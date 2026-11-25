@@ -12,7 +12,7 @@ NSH 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst �
 ## 无需任何操作就能得到的
 
 - **文本会被朗读。** 文本元素是一个无障碍元素，标签就是它的文字。没有标签的视图会朗读其内部的文字。
-- **文本里的链接和行内视图可以逐个到达。** 在 iOS 和 macOS 的 VoiceOver 下，文本中每个可按压的片段（嵌套的 `<Text onPress>`、Markdown 链接）各是一个链接，激活即按下它，用链接转子可在链接间跳转；文本里的每个行内视图各是一个元素，在句中它所在的位置被读到。在 iOS 上，给了标签、角色或自身带按压的文本仍是一个元素。
+- **文本里的链接和行内视图可以逐个到达。** 在 iOS 和 macOS 的 VoiceOver 下，文本中每个可按压的片段（嵌套的 `<Text onPress>`、Markdown 链接）各是一个单独的链接。激活链接就是按下这个片段，用链接转子可以在链接间跳转。文本里的每个行内视图也各是一个元素，读到句中对应位置时读出。在 iOS 上，给了标签、角色或自身带按压的文本仍是一个元素。
 - **可按压视图是元素。** 带按压或长按处理函数（`.on_press`、`onPress`）的视图默认是无障碍元素，激活它（在 VoiceOver 或 TalkBack 下双击）就会按下它。
 - **输入框是文本框**，带有占位文字、值和键盘。
 - **文字跟随用户的大小设置。** 见[文字大小](#文字大小)。
@@ -138,13 +138,20 @@ view()
     )
 ```
 
-状态在 Rust 中是 `AccessibilityState { disabled, selected, checked: Option<Checked>, busy, expanded, pressed: Option<Checked>, current: Option<AccessibilityCurrent>, has_popup, invalid }`，在 TSX 中是 `{ disabled?, selected?, checked?: boolean | "mixed", busy?, expanded?, pressed?: boolean | "mixed", current?: boolean | "page" | "step" | "location" | "date" | "time", hasPopup?, invalid? }`。`pressed` 让按钮成为切换按钮（ARIA 的 `aria-pressed`）；`current` 标出一组中的当前项（ARIA 的 `aria-current`）：分页的当前页、向导的当前步骤；`hasPopup` 标出打开弹出层、菜单或列表的触发器（ARIA 的 `aria-haspopup`），它的 `expanded` 表示弹出层是否打开，没有 `hasPopup` 的 `expanded` 元素是就地展开内容的折叠项（`Popover`、`Menu`、`HoverCard`、`Select`、`Combobox` 和 `DatePicker` 会在各自的触发器上设置它）；`invalid` 标出没有通过应用校验的内容（ARIA 的 `aria-invalid`）：文字被拒绝的输入框、必选却留空的下拉选择。读屏随元素一起读出它，`aria-invalid:` 类可以为它设置样式。禁用视图（`.disabled(..)`、`disabled`）也意味着禁用状态。带 `min`、`max` 和 `now` 的 `accessibilityValue` 以百分比朗读；带 `text` 时按原文朗读（"3 of 10"、"Medium"）。
+状态在 Rust 中是 `AccessibilityState { disabled, selected, checked: Option<Checked>, busy, expanded, pressed: Option<Checked>, current: Option<AccessibilityCurrent>, has_popup, invalid }`，在 TSX 中是 `{ disabled?, selected?, checked?: boolean | "mixed", busy?, expanded?, pressed?: boolean | "mixed", current?: boolean | "page" | "step" | "location" | "date" | "time", hasPopup?, invalid? }`。
+
+- `pressed` 让按钮成为切换按钮（ARIA 的 `aria-pressed`）。
+- `current` 标出一组中的当前项，比如分页的当前页、向导的当前步骤（ARIA 的 `aria-current`）。
+- `hasPopup` 标出弹出层、菜单或列表的触发器（ARIA 的 `aria-haspopup`），再用 `expanded` 表示是否已打开。没有 `hasPopup` 的 `expanded` 元素是就地展开内容的折叠项。`Popover`、`Menu`、`HoverCard`、`Select`、`Combobox` 和 `DatePicker` 都会在触发器上设置 `hasPopup`。
+- `invalid` 标出没通过应用校验的内容，比如输入被拒绝的输入框、必选却留空的下拉选择（ARIA 的 `aria-invalid`）。读屏会连同元素一起读出它，`aria-invalid:` 类可以为它设置样式。
+
+禁用视图（`.disabled(..)`、`disabled`）也意味着禁用状态。带 `min`、`max` 和 `now` 的 `accessibilityValue` 以百分比朗读；带 `text` 时按原文朗读（"3 of 10"、"Medium"）。
 
 在 iOS 和 Android 上，系统自己没有朗读词的状态（选中、部分选中、展开、收起、当前、无效）由 NSH 提供朗读词。它们使用应用文字显示的语言（[国际化](./i18n.md)），包括 `setLocale` 选择的语言，并随它改变：英文、中文（简体和繁体）、日文或韩文。其他平台用读屏自己的词朗读这些状态。
 
 ### 获得焦点的元素里的活动项
 
-有的控件在用户浏览其中各项时一直保有键盘焦点：方向键走过组合框的列表时，焦点仍在它的输入框里；列表移动的是一行光标。`accessibilityActiveDescendant` 指出当前活动的那一项，`accessibilityControls` 指出控件所控制的元素，这样焦点留在用户打字的地方，屏幕阅读器也会在每一项变为活动时读出它。两者都接受被指元素的 ref（TSX 中是 `ViewRef`，Rust 中是 `ElementRef`），被指的元素可以比控件晚渲染，例如虚拟化列表的行；被指的元素不在屏幕上时，这个关系不指向任何元素。
+有的控件在用户浏览其中各项时一直保留键盘焦点。比如用方向键浏览组合框的列表时，焦点仍在输入框里；列表则移动一行光标。`accessibilityActiveDescendant` 指向当前活动项，`accessibilityControls` 指向控件所控制的元素。两者都设置后，焦点留在用户打字的地方，屏幕阅读器也会在每一项变为活动时读出它。两者都接受目标元素的 ref：TSX 中是 `ViewRef`，Rust 中是 `ElementRef`。目标元素可以比控件晚渲染，例如虚拟化列表的行。目标不在屏幕上时，这个关系不指向任何元素。
 
 ```tsx tabs
 // 一直保有焦点、移动光标行的列表。
@@ -197,11 +204,11 @@ view()
     }))
 ```
 
-在 Web 上它们是 `aria-activedescendant` 和 `aria-controls`；在 macOS 上 VoiceOver 把活动项当作控件的选中子元素读出。`Select`、`Combobox` 和 `Command` 用这种方式指出高亮的项和它们的列表，在其他平台上它们自己把高亮的项读给屏幕阅读器。
+在 Web 上它们是 `aria-activedescendant` 和 `aria-controls`。在 macOS 上 VoiceOver 把活动项当作控件的选中子元素读出。`Select`、`Combobox` 和 `Command` 都用这种方式指向高亮项和列表。在其他平台上，它们自己把高亮项读给屏幕阅读器。
 
 ### 说明另一个元素的元素
 
-表单把输入框的错误或帮助写在单独的一行里，与输入框分开。在输入框上用 `accessibilityDescribedBy` 指出这一行，屏幕阅读器每次焦点来到输入框时都会在它的名称之后读出这行文字，这行文字变了也会读新的。它和 `accessibilityControls` 一样接受被指出元素的 ref；那个元素里的标签和文字就是输入框的说明，代替输入框自己的 `accessibilityDescription`，被指出的元素不在屏幕上时，输入框自己的说明又回来。这一行可以设 `accessibilityHidden`，让它只随输入框读一次：被指出的元素照样读出它的文字。每个平台都在读说明的地方读它；在 Web 上它是 `aria-describedby`。
+表单常把输入框的错误或帮助文字放在单独一行。在输入框上用 `accessibilityDescribedBy` 指向这一行。之后焦点每次来到输入框，屏幕阅读器都会在名称之后读出这行文字；文字变化时也会读出新内容。它和 `accessibilityControls` 一样接受目标元素的 ref。目标元素里的标签和文字会作为输入框的说明，替代输入框自己的 `accessibilityDescription`。目标不在屏幕上时，输入框原来的说明会恢复。这一行可以设为 `accessibilityHidden`，这样它只随输入框读一次，目标元素的文字照样会读出。各平台都在读说明的位置读它，Web 上对应 `aria-describedby`。
 
 ```tsx tabs
 // 输入框和它下面的错误行。
@@ -239,7 +246,7 @@ view()
 
 ## 操作
 
-可按压视图已经支持激活。其他操作用 `accessibilityActions` 声明，用 `onAccessibilityAction` 处理；Rust 组件用 `.on_accessibility_action(|name: &str| ..)` 收到所执行操作的名称：
+可按压视图已经支持激活。其他操作用 `accessibilityActions` 声明，用 `onAccessibilityAction` 处理。Rust 组件用 `.on_accessibility_action(|name: &str| ..)` 收到所执行操作的名称：
 
 ```tsx
 function Quantity() {
@@ -346,7 +353,7 @@ view()
 <Image src={decoration} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
 ```
 
-`accessibilityElementsHidden`（iOS 的叫法）和 `importantForAccessibility="no-hide-descendants"`（Android 的叫法）在两个平台上都会隐藏子树；两者同时设置也没有坏处。
+`accessibilityElementsHidden`（iOS 的叫法）和 `importantForAccessibility="no-hide-descendants"`（Android 的叫法）在两个平台上都会隐藏子树，同时设置也没有坏处。
 
 ## 屏幕阅读器与用户的设置
 
@@ -409,7 +416,7 @@ fn upload() -> impl IntoElement {
 
 播报那些用户否则会错过的变化：后台保存完成、在焦点之外出现的错误、计时结束。给视图设置 `accessibilityLiveRegion: "polite"`，屏幕阅读器就会自动播报它的变化——Android 上的 TalkBack、macOS 上的 VoiceOver、web 上的 `aria-live`、Windows 上的实时区域（`"assertive"` 不等用户空闲，立即朗读）。
 
-在 macOS 和 Web 上，警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）会自己被读出：出现时、以及内容变化时，读它的标签，没有标签就读其中的文字，并打断屏幕阅读器正在读的内容。带这个角色显示的错误在这两个平台上不必再自己播报；在 macOS 上，同一次更新里播报的相同文字只读一次，同一次更新里拿掉又以相同文字重建的警告（移到另一个父节点下）也不会再读。在其他平台上，仍要自己播报。
+在 macOS 和 Web 上，屏幕阅读器会自动读出警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）。警告出现和内容变化时，它读出标签；没有标签就读其中的文字，并打断正在读的内容。所以在这两个平台上，带这个角色的错误不必再单独播报。在 macOS 上，同一次更新里播报的相同文字只读一次。更新中拆掉再以相同文字重建的警告（移到另一个父节点下）也不会重读。在其他平台上仍要自己播报。
 
 ## 文字大小
 

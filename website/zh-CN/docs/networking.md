@@ -7,7 +7,14 @@ group: ui
 
 # 网络
 
-NSH 应用用 `fetch` 发起 HTTP 请求：在 Rust 中是 `nsh_core::prelude` 的函数，在任务中 await；在 TSX 中是标准的全局函数。两者都运行在平台的网络栈上（iOS 上是 NSURLSession，Android 上是 HttpURLConnection，[在 Web 上](./web.md#带-rust-组件的应用)是浏览器的），因此请求使用系统的 TLS、代理和 HTTP/2，并经过相同的[能力检查](#能力声明应用可以访问哪些主机)。Rust 的 `fetch` 接受 URL 或 `HttpRequest`，返回完整的响应（`HttpResponse`：`status()`、`ok()`、`header(name)`、`text()`、`body`）。TSX 的 `fetch` 双向流式传输：响应体随网络栈的交付以流的形式到达，请求体也可以是一个边生成边发送的流。TSX 还具备 Fetch API 的配套对象：`Headers`、`Request`、`Response`、`AbortController`、`FormData`、`Blob`、`File`、`URL`、`URLSearchParams`、`TextEncoder` / `TextDecoder` 以及 Web Streams。
+NSH 应用用 `fetch` 发 HTTP 请求。Rust 里它是 `nsh_core::prelude` 中的函数，在任务里 await；TSX 里它就是标准的全局函数。
+
+两者都走平台自己的网络栈：iOS 用 NSURLSession，Android 用 HttpURLConnection，[Web 上](./web.md#带-rust-组件的应用)用浏览器。所以请求直接使用系统的 TLS、代理和 HTTP/2。两者也经过同样的[能力检查](#能力声明应用可以访问哪些主机)，由它决定应用能访问哪些主机。
+
+- Rust 的 `fetch` 接受 URL 或 `HttpRequest`，返回完整响应（`HttpResponse`：`status()`、`ok()`、`header(name)`、`text()`、`body`）。
+- TSX 的 `fetch` 双向流式：响应体随网络栈到达逐段读取，请求体也可以是边生成边发送的流。
+
+TSX 还提供 Fetch API 的配套对象：`Headers`、`Request`、`Response`、`AbortController`、`FormData`、`Blob`、`File`、`URL`、`URLSearchParams`、`TextEncoder` / `TextDecoder` 以及 Web Streams。
 
 ## 获取 JSON
 
@@ -93,9 +100,9 @@ fn App() -> impl IntoElement {
 }
 ```
 
-[`resource`](./reactivity.md#resource) 会保存值、错误以及是否正在加载；source 变化（或调用 `refetch()`）时重新加载；对于不再需要的加载（组件被移除，或有更新的加载开始）会取消请求：Rust 中丢弃加载任务，其请求随之取消；TSX 中通过它传入的 `signal` 取消。Rust 的 `fetch` 使用绝对 URL；JSON 用 `serde_json` 等 crate 解析。
+[`resource`](./reactivity.md#resource) 会保存值、错误以及是否正在加载。source 变化或调用 `refetch()` 时，它会重新加载。组件卸载或新的加载开始后，旧的加载不再需要，它会取消请求：Rust 丢弃加载任务，请求随之取消；TSX 通过传给加载函数的 `signal` 取消。Rust 的 `fetch` 只接受绝对 URL，JSON 用 `serde_json` 等 crate 解析。
 
-在 TSX 中，`Response` 的响应体只能读取一次，可以用 `json()`、`text()`、`arrayBuffer()`、`bytes()`、`blob()` 或 `formData()`，也可以读取 `body` 流。2xx 状态码时 `response.ok` 为 true；与浏览器一样，HTTP 错误状态码不会让 promise 被拒绝。
+在 TSX 中，`Response` 的响应体只能读取一次，可以用 `json()`、`text()`、`arrayBuffer()`、`bytes()`、`blob()` 或 `formData()`，也可以读取 `body` 流。2xx 状态码时 `response.ok` 为 true；和浏览器一样，HTTP 错误状态码不会让 promise reject。
 
 ## 发送数据
 
@@ -253,7 +260,7 @@ await fetch("https://api.example.com/logs", { method: "POST", body, duplex: "hal
 
 ## 取消与超时
 
-在 Rust 中，请求在任务中运行，并随任务一起取消：任务所属的组件被移除时，或对 `spawn` 返回的任务调用 `cancel()` 时。在 TSX 中，传入 `AbortSignal` 即可取消请求；promise 会以 signal 的 reason 被拒绝（默认是 `AbortError` 类型的 `DOMException`），正在读取的响应体也会停止。
+在 Rust 中，请求在任务中运行，并随任务一起取消：任务所属的组件被移除时，或对 `spawn` 返回的任务调用 `cancel()` 时。在 TSX 中，传入 `AbortSignal` 即可取消请求。promise 会以 signal 的 reason reject（默认是 `AbortError` 类型的 `DOMException`），正在读取的响应体也会停止。
 
 ```tsx tabs
 const controller = new AbortController();
@@ -377,7 +384,7 @@ Rust 组件、`#[module]` 函数和 `#[class]` 成员在任务中调用 `fetch`�
 - 同样的 `network` 授权也适用于远程图片（包括画布中的图片和 `Image.getSize` / `prefetch`）和视频来源。应用自身包中的 `asset:` URI 始终允许。
 - 主机取最后一个 `@` 之后的部分，所以 `https://ok.com@evil.io` 被视为 `evil.io`。
 
-没有 `"capabilities"` 的应用可以访问任何主机：独立应用属于开发者自己。嵌入在宿主应用中或以[签名包](./signed-packages.md)分发的应用应当声明能力；宿主应用可以授予比应用声明更少的能力，请求必须同时被两者允许。使用 `nsh dev` / `nsh run` 开发时执行同样的能力检查。见[沙箱与能力声明](./sandbox-and-capabilities.md)。
+没有 `"capabilities"` 的应用可以访问任何主机：独立应用属于开发者自己。嵌入在宿主应用中或以[签名包](./signed-packages.md)分发的应用应当声明能力。宿主应用授予的能力可以少于应用声明的，请求必须两边都允许。使用 `nsh dev` / `nsh run` 开发时执行同样的能力检查。见[沙箱与能力声明](./sandbox-and-capabilities.md)。
 
 ## 与浏览器的差异
 
@@ -390,7 +397,7 @@ TSX 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意
 - **`asset:/` URL** 指应用随附的文件，从应用自身的文件中读取，无需任何能力授权（[运行时读取文件](./images-and-assets.md#运行时读取文件)）。
 - 浏览器专用的选项（`mode`、`credentials`、`cache`、`referrer`、`integrity`、`keepalive`、`priority`）为兼容各种库而被接受。
 
-基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`；原生宿主提供全局 `WebSocket` 和 [`websocket` 模块](../modules/standard-modules.md)，按与 `fetch` 相同的授权检查。
+基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`。原生宿主提供全局 `WebSocket` 和 [`websocket` 模块](../modules/standard-modules.md)，按与 `fetch` 相同的授权检查。
 
 ## 相关内容
 

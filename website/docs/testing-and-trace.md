@@ -7,12 +7,12 @@ group: tools
 
 # Testing
 
-NSH runs apps **headless**: the real engine (the same reactive graph, renderer, components, layout and list
-virtualization as on a device, and QuickJS for TSX), with display frames at 60 Hz, but no simulator, no device and no
-window. It runs anywhere Cargo or the CLI runs, including Linux CI machines, and does two jobs:
+NSH can run apps **headless**: with the real engine but no simulator, device or window. The engine is the same as on
+a device: reactive graph, renderer, components, layout, list virtualization and QuickJS for TSX. Display frames tick
+at 60 Hz. Headless mode runs anywhere Cargo or the CLI runs, including Linux CI machines. It does two jobs:
 
 - it runs tests: each opens the app, takes the steps a user would (press, type, scroll), and checks what is on screen.
-  A Rust app's tests are Rust, run by `cargo test` with the `nsh-testing` crate; tests written in TypeScript run with
+  A Rust app's tests are Rust, run by `cargo test` with the `nsh-testing` crate. Tests written in TypeScript run with
   `nsh test`, for TSX apps and Rust apps alike;
 - with `--trace`, it prints every operation the runtime sends to the native views, with timings: what the first
   frame, a tap or a frame of scrolling costs.
@@ -68,7 +68,7 @@ cargo test                    # every test of the crate
 cargo test adds_a_todo        # the tests whose name contains "adds_a_todo"
 ```
 
-`EngineConfig::new(root)` is a phone-sized engine (390×844 points) with nothing else set; its fields set what `open`'s
+`EngineConfig::new(root)` is a phone-sized engine (390×844 points) with nothing else set. Its fields set what `open`'s
 options set below: `storage` (`MemoryStorage::new(entries)`), `network` (`StubNetwork`, below), `viewport`,
 `environment` (the appearance, the locale, reduced motion), `clock` (`Clock::manual(time)`, below).
 `nsh_testing::Headless::start(config)` starts the app and keeps a model of the views it shows. Its steps are those of
@@ -115,10 +115,10 @@ shows all of them. Any failure makes `nsh test` exit with a non-zero code. `nsh 
 the app, and `nsh check` type checks test files with the rest (`.nsh/types` declares `nsh/test`).
 
 Each test file runs on an engine of its own, and its tests run one after the other, in order. `open` starts the app on
-another engine, a fresh one each time, so tests never share state; the apps a test opened are closed when it ends. A
+another engine, a fresh one each time, so tests never share state. The apps a test opened are closed when it ends. A
 test fails when it throws, when the promise it returns rejects, and after its timeout: 30 seconds, or the milliseconds
 `test`'s third argument gives (`test("syncs", body, 60_000)`). An app with Rust crates of its own
-(`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way; in a Rust app
+(`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way. In a Rust app
 (`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component. Pass `--release` to run
 `cargo test --release` on its crates, build its headless runner and development hosts optimized (`--release`), and
 minify and strip debug info from the app bundles under test.
@@ -155,7 +155,7 @@ describe("the cart", () => {
 | `test.only(name, body, timeout?)`, `describe.only(name, body)` | While a test file has one, only those tests and blocks run; the file's others are reported as skipped. |
 | `test.todo(name)` | A test still to write, reported as one. |
 
-A hook may be `async`; its `timeout` is 30 seconds unless given. Tests and hooks are declared as the file loads: a
+A hook may be `async`. Its `timeout` is 30 seconds unless given. Tests and hooks are declared as the file loads: a
 test declared inside a test or a hook throws.
 
 ### Opening the app
@@ -216,7 +216,7 @@ expect(app.shows("Conversation c-43")).toBe(true);
 
 `modules` puts stand-ins in the place of exports of the native modules the app imports: its own crate's (a
 `#[native_module]` UI set), `nsh/base`'s or the runtime's. Keys are the module's specifier, then an export (`"save"`)
-or a member of one (`"Keychain.get"`). The app's imports get the stand-ins; the module's other exports stay as they
+or a member of one (`"Keychain.get"`). The app's imports get the stand-ins. The module's other exports stay as they
 are, and Rust code calling the module directly runs the module.
 
 A stand-in is a value or a function, and what the app's code gets back follows the kind of stand-in, whatever the
@@ -227,7 +227,7 @@ real export returns:
 | A value | The value at once: an export that is a function becomes a synchronous function returning it, any other export becomes the value. |
 | A function | A promise from every call, synchronous exports included: the function gets the call's arguments, the promise resolves to what it returns (or to what its promise resolves to), and what it throws rejects the promise. |
 
-A function the app calls synchronously keeps its synchronous shape when its stand-in is a value; give a function
+A function the app calls synchronously keeps its synchronous shape when its stand-in is a value. Give a function
 stand-in to the functions the app awaits.
 
 ```tsx
@@ -273,7 +273,7 @@ expect(app.shows("Could not open the link")).toBe(true);
 
 `network` lists routes by `"<METHOD> <URL>"` (a bare URL is a `GET`; `*` matches any text). A request no route
 matches fails, so tests never reach the network unasked. A route is a response, or a function of the request that
-returns one (or a promise of one); in Rust, `StubNetwork::new(routes)` takes the same routes, each a `StubResponse` or
+returns one (or a promise of one). In Rust, `StubNetwork::new(routes)` takes the same routes, each a `StubResponse` or
 a `StubRoute::Handler`:
 
 ```tsx tabs
@@ -413,7 +413,7 @@ prefixes arrive.
 (JavaScript's classes, groups, anchors and quantifiers, matched in linear time; flags `i`, `m` and `s`). ` >> ` looks
 inside what the part before matched (`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0
 (`text:Delete >> nth=1`). A selector finds the views a user would look at first: in the top modal, then on screen,
-and of a navigation stack only the top screen; the content of a scroll view or a list comes in the order it is on
+and of a navigation stack only the top screen. The content of a scroll view or a list comes in the order it is on
 screen, top to bottom (left to right in a horizontal one), as Tab and screen readers go through it. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
 the views that clip them (`overflow: hidden`), or anywhere in the content of a scroll view the user can scroll, which
 scrolling brings in (`opacity` and transforms aside, as in Playwright). A step that acts on a view (`press`, `type`, `clear`, `submit`, `scroll`, `longPress`) needs exactly
@@ -490,7 +490,7 @@ one: a selector matching several fails the step, and the error says how to narro
 A step resolves once the app rendered nothing for 100 ms, no native animation runs that ends by itself and, with
 `--target macos` or `linux`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
 manual clock, also 2 s of the app's time), so what it changed is on
-screen when the next line runs; use `waitFor` for what comes later (a response, a timer). On a manual clock a step
+screen when the next line runs. Use `waitFor` for what comes later (a response, a timer). On a manual clock a step
 does not wait for those 100 ms: it resolves as soon as the app has run everything the step and the clock's time made
 due (timers due now, promises, a stubbed response answered at once) and wants no frame, unless a request is still in
 flight, so tests on a manual clock run without pauses between their steps. What another thread answers (an
@@ -500,7 +500,7 @@ forever, such as a loading spinner, keeps running in the background while steps 
 CSS animation does in a browser's tests. A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
 screen), when the app threw an exception meanwhile, and when the app asked for what only a real platform answers.
 
-The failures a test may expect carry a `code`, which stays as it is; their messages are for people and may change, so
+The failures a test may expect carry a `code`, which stays as it is. Their messages are for people and may change, so
 a test matches the code:
 
 | `code` | The step or query |
@@ -516,7 +516,7 @@ a test matches the code:
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
 ```
 
-`app.viewStyle("id:card")` checks that a view is dimmed or highlighted without a screenshot. It reads the values the app set: while an animation runs it reports the animation’s end value, not the frame on screen. Backgrounds a native control paints by itself are not reported; check those with `app.screenshot`.
+`app.viewStyle("id:card")` checks that a view is dimmed or highlighted without a screenshot. It reads the values the app set: while an animation runs it reports the animation’s end value, not the frame on screen. Backgrounds a native control paints by itself are not reported. Check those with `app.screenshot`.
 
 `app.spanStyle("id:guide")` reads a nested `<Text testID="guide">`; `text:word` reads the first character
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
@@ -525,7 +525,7 @@ layout and preserves the `onTextLayout` callback count.
 
 `lineHeight` and `letterSpacing` are resolved against the span’s own font size: `leading-loose` on a 10 pt span reads
 `lineHeight: 20`, `tracking-wide` reads `letterSpacing: 0.25`. `fontFamily` is the family the app asked for
-(`"Inter, sans-serif"` stays a list), not the face the platform falls back to for characters it lacks; a design-system
+(`"Inter, sans-serif"` stays a list), not the face the platform falls back to for characters it lacks. A design-system
 test checks the family it set, and a screenshot checks what the platform drew:
 
 ```tsx
@@ -533,7 +533,7 @@ expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, 
 ```
 
 The optional second argument of `press` is `PressOptions`: `{ position?: { x: number; y: number } }`. `position` is
-where in the view the press lands, in points from its top left corner; omitting it presses the middle, as before.
+where in the view the press lands, in points from its top left corner. Omitting it presses the middle, as before.
 It reaches a part of a view another view does not cover, such as a dialog's backdrop around its panel:
 
 ```tsx
@@ -544,7 +544,7 @@ The point is in the view the selector names (a text view, for a span). A press a
 fails with `ERR_NSH_TEST_COVERED`, as a press at the middle does. Headless runs and `--target` hosts place it the
 same way.
 
-The optional third argument of `drag` and `dragAndHold` is `DragOptions`: `{ hold?: number }`. `hold` is the total rest in milliseconds after the pointer lands and before it moves; omitting it keeps 100 ms. Headless and iOS support custom timing. Unsupported custom timing rejects with `ERR_NSH_TEST_UNSUPPORTED` before a new pointer goes down. Negative, non-finite and unrepresentable durations reject. For a long-press drag, use `{ hold: 600 }` and put `drop()` in `finally` so an assertion failure still lifts the same finger.
+The optional third argument of `drag` and `dragAndHold` is `DragOptions`: `{ hold?: number }`. `hold` is the total rest in milliseconds after the pointer lands and before it moves. Omitting it keeps 100 ms. Headless and iOS support custom timing. Unsupported custom timing rejects with `ERR_NSH_TEST_UNSUPPORTED` before a new pointer goes down. Negative, non-finite and unrepresentable durations reject. For a long-press drag, use `{ hold: 600 }` and put `drop()` in `finally` so an assertion failure still lifts the same finger.
 
 ### What headless runs play of the platform
 
@@ -555,7 +555,7 @@ that only a real platform can do:
   them. Loops without an end run until the app stops them.
 - **Going back** pops screens and closes modals as a platform does (`app.back()`).
 - **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
-  be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
+  be. A dialog that only its other buttons answer fails the step that showed it until the test says which to press.
 - **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
 - **The page's host answers `host`** when the app's `nsh.json` names one in `web.host` ([The page's
   host](#the-pages-host)).
@@ -568,7 +568,7 @@ that only a real platform can do:
 - **Native modules run on their fakes**: a module that reaches a device gives headless runs a fake in its place, which
   the test drives (`app.fake`). With `nsh-extra`'s `speech`, `Speech.available()` resolves `true`, a session starts
   at once and hears what the fake's `hear` says. Rust tests that launch `Headless` apps whose modules give fakes take
-  turns in one process, as a fake stands in process-wide; apps started with clones of one registry run together.
+  turns in one process, as a fake stands in process-wide. Apps started with clones of one registry run together.
 - **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` comes, nor `onError` unless the test fails the image (`app.failImages`), and `Image.getSize` and `Image.prefetch` reject, in the app and in the test file alike. A `blob:` URL's size is read from its bytes, so `Image.getSize` of one resolves.
@@ -585,7 +585,7 @@ app's call with its message, as on the page, and events sent before the app star
 once it does. `--web-host <module>` names another module. The app's `capabilities.host` must list what it calls, as on
 the page. A call's timeout and the host's own timers run on the app's time, so a manual clock moves them
 (`app.clock.runFor`). In a browser (`--target web`) the development page runs `nsh.json`'s `web.host` for each app as a
-published page does; on the other platforms (`--target`) the apps have no host: `host.available()` is `false`.
+published page does. On the other platforms (`--target`) the apps have no host: `host.available()` is `false`.
 
 ```tsx
 // nsh.json: { "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }
@@ -605,7 +605,7 @@ test("calls reach the page's host", async () => {
 `expect(value)` checks values as Jest does, as JS made them: `toBe` is `Object.is`, `toEqual` compares member by
 member, and a `Date`, a `Map` or a `Uint8Array` is compared as what it is. Each check throws when it does not hold.
 `.not` turns them around: `expect(app.texts()).not.toContain("Error")`. Given a function, `toThrow` checks what calling
-it throws; given a promise, or a function that returns one, `rejects` and `resolves` check what it settles to, as in
+it throws. Given a promise, or a function that returns one, `rejects` and `resolves` check what it settles to, as in
 Jest: `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`.
 
 | Check | Holds when |
@@ -642,10 +642,10 @@ own input at the views their selectors name, as Playwright does in a browser:
   `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
   back button on Windows and in GPUI, the browser's back button on the web, a sheet swiped down, VoiceOver's escape
   gesture while a menu, popover or `Sheet` is open, else the header's back button on iOS, the back button on Android);
-- a view off screen is scrolled into view first, a gesture at a time; on a touch screen the finger lands where the
-  page itself takes it, beside the views that follow a drag (a slider, a drawing area), as a user scrolls; a view at the
+- a view off screen is scrolled into view first, a gesture at a time. On a touch screen the finger lands where the
+  page itself takes it, beside the views that follow a drag (a slider, a drawing area), as a user scrolls. A view at the
   edge of a scroll view already at its end is acted on where it is, without pulling the scroll view past that end
-  (where a pull to refresh starts or a page sheet closes); a view a scroll view's content passes under at its edges
+  (where a pull to refresh starts or a page sheet closes). A view a scroll view's content passes under at its edges
   (on iOS a transparent header, a tab bar, the keyboard) is scrolled out from under them, and a step on one
   left under them, or under a bar the system draws or a selection's edit menu, fails with `ERR_NSH_TEST_COVERED`
   instead of pressing what covers it;
@@ -668,7 +668,7 @@ nsh test tests/form.test.tsx --target macos   # one file
 ```
 
 The window opens at the viewport's size (390 × 844 unless `open` says), within the screen (on macOS, `setViewport`
-keeps it there, its top left corner when it is larger); on iOS and Android the app fills the device's screen, at the
+keeps it there, its top left corner when it is larger). On iOS and Android the app fills the device's screen, at the
 device's size. On macOS, Windows, GPUI and Linux the apps run in the background: their windows show, the keyboard stays with
 the app you type in, and the steps' clicks, keys and shortcuts go to the windows directly (`--foreground` lets them
 become the active app). The app runs as the target's platform (`platform.os`). A manual `clock` works as
@@ -679,9 +679,9 @@ the platform shows moves it a frame (1/60 s), so the app's time passes while it 
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
 all. Sockets and WebSockets connect on the host's network with `"live"`, and are refused as headless otherwise. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
 the locale settings `localeSettings` names, `reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
-and a `colorScheme` it gives switches the system's appearance (`"light"` too); what it leaves out is the platform's, and the app's clipboard calls are served from the
+and a `colorScheme` it gives switches the system's appearance (`"light"` too). What it leaves out is the platform's, and the app's clipboard calls are served from the
 test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays
-as it was; a text input's own copy and paste use the system's. `host.params` reaches the app, `app.host.send` sends
+as it was. A text input's own copy and paste use the system's. `host.params` reaches the app, `app.host.send` sends
 events, and the URLs the app opens are recorded for `app.openedUrls()` instead of being opened. `host.handlers` runs
 headless, where the test answers the app's calls. `open` checks its options against the target: `width` and
 `height` on iOS and Android, a `platform` of another kind of device (a phone's on a desktop or the web, a desktop's or
@@ -690,14 +690,14 @@ is written or says what it needs. A desktop's `platform` (`"macos"` for a deskto
 desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does
 (a desktop from 600 points wide). An app with Rust crates of its own runs in a development host built with its crates, which NSH
-builds for the platform (on Android for the device's ABI, as `nsh run` does); a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
+builds for the platform (on Android for the device's ABI, as `nsh run` does). A Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 `nsh test --target tui` runs the tests against the terminal renderer in an in-memory terminal, suitable for CI.
 Each `open` uses its own surface and data directory. Set its point dimensions with `open(entry, { width, height })`;
 they round up to whole Cells at the app's `nsh.json` `tui.pointsPerCell` scale (8 × 16 points by default).
 `app.screenshot("cells.json")` returns and saves UTF-8 JSON: `format: "nsh-tui-cells"`, `version: 1`, `width`,
 `height`, and `rows[y][x]` containing each Cell's `symbol`, `fg`, `bg`, `underline` and `modifiers`. Colors use `reset`, lowercase
-ratatui color names, `#rrggbb` or `indexed:N`; modifiers are arrays of active style names such as `bold`, `italic`
+ratatui color names, `#rrggbb` or `indexed:N`. Modifiers are arrays of active style names such as `bold`, `italic`
 and `underlined`. Decode the returned bytes with `new TextDecoder().decode(bytes)` and parse the JSON for Cell
 snapshot assertions.
 
@@ -823,8 +823,8 @@ in one hop to the main thread. The lines in it are **mount items**:
 | `Text { id, text, content }` | Laid-out text for a text view. |
 | `Image { id, source, ... }` | An image to load. |
 
-Only what changed is sent: a tap that changes one number sends one `Text` item; views get no default style and no empty
-event mask; unchanged frames are not sent. A frame of scrolling that reveals no new row produces **no batch at all**.
+Only what changed is sent: a tap that changes one number sends one `Text` item. Views get no default style and no empty
+event mask. Unchanged frames are not sent. A frame of scrolling that reveals no new row produces **no batch at all**.
 
 #### The `perf` lines
 
@@ -838,7 +838,7 @@ event mask; unchanged frames are not sent. A frame of scrolling that reveals no 
 
 > [!NOTE]
 > Text is measured with an approximate text engine headless, so text sizes differ a little from a device, which uses
-> CoreText or Android's text layout. Explicit `lineHeight` is respected; without it, lines are 1.2 times the
+> CoreText or Android's text layout. Explicit `lineHeight` is respected. Without it, lines are 1.2 times the
 > font size. Character widths remain approximate. Layout logic, view counts and operation counts are the same.
 
 Single-run timings depend a lot on the CPU's clock state (a machine that just woke from idle is slow). Compare runs on
@@ -893,7 +893,7 @@ GitLab, Jenkins, Azure Pipelines) show per test: a `testsuite` per test file, a 
 where, and the texts on screen.
 
 To guard performance, record the item counts of a few interactions (the `── … : N items` lines and the `ops` /
-`mount items` numbers of `--trace`) and fail when they grow. Counts are deterministic; timings on shared CI machines
+`mount items` numbers of `--trace`) and fail when they grow. Counts are deterministic. Timings on shared CI machines
 are not.
 
 > [!NOTE]
@@ -927,7 +927,7 @@ view()
 
 The test id is a method of every element in Rust, components' elements included (`button().test_id("save")`, which
 names the component's root), and `testID` a prop of every element and of every Rust component (`Button`, `Dialog`, ...). It does not change what screen readers
-say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `--trace` output it appears in
+say. Use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `--trace` output it appears in
 the view's `ViewProps` item as `test_id: Some("add-to-cart")`.
 
 ## See also

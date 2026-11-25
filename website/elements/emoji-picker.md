@@ -7,8 +7,8 @@ demo: el-emoji-picker
 
 # EmojiPicker
 
-An emoji picker is a search field over every emoji: the groups (smileys, people, animals, food, ...) in a grid, the
-user's recent emoji first, a skin tone for the emoji that take one. `EmojiPicker` owns the behavior of one: the emoji
+An emoji picker is a search field over every emoji. It shows the groups (smileys, people, animals, food, ...) in a
+grid, the user's recent emoji first, and a skin tone picker for the emoji that support one. `EmojiPicker` owns the behavior of one: the emoji
 themselves (Unicode's, with their English names and keywords from CLDR), the search, the groups, the highlight, the
 keyboard and what screen readers hear. The search runs natively and the grid is virtualized: only the rows in view are
 made. The look and the words are the app's: the picker draws nothing of its own and says nothing of its own, the app
@@ -81,14 +81,14 @@ popup of its own: put it in a [`Popover`](./popover.md) on a desktop, a [`Sheet`
 ## The emoji
 
 The picker carries Unicode's emoji (emojibase-data, Emoji 18.0) in their groups and order, each with the Emoji version
-that added it and its English name and keywords from Unicode CLDR. The native platforms have them in the app; on the
+that added it and its English name and keywords from Unicode CLDR. The native platforms have them in the app. On the
 web the page fetches them (`nsh-emoji.bin`, about 30 KB compressed) the first time a picker shows, and `loading`
 shows until then.
 
 - **Names in the app's language**: `annotations` gives each emoji a name and keywords in the app's language, as
   emojibase's data of a locale has them (its `compact.json`: `{ emoji: unicode, label, keywords: tags }`). Cells and
-  `onSelect` use the app's names; a query matches the app's words and the English ones both.
-- **Search**: a query matches an emoji whose name or a keyword holds it, ignoring case; emoji whose name has a word
+  `onSelect` use the app's names. A query matches the app's words and the English ones both.
+- **Search**: a query matches an emoji whose name or a keyword holds it, ignoring case. Emoji whose name has a word
   starting with the query come first, then those whose keywords do, then the rest. The matches show in one group
   without a header.
 - **Groups**: `groups` chooses the groups shown and their order. `"recent"` is the app's `recent` emoji: the app keeps
@@ -207,8 +207,8 @@ void fetch("https://cdn.jsdelivr.net/npm/emojibase-data@18/zh/compact.json")
 
 ## Accessibility
 
-- The grid has the role `"listbox"`, named by `accessibilityLabel`; each cell is an `"option"` named by its emoji's
-  name; a group's header is a `"header"`. The places a short row keeps are hidden.
+- The grid has the role `"listbox"`, named by `accessibilityLabel`. Each cell is an `"option"` named by its emoji's
+  name. A group's header is a `"header"`. The places a short row keeps are hidden.
 - The search field keeps the keyboard focus while the arrow keys move the highlight, and screen readers hear the
   highlighted emoji's name.
 
@@ -236,4 +236,4 @@ cancel nothing.
   browser. On Windows a flag shows as its two letters: leave `"flags"` out of `groups` there.
 - Desktops (macOS, Windows, Linux, GPUI) and the web: the pointer highlights the cell it moves over, and a click
   chooses as the button goes down, so the search field keeps the keyboard focus.
-- iOS, Android and Mac Catalyst: a tap chooses; the keyboard's return key chooses the highlighted emoji.
+- iOS, Android and Mac Catalyst: a tap chooses. The keyboard's return key chooses the highlighted emoji.

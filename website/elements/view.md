@@ -93,7 +93,7 @@ set (`flexDirection: "column"`, `flex-col`, `.flex_col()`). A view that sets no 
 ## Props
 
 `View` has one prop of its own, `selectable` (`.selectable(true)` in Rust): the texts inside the view select together, as one selection ([Text selection](./text-selection.md)). The rest are the [common props](./index.md#common-props): its styles (`style`, `class`,
-`classList`; the `Styled` methods in Rust), `disabled`, the press props (`onPress`, `onLongPress`, `onPressDown`,
+`classList`. The `Styled` methods in Rust), `disabled`, the press props (`onPress`, `onLongPress`, `onPressDown`,
 `onPressUp`, `delayLongPress`, `hitSlop`), the state styles (`activeStyle`, `hoverStyle`,
 `focusStyle`, `disabledStyle`, `checkedStyle`), `onMouseEnter` / `onMouseMove` / `onMouseLeave`, `onWheel`, `onPinch`, `onMouseUp`, `onContextMenu`,
 `onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `focusable`, `captureKeys`, `onKeyDown` / `onKeyUp`, `onLayout`, `ref`, `nativeID`, `testID`, the page's
@@ -104,7 +104,7 @@ and `ios` / `android` / `desktop`.
 ## Selectable views
 
 With `selectable`, a selection runs across the [`Text`](./text.md) elements and [`TextView`](./text-view.md)s inside
-the view, in reading order; texts with `selectable={false}` stay out, and a selectable view inside another is part of
+the view, in reading order. Texts with `selectable={false}` stay out, and a selectable view inside another is part of
 the outer one. See [Text selection](./text-selection.md) for the gestures on each platform.
 
 ```tsx
@@ -199,11 +199,11 @@ non-ASCII characters. Parse the URL to obtain a filesystem path rather than remo
 names none, a directory for instance, as the DOM's `File.type`. It is the same on every platform, and no file is read
 to give it.
 
-Use the entry list to preview filenames, counts or kinds before release ("Release to add 2 images"). It contains metadata only; validate the files
+Use the entry list to preview filenames, counts or kinds before release ("Release to add 2 images"). It contains metadata only. Validate the files
 again at drop time. AppKit resolves Finder file references to path URLs. GTK reports entry when its asynchronous
 file-list preload finishes, including when the pointer stays still, and ignores completion after leave or reset.
 Moving between destinations reports leave then entry with the same offered list. `onFileDragLeave` clears the
-preview. Rust entry handlers receive `&FileDragEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
+preview. Rust entry handlers receive `&FileDragEvent`. Existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
 
 On AppKit, a drag that carries no file URLs but promises files, such as an image dragged out of a page in Safari or
 Chrome or an attachment from Mail, is taken as well. Its files are only written once dropped, so `onFileDragEnter`
@@ -227,7 +227,7 @@ same hit testing as touches. As on iOS, Android opens a drag's data only at the 
 `uris: []`, and `onFileDrop` gives the `file:` URLs of copies in the app's cache directory, named as the providing app
 names them (with the extension of their type when the name has none), in the drag's order, with `pagePosition`;
 then the view hears `onFileDragLeave`. NSH leaves the copies there, where the system removes them in time: move or
-upload what the app keeps. A drag that offers only text or links is no file drag and stays with text inputs; a drag
+upload what the app keeps. A drag that offers only text or links is no file drag and stays with text inputs. A drag
 of files over a text input inside the view goes to the view.
 
 ```tsx tabs
@@ -272,7 +272,7 @@ view()
 ```
 
 The closest enabled ancestor listening to `onFileDrop` receives the drop. A modal root bounds that search. `disabled`
-removes file-drag/drop listeners; leaving, cancellation, completion and destination removal clear the active state.
+removes file-drag/drop listeners. Leaving, cancellation, completion and destination removal clear the active state.
 Acceptance uses the Copy operation and mounted native state. The app decides whether to read, open or transfer the
 received files.
 
@@ -299,7 +299,7 @@ presses of its own. See [text](./text.md#inline-views-and-images).
 - `filter` on views: iOS supports `opacity()`, `brightness()` up to 1 and `drop-shadow()` (images take every color
   filter and `blur()`); Android supports them all from API 31, and the color filters below it.
 - `backdropFilter: "blur(…)"` is a system material on iOS (an approximation) and needs API 31 on Android.
-- Android draws `translate`, `scale` and `rotate` transforms; skews (`skew()`, `skewX()`, `skewY()`) apply on the other platforms.
+- Android draws `translate`, `scale` and `rotate` transforms. Skews (`skew()`, `skewX()`, `skewY()`) apply on the other platforms.
 - `borderCurve: "continuous"` (`.border_curve(BorderCurve::Continuous)`) draws corners that ease into the edges (as
   iOS app icons), on both platforms.
 - The `cursor` style applies where there is a pointer (Mac Catalyst, iPad with a pointer, desktops).

@@ -8,11 +8,15 @@ demo: el-slider
 # Slider
 
 A slider picks a value along a track (a volume, a brightness), or a range of two values with a thumb each (a price
-range). It owns its behavior: a press on the track moves the nearer thumb there, a thumb follows a drag, with a mouse
-or a finger; values snap to the `step`; each thumb is a stop of the keyboard focus and moves with the arrow keys, and is
-an adjustable element for screen readers with its own value. The look is the app's: a `Slider` has no colors, sizes,
-radii or motion of its own. It is made of a track with an indicator inside it, the range and the thumbs on the
-indicator, then its children (a label, the value as text), and the app styles each part.
+range). `Slider` owns the behavior:
+- A press on the track moves the nearer thumb there, and a thumb follows a mouse or finger drag.
+- Values snap to the `step`.
+- Each thumb is a keyboard focus stop that moves with the arrow keys.
+- Screen readers see each thumb as an adjustable element with its own value.
+
+The look is the app's: a `Slider` has no colors, sizes, radii or motion of its own. It is a track with an indicator
+inside it, the range and the thumbs on the indicator, then its children (a label, the value as text). The app styles
+each part.
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
@@ -97,11 +101,11 @@ style methods for the slider itself and `.child(..)` for its label. Its value is
 
 ## Value
 
-The value is a number, or `[start, end]` for a range with two thumbs; the shape of the value decides how many thumbs
-there are. The app owns it with `value` and sets the one `onChange` reports, as for every control of `nsh/base`; or it
+The value is a number, or `[start, end]` for a range with two thumbs. The shape of the value decides how many thumbs
+there are. The app owns it with `value` and sets the one `onChange` reports, as for every control of `nsh/base`. Or it
 leaves the value to the slider with `defaultValue`, and hears the changes all the same. During a drag the thumbs and the
-range follow the pointer in the same frame, natively; when the pointer lifts, the app's `value` shows again, as the app
-set it for the drag's last change; screen readers hear the drag's values as it goes while one runs, and its end value
+range follow the pointer in the same frame, natively. When the pointer lifts, the app's `value` shows again, as the app
+set it for the drag's last change. Screen readers hear the drag's values as it goes while one runs, and its end value
 otherwise.
 
 ```tsx
@@ -129,7 +133,7 @@ const price = signal<[number, number]>([200, 800]);
 - A range's thumbs never cross: a dragged thumb stops at the other one. A drag that starts on two thumbs at one value
   moves the one that can go the pointer's way.
 - The value shown is the app's, held to `min` and `max` (a range's ends in order), and a value off the step's grid
-  shows where it is; the user's next change snaps.
+  shows where it is. The user's next change snaps.
 
 ## Props
 
@@ -171,7 +175,7 @@ const price = signal<[number, number]>([200, 800]);
 | The label | the slider, after the track | its own elements (`children`) |
 
 The track takes presses and drags. The indicator's length is the range of values, from `min` at its leading edge (at
-its bottom when vertical); the slider places the range and the thumbs on it, a thumb centered on its value whatever its
+its bottom when vertical). The slider places the range and the thumbs on it, a thumb centered on its value whatever its
 size. Two ways to lay them out:
 
 - The track is the rail (the example above): `h-2 px-2 rounded-full bg-muted` with an `h-full` indicator. The padding
@@ -182,7 +186,7 @@ size. Two ways to lay them out:
 States the parts show:
 
 - A thumb: `hover:` under the pointer, `active:` while it is dragged, `focus-visible:` with the keyboard focus (`focus:` after a drag too), `disabled:`.
-- The track: `active:` while a press on it drags; it is a `group`, so the indicator, the range and the thumbs take
+- The track: `active:` while a press on it drags. It is a `group`, so the indicator, the range and the thumbs take
   `group-hover:` and `group-active:` from it.
 - Every part: `disabled:` while the slider is.
 
@@ -217,7 +221,7 @@ reach the slider only while no text input edits.
 - A screen reader's increment and decrement actions (VoiceOver's swipe up and down) step the thumb, as the arrow keys
   do.
 - The thumbs are the slider's elements for screen readers, named by `accessibilityLabel` (and a range's start by
-  `startAccessibilityLabel`); a visible label among its children is read where it is.
+  `startAccessibilityLabel`). A visible label among its children is read where it is.
 - While `disabled`, screen readers say the thumbs are dimmed, and they take no actions.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and actions in general.

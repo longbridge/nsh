@@ -139,7 +139,7 @@ fn toasts() -> impl IntoElement {
 The manager is headless: it renders nothing and runs no timer. The app pushes toasts, renders the ones
 `visible(limit)` returns with their status, and calls `advance` on a timer while any is mounted, passing `paused`
 while the stack is expanded. In Rust it is `ToastManager<I, T>` over the app's ids and values, with an `Instant` for
-each call; in TS it is a class over string ids and any JSON value, on the engine's clock (a test's manual clock
+each call. In TS it is a class over string ids and any JSON value, on the engine's clock (a test's manual clock
 included).
 
 - `push(id, value, options)` adds the newest toast, replacing one with the same id (whose value it returns);
@@ -158,7 +158,7 @@ included).
 
 The stack's children are its toasts, oldest first. From its `placement` edge (`"topRight"` by default; the bottom
 anchors lay out upward), collapsed toasts overlap `collapsedPeek` apart, each further one narrower by
-`collapsedScaleStep`, and only `collapsedVisible` show; expanded, they are a list `expandedGap` apart (in a terminal three rows apart, so
+`collapsedScaleStep`, and only `collapsedVisible` show. Expanded, they are a list `expandedGap` apart (in a terminal three rows apart, so
 each toast's frame keeps a blank row from the next's). Toasts that
 arrive or leave, and expansion, move them with critically damped springs. It is expanded while the pointer is on it
 or a finger is down on it (`onExpandedChange({ expanded })`; Rust `ToastStackState`, whose `is_expanded()` reads it), so
@@ -176,11 +176,11 @@ from it (Tailwind's `starting:`, CSS's `@starting-style`); `endingClass` while `
 `swipingClass` while a pointer swipes it (`transition-none` keeps it under the finger).
 
 A finger or the mouse dragged toward `swipeDirection` (`"right"` by default; `null` turns swiping off) moves it, once
-the pointer has moved, so its buttons stay buttons; let go past `swipeThreshold` points (50) or flicked, it moves on
+the pointer has moved, so its buttons stay buttons. Let go past `swipeThreshold` points (50) or flicked, it moves on
 out and asks to be dismissed (`onDismissRequest`), short of it, it goes back. The screen reader reads its
 `accessibilityLabel` as it shows, once: a toast the app moves to another parent (rebuilds there, such as a stack drawn
 in the topmost modal while one is open) is not read again. A toast mounted in the same update that takes down a toast
-with the same label is that toast moved; any other toast is read, whatever its `transitionStatus`.
+with the same label is that toast moved. Any other toast is read, whatever its `transitionStatus`.
 
 ## Toast props
 

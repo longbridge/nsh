@@ -7,7 +7,7 @@ group: ui
 
 # Web view and video
 
-The web view and the video player embed the platform's own web engine and media player as ordinary views: `web_view` and `video` in Rust (`nsh_core::prelude`), `WebView` and `Video` from `nsh` in TSX. Because NSH renders with native views, they sit in your layout like any other element: they scroll with their parent, take rounded corners and clipping, and other views can overlap them without layering problems.
+The web view and the video player embed the platform's own web engine and media player as ordinary views. In Rust they are `web_view` and `video` (`nsh_core::prelude`). In TSX they are `WebView` and `Video` from `nsh`. NSH renders with native views, so these sit in your layout like any other element. They scroll with their parent and accept rounded corners and clipping. Other views can overlap them without layering problems.
 
 | Component | iOS | Android | macOS | Linux | Windows |
 |---|---|---|---|---|---|
@@ -25,7 +25,7 @@ own scripts.
 On [Linux](./linux.md) a web view is a WebKitGTK page drawn inside its view: NSH content over it (a dialog, a sheet)
 covers it, and its parents clip it. The `webview` capability also applies to the navigations of frames there (an
 `iframe` of a host that is not granted stays empty), and `scrollable: false` stops the page itself from scrolling
-(elements inside it still scroll). Apps need WebKitGTK 6.0 installed; a runtime built without it shows a neutral
+(elements inside it still scroll). Apps need WebKitGTK 6.0 installed. A runtime built without it shows a neutral
 placeholder. Videos play the formats the installed GStreamer plugins decode; `rate` is not supported (they
 play at 1×), and `onEnd` only comes for videos that do not loop.
 
@@ -72,7 +72,7 @@ A web view shows one of `src` and `html`:
 | `html="<!doctype html>…"` | HTML from a string, shown instead of `src`. |
 | `html` with `baseUrl="https://example.com/"` | HTML whose relative URLs resolve against `baseUrl`. |
 
-In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows HTML (`base_url` an `Option<&str>`); the URL and the HTML can be a signal or a closure, which loads the page again when what it reads changes. Changing `src` or `html` loads the new page.
+In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows HTML (`base_url` an `Option<&str>`). The URL and the HTML can be a signal or a closure, which loads the page again when what it reads changes. Changing `src` or `html` loads the new page.
 
 ### Props
 
@@ -199,7 +199,7 @@ pub fn browser() -> impl IntoElement {
 
 ### Messaging between the page and the app
 
-Pages talk to the app with `window.nsh.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data. Treat what arrives as untrusted data and check it before acting on it: any script the page runs can post, and on Android `window.nsh` is in every frame of the page, `iframe`s included.
+Pages talk to the app with `window.nsh.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings. Send JSON for structured data. Treat what arrives as untrusted data and check it before acting on it: any script the page runs can post, and on Android `window.nsh` is in every frame of the page, `iframe`s included.
 
 ```tsx tabs
 import { mount, signal, Text, View, WebView, type WebViewRef } from "nsh";
@@ -310,7 +310,7 @@ web_view("https://example.com")
 ### Resources the app serves
 
 A page can load bytes the app holds (images it has in memory or on disk, a message's attachments) from a URL scheme
-of the app's own. `url_scheme` names the scheme and the Rust function that answers its requests; the page refers to
+of the app's own. `url_scheme` names the scheme and the Rust function that answers its requests. The page refers to
 its URLs as to any other (`<img src="app-image:42">`, `fetch("app-image:42")`), and the web engine loads them as it
 loads any subresource, bytes as they are, beside the page's scripts. Images of tens of megabytes load at the speed
 of a file.
@@ -332,7 +332,7 @@ fn serve(request: WebResourceRequest) {
 web_view_html(html, None).url_scheme("app-image", serve).flex_1()
 ```
 
-The handler runs on the platform's main thread, so it returns at once; the request is answered once, then or later
+The handler runs on the platform's main thread, so it returns at once. The request is answered once, then or later
 and from any thread, with `respond` (bytes and a MIME type) or `fail` (the image's `error` event, a rejected `fetch`).
 A request dropped unanswered fails. When the page no longer needs it (it navigated, the web view went),
 `is_cancelled()` turns true and an answer is dropped. Answers carry `Access-Control-Allow-Origin: *`, so a page's
@@ -364,10 +364,10 @@ fn open(web: &ElementRef, token: &str) {
 ```
 
 - Only the page's own request carries the headers: not its images, scripts or other subresources, not its later navigations and not a `reload()`, so a credential reaches no other host the page uses. A page that needs it again (a link, a reload) is loaded again with `load`, with values made for that request (a DPoP proof is bound to its URL).
-- The page then shows as one from `src` does; a later change of the `src` prop loads that page instead.
-- Its host must be one `webview.hosts` allows ([`webview`](./sandbox-and-capabilities.md#webview)), as for `src`; otherwise nothing loads and the core logs which host to add.
+- The page then shows as one from `src` does. A later change of the `src` prop loads that page instead.
+- Its host must be one `webview.hosts` allows ([`webview`](./sandbox-and-capabilities.md#webview)), as for `src`. Otherwise nothing loads and the core logs which host to add.
 - A header whose name is not an HTTP token or whose value holds a line break throws a `TypeError` (`WebLoad::new` returns `None`), so one header cannot start another. NSH logs the headers' names, never their values.
-- macOS, iOS, Mac Catalyst, Android, Windows, Linux and the GPUI backend send the headers; the browser backend cannot (an iframe has no way to) and does nothing.
+- macOS, iOS, Mac Catalyst, Android, Windows, Linux and the GPUI backend send the headers. The browser backend cannot (an iframe has no way to) and does nothing.
 
 ### Input as the user's own
 
@@ -403,7 +403,7 @@ In Rust these are `WebInput::Click { x, y }`, `WebInput::Text(text)` and `WebInp
 
 Trusted input carries user activation (it may open windows, write the clipboard, open the system's file panel or press a page's confirm button), so it is a capability of its own: the app needs `"webview": { "input": true }` in `nsh.json`'s `capabilities` ([`webview`](./sandbox-and-capabilities.md#webview)), also when it declares none, and the core drops the call otherwise.
 
-Like a click, `sendInput` takes the keyboard focus for the web view, away from the app's own `Input`. The page handles input on its own schedule: a click's events can still be on their way when the next call starts, so let a click settle (a frame or so) before typing after it. macOS delivers the input; the other platforms ignore it for now.
+Like a click, `sendInput` takes the keyboard focus for the web view, away from the app's own `Input`. The page handles input on its own schedule: a click's events can still be on their way when the next call starts, so let a click settle (a frame or so) before typing after it. macOS delivers the input. The other platforms ignore it for now.
 
 Before offering anything that depends on it, ask whether it works here: `web_input_available()` (`WebView.inputAvailable()`) resolves `true` only where the platform delivers the input and the app holds `webview.input`, so it is `false` on platforms that ignore the call and in apps without the grant.
 
@@ -436,7 +436,7 @@ memory and gone with the web view.
 web_view("https://example.com/preview").incognito(true).flex_1()
 ```
 
-`incognito` is read when the web view is made, so it takes a value in Rust; a later change in TSX keeps the store the
+`incognito` is read when the web view is made, so it takes a value in Rust. A later change in TSX keeps the store the
 web view has and logs a warning. To switch, show a new web view. Each platform keeps the store this way:
 
 | Platform | An incognito web view's store |
@@ -459,7 +459,7 @@ If your `nsh.json` declares `"capabilities"`, a web view may only show and navig
 }
 ```
 
-The check covers the web view's `src` and every top-level navigation the page makes (links, redirects, `location` changes); it is decided natively when the platform asks whether a navigation may proceed. A page's own subresources (scripts, images, frames) are the web content's business and are not checked. `*.example.com` matches subdomains only; list `example.com` as well for the bare domain. An app without a `"capabilities"` key may show any page. See [Sandbox and capabilities](./sandbox-and-capabilities.md).
+The check covers the web view's `src` and every top-level navigation the page makes (links, redirects, `location` changes). It is decided natively when the platform asks whether a navigation may proceed. A page's own subresources (scripts, images, frames) are the web content's business and are not checked. `*.example.com` matches subdomains only. List `example.com` as well for the bare domain. An app without a `"capabilities"` key may show any page. See [Sandbox and capabilities](./sandbox-and-capabilities.md).
 
 ### When there is no web engine
 
@@ -507,7 +507,7 @@ function Preview(props: { url: string }) {
 ### When the page's process ends
 
 A web view's page runs in a process of its own, which can end while the app runs: it crashed, or the system took
-its memory back. The app keeps running and the web view shows no page; its `onError` comes with `code`
+its memory back. The app keeps running and the web view shows no page. Its `onError` comes with `code`
 `"ERR_NSH_WEBVIEW_TERMINATED"` (Rust: `.on_process_terminated`, the message). The ref's `reload()`, `load()` or a new
 `src` / `html` shows a page again (Android makes a new WebView for it). iOS, macOS, Linux and Android report it.
 
@@ -638,7 +638,7 @@ In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) 
 | `onEnd` | | Playback reached the end. |
 | `onError` | `{ message }` | Loading or playback failed. |
 
-With `controls`, the platform draws its own play button, scrubber and full-screen button. Without, draw your own with views over or below the video; since the video is a native view in your layout, overlays work naturally:
+With `controls`, the platform draws its own play button, scrubber and full-screen button. Without, draw your own with views over or below the video. Since the video is a native view in your layout, overlays work naturally:
 
 ```tsx tabs
 <View style={{ height: 220 }}>

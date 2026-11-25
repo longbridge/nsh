@@ -7,24 +7,32 @@ demo: ui-navigation
 
 # nsh/base
 
-`nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
-accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
-app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Link`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), command palettes (`Command`), emoji pickers (`EmojiPicker`), bars of controls (`Toolbar` with its `ToolbarGroup` and `ToolbarSeparator`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`, and `Accordion` with its `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`), a progress bar (`Progress`), one-time codes (`OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Rule`, `Dot`, `Cell`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
-`ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), carousels (`Carousel` and its parts), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
-(`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
-`MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
-by the state you create with `createNavStack`, columns of stacks in a `SplitView`, and `Dialog` for content presented over everything else) and the system's
-alert dialogs (`AlertDialog`). Pages and dialogs also decide the status bar
-(`statusBar`).
+`nsh/base` is the base component layer of an app's UI. Its components have no styles of their own. They own behavior, state, focus and accessibility, and work on every platform. The layer sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and your app's own component library. It plays the role `gpui-base` plays between `gpui` and a styled library in GPUI Kit (see [Modules](./index.md#three-layers)).
+
+It provides:
+
+- **Controls**: `Button`, `Link`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`.
+- **Command palettes** (`Command`) and **emoji pickers** (`EmojiPicker`).
+- **Bars of controls**: `Toolbar` with its `ToolbarGroup` and `ToolbarSeparator`.
+- **Scroll bars** with your app's look (`Scrollbar`).
+- **Regions that expand and collapse**: `Collapsible`, and `Accordion` with its `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`.
+- **Progress and codes**: a progress bar (`Progress`), one-time codes (`OtpInput`) and page numbers (`Pagination`).
+- **Trees**: items that hold items (`Tree`).
+- **Chart parts**: `Plot` with `Line`, `Area`, `Bar`, `Rule`, `Dot`, `Cell`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`.
+- **Workspaces the user arranges**: `ResizablePanel`s in a `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks.
+- **Carousels**: `Carousel` and its parts.
+- **Documents and text**: Markdown or HTML documents (`TextView`), a code editor (`Editor`), the changes between texts (`DiffView`), tables (`Table` and its parts, `DataTable`) and text inputs (`Input`).
+- **Popups shown on top of everything**: `Popover`, `Menu` and `ContextMenu` with their `MenuItem`, `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`.
+- **Toasts**: `Toast` in a `ToastStack`, with their lifecycle in a `ToastManager`.
+- **Navigation**: a `NavStack` of `NavPage`s driven by the state you create with `createNavStack`, columns of stacks in a `SplitView`, and `Dialog` for content presented over everything else.
+- **System alert dialogs** (`AlertDialog`).
+
+Pages and dialogs also decide the status bar (`statusBar`).
 
 The base set also includes `Avatar` and `AvatarGroup`: pictures with native
 image-loading state and a row that places its first `limit` avatars.
 
-The look is the app's: what goes inside a page, a dialog or a header is your own JSX, drawn from the primitives with
-styles, [Tailwind](../docs/tailwind.md) classes and your theme, Rust components from [your own crate](../docs/rust.md),
-or a component library the community builds on `nsh/base`. Every host serves `nsh/base`; Rust apps use the same API
-from the `nsh-base` crate (`nsh_base::{button, dialog, …}`).
+The look is yours. What goes inside a page, a dialog or a header is your own content. It can be JSX drawn from the primitives with styles, [Tailwind](../docs/tailwind.md) classes and your theme. It can be Rust components from [your own crate](../docs/rust.md), or a community component library built on `nsh/base`. Every host serves `nsh/base`. Rust apps use the same API from the `nsh-base` crate (`nsh_base::{button, dialog, …}`).
 
 ```tsx tabs
 import {
@@ -259,7 +267,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Tab`](../elements/tabs.md), [`Tabs`](../elements/tabs.md) | `tab()`, `tabs()` | One tab of a tab list, and the list; the app owns which one is selected and shows its content. |
 | [`Toggle`](../elements/toggle.md), [`ToggleGroup`](../elements/toggle.md) | `toggle()`, `toggle_group()` | A button that is on or off, and a toolbar of them; the app owns which ones are pressed. |
 | [`Toolbar`](../elements/toolbar.md), [`ToolbarGroup`](../elements/toolbar.md), [`ToolbarSeparator`](../elements/toolbar.md) | `toolbar()`, `toolbar_group()`, `toolbar_separator()` | A bar of buttons, toggles and links: one stop of the keyboard focus whose arrow keys move along it; groups of related items and lines between them. |
-| [`Carousel`](../elements/carousel.md) and its parts | `carousel()`, `carousel_content()`, `carousel_item()`, `carousel_previous()`, `carousel_next()`, `carousel_pagination()`, `carousel_pagination_item()` | Slides shown one place at a time on the platform's own scrolling, with previous / next, a pagination, the keys and a seamless loop; the app owns `index`. |
+| [`Carousel`](../elements/carousel.md) and its parts | `carousel()`, `carousel_content()`, `carousel_item()`, `carousel_previous()`, `carousel_next()`, `carousel_pagination()`, `carousel_pagination_item()` | Slides shown one place at a time on the platform's own scrolling, with previous / next, a pagination, the keys and a loop with no visible seam. The app owns `index`. |
 | [`Select`](../elements/select.md) | `select()` | One value from a list of items: a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
 | [`Combobox`](../elements/combobox.md) | `combobox()` | One value or several (`multiple`) from a list of items filtered by typing into its input; the app owns `value` and styles the field. |
 | [`Calendar`](../elements/calendar.md) | `calendar()` | A date or a range of dates picked from months of days, with month and year views and the keyboard; the app owns `value` and draws the items. |
@@ -355,8 +363,8 @@ Slides shown one place at a time (a product's photos, an onboarding, a banner, a
 native scroll view that snaps to the slides' starts, so a finger, the wheel and the touchpad move them in the same
 frame as the pointer; when it rests the carousel reports the slide with `onChange`. Previous and next
 (`CarouselPrevious`, `CarouselNext`), the pagination (`CarouselPaginationItem`s in a `CarouselPagination`, with an
-indicator that springs to the slide shown) and the arrow keys move it natively, around the ends seamlessly with
-`looping`. The slide shown is the app's `index`, which the app's own timer advances for slides that move on by
+indicator that springs to the slide shown) and the arrow keys move it natively, and with
+`looping` they wrap around the ends without a visible jump. The slide shown is the app's `index`, which the app's own timer advances for slides that move on by
 themselves (`onDragStart` / `onDragEnd`, `onFocus` / `onBlur` say when to wait); the look and every label are the
 app's. See
 [Carousel](../elements/carousel.md).

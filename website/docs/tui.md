@@ -7,11 +7,10 @@ group: platforms
 
 # TUI
 
-NSH apps also run in a terminal. The terminal backend draws an app on the terminal's grid of character Cells with
-[ratatui](https://ratatui.rs), in the terminal's own font and colors, and takes its input from the keyboard and the
-mouse. The core, the reactive graph, the renderer, the components and the native modules are the same as on every
-other platform, so the app that runs in a window runs in a terminal too: the gallery's demos are the same code here
-as on a phone.
+NSH apps also run in a terminal. The terminal backend uses [ratatui](https://ratatui.rs) to draw the app on the
+terminal's grid of character cells, in the terminal's own font and colors. Input comes from the keyboard and the
+mouse. The core, reactive graph, renderer, components and native modules are the same as on other platforms. So an
+app that runs in a window also runs in a terminal. The gallery demos here are the same code as on a phone.
 
 The terminal is a device form of its own, as a phone and a desktop are: `idiom()` is `Idiom::Terminal`
 (`nsh_core::platform::Idiom`; `platform.idiom` is `"terminal"` in TSX), and `os()` (`platform.os`) is the machine's own system, macOS, Windows or
@@ -27,7 +26,7 @@ nsh run App.tsx --target tui        # a TSX app
 nsh run --target tui                # a Rust app, from its directory
 ```
 
-The app fills the terminal it was started in, with hot updates on save; a Rust app's root runs in a terminal
+The app fills the terminal it was started in, with hot updates on save. A Rust app's root runs in a terminal
 development host built with its crate, rebuilt and restarted when its Rust code changes. In a checkout, `nsh run`
 builds the development host (`nsh-tui-host`) first.
 
@@ -35,7 +34,7 @@ During startup, the CLI shows build progress, and the crate being compiled when 
 Once the app opens, the terminal shows the app alone. Diagnostics (the CLI's output, the host's logs, `console.log`) go to the app's
 `.nsh/tui.log`, and `C-h e` (Ctrl+H, then E) opens them in a panel over the app: the arrows and Page Up / Page Down
 scroll it, `r` reloads the latest build, and Escape, `C-g` or `q` closes it. An error in the app opens the panel by
-itself, and the next update closes it. Ctrl+C copies a text selection, and otherwise quits; the terminal is restored
+itself, and the next update closes it. Ctrl+C copies a text selection, and otherwise quits. The terminal is restored
 as it was.
 
 `--fps` shows a performance line in the top right corner (frame rate, frame times, the bytes and Cells each frame
@@ -59,7 +58,7 @@ In a terminal the core lays out with an algorithm made for the grid, the way ter
 frame is whole Cells, and spacing designed in points for a screen becomes the Cells a terminal can give it.
 
 - **Spacing.** A gap in a row is one column, two from 24 points. In a column, gaps and margins of 16 points or more
-  are one blank row. Horizontal padding is one Cell from 8 points and two from 24 points; vertical padding is a row
+  are one blank row. Horizontal padding is one Cell from 8 points and two from 24 points. Vertical padding is a row
   from 24 points.
 - **Borders.** A card (a container padded 12 points or more, or around two or more rows of content) keeps its border,
   one Cell on each side that has one, drawn in box-drawing lines: `─` and `│`, rounded corners `╭╮╰╯` where a radius
@@ -76,7 +75,7 @@ frame is whole Cells, and spacing designed in points for a screen becomes the Ce
 ## Keyboard
 
 Every control is reachable from the keyboard. Tab and Shift+Tab visit pressable and editable views in document order,
-as on the desktops; the arrows move to the nearest control in that direction, scrolling to reach it. A control
+as on the desktops. The arrows move to the nearest control in that direction, scrolling to reach it. A control
 scrolled into view by the keyboard is centered in its scroll view. While a dialog or a sheet is open over its
 backdrop, Tab stays in it, and closing it gives the focus back to the control it came from. Tab always moves to the
 next control: in a `DataTable` it leaves the table, and the arrows move between its columns. A click gives the focus
@@ -108,12 +107,12 @@ Ctrl, the key to press there (`⌃O` for `mod+o`).
 terminal names (`a`, `A`, `ArrowLeft`, `Enter`), with the modifiers the terminal reports and the `repeat` flag.
 `code` is always empty: a terminal reports no hardware key identity, and the host never derives one from the
 character a key types. `defaultPrevented` is the capture rule's (`capture_keys`) decision, matched on the same
-canonical shortcuts as the app's keymap; a captured key is marked and runs none of the terminal's defaults,
+canonical shortcuts as the app's keymap. A captured key is marked and runs none of the terminal's defaults,
 while listeners still hear it. The app's own shortcuts keep their priority, and a text field or the Minibuffer
 keeps its keys. A dialog (`Modal`) is the keyboard boundary, while a sheet is an overlay in the same window,
 so its keys follow the view that declared it, as on the desktops.
 
-What the terminal reports varies; nothing is invented when it reports less:
+What the terminal reports varies. Nothing is invented when it reports less:
 
 | Terminal | What a `KeyEvent` gets |
 |---|---|
@@ -151,14 +150,14 @@ search there, and Escape or Ctrl+G puts focus and scrolling back as they were.
 | Escape, Ctrl+G | Leave the field |
 
 While a field is edited, the terminal's cursor is a bar at the caret. Input methods compose in the terminal
-emulator, and the committed text enters the field; a paste is one insertion. Copied text goes to the system clipboard
+emulator, and the committed text enters the field. A paste is one insertion. Copied text goes to the system clipboard
 through the terminal (OSC 52, over SSH too, where the terminal allows it).
 
 ## Mouse
 
 The terminal reports the mouse at Cell precision, and NSH turns each Cell into the point at its middle.
 
-- **Clicks** press what is under the pointer; double and triple clicks select a word and a line in fields and
+- **Clicks** press what is under the pointer. Double and triple clicks select a word and a line in fields and
   selectable text, and a drag after them extends by words or lines. A right click opens the context menu
   (`onContextMenu`) of the nearest view that listens for one.
 - **The wheel** scrolls the scroll view under the pointer by three rows (six columns sideways; Shift turns a vertical
@@ -168,15 +167,15 @@ The terminal reports the mouse at Cell precision, and NSH turns each Cell into t
   cards open on the views under it. Leaving the terminal, or the terminal losing focus, clears hover.
 - **Dragging** follows the pointer Cell by Cell:
   - a `Slider` (and a `ColorSlider` or `ColorArea`): a press on the track moves the nearest thumb there, and a drag
-    moves it with the pointer; a range slider's thumbs stay within each other;
+    moves it with the pointer. A range slider's thumbs stay within each other;
   - a scroll bar: a press on the track jumps the thumb there, and a held thumb follows the pointer;
   - the handle lines of a `ResizablePanelGroup` or `DockArea` resize their panes, and a `DockArea` tab dragged over a
     group outlines where it lands;
-  - text in selectable views and fields is selected; Shift+click extends the selection, and Ctrl+C, Ctrl+Shift+C or
-    Cmd+C copies it; a selection held past the edge of its scroll view (or on the terminal's own edge row) scrolls it
+  - text in selectable views and fields is selected. Shift+click extends the selection, and Ctrl+C, Ctrl+Shift+C or
+    Cmd+C copies it. A selection held past the edge of its scroll view (or on the terminal's own edge row) scrolls it
     row by row, faster the farther past the pointer is;
   - content that nothing else claims scrolls with the drag, and the app's gestures (`panActivation`, the responder
-    system) get every move; a drag keeps its target while the pointer is outside the app.
+    system) get every move. A drag keeps its target while the pointer is outside the app.
 
   A drag never presses what it started on.
 
@@ -201,10 +200,10 @@ With 256 colors or more and a known background, fills are **surfaces**: steps of
 toward its foreground, so a card, a sidebar or a selected row stands on a band a shade lighter or darker than what is
 around it, and the page itself is the terminal's background, transparency included. On a 16-color terminal the same
 app, laid out the same, is drawn in lines, bold, dim and reverse video, and its small fills in the standard colors:
-a chip or a tag on the dark gray, a primary button in its color; panels and cards are set apart by their space.
+a chip or a tag on the dark gray, a primary button in its color. Panels and cards are set apart by their space.
 
 The terminal shows state in its own way: a selected row and a focused control are a highlighted band and bold, a
-hovered control a lighter band, a disabled one faint; the selected row of the pane that has the focus is in the
+hovered control a lighter band, a disabled one faint. The selected row of the pane that has the focus is in the
 accent. The app's focus styles still apply on top.
 
 ## Components and popups
@@ -231,13 +230,13 @@ accent. The app's focus styles still apply on top.
 
 **Popups** (popovers, menus, a select's list, a command palette) open beside their anchor, framed by a
 rounded line, with the label of their first surface as a title in the top border (`╭─ Title ─`). With surfaces they
-stand raised on a band and cast a one-Cell shadow; the item under the keyboard or the pointer is a full-row band in
-the accent. **Dialogs** center a framed box and fade what is behind them; focus stays inside the newest one, Escape
+stand raised on a band and cast a one-Cell shadow. The item under the keyboard or the pointer is a full-row band in
+the accent. **Dialogs** center a framed box and fade what is behind them. Focus stays inside the newest one, Escape
 asks it to close, and closing it gives the focus back to the control that opened it. `AlertDialog` is drawn
 the same way, its buttons `Cancel  OK` in a row (`< Cancel >  < OK >` on 16 colors).
 
 **Toasts** show on the status line, the screen's bottom row, one at a time: the newest toast's content in a row, and a
-new toast takes the line from the last. Nothing stacks or animates; Escape closes the toast there, as its own buttons
+new toast takes the line from the last. Nothing stacks or animates. Escape closes the toast there, as its own buttons
 and its timeout do. A tooltip shares the line and shows there while no toast does.
 
 **Scroll views** that overflow show a one-Cell scroll bar, `│` with a `┃` thumb, on their inner edge, or on the line of
@@ -254,7 +253,7 @@ three Cells wide and one Cell high (24 × 16 points at the default size) with th
 
 **Images show their pictures.** An `Image` larger than an icon draws its picture in its box, fitted with its
 `objectFit` and `objectPosition` and tinted with its `tintColor`. In kitty and Ghostty the picture is shown at the
-terminal's own pixels, through the kitty graphics protocol; elsewhere, at 256 colors or more, each Cell shows two
+terminal's own pixels, through the kitty graphics protocol. Elsewhere, at 256 colors or more, each Cell shows two
 pixels in half blocks (`▀`), including inside tmux. Images show at every size: a small SVG, a logo or an avatar's
 portrait takes the Cells its box rounds to, and a picture that stays transparent until it loads (an avatar's) loads all
 the same. PNG, JPEG, GIF, WebP and SVG files, assets, remote URLs and `data:` /
@@ -263,7 +262,7 @@ the same. PNG, JPEG, GIF, WebP and SVG files, assets, remote URLs and `data:` /
 stays blank.
 
 **Other media keep their space in the layout.** A `Video`, `WebView` or shader view larger than an icon keeps its
-box, so the text and controls around it stay where the design puts them; the box is blank Cells. Videos, web views,
+box, so the text and controls around it stay where the design puts them. The box is blank Cells. Videos, web views,
 shaders and canvases of icon size (48 × 48 points or smaller) give their room to the content around them. With
 surfaces, a view in the image role whose background is a color (a color swatch) shows that color.
 
@@ -315,7 +314,7 @@ fn sidebar_layout() -> AnyElement {
 
 `platform.desktop` is `true` in a terminal, and `platform.idiom === "desktop"` matches windows and desktop browsers,
 so code that asks for a pointer and a wide window with the idiom keeps the terminal on its own branch. Window chrome
-an app draws itself for `nsh/desktop` (a title bar of its own) is the app's content in a terminal; leave it out for
+an app draws itself for `nsh/desktop` (a title bar of its own) is the app's content in a terminal. Leave it out for
 `platform.idiom === "terminal"`. The environment reports reduced motion: navigation and layout transitions take their
 final state at once, and the app's own animations run as written. The safe area and the keyboard height are 0.
 
@@ -355,7 +354,7 @@ The bundle's assets are read from the `assets/` directory next to it.
 ## Embedding in a terminal app
 
 The `nsh-platform-tui` crate gives a Rust [ratatui](https://ratatui.rs) app `AppView`: one NSH engine drawn into any
-area of the app's own frame. The app keeps its terminal, its event loop and its layout; each `AppView` is
+area of the app's own frame. The app keeps its terminal, its event loop and its layout. Each `AppView` is
 independent, and several can share a screen.
 
 ```rust

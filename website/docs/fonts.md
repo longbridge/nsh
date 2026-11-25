@@ -7,7 +7,9 @@ group: ui
 
 # Fonts
 
-Text uses the system font (San Francisco on iOS, Roboto on Android) unless a font family says otherwise (`.font_family(..)` in Rust, `fontFamily` in TSX). A family can be a generic family, a font installed on the device, or a font file you ship with the app.
+Text uses the system font by default: San Francisco on iOS and Roboto on Android. To use another font, set a font
+family with `.font_family(..)` in Rust or `fontFamily` in TSX. A family can be a generic family, a font installed on
+the device, or a font file you ship with the app.
 
 ## System and generic families
 
@@ -20,7 +22,7 @@ Text uses the system font (San Francisco on iOS, Roboto on Android) unless a fon
 
 The system font honors every weight from 100 to 900. Tailwind's `font-sans`, `font-serif` and `font-mono` map to the first three rows, and `font-sans` and `font-mono` to the theme's fonts when it sets them ([A default font for the app](#a-default-font-for-the-app)).
 
-A family installed on the device can be named directly (`"Georgia"`, `"Avenir Next"` on iOS). Installed fonts differ between platforms and versions, so ship the fonts your design depends on. On iOS, a family that does not exist falls back to the system font with a warning in the log (`font family 'X' is not available`); name a list to choose what comes instead ([Fallback lists](#fallback-lists)).
+A family installed on the device can be named directly (`"Georgia"`, `"Avenir Next"` on iOS). Installed fonts differ between platforms and versions, so ship the fonts your design depends on. On iOS, a family that does not exist falls back to the system font with a warning in the log (`font family 'X' is not available`). Name a list to choose what comes instead ([Fallback lists](#fallback-lists)).
 
 ## Shipping a font
 
@@ -46,9 +48,9 @@ fn native(registry: &mut Registry) {
 text("Custom fonts").font_family(PACIFICO.family).text_size(px(30.0))
 ```
 
-`PACIFICO.family` and the TSX import `Pacifico` are the string `"Pacifico"`: the family name stored in the font file (its typographic family name, or else its family name), not the file name. Using the asset's value instead of writing the name by hand keeps the two in sync; a missing or broken file fails the Rust build, and an imported file is sure to be bundled.
+`PACIFICO.family` and the TSX import `Pacifico` are the string `"Pacifico"`: the family name stored in the font file (its typographic family name, or else its family name), not the file name. Using the asset's value instead of writing the name by hand keeps the two in sync. A missing or broken file fails the Rust build, and an imported file is sure to be bundled.
 
-The files ship with the app like any other [asset](./images-and-assets.md). Fonts are registered for the app's process only; they are not installed on the device.
+The files ship with the app like any other [asset](./images-and-assets.md). Fonts are registered for the app's process only. They are not installed on the device.
 
 > [!WARNING]
 > In TSX, an import whose value is never used is removed by TypeScript's import elision, and with it the font. If you only refer to a family by its name (for example in the Tailwind theme), import the file for its side effect: `import "./fonts/Inter-Bold.ttf";`. A Rust crate ships every file of `assets/` through `assets!()`.
@@ -65,7 +67,7 @@ The files ship with the app like any other [asset](./images-and-assets.md). Font
 text("Brand 品牌").font_family("Brand, 'Noto Sans SC', sans-serif")
 ```
 
-Each platform keeps the list's order with its own font machinery: a cascade list on iOS and macOS, a font fallback on Windows (one per paragraph: its first style's list), a Pango family list on Linux, the browser's on the web, GPUI's fallbacks. On Android, text is set in the first family it has; when that one is a font the app registers, the registered fonts after it in the list are its fallbacks (Android 10 and later).
+Each platform keeps the list's order with its own font machinery: a cascade list on iOS and macOS, a font fallback on Windows (one per paragraph: its first style's list), a Pango family list on Linux, the browser's on the web, GPUI's fallbacks. On Android, text is set in the first family it has. When that one is a font the app registers, the registered fonts after it in the list are its fallbacks (Android 10 and later).
 
 ## Registering a font while the app runs
 
@@ -97,7 +99,7 @@ text("Branded").font_family(move || family.get())
 
 ## Weights and italics
 
-A family usually comes as several files, one per weight and style. Ship each one (put them in `assets/` in Rust, import each in TSX); they register under the same family name, and the weight and style choose the face:
+A family usually comes as several files, one per weight and style. Ship each one (put them in `assets/` in Rust, import each in TSX). They register under the same family name, and the weight and style choose the face:
 
 ```tsx tabs
 import { Text } from "nsh";
@@ -187,7 +189,7 @@ The theme's `font-sans` is the app's font: every text that sets no family of its
 }
 ```
 
-The first family of the list that is not a generic one is the font; a generic first family (`system-ui`, `sans-serif`) is the system font. The font can also be set on a container: the texts inside inherit it.
+The first family of the list that is not a generic one is the font. A generic first family (`system-ui`, `sans-serif`) is the system font. The font can also be set on a container: the texts inside inherit it.
 
 ```tsx tabs
 import { mount, View } from "nsh";
@@ -215,7 +217,7 @@ pub fn Root() -> impl IntoElement {
 
 ## Font features
 
-`fontVariant` turns on OpenType features of the font: `"tabular-nums"`, `"proportional-nums"`, `"lining-nums"`, `"oldstyle-nums"` and `"small-caps"` (`.tabular_nums()`, `.small_caps()`, ... in Rust; [Text](./text.md#text-styles)). The font has to contain them; system fonts do.
+`fontVariant` turns on OpenType features of the font: `"tabular-nums"`, `"proportional-nums"`, `"lining-nums"`, `"oldstyle-nums"` and `"small-caps"` (`.tabular_nums()`, `.small_caps()`, ... in Rust; [Text](./text.md#text-styles)). The font has to contain them. System fonts do.
 
 ## Related
 

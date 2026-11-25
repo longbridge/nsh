@@ -6,7 +6,7 @@ order: 12.6
 
 # nsh/i18n
 
-`nsh/i18n` 以用户的语言显示应用的文本。翻译来自应用的 `locales/` 文件（格式与 [rust-i18n](https://github.com/longbridge/rust-i18n) 相同，构建时读取并随 bundle 一起提供）以及运行时通过 `addTranslations` 合并的词典；API 也与 rust-i18n 相同，Rust 组件在 `nsh_core::prelude` 中有对应的 `t!`、`set_locale`、`available_locales` 和 `add_translations`。[I18n](../docs/i18n.md) 介绍了如何翻译一个应用。
+`nsh/i18n` 用用户的语言显示应用文本。翻译有两个来源：应用的 `locales/` 文件（构建时读取，随 bundle 发布），以及运行时用 `addTranslations` 加入的词典。文件格式和 API 都与 [rust-i18n](https://github.com/longbridge/rust-i18n) 相同。Rust 组件在 `nsh_core::prelude` 中有同样的 API：`t!`、`set_locale`、`available_locales` 和 `add_translations`。翻译应用的完整步骤见 [I18n](../docs/i18n.md)。
 
 ```tsx
 import { addTranslations, availableLocales, setLocale, t } from "nsh/i18n";

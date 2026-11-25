@@ -8,9 +8,13 @@ demo: guide-layout
 
 # Layout
 
-NSH lays out every element with [Taffy](https://github.com/DioxusLabs/taffy), a Rust implementation of CSS flexbox, grid and block layout, configured so that children stack vertically and do not shrink by default. Layout runs in the core, after each turn of your code, and only the frames that changed are sent to the native views. Text is measured by the platform's text engine on the same thread, so layout never waits for the main thread.
+NSH lays out every element with [Taffy](https://github.com/DioxusLabs/taffy), a Rust implementation of CSS flexbox,
+grid and block layout. By default, children stack vertically and don't shrink.
 
-The layout properties below are style properties. In Rust they are typed style methods (`.flex_row()`, `.gap_4()`, `.grid_cols(3)`, `.absolute().inset_0()`); in TSX they are keys of the `style` prop, and each has a [Tailwind](./tailwind.md) class (`flex-row`, `gap-4`, `grid-cols-3`, `absolute inset-0`, ...). Both lower to the same native styles.
+Layout runs in the core after each turn of your code. NSH sends only the changed frames to the native views. The
+platform's text engine measures text on the same thread, so layout never waits for the main thread.
+
+The layout properties below are style properties. In Rust they are typed style methods (`.flex_row()`, `.gap_4()`, `.grid_cols(3)`, `.absolute().inset_0()`). In TSX they are keys of the `style` prop, and each has a [Tailwind](./tailwind.md) class (`flex-row`, `gap-4`, `grid-cols-3`, `absolute inset-0`, ...). Both lower to the same native styles.
 
 ## Flexbox
 
@@ -106,7 +110,7 @@ Because minimum sizes default to 0, a `flex: 1` text in a row shrinks and wraps 
 
 In Rust a length is typed: `px(16.0)` is 16 points, `relative(0.5)` is 50% of the parent, `auto()` is `auto`. The step methods follow Tailwind's spacing scale of 4 points per step (`.p_4()` is 16 points, `.gap_0p5()` 2 points).
 
-Layouts land on the screen's device pixels, so neighbouring views meet with no gap and no blur. Half a point (`px(0.5)`, `0.5`) is a one-pixel hairline on a 2x screen; on a 1x screen a view thinner than a pixel still gets one, so a divider never disappears.
+Layouts land on the screen's device pixels, so neighbouring views meet with no gap and no blur. Half a point (`px(0.5)`, `0.5`) is a one-pixel hairline on a 2x screen. On a 1x screen a view thinner than a pixel still gets one, so a divider never disappears.
 
 Without a size, a view is as big as its content (plus padding), stretched across its parent's cross axis by the default `alignItems: "stretch"`. Percentages are relative to the parent's size (for padding and margin, as in CSS, to its width).
 
@@ -229,7 +233,7 @@ view()
     .child(text(move || format!("{} points wide", width.get())))
 ```
 
-The frame is in points: `Bounds<Points>` in Rust, `{ bounds }` in TSX, a `Bounds` (`{ origin: { x, y }, size: { width, height } }`). For the whole surface, read `window()` in Rust or `windowSize()` from [`nsh`](../modules/nsh.md#device) in TSX; both follow rotation and resizing, and a style that reads them changes with the surface. On the desktops the host is invisible: a window's own size is its `WindowRef.state()?.contentBounds` (Rust `WindowRef::state()`), which follows that window's resizes:
+The frame is in points: `Bounds<Points>` in Rust, `{ bounds }` in TSX, a `Bounds` (`{ origin: { x, y }, size: { width, height } }`). For the whole surface, read `window()` in Rust or `windowSize()` from [`nsh`](../modules/nsh.md#device) in TSX. Both follow rotation and resizing, and a style that reads them changes with the surface. On the desktops the host is invisible: a window's own size is its `WindowRef.state()?.contentBounds` (Rust `WindowRef::state()`), which follows that window's resizes:
 
 ```tsx tabs
 import { View } from "nsh";

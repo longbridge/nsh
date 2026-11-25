@@ -7,15 +7,15 @@ demo: el-accordion
 
 # Accordion
 
-An accordion stacks sections that expand and collapse under their headings: the questions of an FAQ, the groups of a
-settings page, the steps of a checkout. Five parts make it, each owning one piece of behavior and none of the look:
+An accordion is a stack of sections that expand and collapse under their headings. Use it for FAQ questions, groups
+of settings or the steps of a checkout. It has five parts. Each owns one piece of behavior, and none owns the look:
 
 - `Accordion`, the stack: it holds the app's `value`, the values of the open items, and reports the next one with
   `onChange`. One item opens at a time, or several with `multiple`.
 - `AccordionItem`, one section, identified by its `value`. It is open while the accordion's `value` holds it.
 - `AccordionHeader`, the item's heading, of a `level` screen readers announce.
 - `AccordionTrigger`, the button in the heading that expands and collapses its item, and says whether it is expanded.
-- `AccordionPanel`, the item's content, shown while it is open; with `reveal` its height springs open and shut.
+- `AccordionPanel`, the item's content, shown while it is open. With `reveal` its height springs open and shut.
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -185,7 +185,7 @@ chevron turns (`transition-transform group-aria-expanded:rotate-180`).
 
 ## Disabled
 
-A disabled item's trigger takes no presses, and screen readers announce it as dimmed; `disabled:` classes on the
+A disabled item's trigger takes no presses, and screen readers announce it as dimmed. `disabled:` classes on the
 trigger and `group-disabled:` inside it follow. The accordion's `disabled` disables every item. A disabled item still
 shows what the app's `value` says: the app can open it.
 
@@ -193,7 +193,7 @@ shows what the app's `value` says: the app can open it.
 
 - The stack is a group, each header a heading of its `level`, and each trigger a button inside it that says whether
   its item is expanded. Screen readers can move from heading to heading.
-- An open panel is a region, named by its `accessibilityLabel`; a closed one is hidden from screen readers, kept
+- An open panel is a region, named by its `accessibilityLabel`. A closed one is hidden from screen readers, kept
   content included.
 - The look of the open item is the app's, and should not rest on color alone: turn the chevron, as the examples do.
 
@@ -212,6 +212,6 @@ panel. Tab moves from a trigger into its open panel's controls and on to the nex
 - With `reveal`, every platform springs the panels' heights on its own animator (iOS, Android, macOS, Windows, Linux,
   GPUI and the web), and opens and closes them at once while the system asks for reduced motion.
 - Each platform's screen reader hears the heading and its level as it reads headings, and the trigger inside it as
-  a button with its expanded state; on iOS, VoiceOver reads the trigger itself.
+  a button with its expanded state. On iOS, VoiceOver reads the trigger itself.
 - iOS, Android and Mac Catalyst: a trigger's press is a tap. Desktops (macOS, Windows, Linux, GPUI) and the web: a
   click, and Space or Return on the focused trigger on macOS and the web.

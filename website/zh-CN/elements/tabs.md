@@ -97,7 +97,7 @@ fn sections() -> impl IntoElement {
 }
 ```
 
-`Tab` 和 `Tabs` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：列表本身不持有值。每个标签页被告知自己是否选中；按下时通过 `onPress` 报告，应用设置自己的值并显示对应的部分，每个标签页显示应用传回的 `selected`。列表和标签页的圆角同心：列表的内边距（`p-1`）正是 `radius.lg` 与 `radius` 之差。选中标签页的填充是列表的指示器（`indicatorClass`，位于这层内边距之内：`inset-y-1`），它以弹簧动画移到应用选中的标签页。在 Rust 中，`tab()` 和 `tabs()` 创建它们，每个属性对应一个设置方法（`.selected(..)`），每个事件对应一个监听方法（`.on_press(..)`），外观用类型化的样式方法，内容用 `.child(..)`。
+`Tab` 和 `Tabs` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：列表本身不持有值。每个标签页被告知自己是否选中。按下时通过 `onPress` 报告，应用设置自己的值并显示对应的部分，每个标签页显示应用传回的 `selected`。列表和标签页的圆角同心：列表的内边距（`p-1`）正是 `radius.lg` 与 `radius` 之差。选中标签页的填充是列表的指示器（`indicatorClass`，位于这层内边距之内：`inset-y-1`），它以弹簧动画移到应用选中的标签页。在 Rust 中，`tab()` 和 `tabs()` 创建它们，每个属性对应一个设置方法（`.selected(..)`），每个事件对应一个监听方法（`.on_press(..)`），外观用类型化的样式方法，内容用 `.child(..)`。
 
 <a id="props"></a>
 
@@ -155,7 +155,7 @@ fn sections() -> impl IntoElement {
 
 ## 指示器
 
-选中标签页下的下划线、它后面的胶囊，或分段控件里凸起的那一段，就是列表的指示器：一个由应用通过 `indicatorClass` 和 `indicatorStyle` 设置样式的视图，绘制在标签页后面，在列表中绝对定位。每次布局之后，Native Shell 把它放到选中的标签页上。沿列表方向（一行的宽度、一列的高度），它覆盖这个标签页，并在这个方向上留出指示器自己的外边距（例如 `mx-3` 让下划线比标签页短一些）；在交叉方向上，由它的类决定位置：
+选中标签页下的下划线、它后面的胶囊，或分段控件里凸起的那一段，就是列表的指示器：一个由应用通过 `indicatorClass` 和 `indicatorStyle` 设置样式的视图，绘制在标签页后面，在列表中绝对定位。每次布局之后，Native Shell 把它放到选中的标签页上。沿列表方向（一行的宽度、一列的高度），它覆盖这个标签页，并在这个方向上留出指示器自己的外边距（例如 `mx-3` 让下划线比标签页短一些）。在交叉方向上，由它的类决定位置：
 
 ```tsx
 // 一行标签页底部的下划线。
@@ -171,7 +171,7 @@ fn sections() -> impl IntoElement {
 </Tabs>
 ```
 
-应用选中另一个标签页时，指示器以弹簧动画原生地移过去，与 GPUI Kit 标签栏的指示器一致；开启减弱动态效果时，它立即就位。没有标签页选中时，指示器隐藏；有多个选中时，它停在第一个上。窗口缩放或标签页宽度变化时，它与标签页在同一帧移动。指示器不需要布局事件，也不需要应用写代码：选中的标签页就是 `selected` 为 true 的那个。可以滚动的列表，把滚动视图放在 `Tabs` 外面，指示器随标签页一起滚动。
+应用选中另一个标签页时，指示器以弹簧动画原生地移过去，与 GPUI Kit 标签栏的指示器一致。开启减弱动态效果时，它立即就位。没有标签页选中时，指示器隐藏。有多个选中时，它停在第一个上。窗口缩放或标签页宽度变化时，它与标签页在同一帧移动。指示器不需要布局事件，也不需要应用写代码：选中的标签页就是 `selected` 为 true 的那个。可以滚动的列表，把滚动视图放在 `Tabs` 外面，指示器随标签页一起滚动。
 
 <a id="disabled"></a>
 
@@ -195,7 +195,7 @@ fn sections() -> impl IntoElement {
 ## 无障碍
 
 - 标签页对屏幕阅读器而言是一个元素，角色是 `"tab"`，带有它的选中状态。它的标签是子元素的文字，或 `accessibilityLabel`。它的 `accessibilityDescription` 在名称之后读出，所以名称可以只是标签页的标题：把标签页除了被选中之外还能做的事写在这里（例如可关闭的标签页按 Delete 关闭）。
-- `Tabs` 的角色是 `"tablist"`：屏幕阅读器把其中的标签页当作一组播报，每个标签页仍然是独立的元素。它的 `accessibilityLabel` 是这个列表的名字；列表旁没有文字说明这些标签页切换的是什么时，都应给一个。
+- `Tabs` 的角色是 `"tablist"`：屏幕阅读器把其中的标签页当作一组播报，每个标签页仍然是独立的元素。它的 `accessibilityLabel` 是这个列表的名字。列表旁没有文字说明这些标签页切换的是什么时，都应给一个。
 - 应用为选中标签页显示的内容可以说明自己是什么：给它的视图加上 `role="tabpanel"`（Rust 为 `.role(AccessibilityRole::TabPanel)`），屏幕阅读器进入时会说这是一个标签页面板。
 - `disabled` 按平台的方式报告（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
 - 平台有列表方向的属性时，屏幕阅读器会听到它：应用设置了 `orientation` 时，Web 的 `aria-orientation` 跟随它。
@@ -221,7 +221,7 @@ fn sections() -> impl IntoElement {
 | Home、End | 把焦点移到第一个或最后一个标签页。 |
 | Space、Return | 按下拥有焦点的标签页。 |
 
-方向键跳过禁用的标签页，焦点移到的标签页报告 `onPress`，应用随焦点移动选中它：显示的部分跟随焦点。`orientation` 决定哪组方向键移动焦点（`horizontal`：Left 和 Right；`vertical`：Up 和 Down）；不设置时两组都会移动焦点（列表按哪种方向排列都可以）。另一组方向键留给页面，所以列表外层的滚动视图可以用它滚动。布局与它无关，由应用的 `class` 决定。在从右到左的布局里，水平列表从右边开始，Left 和 Right 互换：Left 移到下一个标签页，Right 移到上一个；Up、Down、Home 和 End 不变。`focus-visible:` 样式显示焦点所在。不在 `Tabs` 里的 `Tab` 是独立的一站。
+方向键跳过禁用的标签页，焦点移到的标签页报告 `onPress`，应用随焦点移动选中它：显示的部分跟随焦点。`orientation` 决定哪组方向键移动焦点（`horizontal`：Left 和 Right；`vertical`：Up 和 Down）。不设置时两组都会移动焦点（列表按哪种方向排列都可以）。另一组方向键留给页面，所以列表外层的滚动视图可以用它滚动。布局与它无关，由应用的 `class` 决定。在从右到左的布局里，水平列表从右边开始，Left 和 Right 互换：Left 移到下一个标签页，Right 移到上一个。Up、Down、Home 和 End 不变。`focus-visible:` 样式显示焦点所在。不在 `Tabs` 里的 `Tab` 是独立的一站。
 
 <a id="platform-notes"></a>
 

@@ -8,12 +8,12 @@ demo: el-text-selection
 
 # Text selection
 
-A [`View`](./view.md) with `selectable` makes the texts inside it select together, as a web page's do: one selection
-runs from a place in one text to a place in another, across views, [`Text`](./text.md) elements and
-[`TextView`](./text-view.md)s, in reading order. Make a chat transcript selectable and a selection can start in one
-message and end in the next; Copy puts the selected text on the clipboard, with texts side by side joined by a tab and
-the others by a line break. Rust sets it with `view().selectable(true)`, TSX with `<View selectable>`; whether a single
-text can be selected is its `userSelect` style.
+A [`View`](./view.md) with `selectable` lets the user select across all the text inside it, as on a web page. One
+selection can run from one text to another, across views, [`Text`](./text.md) elements and
+[`TextView`](./text-view.md)s, in reading order. In a selectable chat transcript, a selection can start in one
+message and end in the next. Copy puts the selected text on the clipboard: texts side by side are joined by a tab,
+the others by a line break. Rust sets it with `view().selectable(true)`, TSX with `<View selectable>`. Whether a
+single text can be selected is its `userSelect` style.
 
 ```tsx tabs
 import { Text, View } from "nsh";
@@ -201,12 +201,12 @@ punctuation after it (a sentence's `foo.`) stays out, and so do operators (`a=b`
   [Text](./text.md#props) describes.
 - **The look** is the platform's highlight in each text's `selectionColor` (`selection:bg-*`). A text that sets none
   takes the nearest color set on a view around it: the view's `selection:bg-*` class, or `.selection_color(..)` in
-  Rust, which wins over the class. Set it once on the selectable view to color the whole selection; on Android the
+  Rust, which wins over the class. Set it once on the selectable view to color the whole selection. On Android the
   selection handles take it too.
 - **A line in several texts**: a Rust component that lays one line out as several texts (a soft-wrapped line of
-  code) marks the later parts with `.continues_text(true)`; a copy then gives the line whole, with no line break where
+  code) marks the later parts with `.continues_text(true)`. A copy then gives the line whole, with no line break where
   it was cut, and a triple click selects all of its parts. [`DiffView`](./diff-view.md) does this for its wrapped lines.
-- **Lists**: in a virtualized [List](./list.md), a selection covers the rows that are mounted; rows recycled out of
+- **Lists**: in a virtualized [List](./list.md), a selection covers the rows that are mounted. Rows recycled out of
   view leave it.
 
 ## Related

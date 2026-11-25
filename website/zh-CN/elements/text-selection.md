@@ -8,7 +8,7 @@ demo: el-text-selection
 
 # 文字选择
 
-设置了 `selectable` 的 [`View`](./view.md) 让其中的文字一起选择，就像网页一样：一个选区可以从一段文字中的某处延伸到另一段文字中的某处，按阅读顺序跨越视图、[`Text`](./text.md) 元素和 [`TextView`](./text-view.md)。让聊天记录可选择后，选区可以从一条消息开始、在下一条结束；复制会把选中的文字放到剪贴板，并排的文字用制表符连接，其他用换行连接。Rust 用 `view().selectable(true)` 设置，TSX 用 `<View selectable>`；单段文字能否被选择由它的 `userSelect` 样式决定。
+设置了 `selectable` 的 [`View`](./view.md) 让其中的文字一起选择，就像网页一样：一个选区可以从一段文字中的某处延伸到另一段文字中的某处，按阅读顺序跨越视图、[`Text`](./text.md) 元素和 [`TextView`](./text-view.md)。让聊天记录可选择后，选区可以从一条消息开始、在下一条结束。复制会把选中的文字放到剪贴板，并排的文字用制表符连接，其他用换行连接。Rust 用 `view().selectable(true)` 设置，TSX 用 `<View selectable>`。单段文字能否被选择由它的 `userSelect` 样式决定。
 
 ```tsx tabs
 import { Text, View } from "nsh";
@@ -83,7 +83,7 @@ fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {
 
 ## 读取选中的文字
 
-在可选择视图上设置 `onSelectionChange`（Rust 中为 `.on_text_selection_change(..)`），每次选区变化时都会收到选中的文字：`{ text, start, bounds, pageBounds }`，即复制会得到的内容、它在整个视图文字中的起始位置，以及它在视图中和所在根视图中的外框（macOS 和 Windows；锚定在 `pageBounds` 的 `Overlay` 就是选区上方的操作栏）；不再有选中内容时（点击别处、按 Escape、另一个视图开始选择）收到 `""`。只在文字或外框变化时报告。可选择视图嵌套时由外层视图报告，因为选区只有一个。设置了 `selectable` 的 [`TextView`](./text-view.md) 也以同样方式报告自己的选区（`onSelectionChange`，Rust 中为 `.on_selection_change(..)`）。聊天应用可以用它引用读者在回答中选中的部分：
+在可选择视图上设置 `onSelectionChange`（Rust 中为 `.on_text_selection_change(..)`），每次选区变化时都会收到选中的文字：`{ text, start, bounds, pageBounds }`，即复制会得到的内容、它在整个视图文字中的起始位置，以及它在视图中和所在根视图中的外框（macOS 和 Windows；锚定在 `pageBounds` 的 `Overlay` 就是选区上方的操作栏）。不再有选中内容时（点击别处、按 Escape、另一个视图开始选择）收到 `""`。只在文字或外框变化时报告。可选择视图嵌套时由外层视图报告，因为选区只有一个。设置了 `selectable` 的 [`TextView`](./text-view.md) 也以同样方式报告自己的选区（`onSelectionChange`，Rust 中为 `.on_selection_change(..)`）。聊天应用可以用它引用读者在回答中选中的部分：
 
 ```tsx tabs
 import { signal, View } from "nsh";
@@ -170,9 +170,9 @@ Web 之外，一个词是一串字母、数字和 `_`，双击只选择这个词
 - **嵌套的视图**：一个可选择视图放在另一个之中时，属于外层视图，一个选区覆盖两者。
 - **TextView**：设置了 `selectable` 的 [`TextView`](./text-view.md) 自己作为一体选择：它的段落、列表项、单元格和代码块一起选择。放在可选择视图中时，它加入外层的选区。
 - **单独的文字**：不在任何可选择视图中、设置了 `userSelect: "text"` 的文字单独选择，见 [Text](./text.md#属性)。
-- **外观**是平台的高亮，颜色为每段文字的 `selectionColor`（`selection:bg-*`）。没有设置颜色的文字取外层最近的视图上设置的颜色：视图的 `selection:bg-*` 类，或 Rust 中的 `.selection_color(..)`（优先于类）。在可选择视图上设置一次就能给整个选区着色；Android 上选择手柄也用这个颜色。
-- **分成多段文字的一行**：把一行排成多段文字的 Rust 组件（软换行的代码行）给后面的各段设置 `.continues_text(true)`；复制时这一行完整给出，断开处没有换行，三击会选中它的所有部分。[`DiffView`](./diff-view.md) 的换行就是这样处理的。
-- **列表**：在虚拟化的 [List](./list.md) 中，选区覆盖已挂载的行；回收到视野之外的行会离开选区。
+- **外观**是平台的高亮，颜色为每段文字的 `selectionColor`（`selection:bg-*`）。没有设置颜色的文字取外层最近的视图上设置的颜色：视图的 `selection:bg-*` 类，或 Rust 中的 `.selection_color(..)`（优先于类）。在可选择视图上设置一次就能给整个选区着色。Android 上选择手柄也用这个颜色。
+- **分成多段文字的一行**：把一行排成多段文字的 Rust 组件（软换行的代码行）给后面的各段设置 `.continues_text(true)`。复制时这一行完整给出，断开处没有换行，三击会选中它的所有部分。[`DiffView`](./diff-view.md) 的换行就是这样处理的。
+- **列表**：在虚拟化的 [List](./list.md) 中，选区覆盖已挂载的行。回收到视野之外的行会离开选区。
 
 ## 相关内容
 

@@ -1,6 +1,7 @@
 # Writing user docs
 
-These rules cover the website docs (`website/docs/`, `website/zh-CN/docs/`) and the home page copy
+These rules cover every website page (`website/docs/`, `website/elements/`, `website/modules/` and
+their `website/zh-CN/` copies) and the home page copy
 (`website/src/home/*.json`). AI tools read the docs as well, but people come first. If a person
 can't follow a page, it has failed, however complete it is.
 
@@ -74,7 +75,7 @@ must check its own output. Go through every item; fix the page until all pass.
 4. None of these appear: "It's important to note", "seamlessly", "robust", "powerful",
    "leverage", "in order to", "simply", "effectively", "comprehensive", "first-class",
    "under the hood", "as X is", "the rest of that".
-   Quick check: `grep -nEi "seamless|robust|leverag|in order to|first-class|important to note" <file>`.
+   Quick check: `grep -nEiw "seamless(ly)?|robust|leverag\w*|in order to|first-class|important to note|powerful|simply|effectively|comprehensive|under the hood" <file>`.
 5. Each idea appears once. Principles already stated on Goals are linked, not restated.
 6. Every new term is defined at first use (see Terms).
 7. Every number, default, limit and API name matches the code or a benchmark.

@@ -8,7 +8,7 @@ demo: el-control-flow
 
 # If / Each
 
-`If` 和 `Each` 决定哪些元素存在：条件内容和重复内容。它们自身不创建原生视图。原生渲染器只更新发生变化的部分：`If` 在条件翻转时切换分支，`Each` 按 key 增加、移动和删除行，而不是重建整个列表。Rust 在 `nsh_core::prelude` 中提供 `when(..)`、`each(..)` 和 `dynamic(..)`；TSX 提供 `<If>` 和 `<Each>`，它们是无需导入的全局组件。
+`If` 和 `Each` 决定哪些元素存在：条件内容和重复内容。它们自身不创建原生视图。原生渲染器只更新发生变化的部分：`If` 在条件翻转时切换分支，`Each` 按 key 增加、移动和删除行，而不是重建整个列表。Rust 在 `nsh_core::prelude` 中提供 `when(..)`、`each(..)` 和 `dynamic(..)`。TSX 提供 `<If>` 和 `<Each>`，它们是无需导入的全局组件。
 
 ```tsx tabs
 <View>
@@ -85,7 +85,7 @@ dynamic(move || user.get().map(|u| text(u.name)))
 | `key` | `each(.., \|item\| key, ..)` | `(item: any) => unknown` | 条目的标识。TSX 中默认是条目本身（对象按引用比较，原始值按值比较）。 |
 | `children` | `each(.., .., \|item, index\| row)` | `(item: () => any, index: () => number) => JSX.Element` | 渲染一行。 |
 
-行函数拿到的是**访问器**而不是值：TSX 中调用 `item()` 和 `index()`，Rust 中调用 `item.get()` 和 `index.get()`（两者都是 `ReadSignal`）。条目变化时，key 仍然存在的行会被保留（位置变了就移动），它们的条目和索引会更新，只有读取它们的表达式会重新执行。新的 key 产生新行；key 消失的行被删除。
+行函数拿到的是**访问器**而不是值：TSX 中调用 `item()` 和 `index()`，Rust 中调用 `item.get()` 和 `index.get()`（两者都是 `ReadSignal`）。条目变化时，key 仍然存在的行会被保留（位置变了就移动），它们的条目和索引会更新，只有读取它们的表达式会重新执行。新的 key 产生新行。key 消失的行被删除。
 
 ```tsx tabs
 interface Todo {

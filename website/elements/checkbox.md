@@ -7,8 +7,8 @@ demo: el-checkbox
 
 # Checkbox
 
-A checkbox selects an option, an item of a list, or all of them. It is checked, unchecked or indeterminate (neither:
-a "select all" over a partial selection). It owns the behavior: presses, keyboard activation, the disabled state, and
+A checkbox turns an option on or off, or selects an item of a list or all of them. It is checked, unchecked or
+indeterminate. Indeterminate means neither, as in a "select all" over a partial selection. It owns the behavior: presses, keyboard activation, the disabled state, and
 the checkbox role and its value for screen readers. The look is the app's: a `Checkbox` has no box, mark, colors,
 sizes or label of its own. It is made of an indicator (the box) with the app's mark inside it, then its children (a
 label), and the app styles each part, with `checked:`, `indeterminate:` and `disabled:` classes that follow the
@@ -71,7 +71,7 @@ fn notify() -> impl IntoElement {
 `Checkbox` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the app's: a
 press reports the next value with `onChange`, and the checkbox shows the `checked` and `indeterminate` the app passes
 back. In Rust, `checkbox()` makes one with a setter per prop (`.checked(..)`, `.indicator_style(..)`), a listener per
-event (`.on_change(..)`), the typed style methods for the checkbox itself and `.child(..)` for its label; the
+event (`.on_change(..)`), the typed style methods for the checkbox itself and `.child(..)` for its label. The
 indicator's style takes the state methods (`.checked(..)`, `.indeterminate(..)`, `.disabled_style(..)`) that follow
 the checkbox.
 
@@ -180,10 +180,10 @@ sides named (`{ top: 8, bottom: 8 }`), as a [view's `hitSlop`](./index.md#presse
 ## Accessibility
 
 - Give `accessibilityHint` when the label does not explain the effect of changing the selection. It follows reactive
-  values; setting it to `undefined` removes the hint.
+  values. Setting it to `undefined` removes the hint.
 - A checkbox is one element for screen readers, with the role `"checkbox"` (or its `role`) and its value: checked,
   unchecked, or mixed while indeterminate. The indicator and the mark are parts of it. Its label is the text of its
-  children; give `accessibilityLabel` when it has none.
+  children. Give `accessibilityLabel` when it has none.
 - `disabled` is announced as the platform announces it (VoiceOver, TalkBack, UI Automation, the browser's accessibility
   tree).
 - On macOS and the web a checkbox is a stop of the keyboard focus: Tab reaches it, Space and Return toggle it, and

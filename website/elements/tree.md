@@ -8,11 +8,11 @@ demo: el-tree
 # Tree
 
 A tree shows items that hold items: a project's files and folders, the sections of a settings sidebar, a document's
-outline. `Tree` owns the behavior of one: which items are expanded, which one is selected, the keyboard and what
-screen readers hear. Its rows are virtualized: only the rows in view are made, and the children of a collapsed item are
-never made at all, so a tree of thousands of items opens and scrolls at once. The look is the app's: the tree draws
-nothing of its own, the app styles each row (`itemClass`) and draws its content (`renderItem`: an icon, the label
-indented by the item's depth, a chevron, a badge).
+outline. `Tree` owns the behavior: which items are expanded, which one is selected, the keyboard and what screen
+readers hear. Its rows are virtualized: only the rows in view are created, and the children of a collapsed item are
+never created. A tree of thousands of items opens and scrolls at once. The look is the app's. The tree draws nothing
+of its own: the app styles each row (`itemClass`) and draws its content (`renderItem`: an icon, the label indented by
+the item's depth, a chevron, a badge).
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -104,7 +104,7 @@ fn files() -> impl IntoElement {
 
 `Tree` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The expanded items and the
 selected one are the app's when it sets `expanded` and `selected`, which it updates in `onExpandedChange` and
-`onSelectedChange`; without them the tree keeps its own state, starting from `defaultExpanded` and `defaultSelected`.
+`onSelectedChange`. Without them the tree keeps its own state, starting from `defaultExpanded` and `defaultSelected`.
 Items are identified by their `id`, the app's own (a path, a record's key), never by their label. In Rust, `tree()`
 makes it, with a setter per prop (`.items(..)`, `.expanded(..)`, `.render_item(..)`), a listener method per event and
 the typed style methods.
@@ -206,7 +206,7 @@ the tree makes it read-only: it shows what the app's state says and takes no inp
 
 ## Accessibility
 
-- The tree has the role `"tree"`, named by `accessibilityLabel`; each row is a `"treeitem"` named by its item's label,
+- The tree has the role `"tree"`, named by `accessibilityLabel`. Each row is a `"treeitem"` named by its item's label,
   with its level (its depth + 1), whether it is expanded (folders), selected and disabled.
 - As the tree takes the keyboard focus and as the keys move the selection, the row the keys act on takes the screen
   reader's focus.
@@ -237,8 +237,8 @@ expands a folder and enters it, Right collapses it and selects the parent. Up, D
 
 ## Platform notes
 
-- iOS, Android and Mac Catalyst: a tap selects a row and expands or collapses a folder; a double tap acts on the item
+- iOS, Android and Mac Catalyst: a tap selects a row and expands or collapses a folder. A double tap acts on the item
   (`onAction`).
 - Desktops (macOS, Windows, Linux, GPUI) and the web: a click does the same and gives the tree the keyboard focus, and
-  the keys above move in it; a double click acts on the item.
+  the keys above move in it. A double click acts on the item.
 - Every platform draws what the app styles: the tree, its rows and their content.

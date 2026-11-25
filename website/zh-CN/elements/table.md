@@ -61,7 +61,7 @@ fn invoices() -> impl IntoElement {
 }
 ```
 
-`Table` 及其部件来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate，由 `table()`、`table_header()`、`table_body()`、`table_footer()`、`table_row()`、`table_head()`、`table_cell()` 和 `table_caption()` 创建，配合类型化的样式方法和 `.child(..)`。行把单元格横向排列；单元格的宽度由应用设置，使各列对齐。
+`Table` 及其部件来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate，由 `table()`、`table_header()`、`table_body()`、`table_footer()`、`table_row()`、`table_head()`、`table_cell()` 和 `table_caption()` 创建，配合类型化的样式方法和 `.child(..)`。行把单元格横向排列。单元格的宽度由应用设置，使各列对齐。
 
 ## 属性
 
@@ -84,7 +84,7 @@ fn invoices() -> impl IntoElement {
 | `TableCell` | `TableRow` | 单元格 |
 | `TableCaption` | `Table` | 应用显示的有关表格的内容 |
 
-各平台把这些角色交给自己的屏幕阅读器：Linux（AT-SPI）、Web（ARIA）、Android 和 GPUI 后端使用表格、行、单元格和列标题角色；macOS 和 Windows 使用网格和分组；iOS 把列标题标为标题。
+各平台把这些角色交给自己的屏幕阅读器：Linux（AT-SPI）、Web（ARIA）、Android 和 GPUI 后端使用表格、行、单元格和列标题角色。macOS 和 Windows 使用网格和分组。iOS 把列标题标为标题。
 
 ## 另请参阅
 

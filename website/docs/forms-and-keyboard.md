@@ -8,7 +8,12 @@ demo: guide-forms
 
 # Forms and the keyboard
 
-Text entry is the input element, `input()` in Rust and `<Input>` in TSX: a UITextField or UITextView on iOS, an EditText on Android. Typing, the caret, selection, autocorrection and autofill are the platform's own; your app gets the text through events and can control it. NSH also keeps focused inputs above the software keyboard on its own, and gives you the keyboard's height as a reactive value for the cases it cannot handle by itself.
+The input element takes text from the user: `input()` in Rust and `<Input>` in TSX. It is a UITextField or
+UITextView on iOS and an EditText on Android. Typing, the caret, selection, autocorrection and autofill come from the
+platform. Your app reads the text through events and can set it.
+
+NSH keeps a focused input above the software keyboard without any code. For layouts it can't handle on its own, it
+gives you the keyboard's height as a reactive value.
 
 An input takes styles like any view (typed style methods in Rust, styles and Tailwind classes in TSX), so the fields of a form have your app's own look. A labeled field is a short component of your own:
 
@@ -124,7 +129,7 @@ Because you control the value, you can transform what the user types: `.on_chang
 
 ### Input methods
 
-Chinese, Japanese and Korean input methods compose text before committing it: pinyin turns into 腾 once a character is chosen. `onCompositionChange` (Rust `.on_composition_change(..)`) reports the composition as it goes, `{ composing: true, text: "teng" }` while the user types and `{ composing: false, text: "" }` when it ends; the committed text reaches `onChange` before the end. On iOS, Android, macOS and the web, `onChange` also reports the text being composed, as those systems keep it in the input; on Windows, Linux and GPUI it reports the committed text. A controlled input keeps the composition going whatever the app does with the value: a `value` set while the user composes is shown once the composition ends, so an input that uppercases or filters its text takes pinyin as typed.
+Chinese, Japanese and Korean input methods compose text before committing it: pinyin turns into 腾 once a character is chosen. `onCompositionChange` (Rust `.on_composition_change(..)`) reports the composition as it goes, `{ composing: true, text: "teng" }` while the user types and `{ composing: false, text: "" }` when it ends. The committed text reaches `onChange` before the end. On iOS, Android, macOS and the web, `onChange` also reports the text being composed, as those systems keep it in the input. On Windows, Linux and GPUI it reports the committed text. A controlled input keeps the composition going whatever the app does with the value: a `value` set while the user composes is shown once the composition ends, so an input that uppercases or filters its text takes pinyin as typed.
 
 A search box that searches the committed text only:
 
@@ -170,7 +175,7 @@ An input is **uncontrolled** without a value: it keeps its own text, starting at
 
 ### Hardware keys and the input
 
-An `Input` owns the keys that edit it. Its platform applies them natively, together with the input method that composes text, and an ancestor's `onKeyDown` / `onKeyUp` listener or `captureKeys` rule changes nothing: it never intercepts typing, caret movement, selection or the editing commands, and it cannot take a key the system gives the field. Raw hardware keys (`onKeyDown` / `onKeyUp`, `captureKeys`) are for custom-rendered surfaces, not for extending a text field; use `onKeyPress`, `onChange` and `onSubmit` for the field's own text ([keyboard](../elements/keyboard.md#hardware-keys-on-custom-views)).
+An `Input` owns the keys that edit it. Its platform applies them natively, together with the input method that composes text, and an ancestor's `onKeyDown` / `onKeyUp` listener or `captureKeys` rule changes nothing: it never intercepts typing, caret movement, selection or the editing commands, and it cannot take a key the system gives the field. Raw hardware keys (`onKeyDown` / `onKeyUp`, `captureKeys`) are for custom-rendered surfaces, not for extending a text field. Use `onKeyPress`, `onChange` and `onSubmit` for the field's own text ([keyboard](../elements/keyboard.md#hardware-keys-on-custom-views)).
 
 A form control nested in a capturing view keeps that boundary too: only the keys the control does not own (for example a function key, or Tab when the control does not take it) reach the capture rule, and they are reported with `defaultPrevented` as the policy decided for that transition.
 
@@ -260,7 +265,7 @@ The keyboard type (`.keyboard_type(..)`, TSX `keyboardType`) picks the layout:
 
 On iOS, `.keyboard_appearance(KeyboardAppearance::Dark)` (TSX `ios={{ keyboardAppearance: "dark" }}`; or light, default) gives the keyboard a light or dark look regardless of the system's appearance, for a dark app in light mode. Android's keyboards always follow the system's theme.
 
-Autofill (`.auto_fill(AutoFill::Email)`, TSX `autoComplete`) tells the system what the field holds, so it can offer saved names, addresses, passwords and one-time codes from messages. Rust's `AutoFill` has a variant per kind (`Name`, `GivenName`, `FamilyName`, `Email`, `Tel`, `Username`, `Password`, `NewPassword`, `OneTimeCode`, `StreetAddress`, `PostalCode`, `Country`, `CreditCardNumber`, `Url`, `Birthdate`, ..., and `Off`). TSX takes these values: `"name"`, `"given-name"`, `"family-name"`, `"email"`, `"tel"`, `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"street-address"`, `"postal-code"`, `"country"`, `"cc-number"`, `"cc-exp"`, `"cc-csc"`, `"url"`, `"birthdate-full"` and others, or `"off"`; iOS's own names (`"emailAddress"`, `"oneTimeCode"`, ...) are accepted too, in `autoComplete` or `ios={{ textContentType }}`.
+Autofill (`.auto_fill(AutoFill::Email)`, TSX `autoComplete`) tells the system what the field holds, so it can offer saved names, addresses, passwords and one-time codes from messages. Rust's `AutoFill` has a variant per kind (`Name`, `GivenName`, `FamilyName`, `Email`, `Tel`, `Username`, `Password`, `NewPassword`, `OneTimeCode`, `StreetAddress`, `PostalCode`, `Country`, `CreditCardNumber`, `Url`, `Birthdate`, ..., and `Off`). TSX takes these values: `"name"`, `"given-name"`, `"family-name"`, `"email"`, `"tel"`, `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"street-address"`, `"postal-code"`, `"country"`, `"cc-number"`, `"cc-exp"`, `"cc-csc"`, `"url"`, `"birthdate-full"` and others, or `"off"`. iOS's own names (`"emailAddress"`, `"oneTimeCode"`, ...) are accepted too, in `autoComplete` or `ios={{ textContentType }}`.
 
 A password field that is not masked, as after a "show password" toggle, is a password shown as plain text: with `autoComplete` `"current-password"` or `"new-password"` (`AutoFill::Password`, `AutoFill::NewPassword`) and `masked` off, it gets Android's visible password keyboard and iOS's ASCII keyboard, and no platform capitalizes, suggests or corrects it, whatever `autoCapitalize` and `autoCorrect` say. Toggling `masked` is all a reveal button needs.
 
@@ -297,7 +302,7 @@ The return key type (`.return_key_type(ReturnKeyType::Next)`, TSX `returnKeyType
 | `SubmitBehavior::Submit` | `"submit"` | fires the submit event; the input keeps focus | |
 | `SubmitBehavior::Newline` | `"newline"` | inserts a line break (multiline inputs only) | multiline inputs |
 
-A multiline input with `"submit"` or `"blurAndSubmit"` sends on return, as chat composers do, and still wraps its lines; on a hardware keyboard (desktops, a Mac, a tablet's keyboard) Shift+Return or Option / Alt+Return inserts a line break. A return that commits an input method's composition (Chinese or Japanese input, say) only commits it and never submits.
+A multiline input with `"submit"` or `"blurAndSubmit"` sends on return, as chat composers do, and still wraps its lines. On a hardware keyboard (desktops, a Mac, a tablet's keyboard) Shift+Return or Option / Alt+Return inserts a line break. A return that commits an input method's composition (Chinese or Japanese input, say) only commits it and never submits.
 
 To move to the next field, keep refs to the inputs (`element_ref()` and `.element_ref(&r)` in Rust, `ref` in TSX) and call `focus()`:
 
@@ -383,7 +388,7 @@ An input's ref has:
 | `set_selection(start, end)` | `setSelection(start, end?)` | Selects `start..end` (UTF-16 units); a caret when they are equal (TSX: without `end`). |
 | `insert_text(text)` | `insertText(text)` | Inserts `text` in place of the selection as the user's edit: one step of the input's undo history, reported by `onChange`; iOS, macOS, Linux, the web and headless tests ([pasting](#pasting-images-and-files)). |
 
-On macOS, the web and Android, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)); on Android the view is focusable in touch mode for that focus session, and a default button is touch-neutral again once it blurs.
+On macOS, the web and Android, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)). On Android the view is focusable in touch mode for that focus session, and a default button is touch-neutral again once it blurs.
 
 `dismiss_keyboard()` in Rust and `Keyboard.dismiss()` from `nsh` in TSX unfocus whichever input has focus:
 
@@ -399,7 +404,7 @@ view().on_press(|| dismiss_keyboard())
 
 ## Selection
 
-The selection event (`.on_selection_change(..)`, TSX `onSelectionChange`) reports the caret and selection; the ref's `set_selection` or the selected range (`.selected_range(..)`, TSX `selectedRange`) set them. Positions are UTF-16 code units, as JavaScript string indices are, so in TSX `text.slice(start, end)` is the selected text; in Rust, slice the text's UTF-16 units.
+The selection event (`.on_selection_change(..)`, TSX `onSelectionChange`) reports the caret and selection. The ref's `set_selection` or the selected range (`.selected_range(..)`, TSX `selectedRange`) set them. Positions are UTF-16 code units, as JavaScript string indices are, so in TSX `text.slice(start, end)` is the selected text. In Rust, slice the text's UTF-16 units.
 
 ```tsx tabs
 const text = signal("Select part of this text");
@@ -546,7 +551,7 @@ ref's `insertText` (Rust `insert_text`) puts the text it allows in place of the 
 `maxLength` and the line rules apply, `onChange` reports it, and on Linux, Windows and the web it is one step of the input's
 undo history, so Ctrl+Z takes it out again. A new `value` replaces the text instead.
 
-`insertText` inserts text on iOS, macOS, Linux, Windows, the web and in headless tests (`nsh test`); on Android
+`insertText` inserts text on iOS, macOS, Linux, Windows, the web and in headless tests (`nsh test`). On Android
 and GPUI it does nothing yet and logs a warning, so use it on supported targets. Use it with
 `pasteBehavior="report"`: with `"insert"`, the default, the input has inserted the paste already and `insertText`
 inserts it a second time. While an input method is composing, `insertText` inserts nothing.
@@ -611,10 +616,10 @@ input()
     .p_2()
 ```
 
-Upload a pasted file as any `File`, with `fetch` and `FormData` (`form.append("image", file)`); its bytes stay
+Upload a pasted file as any `File`, with `fetch` and `FormData` (`form.append("image", file)`). Its bytes stay
 native until they are sent. On Android, keyboards that insert images (GIFs, stickers) report them the same way. On
 Linux the clipboard is read asynchronously, so with `"insert"` the event may come after the `onChange` of the text it
-inserts; with `"report"` it always comes first.
+inserts. With `"report"` it always comes first.
 Masked inputs on macOS keep AppKit's own paste and report nothing.
 
 A file copied in the macOS Finder leaves its name on the clipboard as text beside its URL, so with `"insert"` the
@@ -675,7 +680,7 @@ The reported height is the text's (at the input's width), so add the vertical pa
 
 ### Inside scroll views: automatic
 
-When the keyboard appears over a focused input that is inside a scroll view or a list, NSH gives the scroll view a bottom inset as tall as the keyboard and scrolls the input into view. This is native and needs no code. A long form is simply a scroll view of inputs:
+When the keyboard appears over a focused input that is inside a scroll view or a list, NSH gives the scroll view a bottom inset as tall as the keyboard and scrolls the input into view. This is native and needs no code. A long form is a scroll view of inputs:
 
 ```tsx tabs
 <Scroll style={{ flex: 1 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
@@ -693,7 +698,7 @@ scroll()
     .child(view().p(px(16.0)).gap(px(12.0)) /* inputs */)
 ```
 
-The dismiss mode (`.keyboard_dismiss_mode(..)`, TSX `keyboardDismissMode`: none, on drag, interactive) lets dragging the form hide the keyboard; handled taps (`.keyboard_taps(KeyboardTaps::Handled)`, TSX `keyboardShouldPersistTaps="handled"`) let a tap on a button go through while the keyboard is up instead of only dismissing it. See [Scrolling](./scrolling.md#scroll-views-and-the-keyboard).
+The dismiss mode (`.keyboard_dismiss_mode(..)`, TSX `keyboardDismissMode`: none, on drag, interactive) lets dragging the form hide the keyboard. Handled taps (`.keyboard_taps(KeyboardTaps::Handled)`, TSX `keyboardShouldPersistTaps="handled"`) let a tap on a button go through while the keyboard is up instead of only dismissing it. See [Scrolling](./scrolling.md#scroll-views-and-the-keyboard).
 
 ### Content outside scroll views
 
@@ -781,7 +786,7 @@ pub fn chat_screen() -> impl IntoElement {
 }
 ```
 
-Padding (`.pb_keyboard()`) shrinks the content above while the background reaches the bottom of the screen; a bottom margin (`marginBottom: "env(keyboard-inset-height)"`, `.mb_keyboard()`) ends the whole view at the top of the keyboard. `calc(env(keyboard-inset-height) + <length>)` (Rust `.pb_keyboard_plus(..)`, `.mb_keyboard_plus(..)`) adds a length, such as minus the height of a tab bar below the view.
+Padding (`.pb_keyboard()`) shrinks the content above while the background reaches the bottom of the screen. A bottom margin (`marginBottom: "env(keyboard-inset-height)"`, `.mb_keyboard()`) ends the whole view at the top of the keyboard. `calc(env(keyboard-inset-height) + <length>)` (Rust `.pb_keyboard_plus(..)`, `.mb_keyboard_plus(..)`) adds a length, such as minus the height of a tab bar below the view.
 
 The full height suits a view that reaches the bottom of the surface, as a screen's content does. On an Android host whose window resizes for the keyboard, the window itself shrinks and the variable is 0. See [Keyboard](../elements/keyboard.md).
 
@@ -793,7 +798,7 @@ placed again as the keyboard moves.
 
 ### The keyboard accessor
 
-`keyboard_height()` and `keyboard_duration()` in Rust, and `keyboardFrame()` from `nsh` in TSX (a `{ height, duration }`), are reactive: how far the keyboard reaches into the surface (0 when hidden; the bottom safe area under it included) and its animation's duration in milliseconds. Read them for anything custom: hide a floating button while typing, or size a panel. What changes with them in the update the keyboard's move starts moves with the keyboard, on its curve and timed from when it started to move (`LayoutCurve::Keyboard`), as `env(keyboard-inset-height)` does; an animation the app configures for that update (`LayoutAnimation.configureNext`) wins.
+`keyboard_height()` and `keyboard_duration()` in Rust, and `keyboardFrame()` from `nsh` in TSX (a `{ height, duration }`), are reactive: how far the keyboard reaches into the surface (0 when hidden; the bottom safe area under it included) and its animation's duration in milliseconds. Read them for anything custom: hide a floating button while typing, or size a panel. What changes with them in the update the keyboard's move starts moves with the keyboard, on its curve and timed from when it started to move (`LayoutCurve::Keyboard`), as `env(keyboard-inset-height)` does. An animation the app configures for that update (`LayoutAnimation.configureNext`) wins.
 
 ```tsx tabs
 import { View, keyboardFrame } from "nsh";
@@ -812,7 +817,7 @@ view().child(when(
 
 ## A bar over the keyboard (iOS): InputAccessoryView
 
-`input_accessory_view(id)` in Rust and `InputAccessoryView` from `nsh/mobile` in TSX show a bar attached to the top of the keyboard while an input that names it has focus: iOS's `inputAccessoryView`. It moves with the keyboard natively, including during interactive dismissal. It takes no room where it is placed in the tree; inputs refer to it by its id (`.input_accessory(id)`, TSX `ios={{ inputAccessoryViewID }}` and `nativeID`):
+`input_accessory_view(id)` in Rust and `InputAccessoryView` from `nsh/mobile` in TSX show a bar attached to the top of the keyboard while an input that names it has focus: iOS's `inputAccessoryView`. It moves with the keyboard natively, including during interactive dismissal. It takes no room where it is placed in the tree. Inputs refer to it by its id (`.input_accessory(id)`, TSX `ios={{ inputAccessoryViewID }}` and `nativeID`):
 
 ```tsx tabs
 import { type InputRef, signal, Text, View } from "nsh";

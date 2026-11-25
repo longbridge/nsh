@@ -7,7 +7,7 @@ group: start
 
 # 安装
 
-NSH 的所有操作都通过一个命令 `nsh` 完成：构建用 TSX 或 Rust 编写的应用、在每个平台上运行它们、以热更新的方式把 TSX 提供给开发宿主，以及打包可安装的应用。你可以使用预构建发行包，也可以从仓库源码构建。
+NSH 的所有操作都通过 `nsh` 这一个命令完成。它负责构建 TSX 或 Rust 应用、在各平台上运行、把 TSX 以热更新方式提供给开发宿主，以及打包可安装的应用。你可以安装预构建版本，也可以从仓库源码构建。
 
 TSX 应用只需要 `nsh`。包含 Rust 的应用（`ext/` 里自己的 crate、Rust nshm，或用 Rust 编写的应用）还需要 Rust 工具链（[见下文](#用-rust-编写的应用)）。除此之外，每个平台还需要自己的工具：
 
@@ -32,7 +32,7 @@ macOS 上的默认目标为 AppKit。Mac Catalyst（`--target catalyst`）是用
 curl -fsSL https://nsh.dev/install.sh | sh
 ```
 
-它把发行包安装到 `~/.nsh`，并把 `~/.local/bin/nsh` 链接过去；再次运行即可更新。`NSH_VERSION=v0.1.0` 指定版本，`NSH_INSTALL_DIR` 指定其他目录。
+它把发行包安装到 `~/.nsh`，并把 `~/.local/bin/nsh` 链接过去。再次运行即可更新。`NSH_VERSION=v0.1.0` 指定版本，`NSH_INSTALL_DIR` 指定其他目录。
 
 **Windows**，在 PowerShell 中：
 
@@ -60,16 +60,16 @@ scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.jso
 mise use -g github:longbridge/nsh
 ```
 
-压缩包（`nsh-macos-arm64.tar.gz`、`nsh-macos-x86_64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-linux-arm64.tar.gz`、`nsh-windows-x86_64.zip`、`nsh-windows-arm64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/nsh/releases/latest/download/<压缩包>` 总是下载最新版本。每个压缩包包含 CLI 和所在平台自己的运行时；其他平台的运行时是[组件](#组件)，第一次用到时再安装。嵌入用的 SDK 单独发布，供嵌入 NSH 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
+压缩包（`nsh-macos-arm64.tar.gz`、`nsh-macos-x86_64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-linux-arm64.tar.gz`、`nsh-windows-x86_64.zip`、`nsh-windows-arm64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/nsh/releases/latest/download/<压缩包>` 总是下载最新版本。每个压缩包包含 CLI 和所在平台自己的运行时。其他平台的运行时是[组件](#组件)，第一次用到时再安装。嵌入用的 SDK 单独发布，供嵌入 NSH 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
 
 > [!NOTE]
-> 二进制文件暂未签名。macOS 会隔离浏览器下载的文件；安装脚本、Homebrew 和 mise 用 `curl` 下载，不受影响，否则请运行 `xattr -dr com.apple.quarantine <目录>`。Linux 运行时需要 glibc 2.39 和 GTK 4.14 或更新版本（Ubuntu 24.04 及以后）。Homebrew 和 Scoop 安装 Apple silicon、x86_64 Linux 和 x86_64 Windows 的构建，其他平台请用安装脚本。
+> 二进制文件暂未签名。macOS 会隔离浏览器下载的文件。安装脚本、Homebrew 和 mise 用 `curl` 下载，不受影响，否则请运行 `xattr -dr com.apple.quarantine <目录>`。Linux 运行时需要 glibc 2.39 和 GTK 4.14 或更新版本（Ubuntu 24.04 及以后）。Homebrew 和 Scoop 安装 Apple silicon、x86_64 Linux 和 x86_64 Windows 的构建，其他平台请用安装脚本。
 
 ## 组件
 
 开发所在平台之外的运行时是发布版的组件，就像 `rustup component add` 安装工具链的组成部分。第一个用到它的命令（例如 `nsh run --target android` 或 `nsh package --target web`）会从当前 `nsh` 所属的发布版下载它，校验 SHA-256，并安装到 CLI 旁边。也可以用 `nsh component` 提前管理：
 
-`nsh component list` 列出本机可用的组件以及是否已安装；`nsh component add` 提前安装，例如离线之前；`nsh component remove` 删除以释放空间：
+`nsh component list` 列出本机可用的组件以及是否已安装。`nsh component add` 提前安装，例如离线之前。`nsh component remove` 删除以释放空间：
 
 ```sh
 nsh component list
@@ -108,7 +108,7 @@ Web：
 rustup target add wasm32-unknown-unknown
 ```
 
-推荐使用 [huacnlee/cargo](https://github.com/huacnlee/cargo) 构建：这是 [huacnlee](https://github.com/huacnlee) 基于官方 Cargo 优化的分支，专门避免 Rust 编译产物把磁盘占满。所有项目和 Git worktree 共用一个构建目录，它会自己控制在大小限制之内；实测在 50 个 worktree 的场景下比官方 Cargo 少占约 90% 的磁盘空间，512 GB 的硬盘基本就够用。它直接替换 `~/.cargo/bin/cargo`，不需要任何配置：
+推荐使用 [huacnlee/cargo](https://github.com/huacnlee/cargo) 构建：这是 [huacnlee](https://github.com/huacnlee) 基于官方 Cargo 优化的分支，专门避免 Rust 编译产物把磁盘占满。所有项目和 Git worktree 共用一个构建目录，它会自己控制在大小限制之内。实测在 50 个 worktree 的场景下比官方 Cargo 少占约 90% 的磁盘空间，512 GB 的硬盘基本就够用。它直接替换 `~/.cargo/bin/cargo`，不需要任何配置：
 
 macOS 和 Linux：
 
@@ -151,7 +151,7 @@ export PATH="$PWD/dist/nsh/bin:$PATH"
 nsh --version
 ```
 
-发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）；在 Linux 上，它改为包含为该机器构建的 Linux 运行时；在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。每个发行包还包含为该机器构建的 [GPUI](./gpui.md) 开发宿主和终端开发宿主。它们都包含
+发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）。在 Linux 上，它改为包含为该机器构建的 Linux 运行时。在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。每个发行包还包含为该机器构建的 [GPUI](./gpui.md) 开发宿主和终端开发宿主。它们都包含
 Android 运行时（在 Windows 上，只有找到 Android SDK 时才包含）。
 
 ## 安装 nightly 版本
@@ -172,7 +172,7 @@ $env:NSH_VERSION = 'nightly'; irm https://nsh.dev/install.ps1 | iex
 
 之后 `nsh -V` 会显示提交和渠道，例如 `nsh 0.4.0 (abcdef0 nightly)`。
 
-用 Rust 编写的应用会用 crates.io 上与 CLI 同版本号的 NSH crate 构建 runner，也就是上一个正式版的 crate；这类应用请使用正式版或源码版。
+用 Rust 编写的应用会用 crates.io 上与 CLI 同版本号的 NSH crate 构建 runner，也就是上一个正式版的 crate。这类应用请使用正式版或源码版。
 
 ## 更新
 
@@ -192,7 +192,7 @@ nsh update
 curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
 ```
 
-它把源码保留在 `~/.nsh/source`，构建 CLI 并链接到 `~/.local/bin`；再次运行即可更新。如果要开发 NSH 本身，克隆仓库并在其中构建 CLI；运行时缺少的桌面和 Web 运行时会自动构建：
+它把源码保留在 `~/.nsh/source`，构建 CLI 并链接到 `~/.local/bin`。再次运行即可更新。如果要开发 NSH 本身，克隆仓库并在其中构建 CLI。运行时缺少的桌面和 Web 运行时会自动构建：
 
 构建出的 CLI 位于 `./target/debug/nsh`：
 
@@ -207,14 +207,14 @@ iOS、Android 运行时和发布版运行器的构建命令见仓库的 [AGENTS.
 
 ### iOS 与 Mac Catalyst
 
-- **Xcode**（及其命令行工具）。`nsh run` 用 `xcrun simctl` 启动模拟器并安装开发宿主；`nsh package` 用 `actool` 处理应用图标，用 `codesign` 签名。
+- **Xcode**（及其命令行工具）。`nsh run` 用 `xcrun simctl` 启动模拟器并安装开发宿主。`nsh package` 用 `actool` 处理应用图标，用 `codesign` 签名。
 - 一个 iOS 模拟器运行时。如果还没有安装，可以用 `xcodebuild -downloadPlatform iOS` 安装。
 - 应用支持 iOS 15.0 及以上版本。
 
 ### Android
 
 - **Android SDK**，通过 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或 Android Studio 的默认位置（`~/Library/Android/sdk`，Windows 上为 `%LOCALAPPDATA%\Android\Sdk`）查找，需包含：
-  - `platforms;android-35` 和较新的 `build-tools`（NSH 使用其中的 `aapt2`、`zipalign` 和 `apksigner`，不使用 Gradle）；
+  - `platforms;android-35` 和较新的 `build-tools`（NSH 使用其中的 `aapt2`、`zipalign` 和 `apksigner`，不使用 Gradle）。
   - `platform-tools`（`adb`）。
 - **JDK**（首次打包时 `keytool` 会在 `~/.android/debug.keystore` 创建调试密钥库，`apksigner` 也需要 Java）。
 - 一个正在运行的模拟器，或通过 `adb` 连接的设备。应用要求 Android 8（API 26）及以上。
@@ -232,7 +232,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 ### Linux
 
-- **GTK 4.14** 及以上；构建运行时还需要它们的开发包和 clang：`libgtk-4-dev clang`（Debian、Ubuntu 24.04 及以上）、`gtk4 clang`（Arch）、`gtk4-devel clang`（Fedora）。
+- **GTK 4.14** 及以上。构建运行时还需要它们的开发包和 clang：`libgtk-4-dev clang`（Debian、Ubuntu 24.04 及以上）、`gtk4 clang`（Arch）、`gtk4-devel clang`（Fedora）。
 - Web 视图及下载决策需要 **WebKitGTK 6.0**（2.42 及以上）：构建运行时需要 `libwebkitgtk-6.0-dev`（Debian、Ubuntu）、`webkitgtk-6.0`（Arch）、`webkitgtk6.0-devel`（Fedora），应用运行的机器上也需要它。没有它时，`cargo xtask dist` 构建的运行时中 Web 视图为占位视图。
 - **GStreamer** 1.14 及以上，用于视频和声音：构建运行时需要 `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev`（Debian、Ubuntu）、`gstreamer gst-plugins-base`（Arch）、`gstreamer1-devel gstreamer1-plugins-base-devel`（Fedora），以及应用要播放的视频和音频格式对应的插件。开发包供 `Sound` 使用（feature `sound`）：不启用它的 Rust 应用只需 GTK 即可构建。
 
@@ -263,7 +263,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | 可以 | 可以 | 可以 |
 | `nsh run --target catalyst`（Mac Catalyst） | 可以 | 不可以 | 不可以 |
 
-在 Linux 上，请从源码构建 CLI 和 Android 运行时（`cargo build -p nsh-cli` 与 `cargo xtask android --dev`）；会自动使用 NDK 的 Linux 工具链。在 Windows 上同样会使用 NDK 的 Windows 工具链，`cargo xtask dist` 找到 Android SDK 时会包含 Android 运行时。
+在 Linux 上，请从源码构建 CLI 和 Android 运行时（`cargo build -p nsh-cli` 与 `cargo xtask android --dev`）。会自动使用 NDK 的 Linux 工具链。在 Windows 上同样会使用 NDK 的 Windows 工具链，`cargo xtask dist` 找到 Android SDK 时会包含 Android 运行时。
 
 ## 编辑器配置
 

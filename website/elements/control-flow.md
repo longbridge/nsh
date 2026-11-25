@@ -11,7 +11,7 @@ demo: el-control-flow
 `If` and `Each` decide which elements exist: conditional and repeated content. They make no native view of their own.
 The native renderer updates only what changed: `If` swaps a branch when its condition flips, `Each` adds, moves and
 removes rows by key instead of rebuilding the list. Rust has `when(..)`, `each(..)` and `dynamic(..)` in
-`nsh_core::prelude`; TSX has `<If>` and `<Each>`, globals that need no import.
+`nsh_core::prelude`. TSX has `<If>` and `<Each>`, globals that need no import.
 
 ```tsx tabs
 <View>
@@ -95,7 +95,7 @@ Renders a row for each item of a list.
 
 The row function gets **accessors**, not values: call `item()` and `index()` in TSX, `item.get()` and `index.get()` in
 Rust (both are `ReadSignal`s). When the items change, rows whose key is still there are kept (and moved if their position
-changed); their item and index update, and only the expressions reading them run again. New keys get new rows; rows
+changed). Their item and index update, and only the expressions reading them run again. New keys get new rows. Rows
 whose key is gone are removed.
 
 ```tsx tabs

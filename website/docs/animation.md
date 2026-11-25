@@ -8,7 +8,7 @@ demo: guide-animation
 
 # Animation
 
-Every animation in NSH runs on the UI thread. You describe it once, from TSX or Rust, and the platform plays it frame by frame (Core Animation and a display link on iOS, the UI-thread animator on Android) without calling back into your code. A busy engine thread cannot make an animation stutter, and an animation costs none of your code while it runs.
+Every animation in NSH runs on the UI thread. You describe an animation once, from TSX or Rust. The platform then plays it frame by frame without calling back into your code. On iOS it uses Core Animation and a display link, on Android the UI-thread animator. A busy engine thread cannot make an animation stutter, and your code does no work while it runs.
 
 There are six tools, from the readiest to the most flexible:
 
@@ -23,7 +23,7 @@ There are six tools, from the readiest to the most flexible:
 
 ## Motion
 
-A motion moves a view's opacity and transform through keyframes, natively. Create one in the component that owns the view (`motion()` in Rust, `createMotion()` from `nsh` in TSX), bind it to the view, and play a ready-made motion or one of your own on it. `enter` starts the view where a motion begins and plays it at once, so the view comes in from its first frame.
+A motion moves a view's opacity and transform through keyframes, natively. Create a motion in the component that owns the view (`motion()` in Rust, `createMotion()` from `nsh` in TSX), bind it to the view, and play a ready-made motion or one of your own. `enter` puts the view at the motion's first frame and plays the motion at once, so the view comes in from that frame.
 
 ```tsx tabs
 import { mount, View } from "nsh";
@@ -66,9 +66,9 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-A motion has an animated value per channel: `opacity` (0..1), `translateX` and `translateY` (points), `rotate`, `rotateX` and `rotateY` (degrees), `scale`, `scaleX` and `scaleY`. They start at rest (opacity and scales 1, the rest 0) and apply in that order: translations, then rotations, then scales, about the view's transform origin. A motion has no look of its own: it moves what you styled.
+A motion has an animated value per channel: `opacity` (0..1), `translateX` and `translateY` (points), `rotate`, `rotateX` and `rotateY` (degrees), `scale`, `scaleX` and `scaleY`. Each channel starts at rest: opacity and scales at 1, the others at 0. They apply in this order, about the view's transform origin: translations, then rotations, then scales. A motion has no look of its own. It moves what you styled.
 
-A motion moves opacity and transform only. Spreading `m.style` sets the view's `opacity` and `transform`; to keep an opacity of your own, bind only the steps (`transform: m.transform`). Colors move with an animated value and [`interpolate`](#interpolation).
+A motion moves opacity and transform only. Spreading `m.style` sets the view's `opacity` and `transform`. To keep an opacity of your own, bind only the steps (`transform: m.transform`). Colors move with an animated value and [`interpolate`](#interpolation).
 
 | TSX | Rust | Description |
 |---|---|---|
@@ -85,7 +85,7 @@ A motion moves opacity and transform only. Spreading `m.style` sets the view's `
 
 ### Presets
 
-The ready-made motions are data: `motions` from `nsh` (`motions.fadeInUp` is what `play("fadeInUp")` plays) and `MotionPreset` in Rust (`MotionPreset::FadeInUp.spec()`). Distances are in points, sized for controls and cards; for larger views, scale a motion's values or write your own keyframes. `swing` and the other rotations turn about the view's transform origin: give a swinging sign `transformOrigin: "top"` (`.origin_top()`).
+The ready-made motions are data: `motions` from `nsh` (`motions.fadeInUp` is what `play("fadeInUp")` plays) and `MotionPreset` in Rust (`MotionPreset::FadeInUp.spec()`). Distances are in points, sized for controls and cards. For larger views, scale a motion's values or write your own keyframes. `swing` and the other rotations turn about the view's transform origin. Give a swinging sign `transformOrigin: "top"` (`.origin_top()`).
 
 **Enter**: they start hidden or away and end at rest.
 
@@ -149,7 +149,7 @@ The ready-made motions are data: `motions` from `nsh` (`motions.fadeInUp` is wha
 
 ### Motions of your own
 
-A motion of your own is keyframes per channel and one timing (the options of [keyframes](#keyframes)). In TSX, write each channel's keyframes (`{ opacity: [0, 1] }`), or a list of frames as the Web Animations API writes them (`[{ opacity: 0, translateY: 24 }, { opacity: 1, translateY: 0 }]`), each frame with its `offset` and `easing`. In a list of frames, a frame without an offset sits where its position in the list puts it, and a channel follows the frames that name it. Angles can be strings (`"45deg"`, `"0.5turn"`). In Rust, build a `MotionSpec`.
+A custom motion has keyframes per channel and one timing (the options of [keyframes](#keyframes)). In TSX, write each channel's keyframes (`{ opacity: [0, 1] }`), or a list of frames as the Web Animations API writes them (`[{ opacity: 0, translateY: 24 }, { opacity: 1, translateY: 0 }]`), each frame with its `offset` and `easing`. In a list of frames, a frame without an offset is placed by its position in the list. Each channel follows only the frames that name it. Angles can be strings (`"45deg"`, `"0.5turn"`). In Rust, build a `MotionSpec`.
 
 ```tsx tabs
 // Channels' keyframes.
@@ -186,7 +186,7 @@ card.play(flip);
 
 ### Spring motions
 
-Give a motion a `spring` and each channel springs to where its keyframes end instead of running through them. It starts from where the channel is and keeps its velocity, so a motion that interrupts another (a sheet sent away while it still rises, a card pressed again mid-bounce) turns smoothly instead of starting again from its first frame. The first keyframe is still where `enter` starts a view; `delay` waits before the spring starts; the keyframes between, `duration`, `easing` and `iterations` are not used, since the spring decides how long the motion takes. The stiffness, damping and mass are [`spring`](#animatedvalue-methods)'s (170, 26 and 1 by default). Presets take a spring as an option, as they take a timing. When the user asks for less motion, a spring motion lands where it ends at once, as any motion does.
+Give a motion a `spring`, and each channel springs to its last keyframe instead of running through the keyframes. The spring starts from the channel's current value and keeps its velocity. A motion that interrupts another therefore turns smoothly instead of restarting from its first frame. Examples are a sheet sent away while it still rises, or a card pressed again mid-bounce. `enter` still starts the view at the first keyframe, and `delay` waits before the spring starts. The spring decides how long the motion takes, so the keyframes in between, `duration`, `easing` and `iterations` are not used. The stiffness, damping and mass are [`spring`](#animatedvalue-methods)'s (170, 26 and 1 by default). Presets take a spring as an option, as they take a timing. When the user asks for less motion, a spring motion lands where it ends at once, as any motion does.
 
 ```tsx tabs
 // About 380 ms to settle, overshooting by 3 %.
@@ -234,7 +234,7 @@ each(items, |item: &Item| item.id, |item, index| {
 })
 ```
 
-Motions also compose: `m.animation(..)` is a motion as a [composite animation](#composite-animations), not started, so `Animated.stagger` runs a group of them natively, counted from the first item, the last, the center or any index. Give them a hidden `initial` (or start them where the motion starts) so nothing shows before its turn.
+Motions also compose: `m.animation(..)` returns the motion as a [composite animation](#composite-animations) that has not started yet. `Animated.stagger` runs a group of them natively, counted from the first item, the last, the center or any index. Give them a hidden `initial` (or start them where the motion starts) so nothing shows before its turn.
 
 ```tsx tabs
 const cards = [0, 1, 2, 3, 4].map(() => createMotion({ initial: { opacity: 0 } }));
@@ -397,7 +397,7 @@ Tailwind: `animate-spin`, `animate-ping`, `animate-pulse`, `animate-bounce`, `an
 
 ## Animated values
 
-An animated value is a number that lives on the UI thread. Create one (`animated_value(..)` in Rust, `createAnimatedValue` from `nsh` in TSX), bind it to styles, and animate it; the bound views follow it every frame without an update.
+An animated value is a number that lives on the UI thread. Create one (`animated_value(..)` in Rust, `createAnimatedValue` from `nsh` in TSX), bind it to styles, and animate it. The bound views follow it every frame without a re-render.
 
 ```tsx tabs
 import { mount, Text, View } from "nsh";
@@ -481,7 +481,7 @@ text(move || price.get().to_string()).bind_color(&color)
 
 Animated values also drive [canvas drawings](./canvas.md#driving-drawings-with-animated-values), receive scroll offsets ([`scrollValue`](./scrolling.md#scroll-linked-effects-scrollvalue)) and gestures ([`pan`, `pinch`, `rotation`](./touch-and-gestures.md#native-gestures-pan-pinch-and-rotation)).
 
-The value is kept alive by the views bound to it and by the component that made it, so a binding stays connected however your variables come and go. Create animated values in the component that owns them (not at module level when every instance needs its own).
+The views bound to a value and the component that created it keep the value alive. A binding stays connected even when your variables go out of scope. Create animated values in the component that owns them (not at module level when every instance needs its own).
 
 ### AnimatedValue methods
 
@@ -497,7 +497,7 @@ The value is kept alive by the views bound to it and by the component that made 
 | `spring(to, { stiffness?, damping?, mass?, velocity?, frameRate? })` | `spring(to, Spring { .. })` | Springs to `to` (defaults: stiffness 170, damping 26, mass 1). Stiffness and mass above 0 and a finite damping move the value; otherwise it jumps to `to`. Negative damping counts as 0: the value keeps oscillating. |
 | `decay({ velocity?, deceleration?, clamp?, bounce?, frameRate? })` | `decay(velocity, deceleration)`, `decay_within(velocity, deceleration, (min, max), bounce)` | Coasts from `velocity` (units per second) and slows down (deceleration 0.998 per ms by default). With a clamp of `[min, max]` it stops at a bound, or bounces back from it keeping `bounce` (0..1) of its speed. |
 
-Each animation gives an answer you can await, whether it finished: `true` when it played to the end, `false` when something stopped it (`stop()`, `set()`, or a new animation on the same value). It is a `Promise<{ finished: boolean }>` in TSX and an `AnimationEnd` in Rust, which a task awaits for the `bool`. Starting a new animation on a moving value interrupts the old one smoothly: a spring or decay without a velocity continues with the value's current velocity.
+Each animation returns a result you can await that says whether it finished: `true` when it played to the end, `false` when something stopped it (`stop()`, `set()`, or a new animation on the same value). The result is a `Promise<{ finished: boolean }>` in TSX. In Rust it is an `AnimationEnd`, which a task awaits to get the `bool`. Starting a new animation on a moving value interrupts the old one smoothly. A spring or decay without a given velocity continues with the value's current velocity.
 
 ```tsx tabs
 // Spring settings: lower damping overshoots more, higher stiffness is faster.
@@ -533,7 +533,7 @@ let at = x.value().await;
 
 ### Keyframes
 
-`keyframes` plays a value through keyframes as CSS keyframes play: `value.keyframes(frames, options)` in TSX, `value.keyframes(frames, KeyframeTiming)` in Rust (`Animated.keyframes(value, { keyframes, ... })` and `Animation::keyframes(..)` as a step of a [composite](#composite-animations)). A keyframe is a number (or an angle string such as `"90deg"`), spread evenly with the others, or `{ offset, value, easing }` (`Keyframe::new(value)`, `Keyframe::at(offset, value)`, `.ease(easing)` in Rust).
+`keyframes` plays a value through keyframes as CSS keyframes play: `value.keyframes(frames, options)` in TSX, `value.keyframes(frames, KeyframeTiming)` in Rust (`Animated.keyframes(value, { keyframes, ... })` and `Animation::keyframes(..)` as a step of a [composite](#composite-animations)). A keyframe is either a number (or an angle string such as `"90deg"`), spaced evenly with the others, or `{ offset, value, easing }` (`Keyframe::new(value)`, `Keyframe::at(offset, value)`, `.ease(easing)` in Rust).
 
 ```tsx tabs
 const y = createAnimatedValue(0);
@@ -578,7 +578,7 @@ They play as in CSS and the Web Animations API:
 
 ### Interpolation
 
-`interpolate` maps a value through piecewise linear segments to numbers, colors or angles, and returns a new node you can bind. One value can drive many properties. In Rust, `interpolate(&input, &output)` maps to numbers, `interpolate_colors(&input, &colors)` to colors, and `interpolate_with(&input, output, Interpolation { .. })` takes the extrapolation and easing; in TSX, `value.interpolate({ inputRange, outputRange })` takes them all.
+`interpolate` maps a value through piecewise linear segments to numbers, colors or angles, and returns a new node you can bind. One value can drive many properties. In Rust, `interpolate(&input, &output)` maps to numbers, `interpolate_colors(&input, &colors)` to colors, and `interpolate_with(&input, output, Interpolation { .. })` takes the extrapolation and easing. In TSX, `value.interpolate({ inputRange, outputRange })` takes them all.
 
 ```tsx tabs
 const t = createAnimatedValue(0);
@@ -623,7 +623,7 @@ view()
 
 ### Arithmetic and diffClamp
 
-Nodes combine with arithmetic, also natively: `a.add(b)`, `a.sub(b)`, `a.mul(b)`, `a.div(b)`, `a.mod(b)` (`a.modulo(b)` in Rust; never negative for a positive `b`, e.g. angles in 0..360), where `b` is a node or a number. In TSX, `Animated.add`, `subtract`, `multiply`, `divide` and `modulo` are the same as functions.
+Nodes combine with arithmetic, also natively: `a.add(b)`, `a.sub(b)`, `a.mul(b)`, `a.div(b)`, `a.mod(b)` (`a.modulo(b)` in Rust), where `b` is a node or a number. For a positive `b`, `mod` is never negative, which suits angles in 0..360. In TSX, `Animated.add`, `subtract`, `multiply`, `divide` and `modulo` are the same as functions.
 
 `diffClamp(min, max)` (`diff_clamp`) follows the node's *changes* while staying within `min..max`. Applied to a scroll offset, it makes a header that hides as the content scrolls up and comes back as soon as it scrolls down:
 
@@ -643,7 +643,7 @@ scroll().flex_1().scroll_value(&offset)
 view().absolute().top_0().left_0().right_0().h(px(56.0)).bind_translate_y(&header.mul(-1.0))
 ```
 
-With `{ snap: true }` (`diff_clamp_with(min, max, DiffClamp::snapping())`), a header left partly shown when the scrolling stops finishes the move: it settles fully shown or fully hidden, whichever is nearer, in 200 ms on the UI thread. It hides only once the page has scrolled at least its height, so a page scrolled less than that shows the whole header. Scrolling again during the move takes over from where the header is.
+With `{ snap: true }` (`diff_clamp_with(min, max, DiffClamp::snapping())`), a header left partly shown when scrolling stops finishes the move. It settles fully shown or fully hidden, whichever is nearer, in 200 ms on the UI thread. It hides only once the page has scrolled at least its height, so a page scrolled less than that shows the whole header. Scrolling again during the move takes over from where the header is.
 
 ```tsx tabs
 const header = scroll.diffClamp(0, 56, { snap: true });
@@ -653,7 +653,7 @@ const header = scroll.diffClamp(0, 56, { snap: true });
 let header = offset.diff_clamp_with(0.0, 56.0, DiffClamp::snapping());
 ```
 
-Either bound can be an animated value, read on the UI thread every frame. A drag limited to a range that changes as the content or layout does (a timeline, a canvas) passes the range as a value: when it shrinks, the result clamps at once, and when the drag reverses at an edge, the result moves back immediately, with no dead zone:
+Either bound can be an animated value, read on the UI thread every frame. Use this for a drag whose range changes with the content or layout, such as a timeline or a canvas. When the range shrinks, the result clamps at once. When the drag reverses at an edge, the result moves back immediately, with no dead zone:
 
 ```tsx tabs
 const drag = createAnimatedValue(0);
@@ -745,9 +745,15 @@ spawn(async move {
 | `Animated.delay(ms)` | `Animation::delay(ms)` | Waits. |
 | `Animated.loop(animation, { iterations?, resetBeforeIteration? })` | `.looped(iterations)`, `.reset_before_iteration(..)` | Repeats (forever by default; `None` in Rust). |
 
-A composite animation has `start()` (in TSX also with a callback and a promise, both given `{ finished }`; in Rust an awaitable `bool`; calling it again runs it again), `stop()` (stops where it is) and `reset()` (stops and puts its values back where they were when it started). The callback runs once for the whole tree.
+A composite animation has three methods:
 
-A running animation does not keep its values alive: when the component that owns them goes (its views and variables), an endless loop stops with them, and its answer is that it did not finish (`false`).
+- `start()` runs it. Calling it again runs it again. In TSX it also takes a callback and returns a promise, both given `{ finished }`. In Rust it returns an awaitable `bool`.
+- `stop()` stops it where it is.
+- `reset()` stops it and puts its values back where they were when it started.
+
+The callback runs once for the whole tree.
+
+A running animation does not keep its values alive. When the component that owns them goes away, with its views and variables, an endless loop stops too. Its result is that it did not finish (`false`).
 
 ## Easing
 
@@ -765,7 +771,7 @@ Easing curves are data, evaluated natively: `Easing` from `nsh` in TSX, the `Eas
 | `Easing.steps(count, position?)` | `Easing::Steps(count, StepPosition::JumpEnd)` | Jumps between `count` levels instead of moving, as CSS `steps()`: a frame-by-frame sprite, a ticking hand. `position` is `"jump-end"` (the default, also `"end"`), `"jump-start"` (`"start"`), `"jump-none"` or `"jump-both"`. |
 | `Easing.in(e)`, `Easing.out(e)`, `Easing.inOut(e)` | `Easing::Curve(curve, EaseMode::In)`, `EaseMode::Out`, `EaseMode::InOut` | The curves are "in" curves; `out` and `inOut` turn them around. |
 
-In TSX, anywhere an easing is accepted you can also pass a name (`"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`) or a Bézier array `[x1, y1, x2, y2]`; in Rust, `Easing::EaseIn`, `Easing::EaseOut` and `Easing::EaseInOut` are the CSS curves.
+In TSX, anywhere an easing is accepted you can also pass a name (`"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`) or a Bézier array `[x1, y1, x2, y2]`. In Rust, `Easing::EaseIn`, `Easing::EaseOut` and `Easing::EaseInOut` are the CSS curves.
 
 ```tsx tabs
 x.timing(1, { easing: Easing.out(Easing.back()) });
@@ -779,7 +785,7 @@ x.timing(1.0, 300.0, Easing::EaseOut);
 x.timing(1.0, 300.0, Easing::Bezier(0.2, 0.8, 0.2, 1.0));
 ```
 
-`Easing.sample(easing, count)` (`sample_easing` in Rust) returns the curve at `count` evenly spaced points from 0 to 1, and `Animated.sampleSpring(config, fps?)` / `Animated.sampleDecay(config, fps?)` (`sample_spring`, `sample_decay`) the values a spring or decay moves through, one per frame (60 per second by default) from `config.from` (0) until it ends. They are computed by the same native code the animations run, so a chart of a curve shows exactly what the animation does:
+`Easing.sample(easing, count)` (`sample_easing` in Rust) returns the curve at `count` evenly spaced points from 0 to 1, and `Animated.sampleSpring(config, fps?)` / `Animated.sampleDecay(config, fps?)` (`sample_spring`, `sample_decay`) the values a spring or decay moves through, one per frame (60 per second by default) from `config.from` (0) until it ends. The same native code that runs the animations computes these samples, so a chart of a curve shows exactly what the animation does:
 
 ```ts tabs
 const curve = Easing.sample(Easing.out(Easing.back()), 50); // 50 progress values
@@ -795,7 +801,7 @@ let spring = sample_spring(0.0, 1.0, Spring { stiffness: 180.0, damping: 8.0, ..
 
 ## LayoutAnimation
 
-A layout animation animates the frame changes of the **next** update natively: views that move or resize glide to their new frames, new views fade (or scale) in, removed views fade out. Call it right before the state change: `animate_layout(..)` in Rust, `LayoutAnimation.configureNext(config)` in TSX.
+A layout animation animates the frame changes of the **next** update natively. Views that move or resize glide to their new frames. New views fade (or scale) in, and removed views fade out. Call it right before the state change: `animate_layout(..)` in Rust, `LayoutAnimation.configureNext(config)` in TSX.
 
 ```tsx tabs
 import { signal } from "nsh";
@@ -870,7 +876,7 @@ animate_layout(LayoutAnimation {
 
 A layout animation covers every frame the update changes, anywhere on the screen: a list that refreshes or live data that lands in the same update moves with it.
 
-In a `List`, the rows already shown slide to their new places and a row that comes in appears in its own, as UIKit's batch updates do: a chat's new message at the bottom of an `inverted` list pushes the messages above it up, while the list keeps its distance from the end. A new row that takes a recycled cell shows at its place at once. To animate only what one element's change moves, call `ElementRef::animate_layout(transition)` in Rust or `ref.animateLayout(transition)` in TSX (`transition` is a phase as above; easing in and out over 300 ms without one): the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen, and the content of those it resizes). The update's other frames change at once: a list that gains or loses rows in the same update does not move its rows with it, even when it grows with the change. Insertions and removals are not animated, and a `configureNext` in the same update animates every frame instead. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content, and how a header collapses over a list that keeps updating.
+In a `List`, the rows already shown slide to their new places and a new row appears in its place, as UIKit's batch updates do. In a chat, a new message at the bottom of an `inverted` list pushes the messages above it up, and the list keeps its distance from the end. A new row that takes a recycled cell shows at its place at once. To animate only what one element's change moves, call `ElementRef::animate_layout(transition)` in Rust or `ref.animateLayout(transition)` in TSX. `transition` is a phase as above, and defaults to ease-in-out over 300 ms. This animates the element's own frame and its content, plus the views its size pushes along: its siblings and their ancestors up to the screen, and the content of views it resizes. The update's other frames change at once. A list that gains or loses rows in the same update does not move its rows with it, even when it grows with the change. Insertions and removals are not animated, and a `configureNext` in the same update animates every frame instead. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content, and how a header collapses over a list that keeps updating.
 
 ```rust
 use nsh_core::element::{LayoutTransition, Spring};
@@ -901,7 +907,7 @@ const collapse = () => {
 <View ref={(r) => (header = r)} style={{ height: compact() ? 56 : 120 }} />;
 ```
 
-A spring given by its physics, as design systems give theirs, is `LayoutTransition::spring(spring)` with gpui-base's `Spring`: `Spring::new(response_ms)` (the period of the undamped spring, critically damped) or `Spring::from_stiffness(stiffness)` (a mass of 1), each shaped by `.damping_ratio(ζ)`. The animation lasts until the spring stays within a thousandth of its target (`Spring::settle_ms`), whatever duration the transition was given, and moves by the same physics on every platform (`LayoutCurve::Spring`). In TSX, a `"spring"` phase that names `stiffness`, `damping` (the damping coefficient, not a ratio) or `mass` is that spring, the others `Animated.spring`'s defaults (170, 26 and 1); its `duration` and `springDamping` are not used. It works in `configureNext` and `ref.animateLayout` alike. A `LayoutCurve::FittedSpring { damping_ratio }` is the spring a `"spring"` phase without them names (`springDamping`): its stiffness is fitted to the transition's duration.
+A spring given by its physics, as design systems give theirs, is `LayoutTransition::spring(spring)` with gpui-base's `Spring`: `Spring::new(response_ms)` (the period of the undamped spring, critically damped) or `Spring::from_stiffness(stiffness)` (a mass of 1), each shaped by `.damping_ratio(ζ)`. The animation lasts until the spring stays within a thousandth of its target (`Spring::settle_ms`), whatever duration the transition was given. It moves by the same physics on every platform (`LayoutCurve::Spring`). In TSX, a `"spring"` phase that names `stiffness`, `damping` (the damping coefficient, not a ratio) or `mass` uses this spring. Unnamed values take `Animated.spring`'s defaults (170, 26 and 1). Its `duration` and `springDamping` are not used. It works in `configureNext` and `ref.animateLayout` alike. A `LayoutCurve::FittedSpring { damping_ratio }` is the spring a `"spring"` phase without them names (`springDamping`): its stiffness is fitted to the transition's duration.
 
 ```tsx tabs
 // Stiffness 620, damping 36, mass 1: a damping ratio of about 0.72, settled in about 380 ms.
@@ -935,7 +941,7 @@ Reach for `requestAnimationFrame` (a global in TSX, following the display) only 
 
 ## Frame rate
 
-Every animation runs at the screen's highest frame rate by default: 120 Hz on a ProMotion display. A small or slow motion, such as a spinner or a gentle pulse, looks the same at a lower rate, and asking for one lets the screen refresh less often while it is all that moves, which saves power. `frameRate` is the highest rate, in Hz, an animation needs: in the options of `timing`, `spring` and `decay`, of `Animated.*` steps, keyframes and motions (`play`), and as `animationFrameRate` beside a keyframe animation's other style keys.
+Every animation runs at the screen's highest frame rate by default: 120 Hz on a ProMotion display. A small or slow motion, such as a spinner or a gentle pulse, looks the same at a lower rate. Asking for a lower rate lets the screen refresh less often while that motion is all that moves, which saves power. `frameRate` is the highest rate, in Hz, an animation needs: in the options of `timing`, `spring` and `decay`, of `Animated.*` steps, keyframes and motions (`play`), and as `animationFrameRate` beside a keyframe animation's other style keys.
 
 ```tsx tabs
 // A spinner that needs 30 frames a second.
@@ -957,7 +963,7 @@ opacity.timing_with(1.0, Timing::new(600.0, Easing::Linear).frame_rate(30.0));
 glow.keyframes([Keyframe::new(0.4), Keyframe::new(1.0), Keyframe::new(0.4)], KeyframeTiming::new(1600.0).infinite().frame_rate(24.0));
 ```
 
-The screen runs at the highest rate anything on it needs: an animation without `frameRate`, a transition, a scroll, a gesture or a `requestAnimationFrame` loop brings it back to the full rate while it runs, and a composite runs at the highest rate of its steps. The animation's timing is the same at any rate: it ends when it would at the full rate. macOS and iOS lower the screen's rate for these requests; the other platforms run every animation at the screen's rate.
+The screen runs at the highest rate anything on it needs. An animation without `frameRate`, a transition, a scroll, a gesture or a `requestAnimationFrame` loop brings it back to the full rate while it runs. A composite runs at the highest rate of its steps. The timing does not change with the rate: an animation ends when it would at the full rate. macOS and iOS lower the screen's rate for these requests; the other platforms run every animation at the screen's rate.
 
 ## Reduced motion
 
@@ -969,7 +975,7 @@ drivers and `Animated` composites play as written.
 
 When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduce_motion()` in Rust and `reduceMotion()` from `nsh` in TSX are `true`, and the `motion-reduce:` / `motion-safe:` Tailwind variants apply.
 
-[Motions](#motion) follow the setting on their own: `play` and `enter` land where the motion ends at once, without moving, and the answer is that it finished (`true`), as for a motion that played. An exit still ends hidden, an entrance still ends at rest. Pass `ignoreReduceMotion: true` (`play_ignoring_reduce_motion` in Rust) for a motion that carries meaning the user needs, such as a progress spinner.
+[Motions](#motion) follow the setting on their own. `play` and `enter` jump straight to where the motion ends, and the result is `true` (finished), as for a motion that played. An exit still ends hidden, an entrance still ends at rest. Pass `ignoreReduceMotion: true` (`play_ignoring_reduce_motion` in Rust) for a motion that carries meaning the user needs, such as a progress spinner.
 
 Transitions, keyframe animations, animated values, keyframes and composites play as written; use these to choose a calmer alternative:
 

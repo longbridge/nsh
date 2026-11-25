@@ -61,17 +61,17 @@ fn reminder_time() -> impl IntoElement {
 
 ## 值
 
-值是 24 小时制的一天中的时间，与 HTML `<input type="time">` 的相同：`"HH:MM"`，在 `precision="second"` 时为 `"HH:MM:SS"`，不论输入框显示哪种 `hourCycle`。有 `value` 时，值由应用持有：输入框显示它，并用 `onChange({ value })` 报告每次编辑；应用把 `value` 设为报告的值以跟随它。省略 `value` 时，输入框自己保存时间，初始为 `defaultValue`（默认 `00:00`）。
+值是 24 小时制的一天中的时间，与 HTML `<input type="time">` 的相同：`"HH:MM"`，在 `precision="second"` 时为 `"HH:MM:SS"`，不论输入框显示哪种 `hourCycle`。有 `value` 时，值由应用持有：输入框显示它，并用 `onChange({ value })` 报告每次编辑。应用把 `value` 设为报告的值以跟随它。省略 `value` 时，输入框自己保存时间，初始为 `defaultValue`（默认 `00:00`）。
 
 `precision` 是输入框编辑的最小单位，`"minute"`（默认）或 `"second"`。`hourCycle` 是小时的计法：`"h23"`（默认）从 00 到 23，`"h12"` 从 12 到 11，并在数字后加一个上午/下午段。`localeSettings().hourCycle` 为 `"h11"` 或 `"h12"` 时用户的是 `"h12"`，否则是 `"h23"`（[地区偏好](../docs/device-and-environment.md#地区偏好)）。
 
-`min` 和 `max` 限定时间的范围，与 `value` 一样使用 `"HH:MM"` 或 `"HH:MM:SS"`：营业时间、预约时段。将要越过边界的一步会停在边界上；在边界上再向外走的一步不做任何事（不会回绕出范围）。输入的数字若使时间超出范围，会在这一段输入完成时被限制在最近的边界上（只输入了一半的段在移动选择或离开输入框时被限制到边界）。`min` 晚于 `max` 时两者都不生效。没有它们时，输入框接受任意时间，与以前一样。
+`min` 和 `max` 限定时间的范围，与 `value` 一样使用 `"HH:MM"` 或 `"HH:MM:SS"`：营业时间、预约时段。将要越过边界的一步会停在边界上。在边界上再向外走的一步不做任何事（不会回绕出范围）。输入的数字若使时间超出范围，会在这一段输入完成时被限制在最近的边界上（只输入了一半的段在移动选择或离开输入框时被限制到边界）。`min` 晚于 `max` 时两者都不生效。没有它们时，输入框接受任意时间，与以前一样。
 
 <a id="editing"></a>
 
 ## 编辑
 
-总有一段被选中；按键编辑它，与 `gpui-base` 的时间输入框相同：
+总有一段被选中。按键编辑它，与 `gpui-base` 的时间输入框相同：
 
 - Up 和 Down 把这一段加减一，到头后回绕（59 到 00），不会进位到相邻的段。有 `min` / `max` 时，会越过边界的一步停在边界上。
 - 数字输入到这一段，每段两位：一个不能作为更长数值开头的数字（小时里的 `7`）会直接填完这一段并移到下一段。
@@ -99,7 +99,7 @@ fn reminder_time() -> impl IntoElement {
 | `renderSegment` | `.render_segment(..)` | `(segment: TimeFieldSegmentEntry) => JSX.Element` | 无 | 由应用根据段显示的内容绘制；否则显示其标签。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 输入框，包住各段（一行）。 |
 
-`renderSegment` 得到一个 `TimeFieldSegmentEntry`：`segment`（`"hour"`、`"minute"`、`"second"` 或 `"period"`）、`value`（输入框钟面上的小时、分钟或秒；上午为 `0`，下午为 `1`）和 `label`（两位数字，或 `AM` / `PM`）。它从不包含段的状态：按键编辑的段是 `focus:`，输入框禁用时段是 `disabled:`；在 `segmentClass` 里加上 `group`，内容就用 `group-focus:` 和 `group-disabled:` 跟随。所以一个段只在它的值变化时重新绘制，在段之间移动、焦点进出都不绘制：
+`renderSegment` 得到一个 `TimeFieldSegmentEntry`：`segment`（`"hour"`、`"minute"`、`"second"` 或 `"period"`）、`value`（输入框钟面上的小时、分钟或秒；上午为 `0`，下午为 `1`）和 `label`（两位数字，或 `AM` / `PM`）。它从不包含段的状态：按键编辑的段是 `focus:`，输入框禁用时段是 `disabled:`。在 `segmentClass` 里加上 `group`，内容就用 `group-focus:` 和 `group-disabled:` 跟随。所以一个段只在它的值变化时重新绘制，在段之间移动、焦点进出都不绘制：
 
 ```tsx
 <TimeField
@@ -145,7 +145,7 @@ Tab 到达输入框时停在选中的段上。然后：
 
 ## 无障碍
 
-- 输入框是一个文本输入框，名称来自 `accessibilityLabel`；屏幕阅读器读出它显示的时间。`disabled` 时它显示为不可用。
+- 输入框是一个文本输入框，名称来自 `accessibilityLabel`。屏幕阅读器读出它显示的时间。`disabled` 时它显示为不可用。
 - 手机和平板显示数字键盘。
 
 关于标签、角色和播报的一般说明，见[无障碍](../docs/accessibility.md)。

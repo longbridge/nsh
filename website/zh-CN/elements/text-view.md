@@ -85,9 +85,9 @@ fn release_notes() -> impl IntoElement {
 
 ## 基于 Text 构建
 
-`TextView` 由 [`Text`](./text.md) 元素组成，其中的文本行为与 Text 页面描述的完全一致。每个段落、标题、表格单元格和代码块都是一个原生 `Text`：一个独立排版、换行、跟随字体缩放的文本块，设置 `selectable` 后可以选择和复制。加粗、强调、删除线等行内标记是它的[片段](./text.md#片段)；行内代码是带[片段背景](./text.md#片段背景)的片段，因此 `code: "rounded bg-neutral-100"` 会给它一个圆角背景；链接是[可点击的片段](./text.md#链接)；图片和行内自定义节点是[行内附件](./text.md#行内视图和图片)。根节点上的文本样式会传给每个部件，就像[文本样式](./text.md#文本样式)从 `Text` 传给它的片段一样。
+`TextView` 由 [`Text`](./text.md) 元素组成，其中的文本行为与 Text 页面描述的完全一致。每个段落、标题、表格单元格和代码块都是一个原生 `Text`：一个独立排版、换行、跟随字体缩放的文本块，设置 `selectable` 后可以选择和复制。加粗、强调、删除线等行内标记是它的[片段](./text.md#片段)。行内代码是带[片段背景](./text.md#片段背景)的片段，因此 `code: "rounded bg-neutral-100"` 会给它一个圆角背景。链接是[可点击的片段](./text.md#链接)。图片和行内自定义节点是[行内附件](./text.md#行内视图和图片)。根节点上的文本样式会传给每个部件，就像[文本样式](./text.md#文本样式)从 `Text` 传给它的片段一样。
 
-设置 `selectable` 后，整个文档作为一体选择，就像网页一样：拖动（在触摸屏上是长按后拖动选择手柄）可以从一个段落、列表项、单元格或代码块延伸到下一个，复制会取得它们全部的正文内容，列表项目符号与序号、任务勾选符号、提示图标、折叠三角以及操作按钮等装饰与控件文字不会混入选区。部件的类名或样式可以把它们重新纳入选区：设置 `classes={{ listMarker: "select-text" }}` 后，项目符号与序号会随列表项一起被选中和复制。设置了 `selectable` 的 `TextView` 自己作为一体选择；放在[可选择视图](./text-selection.md)里时，它的选区还会延伸到周围的文字和其他 `TextView`。
+设置 `selectable` 后，整个文档作为一体选择，就像网页一样：拖动（在触摸屏上是长按后拖动选择手柄）可以从一个段落、列表项、单元格或代码块延伸到下一个，复制会取得它们全部的正文内容，列表项目符号与序号、任务勾选符号、提示图标、折叠三角以及操作按钮等装饰与控件文字不会混入选区。部件的类名或样式可以把它们重新纳入选区：设置 `classes={{ listMarker: "select-text" }}` 后，项目符号与序号会随列表项一起被选中和复制。设置了 `selectable` 的 `TextView` 自己作为一体选择。放在[可选择视图](./text-selection.md)里时，它的选区还会延伸到周围的文字和其他 `TextView`。
 
 `TextView` 增加的是其余部分：把 Markdown、HTML 或文档读成文档块，文本周围的视图（列表、引用、表格、代码块、折叠块、脚注），流式输出，按部件设定样式，渲染函数和扩展。
 
@@ -97,8 +97,8 @@ fn release_notes() -> impl IntoElement {
 
 内容来自以下三个属性之一，按此顺序读取：
 
-- **`markdown`**：CommonMark 加上 GitHub 的扩展（表格、任务列表、删除线、自动链接、脚注、提示块）、公式（`$…$` 和 `$$…$$`）以及 Markdown 中的 HTML。中日韩文字旁的强调按 CommonMark 的 CJK 友好修订判定，`**涨幅：**5%` 会加粗到冒号为止；裸网址遇到中日韩文字或弯引号即结束：`https://example.com。下一句` 只链接 `https://example.com`。写在尖括号里（`<https://zh.wikipedia.org/wiki/中文>`）或写成链接的网址保留全部字符。标签名既不是 HTML 元素、也不是 `tag` 扩展时（`<US tech>`、`<公司名>`），按原样显示为文字。
-- **`html`**：按阅读模式的方式显示 HTML。文本、结构和行内格式都会保留，文字颜色也会保留（`<span style="color: …">` 和 `<font color="…">` 读成带该颜色的 `textStyle`）；脚本、样式、表单控件和隐藏元素不会显示。片段和完整页面都可以（完整页面显示其 body）。
+- **`markdown`**：CommonMark 加上 GitHub 的扩展（表格、任务列表、删除线、自动链接、脚注、提示块）、公式（`$…$` 和 `$$…$$`）以及 Markdown 中的 HTML。中日韩文字旁的强调按 CommonMark 的 CJK 友好修订判定，`**涨幅：**5%` 会加粗到冒号为止。裸网址遇到中日韩文字或弯引号即结束：`https://example.com。下一句` 只链接 `https://example.com`。写在尖括号里（`<https://zh.wikipedia.org/wiki/中文>`）或写成链接的网址保留全部字符。标签名既不是 HTML 元素、也不是 `tag` 扩展时（`<US tech>`、`<公司名>`），按原样显示为文字。
+- **`html`**：按阅读模式的方式显示 HTML。文本、结构和行内格式都会保留，文字颜色也会保留（`<span style="color: …">` 和 `<font color="…">` 读成带该颜色的 `textStyle`）。脚本、样式、表单控件和隐藏元素不会显示。片段和完整页面都可以（完整页面显示其 body）。
 - **`document`**：应用构建或保存的文档块：TSX 中是普通对象，Rust 中是 `nsh_base::text_view::Document`（[文档模型](#the-document-model)）。
 
 ```tsx tabs
@@ -135,7 +135,7 @@ fn total() -> impl IntoElement {
 
 ## 部件样式
 
-`class` 和 `style` 设定根节点（各文档块组成的一列）的样式；在那里设置的文本样式（颜色、字号、字体）会传给每个部件。根节点也是部件 `root`：`styles.root` 以带类型的方式接收文本样式（`style` 的类型是视图样式），`classes.root` 接收类。`classes` 按部件接收 Tailwind 类，`styles` 按部件接收内联样式。部件的类排在它自己的默认样式之后，因此优先生效；它的 `styles` 又优先于它的类。在 Rust 中，部件接收类型化的样式：`TextViewParts` 为每个 `TextViewPart` 提供一个细化其样式的函数，作用于提供它的视图下面的每个 `TextView`（[类型化的部件样式](#typed-part-styles)），根节点则使用样式方法。默认样式的行高以点为单位：改变某个部件字号的类也要设定行高（Tailwind 的 `text-*` 类会一并设定）。文档块的位置变体（`first:`、`last:`、`odd:`、`even:`、`only:`）按它在周围各块中的位置生效：`heading: "mt-6 first:mt-0"` 让位于文档或引用开头的标题上方不留空。
+`class` 和 `style` 设定根节点（各文档块组成的一列）的样式。在那里设置的文本样式（颜色、字号、字体）会传给每个部件。根节点也是部件 `root`：`styles.root` 以带类型的方式接收文本样式（`style` 的类型是视图样式），`classes.root` 接收类。`classes` 按部件接收 Tailwind 类，`styles` 按部件接收内联样式。部件的类排在它自己的默认样式之后，因此优先生效。它的 `styles` 又优先于它的类。在 Rust 中，部件接收类型化的样式：`TextViewParts` 为每个 `TextViewPart` 提供一个细化其样式的函数，作用于提供它的视图下面的每个 `TextView`（[类型化的部件样式](#typed-part-styles)），根节点则使用样式方法。默认样式的行高以点为单位：改变某个部件字号的类也要设定行高（Tailwind 的 `text-*` 类会一并设定）。文档块的位置变体（`first:`、`last:`、`odd:`、`even:`、`only:`）按它在周围各块中的位置生效：`heading: "mt-6 first:mt-0"` 让位于文档或引用开头的标题上方不留空。
 
 ```tsx tabs
 <TextView
@@ -190,7 +190,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 }
 ```
 
-有些节点同时属于多个部件，按顺序应用：二级标题是 `heading` 再 `heading2`；提示块是 `blockquote`、`alert`，再是它的种类（`alertNote` 等）；任务标记是 `listMarker`、`taskMarker`，完成时再加 `taskMarkerChecked`；表头行是 `tableRow` 再 `tableHead`，表头单元格是 `tableCell` 再 `tableHeaderCell`。
+有些节点同时属于多个部件，按顺序应用：二级标题是 `heading` 再 `heading2`。提示块是 `blockquote`、`alert`，再是它的种类（`alertNote` 等）。任务标记是 `listMarker`、`taskMarker`，完成时再加 `taskMarkerChecked`。表头行是 `tableRow` 再 `tableHead`，表头单元格是 `tableCell` 再 `tableHeaderCell`。
 
 | 部件 | Rust | 说明 |
 |---|---|---|
@@ -249,7 +249,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 
 随着回复增长传入它，并设置 `options={{ streaming: true }}`（Rust 中是 `MarkdownOptions { streaming: true, .. }`）。仍在到达的文本末尾常常留着未闭合的语法（`**bold`、`**bold*`、`` `code ``、还没等到 `(` 的 `[a link]`、`[a link](htt`、刚到达表头的表格）；流式模式会把它显示成闭合后的样子，读者不会看到零散的 `**` 或 `[`。含义要看后面字符的末行在这一行结束时显示：单独的列表标记、单独的任务框（`- [x]`）、段落下的 `-` 或 `=` 行、代码围栏的开头行或打了一半的收尾围栏，因此列表项、标题和代码块一出现就是最终的样子。词内的 `*`（`a*b`）保持原样。回复结束后（关闭 `streaming`），文本按原样解析。文档块按位置保留：已完成的块只解析一次并保留它们的视图，每次更新只重新解析并生成正在写的块，因此长回复的更新依然很轻。
 
-`streamingCaret` 跟随文档末尾：以行内方式显示在最后一段文本的末尾，无论最后一个块在哪里结束（段落、列表项、代码块、表格的最后一个单元格）；否则单独一行显示在最后一个块之后（分隔线、渲染函数的内容）。回复结束后去掉它。
+`streamingCaret` 跟随文档末尾：以行内方式显示在最后一段文本的末尾，无论最后一个块在哪里结束（段落、列表项、代码块、表格的最后一个单元格）。否则单独一行显示在最后一个块之后（分隔线、渲染函数的内容）。回复结束后去掉它。
 
 ```tsx tabs
 import { signal, View } from "nsh";
@@ -294,7 +294,7 @@ fn reply(text: Signal<SharedString>, done: Signal<bool>) -> impl IntoElement {
 
 ## 链接
 
-链接是[可点击的片段](./text.md#链接)。点击链接会以 `{ url }` 调用 `onLinkPress`；打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。在终端里，Tab 依次到达每个链接和脚注引用，Return 按下获得焦点的那一个：`onLinkPress` 收到它，与收到点击一样。事件还带有按下时按住的修饰键（`modifiers`，与点击事件的相同），应用可以把按住 Command（macOS 以外是 Control）的点击交给浏览器，普通点击自己处理；键盘或辅助技术触发的按下不带修饰键。
+链接是[可点击的片段](./text.md#链接)。点击链接会以 `{ url }` 调用 `onLinkPress`。打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。在终端里，Tab 依次到达每个链接和脚注引用，Return 按下获得焦点的那一个：`onLinkPress` 收到它，与收到点击一样。事件还带有按下时按住的修饰键（`modifiers`，与点击事件的相同），应用可以把按住 Command（macOS 以外是 Control）的点击交给浏览器，普通点击自己处理。键盘或辅助技术触发的按下不带修饰键。
 
 ```tsx tabs
 <TextView
@@ -322,7 +322,7 @@ fn doc(markdown: &'static str) -> impl IntoElement {
 
 `scroll_to_anchor` 和 `open_web`（TSX 中是 `scrollToAnchor` 和 `nav`）代表应用自己的函数。
 
-设置 `links="open"` 后，按下指向其他网站或应用的链接（带 scheme 的 URL：`https:`、`mailto:` 等）时，在 `onLinkPress` 报告之后，还会用 [`openUrl`](../modules/nsh.md#openurl) 在应用之外打开它，受应用的 `openUrl` 能力约束；文档内的锚点（`#…`）只报告。默认值 `"report"` 什么都不打开。
+设置 `links="open"` 后，按下指向其他网站或应用的链接（带 scheme 的 URL：`https:`、`mailto:` 等）时，在 `onLinkPress` 报告之后，还会用 [`openUrl`](../modules/nsh.md#openurl) 在应用之外打开它，受应用的 `openUrl` 能力约束。文档内的锚点（`#…`）只报告。默认值 `"report"` 什么都不打开。
 
 ```tsx tabs
 <TextView markdown={doc} links="open" />
@@ -334,15 +334,15 @@ use nsh_base::{TextViewLinks, text_view};
 text_view().markdown(doc).links(TextViewLinks::Open)
 ```
 
-在桌面平台和桌面形态的 Web 上，指针停在链接上会在指针下方显示它去往哪里：链接有标题时先显示标题（`[docs](https://example.com/docs "The guide")`，或 HTML 链接的 `title`），下面一行是用主题 `muted-foreground` 颜色显示的目的地。URL 按解析后的样子显示，协议、主机和端口始终完整（国际化域名显示为 ASCII 形式，冒充的字母会显示出本来面目），过长的路径从中间截断；路径和文档内的锚点（`#…`）按原样显示。链接里的图片也以同样方式在图片下方显示链接的目的地和标题。这与 [Link](./link.md#去往哪里) 的核对相同。
+在桌面平台和桌面形态的 Web 上，指针停在链接上会在指针下方显示它去往哪里：链接有标题时先显示标题（`[docs](https://example.com/docs "The guide")`，或 HTML 链接的 `title`），下面一行是用主题 `muted-foreground` 颜色显示的目的地。URL 按解析后的样子显示，协议、主机和端口始终完整（国际化域名显示为 ASCII 形式，冒充的字母会显示出本来面目），过长的路径从中间截断。路径和文档内的锚点（`#…`）按原样显示。链接里的图片也以同样方式在图片下方显示链接的目的地和标题。这与 [Link](./link.md#去往哪里) 的核对相同。
 
-在 Web 上，指向网页、站内路径、邮件地址或电话号码的链接（`https:`、`http:`、路径、`mailto:`、`tel:`）在页面中是一个 `<a href>`，与带 `href` 的 [Link](./link.md#平台说明) 相同：爬虫会跟随它，浏览器会显示它去往哪里，按住修饰键点击或用鼠标中键点击时由浏览器在新标签页或新窗口中打开，不触发 `onLinkPress`；右键点击显示浏览器的链接菜单。普通点击由应用处理，由 `onLinkPress` 报告。路径与 `Link` 的 `href` 一样，放在站点的基础地址下。文档内的锚点（`#…`）和指向应用自身路由的链接（应用自己的 scheme，如 `myapp:`）是可点击的文字，每次点击都会连同修饰键一起报告。
+在 Web 上，指向网页、站内路径、邮件地址或电话号码的链接（`https:`、`http:`、路径、`mailto:`、`tel:`）在页面中是一个 `<a href>`，与带 `href` 的 [Link](./link.md#平台说明) 相同：爬虫会跟随它，浏览器会显示它去往哪里，按住修饰键点击或用鼠标中键点击时由浏览器在新标签页或新窗口中打开，不触发 `onLinkPress`。右键点击显示浏览器的链接菜单。普通点击由应用处理，由 `onLinkPress` 报告。路径与 `Link` 的 `href` 一样，放在站点的基础地址下。文档内的锚点（`#…`）和指向应用自身路由的链接（应用自己的 scheme，如 `myapp:`）是可点击的文字，每次点击都会连同修饰键一起报告。
 
 <a id="render-functions"></a>
 
 ## 渲染函数
 
-渲染函数把应用自己的内容放进文档。每个渲染函数接收一个部件的值并返回其内容（TSX 中是 JSX，Rust 中是元素）；只要值不变，部件就保留为它渲染的内容，因此流式输出时只有正在写的部件会重新渲染。
+渲染函数把应用自己的内容放进文档。每个渲染函数接收一个部件的值并返回其内容（TSX 中是 JSX，Rust 中是元素）。只要值不变，部件就保留为它渲染的内容，因此流式输出时只有正在写的部件会重新渲染。
 
 | 属性 | Rust | 值 | 替换或添加 |
 |---|---|---|---|
@@ -353,7 +353,7 @@ text_view().markdown(doc).links(TextViewLinks::Open)
 | `renderImage` | `.render_image(\|image\| ..)` | `TextViewImage`（`Image`） | 替换图片（`{ src, alt, title }`）：自己的加载方式、尺寸、点击查看大图。 |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `TextViewCustomNode`（`CustomNode`） | 按 `name` 显示自定义节点（[Markdown 扩展](#markdown-extensions)）。 |
 
-代码块的右上角浮动着操作按钮，外观统一：幽灵按钮，悬停或按下时显示背景；桌面上指针悬停在代码块上时显示，触摸屏上始终显示。`copy` 是内置的：复制代码，并短暂显示一个对勾。其他操作由应用定义：`renderCodeBlockAction` 绘制它们的图标，`onCodeBlockAction` 报告按下（内置的 `copy` 复制后也会报告）。`copy` 与 `Clipboard` 一样写入剪贴板，因此需要应用的 `clipboard` 权限（`nsh.json`）。
+代码块的右上角浮动着操作按钮，外观统一：幽灵按钮，悬停或按下时显示背景。桌面上指针悬停在代码块上时显示，触摸屏上始终显示。`copy` 是内置的：复制代码，并短暂显示一个对勾。其他操作由应用定义：`renderCodeBlockAction` 绘制它们的图标，`onCodeBlockAction` 报告按下（内置的 `copy` 复制后也会报告）。`copy` 与 `Clipboard` 一样写入剪贴板，因此需要应用的 `clipboard` 权限（`nsh.json`）。
 
 ```tsx tabs
 import { Text } from "nsh";
@@ -390,7 +390,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 }
 ```
 
-代码块开箱即有语法高亮：围栏上标明语言（`ts`、`tsx`、`rust`、`python`、`bash`、`json`、`toml`、`yaml`、`diff` 等约两百种）时，代码以 Allsum 的代码配色显示，随外观切换浅色或深色；未标明语言的代码块按原样显示。应用想用自己的高亮时，用 `renderCodeBlock` 显示代码，使用它自己的组件或它的 Rust crate 中的组件；Rust 视图通过 [`CodeHighlighter`](#syntax-highlighting) 把高亮器交给 `TextView`。下面用应用自己的高亮显示代码，并让图片占满宽度：
+代码块开箱即有语法高亮：围栏上标明语言（`ts`、`tsx`、`rust`、`python`、`bash`、`json`、`toml`、`yaml`、`diff` 等约两百种）时，代码以 Allsum 的代码配色显示，随外观切换浅色或深色。未标明语言的代码块按原样显示。应用想用自己的高亮时，用 `renderCodeBlock` 显示代码，使用它自己的组件或它的 Rust crate 中的组件。Rust 视图通过 [`CodeHighlighter`](#syntax-highlighting) 把高亮器交给 `TextView`。下面用应用自己的高亮显示代码，并让图片占满宽度：
 
 ```tsx tabs
 import { Image, View } from "nsh";
@@ -428,7 +428,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 
 单独成段的图片（一段或一个表格单元格里只有图片）放在与正文同宽的框里：`w-full` 填满这个宽度，`max-w-full` 让更宽的图片收在其中，固定宽度的图片保持自己的宽度，靠行首排列。位于一行文字中的图片保持它要求的尺寸。
 
-`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持 KaTeX 的 TeX 语法并使用 KaTeX 字体，颜色跟随文本，在各平台上效果一致；无法解析的 TeX 以等宽字体显示其源码。
+`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持 KaTeX 的 TeX 语法并使用 KaTeX 字体，颜色跟随文本，在各平台上效果一致。无法解析的 TeX 以等宽字体显示其源码。
 
 复制选中的段落时，文字中的公式（`$…$`）给出它的源码 `$x^2$`。公式块（`$$…$$`）不在文字中，复制时仍不包含。`renderMath` 返回的视图把源码设为它的
 [`copyText`](./text.md#行内视图和图片)，复制时也会保留公式：
@@ -557,13 +557,13 @@ fn message() -> impl IntoElement {
 ````
 
 `BarChart`（Rust 中是 `bar_chart`）代表应用自己的图表。提及（mention）的捕获组在 `node.attributes?.["1"]`（Rust 中是 `node.attributes["1"]`：`ada`）中，完整匹配在 `node.text`（`@ada`）中。没有渲染函数的自定义节点显示其内容。
-为行内节点返回的视图（如芯片）按它自己的 `verticalAlign` 放在行中：`align-middle`（`verticalAlign: "middle"`）让它与文字居中对齐；除非视图比行高更高，它所在的行仍保持段落的 `lineHeight`。
+为行内节点返回的视图（如芯片）按它自己的 `verticalAlign` 放在行中：`align-middle`（`verticalAlign: "middle"`）让它与文字居中对齐。除非视图比行高更高，它所在的行仍保持段落的 `lineHeight`。
 
 <a id="options"></a>
 
 ### 选项
 
-`options` 选择在 CommonMark 和 GitHub 语法之外读取的 Markdown 语法；在 Rust 中它是字段相同的 `MarkdownOptions`（`MarkdownOptions { streaming: true, ..Default::default() }`）：
+`options` 选择在 CommonMark 和 GitHub 语法之外读取的 Markdown 语法。在 Rust 中它是字段相同的 `MarkdownOptions`（`MarkdownOptions { streaming: true, ..Default::default() }`）：
 
 | 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -611,7 +611,7 @@ fn message() -> impl IntoElement {
 
 文档还可以有 `footnotes?`：`{ label, index, children }`，按首次引用的顺序显示在文档块之后。应用可以把回复存成文档、用自己的数据构建文档，或者混入由 `renderCustom` 显示的自定义节点。
 
-代码块的 `id` 由应用设定：`onCodeBlockAction` 会连同它把代码块交回，操作由此知道作用于哪一块。`wrap: true` 让代码在视图宽度内换行，而不是横向滚动。`content` 是以行内内容表示的代码（应用的标注：强调、高亮，以及在 `custom` 部件中显示为其内容的自定义节点）；其纯文本与 `code` 相同时代替高亮后的代码显示，因此显示的就是复制得到的文本。
+代码块的 `id` 由应用设定：`onCodeBlockAction` 会连同它把代码块交回，操作由此知道作用于哪一块。`wrap: true` 让代码在视图宽度内换行，而不是横向滚动。`content` 是以行内内容表示的代码（应用的标注：强调、高亮，以及在 `custom` 部件中显示为其内容的自定义节点）。其纯文本与 `code` 相同时代替高亮后的代码显示，因此显示的就是复制得到的文本。
 
 <a id="parsing-and-plain-text"></a>
 
@@ -659,7 +659,7 @@ Rust 视图从 `nsh-base` crate 使用同一个组件，上面的示例都有对
 
 ### 语法高亮
 
-`TextView` 用 syntect 以 Allsum 的代码配色高亮代码（`nsh-base` 的 feature `highlight`，默认开启）；较大的代码块先按原样显示，在后台线程高亮后再着色。`CodeHighlighter` 是代替它的应用自己的高亮器，通过 `provide_context` 交给一个视图下面的所有 `TextView`。它收到每个代码块，返回代码中各字节范围的样式（按顺序、互不重叠；未覆盖的部分保持原样）；`TextView` 以带这些样式的片段显示代码，仍放在它通常的代码块中（标题行、操作、滚动视图、部件）。高亮器可以是任何能把代码变成带样式范围的工具：`tree-sitter`、使用应用自己主题的 syntect 等。
+`TextView` 用 syntect 以 Allsum 的代码配色高亮代码（`nsh-base` 的 feature `highlight`，默认开启）。较大的代码块先按原样显示，在后台线程高亮后再着色。`CodeHighlighter` 是代替它的应用自己的高亮器，通过 `provide_context` 交给一个视图下面的所有 `TextView`。它收到每个代码块，返回代码中各字节范围的样式（按顺序、互不重叠；未覆盖的部分保持原样）。`TextView` 以带这些样式的片段显示代码，仍放在它通常的代码块中（标题行、操作、滚动视图、部件）。高亮器可以是任何能把代码变成带样式范围的工具：`tree-sitter`、使用应用自己主题的 syntect 等。
 
 ```rust
 use std::ops::Range;
@@ -689,7 +689,7 @@ fn chat() -> impl IntoElement {
 
 ### 类型化的部件样式
 
-`TextViewParts` 让 Rust 视图用类型化的样式代替类名字符串设定部件样式：每个 `TextViewPart`（对应[上面表格](#styling-the-parts)中的一个部件）得到一个细化其 `StyleRefinement` 的函数。通过 `provide_context` 提供后，它们作用于下面的每个 `TextView`，先于其 `classes` 和 `styles` 应用；其中读取的主题颜色会跟随浅色和深色外观。
+`TextViewParts` 让 Rust 视图用类型化的样式代替类名字符串设定部件样式：每个 `TextViewPart`（对应[上面表格](#styling-the-parts)中的一个部件）得到一个细化其 `StyleRefinement` 的函数。通过 `provide_context` 提供后，它们作用于下面的每个 `TextView`，先于其 `classes` 和 `styles` 应用。其中读取的主题颜色会跟随浅色和深色外观。
 
 ```rust
 use nsh_base::{TextViewPart, TextViewParts, theme};
@@ -709,7 +709,7 @@ fn chat_parts() {
 
 ### Markdown 插件
 
-`MarkdownPlugin` 在 Rust 中读取 Markdown 语法：在解析器读取语法树（markdown-rs 的 `mdast`）的每个节点之前先交给它，它返回自己的文档块或行内内容，通常是一个 `CustomNode`；它也可以显示自己生成的自定义节点。一个视图为它下面的所有 `TextView` 提供插件：
+`MarkdownPlugin` 在 Rust 中读取 Markdown 语法：在解析器读取语法树（markdown-rs 的 `mdast`）的每个节点之前先交给它，它返回自己的文档块或行内内容，通常是一个 `CustomNode`。它也可以显示自己生成的自定义节点。一个视图为它下面的所有 `TextView` 提供插件：
 
 ```rust
 use nsh_base::text_view::{mdast, CustomNode, Inline, MarkdownPlugin, MarkdownPlugins, ParseContext};
@@ -742,7 +742,7 @@ fn chat() -> impl IntoElement {
 
 插件的 `render` 最先生效，然后是 `renderCustom`，最后是节点的内容。`configure` 打开 markdown-rs 的更多语法，`ParseContext` 按解析器的方式读取节点的子节点。
 
-`ParseContext::source` 是整篇 Markdown 文本，节点位置是它里面的偏移；长文本分段读取时也一样。带插件的长文档同样读得快；`configure` 打开或关闭某个语法结构（construct）的插件会让文本每次按整篇一次解析。
+`ParseContext::source` 是整篇 Markdown 文本，节点位置是它里面的偏移。长文本分段读取时也一样。带插件的长文档同样读得快。`configure` 打开或关闭某个语法结构（construct）的插件会让文本每次按整篇一次解析。
 
 <a id="props"></a>
 
@@ -771,7 +771,7 @@ fn chat() -> impl IntoElement {
 | `renderImage` | `.render_image(\|image\| ..)` | `(image: TextViewImage) => JSX.Element` | | 显示图片。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | | 根节点，即各文档块组成的一列；其文本样式传给每个部件（带类型的文本样式：`styles.root`）。 |
 
-在 Rust 中，按部件给出的类和样式是 `TextViewClasses` 和 `TextViewStyles`；Rust 视图通常用 [`TextViewParts`](#typed-part-styles) 设定部件样式。
+在 Rust 中，按部件给出的类和样式是 `TextViewClasses` 和 `TextViewStyles`。Rust 视图通常用 [`TextViewParts`](#typed-part-styles) 设定部件样式。
 
 <a id="events"></a>
 

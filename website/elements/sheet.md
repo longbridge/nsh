@@ -8,8 +8,9 @@ demo: el-sheet
 # Sheet
 
 A sheet is a panel at an edge of the screen over a backdrop that covers the rest: filters, a share panel, a side
-drawer. A press on the backdrop, Escape, the Android back button and VoiceOver's escape gesture close it. It shows on top of everything in its
-window, the same on every device, and draws nothing of its own: the panel and the backdrop are the app's.
+drawer. A press on the backdrop, Escape, the Android back button and VoiceOver's escape gesture close it. It shows
+on top of everything in its window, the same on every device. It draws nothing of its own: the app styles the panel
+and the backdrop.
 
 ```tsx tabs
 import { signal, Text, View } from "nsh";
@@ -60,10 +61,10 @@ fn filters(open: Signal<bool>) -> impl IntoElement {
 
 `Sheet` comes from [`nsh/base`](../modules/nsh-base.md). Its content is made each time it opens. `side` puts it at
 the `"bottom"` (the default) or `"top"` of the screen, as wide as the screen, or at the `"left"` or `"right"`, as tall
-as the screen; its size across is the panel's, from its content or `popupClass`.
+as the screen. Its size across is the panel's, from its content or `popupClass`.
 
 Its slide follows the panel's measured size as content is created or grows during the entrance. Lazy content and
-asynchronous size updates share the same animation progress; the panel settles at its current size.
+asynchronous size updates share the same animation progress. The panel settles at its current size.
 
 ## Open state
 
@@ -76,17 +77,17 @@ Without `open`, the sheet keeps its own state, starting from `defaultOpen`. With
 
 ## Dragging a bottom sheet
 
-Set `closeOnSwipe` to let a bottom panel follow downward dragging. Its backdrop fades with the distance; releasing
+Set `closeOnSwipe` to let a bottom panel follow downward dragging. Its backdrop fades with the distance. Releasing
 past 30% of the panel's height, or downward at 800 points per second, requests closing with reason `"swipe"`.
 A shorter drag returns smoothly. A controlled owner can keep `open` true to return the panel after a close request.
-With reduced motion, release and programmatic opening/closing settle immediately; direct dragging still follows the finger.
+With reduced motion, release and programmatic opening/closing settle immediately. Direct dragging still follows the finger.
 
-The panel fits its content, including short menus; use `popupStyle` or a child's height to constrain taller content.
+The panel fits its content, including short menus. Use `popupStyle` or a child's height to constrain taller content.
 The app draws its own handle, which can be any view inside the panel. On iOS, an inner vertical `Scroll` or `List`
 consumes the drag until its top and hands the remaining downward motion to the panel within the same gesture.
 On Android, desktops and the web, dragging the handle or content outside a scroll uses their native pan support;
 inner scrolls keep their platform's normal gesture arbitration. When the panel starts to follow the finger, editing
-ends: the focused input inside blurs and the software keyboard goes down; scrolling an inner list keeps it. Setting `closeOnSwipe` to false keeps the panel
+ends: the focused input inside blurs and the software keyboard goes down. Scrolling an inner list keeps it. Setting `closeOnSwipe` to false keeps the panel
 stationary and preserves the mounted content and scroll position. Other sides retain their existing behavior.
 
 ## Detents
@@ -94,16 +95,16 @@ stationary and preserves the mounted content and scroll position. Other sides re
 A bottom sheet can rest at several heights, as a map's or a player's panel does: give it `detents`, from
 `"medium"` (about half the screen) and `"large"` (the screen below the status bar) to `{ height }` in points and
 `{ fraction }` of the large one. The panel is as tall as the largest and rests lower for a smaller one, so its top
-part shows. A drag moves it between them, following the finger; a release springs it to the nearest detent, or on to
-the next one in the direction of a flick. Below the smallest, `closeOnSwipe` closes it as without detents; without
+part shows. A drag moves it between them, following the finger. A release springs it to the nearest detent, or on to
+the next one in the direction of a flick. Below the smallest, `closeOnSwipe` closes it as without detents. Without
 `closeOnSwipe` it comes back. On iOS a scroll inside it hands the downward drag over once it is at its top, so a list
 at the largest detent scrolls first and then brings the sheet down. Mouse drags move it the same way on the desktops
 and the web.
 
 Without `detent`, the sheet keeps its own detent, starting from `defaultDetent` (the smallest by default). With
 `detent`, the app owns it: change it in `onDetentChange({ detent })`, which reports each detent the user moves it
-to; a detent the app keeps brings the panel back. `detents` may change while the sheet is open: given to a sheet
-that had none, or all taken away, they take effect at once, and the sheet makes its content again; so does a `side`
+to. A detent the app keeps brings the panel back. `detents` may change while the sheet is open: given to a sheet
+that had none, or all taken away, they take effect at once, and the sheet makes its content again. So does a `side`
 changing between the bottom and another edge.
 
 `grabber` shows a handle at the top of the panel, before the content. Like the rest of the sheet it looks like
@@ -113,7 +114,7 @@ reduced motion the sheet moves between detents at once.
 
 `footer` shows at the bottom of the panel, after the content: an input bar, the sheet's actions. With detents it stays
 at the bottom of the part of the panel that shows, at every detent and while a drag or a spring moves the panel
-between them, moving natively with the panel; below the smallest detent it goes with the panel. Give the smallest
+between them, moving natively with the panel. Below the smallest detent it goes with the panel. Give the smallest
 detent room for it. Style it with `footerClass` / `footerStyle`.
 
 ```tsx
@@ -145,7 +146,7 @@ detent meanwhile.
 
 ## The software keyboard
 
-On native Android, the Sheet's modal window already excludes the whole IME. The sheet or drawer restores only the part shared with the bottom safe area, so its existing safe-area padding sits behind the keyboard; it does not apply a second keyboard lift. Its title and close button stay on screen and its content ends above the keyboard as on the other platforms, which move the panel within the full-height presentation. This offset belongs to the Sheet's modal root; other popups keep their own presentation and keyboard handling.
+On native Android, the Sheet's modal window already excludes the whole IME. The sheet or drawer restores only the part shared with the bottom safe area, so its existing safe-area padding sits behind the keyboard. It does not apply a second keyboard lift. Its title and close button stay on screen and its content ends above the keyboard as on the other platforms, which move the panel within the full-height presentation. This offset belongs to the Sheet's modal root. Other popups keep their own presentation and keyboard handling.
 
 While the software keyboard is up, a panel that reaches the bottom of the screen (a bottom sheet, a drawer at the left
 or right) ends at the keyboard's top instead of the screen's bottom, and moves with the keyboard as it comes and goes,

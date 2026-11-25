@@ -7,7 +7,7 @@ group: ui
 
 # 字体
 
-除非字体族另有指定（Rust 中的 `.font_family(..)`，TSX 中的 `fontFamily`），文字使用系统字体（iOS 上是 San Francisco，Android 上是 Roboto）。字体族可以是通用字体族、设备上已安装的字体，或随应用发布的字体文件。
+文字默认使用系统字体：iOS 上是 San Francisco，Android 上是 Roboto。要换字体，在 Rust 中用 `.font_family(..)`，在 TSX 中用 `fontFamily` 指定字体族。字体族可以是通用字体族、设备上已安装的字体，或随应用发布的字体文件。
 
 ## 系统字体与通用字体族
 
@@ -18,9 +18,9 @@ group: ui
 | `"monospace"`、`"ui-monospace"` | 系统等宽字体（iOS 上是 SF Mono） |
 | `"ui-rounded"` | 系统圆体（SF Pro Rounded），仅限 iOS |
 
-系统字体支持 100 到 900 的所有字重。Tailwind 的 `font-sans`、`font-serif` 和 `font-mono` 分别对应前三行；主题设置了字体时，`font-sans` 和 `font-mono` 对应主题的字体（[应用的默认字体](#应用的默认字体)）。
+系统字体支持 100 到 900 的所有字重。Tailwind 的 `font-sans`、`font-serif` 和 `font-mono` 分别对应前三行。主题设置了字体时，`font-sans` 和 `font-mono` 对应主题的字体（[应用的默认字体](#应用的默认字体)）。
 
-设备上已安装的字体族可以直接用名称指定（iOS 上的 `"Georgia"`、`"Avenir Next"`）。不同平台和系统版本安装的字体各不相同，所以设计依赖的字体请随应用发布。在 iOS 上，不存在的字体族会回退到系统字体，并在日志中输出警告（`font family 'X' is not available`）；指定一个列表可以选择用什么代替（[回退列表](#回退列表)）。
+设备上已安装的字体族可以直接用名称指定（iOS 上的 `"Georgia"`、`"Avenir Next"`）。不同平台和系统版本安装的字体各不相同，所以设计依赖的字体请随应用发布。在 iOS 上，不存在的字体族会回退到系统字体，并在日志中输出警告（`font family 'X' is not available`）。指定一个列表可以选择用什么代替（[回退列表](#回退列表)）。
 
 ## 发布字体
 
@@ -46,7 +46,7 @@ fn native(registry: &mut Registry) {
 text("Custom fonts").font_family(PACIFICO.family).text_size(px(30.0))
 ```
 
-`PACIFICO.family` 和 TSX 导入的 `Pacifico` 都是字符串 `"Pacifico"`：它是字体文件中存储的字体族名（优先取排版字体族名，否则取字体族名），而不是文件名。使用资源的值而不是手写名称，可以让两者始终一致；缺失或损坏的文件会让 Rust 构建失败，导入的文件则一定会被打包。
+`PACIFICO.family` 和 TSX 导入的 `Pacifico` 都是字符串 `"Pacifico"`：它是字体文件中存储的字体族名（优先取排版字体族名，否则取字体族名），而不是文件名。使用资源的值而不是手写名称，可以让两者始终一致。缺失或损坏的文件会让 Rust 构建失败，导入的文件则一定会被打包。
 
 这些文件会像其他[资源](./images-and-assets.md)一样随应用发布。字体只为应用进程注册，不会安装到设备上。
 
@@ -65,7 +65,7 @@ text("Custom fonts").font_family(PACIFICO.family).text_size(px(30.0))
 text("Brand 品牌").font_family("Brand, 'Noto Sans SC', sans-serif")
 ```
 
-各平台都用自己的字体机制保持列表的顺序：iOS 和 macOS 上的级联列表、Windows 上的字体回退（每段一个：取段落第一个样式的列表）、Linux 上的 Pango 字体族列表、Web 上浏览器的列表、GPUI 的回退字体。在 Android 上，文字用它拥有的第一个字体族排版；该字体族是应用注册的字体时，列表中排在它之后的已注册字体是它的回退字体（Android 10 及更高版本）。
+各平台都用自己的字体机制保持列表的顺序：iOS 和 macOS 上的级联列表、Windows 上的字体回退（每段一个：取段落第一个样式的列表）、Linux 上的 Pango 字体族列表、Web 上浏览器的列表、GPUI 的回退字体。在 Android 上，文字用它拥有的第一个字体族排版。该字体族是应用注册的字体时，列表中排在它之后的已注册字体是它的回退字体（Android 10 及更高版本）。
 
 ## 在应用运行时注册字体
 
@@ -93,11 +93,11 @@ spawn(async move {
 text("Branded").font_family(move || family.get())
 ```
 
-URL 无法加载或数据不是字体时，`registerFont` 以 `Error` 拒绝；`network` 权限不允许该 URL 或它的重定向时，该 `Error` 的 `code` 为 `"ERR_ACCESS_DENIED"`；Rust 的 `register_font` 解析为原因。再次注册同一字体没有影响。与导入的字体一样，注册的字体只属于该应用，不会安装到设备上。
+URL 无法加载或数据不是字体时，`registerFont` 以 `Error` 拒绝。`network` 权限不允许该 URL 或它的重定向时，该 `Error` 的 `code` 为 `"ERR_ACCESS_DENIED"`。Rust 的 `register_font` 解析为原因。再次注册同一字体没有影响。与导入的字体一样，注册的字体只属于该应用，不会安装到设备上。
 
 ## 字重与斜体
 
-一个字体族通常由多个文件组成，每个字重和样式一个。逐个发布它们（Rust 中放进 `assets/`，TSX 中逐个导入）；它们会注册在同一个字体族名下，由字重和样式选择具体字形：
+一个字体族通常由多个文件组成，每个字重和样式一个。逐个发布它们（Rust 中放进 `assets/`，TSX 中逐个导入）。它们会注册在同一个字体族名下，由字重和样式选择具体字形：
 
 ```tsx tabs
 import { Text } from "nsh";
@@ -187,7 +187,7 @@ text("Bold Inter").font_family(INTER.family).font_weight(FontWeight::BOLD)
 }
 ```
 
-列表中第一个非通用的字体族就是所用的字体；第一个是通用字体族（`system-ui`、`sans-serif`）时使用系统字体。字体也可以设置在容器上，内部的文字会继承它。
+列表中第一个非通用的字体族就是所用的字体。第一个是通用字体族（`system-ui`、`sans-serif`）时使用系统字体。字体也可以设置在容器上，内部的文字会继承它。
 
 ```tsx tabs
 import { mount, View } from "nsh";
@@ -215,7 +215,7 @@ pub fn Root() -> impl IntoElement {
 
 ## 字体特性
 
-`fontVariant` 用于开启字体的 OpenType 特性：`"tabular-nums"`、`"proportional-nums"`、`"lining-nums"`、`"oldstyle-nums"` 和 `"small-caps"`（Rust 中的 `.tabular_nums()`、`.small_caps()` 等；[文字](./text.md#文字样式)）。字体本身必须包含这些特性；系统字体都包含。
+`fontVariant` 用于开启字体的 OpenType 特性：`"tabular-nums"`、`"proportional-nums"`、`"lining-nums"`、`"oldstyle-nums"` 和 `"small-caps"`（Rust 中的 `.tabular_nums()`、`.small_caps()` 等；[文字](./text.md#文字样式)）。字体本身必须包含这些特性。系统字体都包含。
 
 ## 相关内容
 

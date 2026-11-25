@@ -130,12 +130,12 @@ fn toasts() -> impl IntoElement {
 
 ## ToastManager
 
-Manager 没有界面：它不渲染任何东西，也不运行计时器。应用 push toast，用 `visible(limit)` 返回的 toast 及其状态进行渲染，并在有 toast 挂载期间用计时器调用 `advance`，在栈展开时传入 `paused`。在 Rust 中它是基于应用自己的 id 和值的 `ToastManager<I, T>`，每次调用传入一个 `Instant`；在 TS 中它是基于字符串 id 和任意 JSON 值的类，使用引擎的时钟（包括测试的手动时钟）。
+Manager 没有界面：它不渲染任何东西，也不运行计时器。应用 push toast，用 `visible(limit)` 返回的 toast 及其状态进行渲染，并在有 toast 挂载期间用计时器调用 `advance`，在栈展开时传入 `paused`。在 Rust 中它是基于应用自己的 id 和值的 `ToastManager<I, T>`，每次调用传入一个 `Instant`。在 TS 中它是基于字符串 id 和任意 JSON 值的类，使用引擎的时钟（包括测试的手动时钟）。
 
-- `push(id, value, options)` 添加最新的 toast，替换 id 相同的 toast（并返回其值）；`options.timeout` 是它以毫秒计的显示时长（不设置时一直保留到被关闭）。
-- `dismiss(id)` 开始一个 toast 的退出；`dismissAll()` 开始所有 toast 的退出，并返回它们的 id。
+- `push(id, value, options)` 添加最新的 toast，替换 id 相同的 toast（并返回其值）。`options.timeout` 是它以毫秒计的显示时长（不设置时一直保留到被关闭）。
+- `dismiss(id)` 开始一个 toast 的退出。`dismissAll()` 开始所有 toast 的退出，并返回它们的 id。
 - `advance(paused)` 推进生命周期并报告变化：`presented`、`ending`（计时结束）、`removed`（带其值）以及 `changed`。
-- `visible(limit)` 是最新的 `limit` 个未处于 ending 的 toast 加上所有 ending 的 toast，从旧到新；`entries()`（Rust 的 `iter()`）是全部 toast；还有 `get(id)`、`len()`、`isEmpty()`。
+- `visible(limit)` 是最新的 `limit` 个未处于 ending 的 toast 加上所有 ending 的 toast，从旧到新。`entries()`（Rust 的 `iter()`）是全部 toast。还有 `get(id)`、`len()`、`isEmpty()`。
 
 `ToastMotion` 保存两者共用的参数：`duration`（400 毫秒：进入的期限和栈的弹簧响应时间）、`exitDuration`（200 毫秒）、`collapsedPeek`（14）、`expandedGap`（14）、`collapsedScaleStep`（0.05）和 `collapsedVisible`（3），即 Sonner 的取值（Rust 中为 `ToastMotion::sonner()`；TS 中省略的字段保持这些值）。
 
@@ -143,7 +143,7 @@ Manager 没有界面：它不渲染任何东西，也不运行计时器。应用
 
 ## ToastStack
 
-栈的子元素就是它的 toast，从旧到新。从 `placement` 指定的边缘（默认 `"topRight"`；底部的锚点向上排列）开始，收起时 toast 以 `collapsedPeek` 的间距重叠，越靠后的每层窄 `collapsedScaleStep`，只显示 `collapsedVisible` 层；展开时它们是间距为 `expandedGap` 的列表（终端里间距为三行，每个 toast 的边框与下一个之间空一行）。toast 的出现、离开和栈的展开都以临界阻尼弹簧移动它们。指针停在栈上或手指按在栈上时它是展开的（`onExpandedChange({ expanded })`；Rust 的 `ToastStackState` 用 `is_expanded()` 读取），这样应用可以在用户阅读或触摸 toast 时暂停计时。
+栈的子元素就是它的 toast，从旧到新。从 `placement` 指定的边缘（默认 `"topRight"`；底部的锚点向上排列）开始，收起时 toast 以 `collapsedPeek` 的间距重叠，越靠后的每层窄 `collapsedScaleStep`，只显示 `collapsedVisible` 层。展开时它们是间距为 `expandedGap` 的列表（终端里间距为三行，每个 toast 的边框与下一个之间空一行）。toast 的出现、离开和栈的展开都以临界阻尼弹簧移动它们。指针停在栈上或手指按在栈上时它是展开的（`onExpandedChange({ expanded })`；Rust 的 `ToastStackState` 用 `is_expanded()` 读取），这样应用可以在用户阅读或触摸 toast 时暂停计时。
 
 栈由应用放置：放在边缘的 [Overlay](./overlay.md) 中，并位于安全区域之内。它的 `class` 和 `style` 决定宽度。只要它包含 toast，它就会收到 Escape 和 Android 返回键（`onCancel`；`closeOnEscape={false}` 把它们留给应用的其他部分）：关闭最新的 toast。
 
@@ -151,9 +151,9 @@ Manager 没有界面：它不渲染任何东西，也不运行计时器。应用
 
 ## Toast
 
-Toast 是包裹应用内容的 `alert` 角色。它的 `transitionStatus` 来自 manager，状态类随之叠加在它的 `class` 之上：`startingClass` 在 `"starting"` 时只作用于它的第一帧，它的 `transition` 类从这里开始动画（Tailwind 的 `starting:`、CSS 的 `@starting-style`）；`endingClass` 在 `"ending"` 期间、退出时长内生效；`swipingClass` 在指针滑动它时生效（`transition-none` 让它紧跟手指）。
+Toast 是包裹应用内容的 `alert` 角色。它的 `transitionStatus` 来自 manager，状态类随之叠加在它的 `class` 之上：`startingClass` 在 `"starting"` 时只作用于它的第一帧，它的 `transition` 类从这里开始动画（Tailwind 的 `starting:`、CSS 的 `@starting-style`）。`endingClass` 在 `"ending"` 期间、退出时长内生效。`swipingClass` 在指针滑动它时生效（`transition-none` 让它紧跟手指）。
 
-手指或鼠标朝 `swipeDirection`（默认 `"right"`；`null` 关闭滑动）拖动时，它会在指针移动之后跟随，因此它的按钮仍是按钮；松开时超过 `swipeThreshold` 点（50）或快速甩动，它会继续移出并请求关闭（`onDismissRequest`），不足则回到原位。读屏软件会在它出现时朗读它的 `accessibilityLabel`，只读一次：应用把 toast 移到另一个父节点下（在那里重建，例如有模态打开时把栈画进最上层的模态）不会再读一遍。在拿掉一个同标签 toast 的同一次更新里挂上的 toast，就是被移过去的那一条；其余的 toast 都会读，不论它的 `transitionStatus` 是什么。
+手指或鼠标朝 `swipeDirection`（默认 `"right"`；`null` 关闭滑动）拖动时，它会在指针移动之后跟随，因此它的按钮仍是按钮。松开时超过 `swipeThreshold` 点（50）或快速甩动，它会继续移出并请求关闭（`onDismissRequest`），不足则回到原位。读屏软件会在它出现时朗读它的 `accessibilityLabel`，只读一次：应用把 toast 移到另一个父节点下（在那里重建，例如有模态打开时把栈画进最上层的模态）不会再读一遍。在拿掉一个同标签 toast 的同一次更新里挂上的 toast，就是被移过去的那一条。其余的 toast 都会读，不论它的 `transitionStatus` 是什么。
 
 <a id="toast-props"></a>
 

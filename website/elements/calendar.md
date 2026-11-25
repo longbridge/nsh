@@ -7,10 +7,10 @@ demo: el-date-picker
 
 # Calendar
 
-A calendar picks a date, or with `range` a range of dates, from months of days laid out in weeks: a due date in a
-form, the nights of a stay, the days of a report. It shows one month or several side by side, turns the months with
-Previous and Next, and switches to a view of the year's months or a page of years to go far. It is the calendar in
-[DatePicker](./date-picker.md)'s popup, on its own in the page.
+A calendar lets the user pick a date, or a range of dates with `range`, from a month grid. Use it for a due date, the
+nights of a stay or the days of a report. It shows one month or several side by side. Previous and Next turn the
+months, and a month view and a year view jump further. It is the same calendar as in
+[DatePicker](./date-picker.md)'s popup, placed directly in the page.
 
 The calendar owns the behavior: the value (the app's, or its own), the shown month, the views, the days that cannot
 be picked, the keyboard and what screen readers hear. The look is the app's: it styles the header, the body, each
@@ -110,9 +110,9 @@ them), the days it disables a `Matcher`.
 
 ## Value
 
-The value is an ISO date, `"2026-10-28"`, as an HTML `<input type="date">`'s; with `range` it is `[start, end]`, and
+The value is an ISO date, `"2026-10-28"`, as an HTML `<input type="date">`'s. With `range` it is `[start, end]`, and
 `null` is no date. With `value`, the app owns it: the calendar shows it as selected and reports a pick with
-`onChange({ value })`; the app sets `value` to follow it. Left out, the calendar keeps its own value, from
+`onChange({ value })`. The app sets `value` to follow it. Left out, the calendar keeps its own value, from
 `defaultValue` at first.
 
 `onChange` reports complete values only, as `gpui-base`'s `Selected`: a pressed day, or a range's end.
@@ -126,13 +126,13 @@ The calendar opens on the month of the value (a range's start), else today's.
 
 ## Months and views
 
-`numberOfMonths` shows that many months side by side, from the shown one on; Previous and Next turn them one month at
-a time. `firstDayOfWeek` is the day the weeks start on, `0` Sunday (the default) to `6` Saturday; the user's is
+`numberOfMonths` shows that many months side by side, from the shown one on. Previous and Next turn them one month at
+a time. `firstDayOfWeek` is the day the weeks start on, `0` Sunday (the default) to `6` Saturday. The user's is
 `localeSettings().firstDayOfWeek % 7` ([Regional preferences](../docs/device-and-environment.md#regional-preferences)).
 
 The header holds Previous, two toggles and Next:
 
-- The day view shows the months' days, each month a column of its weekdays' row and its weeks; the days of the
+- The day view shows the months' days, each month a column of its weekdays' row and its weeks. The days of the
   months before and after fill the weeks (`outside`, `data-outside`).
 - The month toggle (`monthToggle`) opens the month view: the twelve months, in rows of three. Picking one shows it in
   the day view.
@@ -176,7 +176,7 @@ months and the years. Each is drawn in a part styled by `itemClass` and `itemSty
 | `data-outside:` | Is a day of the month before or after, filling its weeks. |
 
 The `data-*` variants are Tailwind's (`data-range-start:` matches `[data-range-start]`), as shadcn's calendar styles
-its days; with `group` in `itemClass`, the content follows them with `group-selected:`, `group-data-range-middle:`,
+its days. With `group` in `itemClass`, the content follows them with `group-selected:`, `group-data-range-middle:`,
 and so on. `selected:` means every day of a range, so a range's ends take their look over it (later variants win:
 `data-*` comes after `selected:`), and its middle days theirs:
 
@@ -189,7 +189,7 @@ and so on. `selected:` means every day of a range, so a range's ends take their 
 
 While the second end is chosen, the `data-range-preview-*` variants mark the range a pick would make: from the start
 to the day the mouse last moved over, or to the keyboard's day once it moves, as React Aria's range calendar
-highlights it, whichever moved last. A day before the start shows none, since a pick there starts the range again; a
+highlights it, whichever moved last. A day before the start shows none, since a pick there starts the range again. A
 disabled day under the mouse, or the mouse leaving the days, leaves the preview where it was. The second pick replaces
 it with the range's own variants. Without a mouse or a keyboard (on a touch screen) the half
 range shows its start alone. Drawing the preview like the range shows the band before it is picked, the day at its end
@@ -216,7 +216,7 @@ with several months, the months still shown keep theirs).
 | `today` | The day is today. |
 | `outside` | The day is of the month before or after. |
 
-Without `renderItem`, an item shows its number, and Previous and Next show `‹` and `›`, as `gpui-base`'s; a weekday
+Without `renderItem`, an item shows its number, and Previous and Next show `‹` and `›`, as `gpui-base`'s. A weekday
 shows its number too, `0` to `6`, since the names of the months and weekdays are the app's words in the app's
 language.
 
@@ -272,17 +272,17 @@ disabled days, which take no focus. Then:
 | Shift+Page Up / Shift+Page Down | The same day a year before or after. |
 | Return, Space | Picks the day. |
 
-In a right-to-left layout the weeks run from the right, so Left is the day after and Right the day before; Up and Down
+In a right-to-left layout the weeks run from the right, so Left is the day after and Right the day before. Up and Down
 keep the weeks. A key that reaches a disabled day goes on to the next day that is not, in the direction it moves (Home
 and End back toward the day they left). Moving past the shown months turns them. Previous, the toggles, Next, the months and the years take
 presses.
-`gpui-base`'s days take presses only; the keys are NSH's, after the WAI-ARIA date picker dialog.
+`gpui-base`'s days take presses only. The keys are NSH's, after the WAI-ARIA date picker dialog.
 
 ## Accessibility
 
 - Each day is a button named by its ISO date, selected while it is the date or a day of the range (its ends included, as
   React Aria's range calendar), dimmed while disabled.
-- Previous and Next are buttons named by `previousAccessibilityLabel` and `nextAccessibilityLabel`; the toggles,
+- Previous and Next are buttons named by `previousAccessibilityLabel` and `nextAccessibilityLabel`. The toggles,
   months and years are buttons named by what they show.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.

@@ -32,7 +32,7 @@ nsh package --target ios --sign "Apple Development: Jane Doe (ABCDE12345)" --pro
 nsh package App.tsx --target ios-simulator --run
 ```
 
-Output goes to `.nsh/out/` unless you pass `--out`. The sections below give each target's command for a Rust app; a
+Output goes to `.nsh/out/` unless you pass `--out`. The sections below give each target's command for a Rust app. A
 TSX app adds its entry (`nsh package App.tsx --target …`).
 
 > [!NOTE]
@@ -134,7 +134,7 @@ Find your identities with:
 security find-identity -v -p codesigning
 ```
 
-Without `--sign` and `--profile`, NSH writes an unsigned `.nsh/out/<Name>.app` and tells you so; it cannot be installed on a
+Without `--sign` and `--profile`, NSH writes an unsigned `.nsh/out/<Name>.app` and tells you so. It cannot be installed on a
 device as it is.
 
 The app supports iPhone and iPad, portrait and landscape (portrait upside down on iPad only), and needs iOS 15.0 or
@@ -168,11 +168,11 @@ Widgets, Live Activities, notification service extensions and other app extensio
 
 Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`: an extension's
 version should match its app's (App Store Connect flags a mismatch). An extension's identifier must start with the app's (`com.example.app.Widget` for
-`com.example.app`). The simulator package signs them ad hoc; the device package signs each one with the profile for its
+`com.example.app`). The simulator package signs them ad hoc. The device package signs each one with the profile for its
 identifier, which it carries as `embedded.mobileprovision`, before it signs the app. `nsh run --target ios` carries them
 too: the simulator's development host runs every TSX app, so each extension takes the host's identifier in place of
 the app's (`com.longbridge.nsh.host.Widget`).  Pass one `--profile` for the app
-and one for each extension; a profile that names a bundle's identifier is taken before a wildcard that covers it:
+and one for each extension. A profile that names a bundle's identifier is taken before a wildcard that covers it:
 
 ```sh
 nsh package --target ios \
@@ -208,7 +208,7 @@ without Gradle. Requirements:
 
 The app targets API 35 (`targetSdkVersion`, what Google Play requires) unless `nsh.json` names another level, and
 needs API 26 (Android 8) or newer. It contains native code for the ABIs of phones,
-`arm64-v8a` and `armeabi-v7a`; with `--run`, also the device's, such as an emulator's `x86_64`. `--abi` picks them
+`arm64-v8a` and `armeabi-v7a`. With `--run`, also the device's, such as an emulator's `x86_64`. `--abi` picks them
 yourself, for example `--abi arm64-v8a` for 64-bit phones only, the smallest APK:
 
 ```sh
@@ -270,7 +270,7 @@ others, for code of the app or an extension that calls Android itself: a bare na
 
 A normal permission such as `ACCESS_WIFI_STATE` is granted when the app is installed. A runtime permission
 (`ACCESS_FINE_LOCATION`, say) is only declared: the app's own code still asks the user for it. The TSX development
-host (`nsh run --target android` of a TSX app) declares none of these; a Rust app's `nsh run` builds its package and
+host (`nsh run --target android` of a TSX app) declares none of these. A Rust app's `nsh run` builds its package and
 declares them.
 
 ### Java code
@@ -288,20 +288,20 @@ Android library (`.aar`) and dex files, relative to `nsh.json`. An nshm lists it
 
 The package turns the jars into dex with the SDK's `d8` and carries their classes after NSH's runtime, where the
 app's class loader finds them. The files a jar carries besides its classes (`META-INF/services/...` for
-`ServiceLoader`, for one) go to the root of the package; those under `assets/` are the package's assets, as Android's
+`ServiceLoader`, for one) go to the root of the package. Those under `assets/` are the package's assets, as Android's
 Gradle plugin makes them. A dex file goes in as it is, without `d8`, so a class it defines again besides a jar is not found
 when packaging. A file listed twice, or by two
-crates, goes in once; a class that two different files define stops the build, naming both files. An app that lists
+crates, goes in once. A class that two different files define stops the build, naming both files. An app that lists
 no libraries is packaged as before, without `d8`.
 
 The libraries are local files: NSH does not download them or resolve Maven dependencies, so list the libraries an SDK
 depends on as well. The third-party tool [nsh-maven](https://github.com/SuperNSH/maven) resolves a library from Maven
 repositories with what it depends on (`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`), downloads the
-files into the app and lists them here; with `--crate` it lists them in an nshm crate's `Cargo.toml`.
+files into the app and lists them here. With `--crate` it lists them in an nshm crate's `Cargo.toml`.
 
 An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
-(`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
-own; its resources (`res/`) join the package's, and its code reads them through its `R` class as it was built to; and
+(`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own. Its assets join the app's
+own. Its resources (`res/`) join the package's, and its code reads them through its `R` class as it was built to. Also,
 its manifest's permissions, features, `<queries>` and components join the app's manifest, its relative class
 names (`.PushService`) completed with its package and `${applicationId}` filled in with the app's. Components that
 several libraries declare under one name (a startup provider each adds an initializer to) become one. Other
@@ -330,7 +330,7 @@ Resources share one namespace, as in any Android app. When several define a reso
 lists, an earlier one over a later one, then its crates' libraries, the crate whose name sorts first over the others.
 A style is taken whole from the one that wins, not item by item. What NSH makes for the package (its icon, launch
 screen and notification sounds) is the package's in every configuration: a library's resources of those names are left
-out, with a warning. A library's `R.txt` also lists the resources of the libraries it was built with; those no library
+out, with a warning. A library's `R.txt` also lists the resources of the libraries it was built with. Those no library
 listed defines are left out of its `R` class, with one note. A library's code that reads such a resource stops the
 build, naming the library, the class and the resource: list the library that has it.
 
@@ -341,7 +341,7 @@ javac --release 11 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -
 jar cf java/out/glue.jar -C java/classes .
 ```
 
-A thread Rust started finds only the system's classes through JNI's `FindClass`; load the app's classes from the
+A thread Rust started finds only the system's classes through JNI's `FindClass`. Load the app's classes from the
 activity's class loader (`Context.getClassLoader()`) there.
 
 An NSH app has no `Application` class of its own, so an SDK that must be initialized from one, or must be its
@@ -386,7 +386,7 @@ The crates the app links add theirs the same way ([What the packaged app needs](
 after the app's. When the app has Android libraries (`.aar`), these entries are merged with what the libraries declare:
 one of the same name as a library's (`<meta-data>` for a provider a library declares) joins it. `<application>`'s own
 attributes stay NSH's. The development host (`nsh run` of a TSX app, and
-`nsh test --target android`) declares the crates' entries but not the app's own; a Rust app's `nsh run` builds its
+`nsh test --target android`) declares the crates' entries but not the app's own. A Rust app's `nsh run` builds its
 package and declares them.
 
 ### Google Play: App Bundles
@@ -401,7 +401,7 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
   --keystore release.jks --key-alias upload
 ```
 
-`--run` installs APKs, so it does not take `--format aab`; to try a bundle on a device, use
+`--run` installs APKs, so it does not take `--format aab`. To try a bundle on a device, use
 [bundletool](https://github.com/google/bundletool) (`build-apks`, then `install-apks`).
 
 ## macOS
@@ -412,7 +412,7 @@ nsh package --target macos --run
 
 Writes `.nsh/out/<Name>.app`: the executable in `Contents/MacOS/`, and `nsh/assets/…`, `nsh/app.json` (the window
 title, the app's appearance, its activation policy and nsh.json's window options) and a TSX app's `nsh/bundle.nshc` in
-`Contents/Resources/`. Without `--sign`, the app is signed ad hoc; it needs macOS 14 or later, or the later version it
+`Contents/Resources/`. Without `--sign`, the app is signed ad hoc. It needs macOS 14 or later, or the later version it
 names ([Minimum system version](#minimum-system-version)). See [macOS](./macos.md#packaging).
 
 To sign the app for distribution, pass `--sign <identity>` (such as `"Developer ID Application: …"` or
@@ -518,7 +518,7 @@ nsh package --target macos --arch universal \
 This writes `.nsh/out/<Name>.app`. With a certificate, NSH signs nested frameworks and extensions first, then the app,
 with Hardened Runtime (`--options runtime`) and a secure timestamp (`--timestamp`) as notarization requires, and
 verifies the result with `codesign --verify --deep --strict`. `--arch universal` runs on both Apple silicon and Intel
-Macs (it needs `rustup target add x86_64-apple-darwin` for a Rust app); leave it out for this Mac's processor only.
+Macs (it needs `rustup target add x86_64-apple-darwin` for a Rust app). Leave it out for this Mac's processor only.
 Without `--sign` the app is signed ad hoc, which runs on the Mac that built it but is stopped by Gatekeeper elsewhere.
 
 #### Notarize and staple
@@ -596,7 +596,7 @@ nsh package --target linux --format appimage
 
 Writes `.nsh/out/<Name>.AppDir` and `.nsh/out/<Name>-<arch>.AppImage`, besides the directory and archive. The
 AppImage carries the desktop entry, icon and metainfo, and runs on the system's GTK 4 and WebKitGTK like the archive,
-so the target system needs them installed. Attach it to your release; users run:
+so the target system needs them installed. Attach it to your release. Users run:
 
 ```sh
 chmod +x Counter-x86_64.AppImage
@@ -619,8 +619,8 @@ flatpak run io.github.example.Counter
 ```
 
 Requirements: [appimagetool](https://github.com/AppImage/appimagetool/releases) on `PATH` or in `NSH_APPIMAGETOOL`
-(without FUSE, set `APPIMAGE_EXTRACT_AND_RUN=1`); for a local Flatpak build, `flatpak`, `flatpak-builder` and the GNOME
-runtime and SDK. AppImage bundles NSH but not GTK 4 or WebKitGTK; when an AppImage starts without a window, the system
+(without FUSE, set `APPIMAGE_EXTRACT_AND_RUN=1`). For a local Flatpak build, `flatpak`, `flatpak-builder` and the GNOME
+runtime and SDK. AppImage bundles NSH but not GTK 4 or WebKitGTK. When an AppImage starts without a window, the system
 lacks them, and the Flatpak brings them. Releasing on Flathub: [Publishing](./publish.md#publish-to-flathub).
 
 ### Distribute
@@ -717,7 +717,7 @@ nsh package --target windows --run
 
 Writes `.nsh\out\<Name>\` (the executable `<Name>.exe` with the app's icon, `nsh\assets\…`, `nsh\app.json` with the
 window title, the app id, the version, the appearance and nsh.json's window options, and a TSX app's `nsh\bundle.nshc`)
-and the same as `.nsh\out\<Name>.zip`. A TSX app needs no tools; a Rust app's runner is built with Visual Studio Build
+and the same as `.nsh\out\<Name>.zip`. A TSX app needs no tools. A Rust app's runner is built with Visual Studio Build
 Tools. Package on Windows: the runner is built for the machine it is built on, and only Windows can
 embed the icon. The app runs from wherever its directory is copied. `nsh package` also writes the Inno Setup script
 `.nsh\out\<Name>.iss` and, when Inno Setup 6 is installed, compiles it to `.nsh\out\<Name>-setup.exe`: a per-user
@@ -747,11 +747,11 @@ package's identity comes from `nsh.json`:
 ```
 
 Copy `identityName` and `publisher` from Partner Center (the app → Product identity: Package/Identity/Name and
-Package/Identity/Publisher); defaults are the app id and `CN=<name>`. The version is `version` with a fourth part 0,
+Package/Identity/Publisher). Defaults are the app id and `CN=<name>`. The version is `version` with a fourth part 0,
 which the Store reserves. The Store signs what it publishes, so submit the unsigned package with
 `nsh publish windows` ([Publishing](./publish.md#publish-to-the-microsoft-store)). Outside the Store, Windows installs only signed
 packages: `--sign <cert.pfx>` signs it with `signtool` on Windows or `osslsigncode` (2.6 or newer) elsewhere, its
-password in `NSH_WINDOWS_CERT_PASSWORD`; the certificate's subject must equal `windows.publisher`.
+password in `NSH_WINDOWS_CERT_PASSWORD`. The certificate's subject must equal `windows.publisher`.
 
 ### Sign and distribute
 
@@ -767,7 +767,7 @@ For the Microsoft Store, package an [MSIX](#msix) and submit it with `nsh publis
 
 On the Windows machine (or CI runner) that packages the app:
 
-1. **Install the tools.** A TSX app needs none; a Rust app's runner is built with Visual Studio Build Tools. For the
+1. **Install the tools.** A TSX app needs none. A Rust app's runner is built with Visual Studio Build Tools. For the
    installer, install Inno Setup 6: `winget install JRSoftware.InnoSetup`.
 2. **Get a code signing certificate** from a certificate authority, or use a cloud signing service such as Azure
    Trusted Signing. Unsigned executables still run, but SmartScreen warns about an unknown publisher, and some
@@ -813,7 +813,7 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /n "Exampl
 signtool verify /pa .nsh\out\Notes-setup.exe
 ```
 
-`ISCC.exe` compiles the installer again from the script `nsh package` wrote, now with the signed executable; its path
+`ISCC.exe` compiles the installer again from the script `nsh package` wrote, now with the signed executable. Its path
 depends on where Inno Setup is installed (`C:\Program Files (x86)\Inno Setup 6\ISCC.exe` for a machine-wide install).
 Make the `.zip` again from the signed directory too if you publish it. Always timestamp (`/tr`): the signature then
 stays valid after the certificate expires.
@@ -861,7 +861,7 @@ so hosts can cache them for good. Deploy the directory to any web server or CDN;
 
 ### Host the site
 
-On the web an app is a static site. `nsh package --target web` writes it; you copy the directory to any web server,
+On the web an app is a static site. `nsh package --target web` writes it. You copy the directory to any web server,
 object store or static host. There is no store, no signing and no review, and a deploy updates every user on their next
 load. `nsh publish` has nothing to do here.
 
@@ -930,10 +930,10 @@ jobs:
       - uses: actions/deploy-pages@v4
 ```
 
-A project site lives under `/<repo>/`; relative URLs handle that. An app opened at its own paths sets
+A project site lives under `/<repo>/`. Relative URLs handle that. An app opened at its own paths sets
 `"web": { "base": "/<repo>/" }` and adds a copy of `index.html` as `404.html` (`cp site/index.html site/404.html`
 before the upload), which GitHub Pages answers unknown paths with. GitHub Pages cannot set `Cache-Control` per file, so returning visitors revalidate
-the hashed files too; a host that lets you set headers loads faster.
+the hashed files too. A host that lets you set headers loads faster.
 
 ##### An object store and a CDN
 
@@ -1018,7 +1018,7 @@ Entitlements:
 
 - **iOS devices** are signed with the entitlements the provisioning profile grants, each of the app's in place of the
   profile's value. Every entitlement the app names must be one the profile grants, with a value it covers (a profile
-  grants associated domains as `*` and keychain groups as `TEAMID.*`); otherwise `nsh package` stops and names the
+  grants associated domains as `*` and keychain groups as `TEAMID.*`). Otherwise `nsh package` stops and names the
   entitlement, so enable its capability for the app's identifier and download the profile again.
 - **The iOS simulator** is signed with the app's entitlements as they are.
 - **macOS** packages are signed with the app's entitlements, ad hoc by default or with `--sign <identity>` (Hardened
@@ -1061,7 +1061,7 @@ development host's.
   set it in `infoPlist`, or have it from NSH (the app's name, the usage descriptions NSH adds) or from a
   [crate](./nshm.md#what-the-packaged-app-needs). A translation of a key the package's `Info.plist` does not have as a
   string stops `nsh package` with an error naming it: the system would never show it.
-- **Translated keys** are the app's own and, of NSH's, only `CFBundleDisplayName` and `CFBundleName`; values are
+- **Translated keys** are the app's own and, of NSH's, only `CFBundleDisplayName` and `CFBundleName`. Values are
   strings. A macOS package whose name is translated also says so to Finder (`LSHasLocalizedDisplayName`).
 - **The languages are declared** to the system with the app's [`locales`](./i18n.md) (`CFBundleLocalizations`),
   English first: users of a language the app has no translation for see the `Info.plist` text, and the system's own UI
@@ -1140,7 +1140,7 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 
 - **iOS:** compiled by Xcode's `actool` into the app's asset catalog (`Assets.car`), which derives every size iOS
   needs.
-- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`); see adaptive icons below.
+- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`). See adaptive icons below.
 - **macOS:** converted by `sips` to `AppIcon.icns`. `nsh run --target macos` and `nsh test --target macos` show the
   PNG in the Dock and the app switcher.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
@@ -1151,7 +1151,7 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 - **Web:** resized to 32 pixels (the favicon), 180 (`apple-touch-icon`), 192 and 512 (the web app manifest).
 
 Platforms draw icons differently: macOS artwork sits inset on a transparent canvas (824 of 1024 pixels), while
-Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platform; its keys are `macos`, `windows`,
+Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platform. Its keys are `macos`, `windows`,
 `linux`, `ios`, `android` and `web`, and a platform left out gets the system's default:
 
 ```json
@@ -1165,7 +1165,7 @@ Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platf
 ```
 
 `icon.android` also takes an adaptive icon, whose layers the launcher masks to its own shape (circle, squircle, ...).
-Each layer is 108×108dp; the inner 72×72dp appears within the mask, and the outer 18dp on each side is left for the
+Each layer is 108×108dp. The inner 72×72dp appears within the mask, and the outer 18dp on each side is left for the
 launcher's visual effects. Keep the artwork within the central circle of 66dp: about 61% of the width, 264 pixels of a
 432-pixel layer.
 
@@ -1214,7 +1214,7 @@ middle of the screen, the same in both appearances or one for each:
 
 Both are compiled into the app's asset catalog with its icon and named in `UILaunchScreen`, which the app no longer
 sets in `ios.infoPlist`. A launch screen that matches the app's first frame (its background, the same image in the
-same place) makes the start look seamless. `appearance` picks which of the two the system shows.
+same place) hides the switch from the launch screen to the app. `appearance` picks which of the two the system shows.
 
 On Android, `android.launchScreen` takes the same keys. The package gives the app a theme whose window background is
 `background`, so the window matches the app's first frame from the tap on the icon on, and stays behind it. On Android
@@ -1273,7 +1273,7 @@ assets it imports, next to the prebuilt runtime:
 | Windows | the `nsh-windows-app.exe` executable, renamed `<Name>.exe` | `<Name>\nsh\bundle.nshc`, `nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.js`, `assets/…`, `index.html` |
 
-A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
+A packaged app registers no [native components](./native-components.md). For those, embed NSH in your own app.
 
 ## Logs
 
@@ -1288,7 +1288,7 @@ A Rust app builds its own runners. For TSX apps, `nsh package` looks for the pre
 NSH it uses `target/<triple>/<profile>` and `target/android/<profile>`, with the CLI's own profile (a debug CLI uses
 debug runtimes): build them with `cargo build -p nsh-ios-app --target aarch64-apple-ios-sim` (or `aarch64-apple-ios`
 for devices) and `cargo xtask android` (add `--release` for a release CLI); `nsh-macos-app` (on macOS), `nsh-linux-app` (on Linux) and `nsh-windows-app` (on Windows) are built for this
-machine in `target/<profile>` (`cargo build -p nsh-macos-app`, `cargo build -p nsh-linux-app`, `cargo build -p nsh-windows-app`); the web runtime is built with the `web` profile whatever the CLI's, into `target/wasm32-unknown-unknown/web/`. The environment variable `NSH_RUNTIME`
+machine in `target/<profile>` (`cargo build -p nsh-macos-app`, `cargo build -p nsh-linux-app`, `cargo build -p nsh-windows-app`). The web runtime is built with the `web` profile whatever the CLI's, into `target/wasm32-unknown-unknown/web/`. The environment variable `NSH_RUNTIME`
 points the CLI at another directory laid out like the distribution's `runtime/` (`ios/iphoneos`,
 `ios/iphonesimulator`, `android/release`, `macos`, `linux`, `windows`, `gpui`, `web`, ...).
 

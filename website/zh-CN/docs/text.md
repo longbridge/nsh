@@ -36,7 +36,7 @@ text("By continuing you agree to the ")
 > [!IMPORTANT]
 > 字符串由文本元素显示。在 TSX 中，直接放在 `<View>` 中的字符串不会显示：请把它包在 `<Text>` 里。
 
-元素本身的说明见 [text](../elements/text.md)；本页介绍如何使用它。
+元素本身的说明见 [text](../elements/text.md)。本页介绍如何使用它。
 
 ## 字符串与空白
 
@@ -100,7 +100,7 @@ text("Read the ")
 
 ### Span 的背景
 
-Span 的背景色和圆角会在它所在的每一行、字符后面画一个与字体等高的方框；文字排版不变，复制时内容完整，所以行内代码就是一个 span（[Text 元素](../elements/text.md#片段背景)）：
+Span 的背景色和圆角会在它所在的每一行、字符后面画一个与字体等高的方框。文字排版不变，复制时内容完整，所以行内代码就是一个 span（[Text 元素](../elements/text.md#片段背景)）：
 
 ```tsx tabs
 <Text>
@@ -114,7 +114,7 @@ text("先运行 ")
     .child("。")
 ```
 
-span 上的水平 padding 会在它两端的行内占位，背景也覆盖这段空间，与 CSS 行内盒一致；垂直 padding 会让背景向文字上下延伸，但不改变行高；边框对 span 不起作用。`fontSize` 用相对值时，span 无论放在哪里都和所在段落保持比例：
+span 上的水平 padding 会在它两端的行内占位，背景也覆盖这段空间，与 CSS 行内盒一致。垂直 padding 会让背景向文字上下延伸，但不改变行高。边框对 span 不起作用。`fontSize` 用相对值时，span 无论放在哪里都和所在段落保持比例：
 
 ```tsx
 <Text style={{ fontSize: 16 }}>
@@ -166,11 +166,11 @@ text("Made with ")
     )
 ```
 
-被 `numberOfLines` 或省略号截掉的行内元素会被隐藏；复制文字时也不会包含它们，设置了 `copyText`（`.copy_text(..)`）的元素除外：
+被 `numberOfLines` 或省略号截掉的行内元素会被隐藏。复制文字时也不会包含它们，设置了 `copyText`（`.copy_text(..)`）的元素除外：
 复制结果在它的位置放上这段文字（例如行内公式的 `$x^2$`）。行内元素里的文字沿用外围文字的颜色（如同 CSS 的
-`color` 会传到行内块），自己设置了颜色时除外（上面的 `LIVE` 标签即是）；字体和行高仍是它自己的。
+`color` 会传到行内块），自己设置了颜色时除外（上面的 `LIVE` 标签即是）。字体和行高仍是它自己的。
 
-样式键 `verticalAlign` 决定行内元素在所在行中的位置，与 CSS 的 `vertical-align` 摆放图片的方式一致：`"baseline"`（默认）让元素底边落在基线上，`"text-top"` 和 `"text-bottom"` 让元素顶边或底边对齐文本字体的顶部或底部，`"middle"` 让元素中心位于基线上方半个 x 高度处。元素超出字体的部分会撑高所在行，设置了固定 `lineHeight` 时也是如此。段首图标若要像 Android 的 `ImageSpan` 那样与文字底部对齐，使用 `"text-bottom"`。对应的类是 `align-baseline`、`align-text-top`、`align-text-bottom` 和 `align-middle`；Rust 中是同名的 `.align_text_bottom()` 等方法。
+样式键 `verticalAlign` 决定行内元素在所在行中的位置，与 CSS 的 `vertical-align` 摆放图片的方式一致：`"baseline"`（默认）让元素底边落在基线上，`"text-top"` 和 `"text-bottom"` 让元素顶边或底边对齐文本字体的顶部或底部，`"middle"` 让元素中心位于基线上方半个 x 高度处。元素超出字体的部分会撑高所在行，设置了固定 `lineHeight` 时也是如此。段首图标若要像 Android 的 `ImageSpan` 那样与文字底部对齐，使用 `"text-bottom"`。对应的类是 `align-baseline`、`align-text-top`、`align-text-bottom` 和 `align-middle`。Rust 中是同名的 `.align_text_bottom()` 等方法。
 
 ```tsx
 <Text style={{ fontSize: 16 }}>
@@ -270,7 +270,7 @@ text(move || total.get())
     .w(px(200.0))
 ```
 
-Tailwind 类 `line-clamp-*`、`text-ellipsis` 和 `text-clip` 设置同样的键，`truncate`（`.truncate()`）是单行并以省略号截断；作为样式键，它们也能用在状态样式和变体中。
+Tailwind 类 `line-clamp-*`、`text-ellipsis` 和 `text-clip` 设置同样的键，`truncate`（`.truncate()`）是单行并以省略号截断。作为样式键，它们也能用在状态样式和变体中。
 
 `whitespace-nowrap`（`.whitespace_nowrap()`）让文本保持一行。`text-pretty`（`.text_pretty()`）换行时不让末行只剩一两个字：末行短于宽度四分之一时，在不增加行数的前提下从上面几行挪字过来。`whitespace-normal`（`.whitespace_normal()`）按常规换行。设在视图上时，它们会像 CSS 的 `white-space` 一样作用到其中的文本：
 
@@ -307,7 +307,7 @@ text("Tab label").max_font_size_multiplier(1.3).text_size(px(13.0))
 
 样式键 `userSelect: "text"`（`.select_text()`，类 `select-text`）允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。样式键 `selectionColor`（`.selection_color(..)`、`selection:text-*`）设置高亮和选择柄的颜色。设在视图上的 `userSelect` 作用于其中未自行设置的文本。
 
-在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外；`userSelect: "none"`（`.select_none()`，类 `select-none`）让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
+在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外。`userSelect: "none"`（`.select_none()`，类 `select-none`）让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
 
 ```tsx tabs
 <Text style={{ userSelect: "text", selectionColor: "#7c3aed" }}>{orderNumber}</Text>

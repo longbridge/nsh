@@ -8,7 +8,7 @@ group: platforms
 # Android
 
 NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 8（API 26）及以上，支持 `arm64-v8a`、
-`armeabi-v7a` 和 `x86_64`。用 TSX 和 Rust 编写的完整应用，运行和打包方式与其他平台相同；现有应用也可以在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。在
+`armeabi-v7a` 和 `x86_64`。TSX 和 Rust 应用的运行、打包方式与其他平台一样。已有的 Android 应用也能用 `NshView` 嵌入模块，或加载下载的签名包，限制和能力由宿主应用决定。在
 Android 上，`os()` 是 `Os::Android`（TSX 中 `platform.os` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
 
 ## 环境要求
@@ -26,12 +26,12 @@ nsh run --target android               # Rust 应用
 nsh run App.tsx --target android       # TSX 应用
 ```
 
-先启动模拟器或连接设备（`adb devices` 会列出它们）。NSH 使用 `--device <serial>` 或 `ANDROID_SERIAL` 指定的那台，否则使用第一台；
+先启动模拟器或连接设备（`adb devices` 会列出它们）。NSH 使用 `--device <serial>` 或 `ANDROID_SERIAL` 指定的那台，否则使用第一台。
 连着多台时会提示用的是哪一台。对 Rust 应用，`nsh` 用你的 crate 构建应用的 `libnsh.so`，
-安装 APK 并启动它；修改 crate 的 Rust 代码会重新构建并安装。对 TSX 应用，`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
-`adb reverse` 转发开发服务器的端口，因此通过 USB 即可工作，无需共享网络；你保存时应用会更新，日志显示在终端中。
+安装 APK 并启动它。修改 crate 的 Rust 代码会重新构建并安装。对 TSX 应用，`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
+`adb reverse` 转发开发服务器的端口，因此通过 USB 即可工作，无需共享网络。你保存时应用会更新，日志显示在终端中。
 
-这些开发构建中的 `libnsh.so` 不带调试信息，APK 因此小到能在模拟器上更新；完整的库在它旁边的 `symbols/<abi>/` 中，供 `ndk-stack`
+这些开发构建中的 `libnsh.so` 不带调试信息，APK 因此小到能在模拟器上更新。完整的库在它旁边的 `symbols/<abi>/` 中，供 `ndk-stack`
 和调试器使用。设备没有空间更新开发宿主时，NSH 会先卸载它再重新安装：它只保存所运行应用写下的数据。应用自己的 APK 从不会被自动卸载：
 错误信息会说明如何腾出空间。
 
@@ -44,7 +44,7 @@ nsh package App.tsx --target android --run     # TSX 应用
 
 Rust 应用的 APK 带有它自己的 `libnsh.so`，用你的 crate 构建，其中的 activity 挂载根组件。
 
-APK 用 SDK 的 build tools 构建，不需要 Gradle；除非传入发布用的 keystore，否则用调试密钥签名。发布签名和图标见[打包](./packaging.md#android)。
+APK 用 SDK 的 build tools 构建，不需要 Gradle。除非传入发布用的 keystore，否则用调试密钥签名。发布签名和图标见[打包](./packaging.md#android)。
 
 NSH 以 16 KB ELF 对齐构建 `libnsh.so`，并将未压缩的原生库按 16 KB ZIP 边界打包。
 release APK 中的 `libnsh.so` 不带符号表和调试信息。完整的库位于运行时旁的 `symbols/<abi>/libnsh.so`（Rust 应用的在
@@ -71,7 +71,7 @@ Play Console 与服务账号的准备、上传密钥、轨道、分阶段发布�
 Android 上以 `nsh package --target android` 构建的 APK 发布。NSH 应用用普通的 Android
 视图渲染，与你自己的视图并列。
 
-每个 `NshView` 都是一个独立的引擎，拥有自己的 JS VM；没有全局单例，所以可以同时运行多个。
+每个 `NshView` 都是一个独立的引擎，拥有自己的 JS VM。没有全局单例，所以可以同时运行多个。
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="一个宿主应用里有两个 nsh 视图（iOS 上是 NshAppView，Android 上是 NshView）：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力；宿主授予能力、设置限制，并注册地图这样的原生组件。">
@@ -93,7 +93,7 @@ dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 ```
 
-`--no-dev` 不构建 `nsh-dev.aar`。默认包含 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`；重复 `--abi` 可以少构建几个。
+`--no-dev` 不构建 `nsh-dev.aar`。默认包含 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`。重复 `--abi` 可以只构建其中几个。
 
 AAR 包含 Java 运行时以及适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的 `libnsh.so`，库中带有符号：应用的 Gradle
 构建在打包时去除符号，并保留它们用于崩溃报告。它声明了 `INTERNET` 和
@@ -260,14 +260,14 @@ nsh.handle("user.profile") { data, reply ->
 }
 ```
 
-处理函数在 UI 线程运行；调用在应用中等待回答，不会阻塞任何一方。始终没有给出的 reply 在被回收时让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadAssetBundle` 之前、重新加载期间）发送的事件交给下一个应用。
+处理函数在 UI 线程运行。调用会在应用中等待回答，但不会阻塞任何一方。如果 reply 一直没给出，它被回收时调用会失败。调用了没有处理函数的名称，会立即失败。应用还没监听的事件会先保留，等它开始监听再送达。没有应用运行时（`loadAssetBundle` 之前、重新加载期间）发送的事件，会交给下一个应用。
 ## 跟随滚动视图
 
 宿主的原生界面有时要逐帧跟着应用的内容移动：页面下方一个由内容末尾拉起的面板，或随内容收起的页头。把 `onScroll` 经 JS
 转给宿主会晚一帧，所以宿主按 `nativeID` 监听应用的 `<Scroll>`，拿到它的 `NshScrollHandle`。一切都在 UI 线程、滚动的同一帧里进行，
 不经过 JS。iOS 上的 API 与此相同，单位按各平台习惯。
 
-给 `<Scroll>` 设置 `nativeID`（供原生代码识别视图；`testID` 仍只用于测试）：
+给 `<Scroll>` 设置 `nativeID`（供原生代码识别视图，`testID` 仍只用于测试）：
 
 ```tsx
 <Scroll nativeID="page">…</Scroll>
@@ -419,7 +419,7 @@ set_foreign_handler(Chats);
 `ForeignNotification` 带有转成 JSON 的 intent `extras`、它的 `action` 和 `data` URI。Android 不告诉 activity 是哪条通知打开了它，
 所以 NSH 把带 extras、又没有别的含义的 intent 当作这样的点击：链接（`ACTION_VIEW`，交给 `onLink`）、分享和系统的其他 action
 都不算，从最近任务重新打开任务也不算。每个 intent 只交一次，用它重建的 activity 不会再报一次。处理者在 UI 线程运行，在其他线程调用
-`set_foreign_handler` 会 panic。处理者只有一个，所以由应用 crate 持有，再转给它使用的模块；之后的调用会替换它。嵌入 `NshView` 的应用
+`set_foreign_handler` 会 panic。处理者只有一个，所以由应用 crate 持有，再转给它使用的模块。之后的调用会替换它。嵌入 `NshView` 的应用
 在 `onCreate` 和 `onNewIntent` 里把 activity 的 intent 传给 `NshView.handleNotificationIntent`，这些点击也由它交出。
 
 ## 限制

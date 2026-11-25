@@ -7,7 +7,7 @@ demo: el-date-picker
 
 # Calendar
 
-日历从按周排列的月份中选出一个日期，或者在 `range` 时选出一段日期：表单里的截止日期、一次住宿的几晚、一份报告的天数。它显示一个月，或并排显示几个月，用"上一个"和"下一个"翻月，并可切换到一年中各月的视图或一页年份，以便跳得更远。它就是 [DatePicker](./date-picker.md) 弹出层里的日历，单独放在页面中。
+日历用来在月份网格上选一个日期。设置 `range` 后可以选一段日期。比如表单里的截止日期、住宿的几晚、报告覆盖的天数。它可以显示一个月，也可以并排显示几个月。用"上一个"和"下一个"翻月，切到月份视图或年份视图可以跳得更远。它和 [DatePicker](./date-picker.md) 弹出层里的日历是同一个组件，只是直接放在页面中。
 
 日历负责行为：值（应用的，或它自己的）、显示的月份、视图、不能选的日期、键盘，以及屏幕阅读器听到的内容。外观由应用决定：应用为头部、主体、每个月、每一行和每个条目设置样式，并绘制条目的内容（月份和星期的名称、今天的标记、范围的色带）。日历的网格像表格的列一样填满给它的宽度：几个月平分它，一行里的条目平分这一行，所以手机底部面板里的日历横跨整个屏幕，而按内容定宽的弹出层里的日历保持条目自身的宽度（在 `itemClass` 或 `monthClass` 里写 `flex-none` 可让条目或月份保持自身宽度）。
 
@@ -101,7 +101,7 @@ fn due_date() -> impl IntoElement {
 
 ## 值
 
-值是一个 ISO 日期 `"2026-10-28"`，与 HTML `<input type="date">` 的相同；在 `range` 时是 `[start, end]`，`null` 表示没有日期。有 `value` 时，值由应用持有：日历把它显示为已选，并用 `onChange({ value })` 报告一次选择；应用把 `value` 设为报告的值以跟随它。省略 `value` 时，日历自己保存值，初始为 `defaultValue`。
+值是一个 ISO 日期 `"2026-10-28"`，与 HTML `<input type="date">` 的相同。在 `range` 时是 `[start, end]`，`null` 表示没有日期。有 `value` 时，值由应用持有：日历把它显示为已选，并用 `onChange({ value })` 报告一次选择。应用把 `value` 设为报告的值以跟随它。省略 `value` 时，日历自己保存值，初始为 `defaultValue`。
 
 `onChange` 只报告完整的值，与 `gpui-base` 的 `Selected` 相同：按下的一天，或范围的结束日。
 
@@ -114,11 +114,11 @@ fn due_date() -> impl IntoElement {
 
 ## 月份与视图
 
-`numberOfMonths` 从显示的月份起并排显示这么多个月；"上一个"和"下一个"每次翻一个月。`firstDayOfWeek` 是每周的第一天，`0` 为星期日（默认）到 `6` 为星期六；用户的是 `localeSettings().firstDayOfWeek % 7`（[地区偏好](../docs/device-and-environment.md#地区偏好)）。
+`numberOfMonths` 从显示的月份起并排显示这么多个月。"上一个"和"下一个"每次翻一个月。`firstDayOfWeek` 是每周的第一天，`0` 为星期日（默认）到 `6` 为星期六。用户的是 `localeSettings().firstDayOfWeek % 7`（[地区偏好](../docs/device-and-environment.md#地区偏好)）。
 
 头部包含"上一个"、两个切换按钮和"下一个"：
 
-- 日视图显示各月的日期，每个月是一列，包含星期行和各周；前后月份的日期补满各周（`outside`、`data-outside`）。
+- 日视图显示各月的日期，每个月是一列，包含星期行和各周。前后月份的日期补满各周（`outside`、`data-outside`）。
 - 月份切换按钮（`monthToggle`）打开月份视图：十二个月，每行三个。选中一个会在日视图中显示它。
 - 年份切换按钮（`yearToggle`）打开年份视图：一页 20 年，每行五个，"上一个"和"下一个"翻页。选中一个会在日视图中显示那一年。`yearRange` 是翻页经过的年份，`[start, end)`（默认：今年之前 50 年到之后 50 年）。
 
@@ -157,7 +157,7 @@ fn due_date() -> impl IntoElement {
 | `data-today:` | 是今天。 |
 | `data-outside:` | 是补满各周的前后月份的日期。 |
 
-`data-*` 变体是 Tailwind 的（`data-range-start:` 匹配 `[data-range-start]`），与 shadcn 的日历为日期设置样式的方式相同；在 `itemClass` 里加上 `group`，内容就用 `group-selected:`、`group-data-range-middle:` 等跟随它们。`selected:` 指范围中的每一天，所以范围两端用自己的样式覆盖它（后面的变体胜出：`data-*` 排在 `selected:` 之后），中间的日期也一样：
+`data-*` 变体是 Tailwind 的（`data-range-start:` 匹配 `[data-range-start]`），与 shadcn 的日历为日期设置样式的方式相同。在 `itemClass` 里加上 `group`，内容就用 `group-selected:`、`group-data-range-middle:` 等跟随它们。`selected:` 指范围中的每一天，所以范围两端用自己的样式覆盖它（后面的变体胜出：`data-*` 排在 `selected:` 之后），中间的日期也一样：
 
 ```tsx
 <Calendar
@@ -166,7 +166,7 @@ fn due_date() -> impl IntoElement {
 />
 ```
 
-选择第二个端点时，`data-range-preview-*` 变体标出再选一次会得到的范围：从开始日到鼠标最后移过的那一天，或在键盘移动后到键盘所在的那一天，与 React Aria 的范围日历高亮它的方式相同。鼠标和键盘以最后移动的为准。开始日之前的日期没有预览，因为在那里选择会重新开始范围；鼠标停在被禁用的日期上或离开日期时，预览留在原处。第二次选择后，预览让位于范围自己的变体。没有鼠标和键盘时（触摸屏上），半个范围只显示它的开始日。把预览画得和范围一样，就能在选定之前显示出范围的色带，末端那一天由 `hover:` 或 `focus:` 点亮：
+选择第二个端点时，`data-range-preview-*` 变体标出再选一次会得到的范围：从开始日到鼠标最后移过的那一天，或在键盘移动后到键盘所在的那一天，与 React Aria 的范围日历高亮它的方式相同。鼠标和键盘以最后移动的为准。开始日之前的日期没有预览，因为在那里选择会重新开始范围。鼠标停在被禁用的日期上或离开日期时，预览留在原处。第二次选择后，预览让位于范围自己的变体。没有鼠标和键盘时（触摸屏上），半个范围只显示它的开始日。把预览画得和范围一样，就能在选定之前显示出范围的色带，末端那一天由 `hover:` 或 `focus:` 点亮：
 
 ```tsx
 <Calendar
@@ -186,7 +186,7 @@ fn due_date() -> impl IntoElement {
 | `today` | 这一天是今天。 |
 | `outside` | 这一天属于前后的月份。 |
 
-不设 `renderItem` 时，条目显示它的数字，"上一个"和"下一个"显示 `‹` 和 `›`，与 `gpui-base` 的相同；星期也显示它的数字 `0` 到 `6`，因为月份和星期的名称是应用用自己的语言说的话。
+不设 `renderItem` 时，条目显示它的数字，"上一个"和"下一个"显示 `‹` 和 `›`，与 `gpui-base` 的相同。星期也显示它的数字 `0` 到 `6`，因为月份和星期的名称是应用用自己的语言说的话。
 
 <a id="props"></a>
 
@@ -236,7 +236,7 @@ fn due_date() -> impl IntoElement {
 
 ## 键盘
 
-所有日期是 Tab 的一站：落在选中的日期上，没有则落在今天，再没有则落在第一个显示的日期；禁用的日期不接受焦点，会被跳过。然后：
+所有日期是 Tab 的一站：落在选中的日期上，没有则落在今天，再没有则落在第一个显示的日期。禁用的日期不接受焦点，会被跳过。然后：
 
 | 按键 | 操作 |
 |---|---|
@@ -247,13 +247,13 @@ fn due_date() -> impl IntoElement {
 | Shift+Page Up / Shift+Page Down | 一年前或一年后的同一天。 |
 | Return、Space | 选中这一天。 |
 
-在从右到左的布局里，每周从右边开始，Left 是后一天，Right 是前一天；Up 和 Down 仍按周移动。按键到达禁用的日期时，会沿移动方向继续到下一个未禁用的日期（Home 和 End 朝离开的那一天方向回退）。移出显示的月份时会翻月。"上一个"、切换按钮、"下一个"、月份和年份接受按压。`gpui-base` 的日期只接受按压；这些按键是 NSH 的，参照 WAI-ARIA 的日期选择对话框。
+在从右到左的布局里，每周从右边开始，Left 是后一天，Right 是前一天。Up 和 Down 仍按周移动。按键到达禁用的日期时，会沿移动方向继续到下一个未禁用的日期（Home 和 End 朝离开的那一天方向回退）。移出显示的月份时会翻月。"上一个"、切换按钮、"下一个"、月份和年份接受按压。`gpui-base` 的日期只接受按压。这些按键是 NSH 的，参照 WAI-ARIA 的日期选择对话框。
 
 <a id="accessibility"></a>
 
 ## 无障碍
 
-- 每一天是一个按钮，以其 ISO 日期命名；它是选中的日期或范围中的一天时（包括两端，与 React Aria 的范围日历一致）为已选状态，被禁用时显示为不可用。
-- "上一个"和"下一个"是按钮，名称来自 `previousAccessibilityLabel` 和 `nextAccessibilityLabel`；切换按钮、月份和年份是按钮，以其显示的内容命名。
+- 每一天是一个按钮，以其 ISO 日期命名。它是选中的日期或范围中的一天时（包括两端，与 React Aria 的范围日历一致）为已选状态，被禁用时显示为不可用。
+- "上一个"和"下一个"是按钮，名称来自 `previousAccessibilityLabel` 和 `nextAccessibilityLabel`。切换按钮、月份和年份是按钮，以其显示的内容命名。
 
 关于标签、角色和播报的一般说明，见[无障碍](../docs/accessibility.md)。

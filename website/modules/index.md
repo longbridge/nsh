@@ -6,7 +6,7 @@ order: 1
 
 # Modules
 
-An NSH app imports everything it uses from a small set of modules. They are all native: the reactive graph, the renderer and every module are implemented in Rust inside the runtime, and the bundler keeps `import ... from "nsh/..."` as imports instead of copying code into your bundle. Your bundle only holds your own code.
+An NSH app imports everything it uses from a small set of modules. Every module is implemented in Rust inside the runtime, as are the reactive graph and the renderer. The bundler keeps `import ... from "nsh/..."` as imports and does not copy NSH code into your bundle, so the bundle holds only your own code.
 
 ```tsx
 import { createAnimatedValue, mount, signal, windowSize } from "nsh";

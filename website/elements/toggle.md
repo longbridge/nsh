@@ -8,12 +8,12 @@ demo: el-toggle
 # Toggle
 
 A toggle is a button that stays on or off: bold in a text toolbar, a favorite star, a view option. `Toggle` owns the
-behavior of one: presses, keyboard activation, the disabled state, and the button role with its pressed state for
-screen readers, which announce it as a toggle button. A `ToggleGroup` around several is a toolbar: screen readers
-announce it as one, and the keyboard reaches it in one stop and moves between its toggles with the arrow keys. The
-look is the app's: a toggle has no colors, sizes, icon or label of its own. Its children are the app's icon or
-label, and `aria-pressed:` classes on the toggle, or `group-aria-pressed:` classes on what is inside it, follow its
-state.
+behavior: presses, keyboard activation, the disabled state, and the button role and pressed state for screen
+readers, which announce it as a toggle button. A `ToggleGroup` around several toggles is a toolbar. Screen readers
+announce it as one control, and the keyboard reaches it in one stop and moves between toggles with the arrow keys.
+
+The look is the app's: a toggle has no colors, sizes, icon or label of its own. Its children are the app's icon or
+label. `aria-pressed:` classes on the toggle, or `group-aria-pressed:` classes on its children, follow its state.
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";

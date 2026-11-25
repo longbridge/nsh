@@ -7,8 +7,14 @@ group: tools
 
 # 性能
 
-性能是 NSH 的第一优先级，而其中大部分由框架而非你的应用决定：运行时是原生的，每次更新只跨一次线程，动画和列表虚拟化
-都无需 JS 参与，用 Rust 编写的应用则完全不运行 JS。本页介绍 NSH 遵循的规则、它们对你用 TSX 和 Rust 所写代码的意义，以及如何测量。
+性能是 NSH 的第一优先级，其中大部分由框架决定，不靠你的应用：
+
+- 运行时是原生的。
+- 每次更新只跨一次线程。
+- 动画和列表虚拟化不经过 JS。
+- 用 Rust 写的应用完全不运行 JS。
+
+本页说明 NSH 遵循的规则、这些规则对你的 Rust 和 TSX 代码意味着什么，以及怎样测量。
 
 ## 规则
 
@@ -38,7 +44,7 @@ group: tools
 | 首帧（ops） | 1.32 ms / 0.77 ms (1015) | 2.32 ms / 0.70 ms (2415) |
 | 更新全部 200 个标题（ops） | 0.42 ms / 0.42 ms (200) | 0.77 ms / 0.36 ms (600) |
 
-（在 Apple silicon 上测得；第二张表基于早先的运行时。两者均出自 NSH 的性能基线。）
+（在 Apple silicon 上测得。第二张表基于早先的运行时。两者均出自 NSH 的性能基线。）
 
 **对你的代码而言：** 让事件处理函数和 computed 值保持轻量。繁重的计算（解析大型数据、每次按键都对上千条数据排序）在
 QuickJS 中的代价，比你在带 JIT 的 V8 或 JavaScriptCore 中习惯的要高。只做一次，用 `computed` 缓存，或者把它移出交互路径。
@@ -49,7 +55,7 @@ QuickJS 中的代价，比你在带 JIT 的 V8 或 JavaScriptCore 中习惯的�
 **一次 commit**：运行时渲染组件、布局、diff，并生成一批原生视图操作，以**一次跳转**送达主线程。不存在每个视图一条的
 bridge 消息，也没有每个 prop 一次的序列化。
 
-**对你的代码而言：** 无需为了性能合并写入；一个处理函数里调用十次 `set` 仍然只产生一次 commit，TSX 和 Rust 都是如此。如果你希望 effect 和
+**对你的代码而言：** 无需为了性能合并写入。一个处理函数里调用十次 `set` 仍然只产生一次 commit，TSX 和 Rust 都是如此。如果你希望 effect 和
 computed 值一次性看到所有写入，而不是每次写入后都运行一遍，请使用 `batch`。
 
 ### 3. 细粒度更新
@@ -94,7 +100,7 @@ fn price(quote: Signal<Quote>) -> impl IntoElement {
 
 - 在使用 signal 的地方读取它（绑定内部：Rust 中的 `move ||` 闭包、TSX 中的 JSX 表达式，以及 `computed`、`effect` 内部），
   而不是在组件顶部读取，这样更新的是范围最小的绑定。
-- 集合使用 `each` / `<Each>`（按 key 保留行）或[虚拟列表](./lists.md)；由整个集合重新生成的行（Rust 中的 `dynamic`、JSX 中普通的 `.map()`）
+- 集合使用 `each` / `<Each>`（按 key 保留行）或[虚拟列表](./lists.md)。由整个集合重新生成的行（Rust 中的 `dynamic`、JSX 中普通的 `.map()`）
   会在每次变化时全部重新创建。
 - 当多个绑定用到同一个派生值时，用 `computed` 计算它，这样每次变化只计算一次。
 
@@ -116,7 +122,7 @@ each(move || items.get(), |n: &u32| *n, |n, _| text(move || format!("row {}", n.
 
 ### 4. 不发送不需要的内容
 
-core 只发送变化的部分：新视图不带默认样式，也不带空的事件掩码；未变化的样式和 frame 不会发送；文本颜色的变化不会让文本
+core 只发送变化的部分：新视图不带默认样式，也不带空的事件掩码。未变化的样式和 frame 不会发送。文本颜色的变化不会让文本
 重新布局。一次只改变一个数字的点击只发送一个文本条目。你可以在 `nsh test --trace` 的输出中看到这一点（见下文）。
 
 ### 5. 原生执行动画
@@ -156,7 +162,7 @@ virtual_list(move || photos.with(Vec::len), move |at| photo_row(photos, at))
 ```
 
 - `timing`、`spring` 和 `decay` 在平台的 UI 线程上逐帧运行，每帧不需要引擎线程做任何事。
-- `scroll_value`（`scrollValue`）在同一帧内把滚动偏移写入动画值；拖拽手势（`pan={{ x, y }}`）让拖动直接移动视图。你的代码只在
+- `scroll_value`（`scrollValue`）在同一帧内把滚动偏移写入动画值。拖拽手势（`pan={{ x, y }}`）让拖动直接移动视图。你的代码只在
   结束时得到通知（动画完成，拖拽结束时拿到速度）。
 - `Animated.sequence` / `parallel` / `stagger` / `loop` 作为一棵原生树运行：每一步在上一步结束的瞬间开始，中间没有
   等待 JS 的间隙。
@@ -165,13 +171,13 @@ virtual_list(move || photos.with(Vec::len), move |at| photo_row(photos, at))
 ### 6. 虚拟化长列表
 
 [`List`](./lists.md) 只保留视口附近的行，复用它们的单元格，并在原生侧计算位置、多列布局、吸顶标题和可见性。没有露出新行
-的滚动帧不会运行你的任何代码，也不会产生 batch；在 gallery 的照片列表中，绑定一个新行的帧只有 4 个操作和 4 个 mount item。
+的滚动帧不会运行你的任何代码，也不会产生 batch。在 gallery 的照片列表中，绑定一个新行的帧只有 4 个操作和 4 个 mount item。
 
 **对你的代码而言：**
 
 - `estimated_item_size`（`estimatedItemSize`）要接近真实的行高。
 - 把每个条目的状态放在数据里（按 id 存放），而不是放在行内创建的 signal 中：单元格会被复用给其他条目，复用时
-  行的位置（`at.index()`；TSX 中的 `item()` / `index()`）会变化。
+  行的位置（`at.index()`。TSX 中的 `item()` / `index()`）会变化。
 - 让行保持轻量：行在每次复用时绑定一次，所以它的代码是在用户滚动时运行的。
 - 对跟随滚动位置的效果，使用 `scroll_value`（`scrollValue`）而不是 `on_scroll`（`onScroll`）。滚动监听每个引擎轮次最多收到一个事件，
   但每个事件仍然是一次对你代码的调用（TSX 中是对 JS 的调用）。
@@ -221,18 +227,18 @@ nsh run App.tsx --target android --trace --release
 nsh run App.tsx --target macos --fps --release
 ```
 
-（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`）会在运行中的应用上方显示帧率、每帧和每次 commit 的开销，以及 CPU、GPU 和内存（[macOS：性能监视器](./macos.md#性能监视器)）。Linux 也会显示面板，包含帧率、帧耗时和 p95、JS 与 core 耗时、CPU、内存、JS 堆和存活节点数，底部以曲线显示最近 120 帧的耗时（慢帧以琥珀色升起）；单击面板可将其收起为只显示帧率的小条，再次单击即展开。在 Linux 和 Windows 上，`--target linux --fps` 和 `--target windows --fps` 每秒输出一行同样的读数，并给出一帧中每个阶段的耗时，用 `-v` 显示；
+（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`）会在运行中的应用上方显示帧率、每帧和每次 commit 的开销，以及 CPU、GPU 和内存（[macOS：性能监视器](./macos.md#性能监视器)）。Linux 也会显示面板，包含帧率、帧耗时和 p95、JS 与 core 耗时、CPU、内存、JS 堆和存活节点数，底部以曲线显示最近 120 帧的耗时（慢帧以琥珀色升起）。单击面板可将其收起为只显示帧率的小条，再次单击即展开。在 Linux 和 Windows 上，`--target linux --fps` 和 `--target windows --fps` 每秒输出一行同样的读数，并给出一帧中每个阶段的耗时，用 `-v` 显示。
 `nsh test --target linux --fps -v`（或 `windows`）可以在测试驱动应用时采集这些读数。
 
 环境变量 `NSH_FPS=1` 无论应用怎样启动都会打开监视器：开发宿主、打包后的应用、Rust 应用、嵌入 NSH 的应用都一样。从 Dock 或
 访达打开的 macOS 打包应用从 `Info.plist` 的 `LSEnvironment` 取得它（`nsh.json`：`"macos": { "infoPlist": { "LSEnvironment": { "NSH_FPS": "1" } } }`）。
-应用自己用 `setFpsEnabled(enabled)` 打开或关闭它，用 `fpsEnabled()` 读取它（见 [`nsh`](../modules/nsh.md#fpsenabled-和-setfpsenabled)）；
+应用自己用 `setFpsEnabled(enabled)` 打开或关闭它，用 `fpsEnabled()` 读取它（见 [`nsh`](../modules/nsh.md#fpsenabled-和-setfpsenabled)）。
 gallery 侧边栏的菜单里有对应的开关。
 
 终端目标用 `nsh run examples/gallery --target tui --fps` 在角落显示一行读数。
 在文本输入框外，`C-h p` 切换显示。读数包括活跃时的 FPS、空闲时的 `idle`、帧耗时和 p95、
 应用批次 / 绘制 / 刷新终端的耗时、每帧写出的字节数和变化的 Cell 数。
-相同读数也出现在 `C-h e` 日志面板中；显示监视器时才开启测量。
+相同读数也出现在 `C-h e` 日志面板中。显示监视器时才开启测量。
 
 > [!TIP]
 > 单次测量主要受 CPU 时钟状态影响：刚刚休眠过的线程会在一段时间内运行得更慢。请在同一台机器上比较多次运行的最小值，
@@ -244,12 +250,12 @@ gallery 侧边栏的菜单里有对应的开关。
 
 ## 检查清单
 
-- 语言：用 Rust 编写应用，或至少编写它最常用的部分（[用 Rust 开发](./rust.md)）；TSX 留给经常变化或在运行时下发的部分。
+- 语言：用 Rust 编写应用，或至少编写它最常用的部分（[用 Rust 开发](./rust.md)）。TSX 留给经常变化或在运行时下发的部分。
 - 交互：一次点击只改变少量 mount item，而不是几十个。
-- 列表：长列表一律用虚拟列表（`virtual_list`、`List`），并设置估计的行高；每个条目的状态放在数据里。
+- 列表：长列表一律用虚拟列表（`virtual_list`、`List`），并设置估计的行高。每个条目的状态放在数据里。
 - 动画：使用动画值，而不是每帧写入的 signal。
 - 滚动效果：使用 `scroll_value`（`scrollValue`），而不是滚动监听。
-- 处理函数：不在每次按键或每个滚动事件中做繁重工作；用 `computed` 缓存。
+- 处理函数：不在每次按键或每个滚动事件中做繁重工作。用 `computed` 缓存。
 
 ## 另请参阅
 

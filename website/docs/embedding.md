@@ -7,10 +7,11 @@ group: platforms
 
 # Embedding in an existing app
 
-An existing native app can show an NSH app in part of its own UI: one screen, one tab, a card under a native toolbar.
-The host adds one view, sizes it like any of its own views and loads an app into it. The NSH app lays itself out at the
-view's size, renders with the platform's own views next to the host's, and stops when the view goes away. Each view is
-an independent engine, so a host can show several at once.
+An existing native app, the **host**, can show an NSH app in part of its own UI: one screen, one tab, or a card under
+a native toolbar. The host adds one view, sizes it like its other views and loads an app into it.
+
+The NSH app lays itself out at the view's size and renders with the platform's own views, next to the host's. It stops
+when the view goes away. Each view runs its own engine, so a host can show several NSH apps at once.
 
 ## Choose the route
 
@@ -29,7 +30,7 @@ What the view runs depends on the language the host is written in, not on the pl
 So:
 
 - **A Swift or Java/Kotlin host loads TSX.** Write the embedded part in TSX, build it with `nsh build` and load the
-  bundle into `NshAppView` or `NshView`; a signed package (`nsh publish`) can update it without an app release.
+  bundle into `NshAppView` or `NshView`. A signed package (`nsh publish`) can update it without an app release.
 - **A host with Rust code can mount a Rust root**, the root component of your crate, with no JavaScript VM, and can load
   TSX bundles into the same `AppView`.
 - The desktop `AppView`s are Rust APIs. A desktop app written in Swift, C# or C++ has no host view of its own yet.
@@ -41,7 +42,7 @@ So:
 1. Get `NativeShell.xcframework` (release) and `NativeShellDev.xcframework` (connects to `nsh dev`) from
    `dist/nsh/embed/ios`, or build them from a checkout with `cargo xtask ios-embed`
    ([Get the framework](./ios.md#get-the-framework)).
-2. Add the framework to the app target, `Do Not Embed` for the default static build; link the Dev framework in Debug
+2. Add the framework to the app target, `Do Not Embed` for the default static build. Link the Dev framework in Debug
    only ([Add it to an Xcode project](./ios.md#add-it-to-an-xcode-project)).
 3. Build the NSH app into a folder reference of the app:
 
@@ -145,7 +146,7 @@ function your crate exports. `AppView::load` runs a TSX bundle in the same view 
    ```
 
 The layout parameters decide the area. The complete sample is `examples/embed-android`; [Android](./android.md#nshview)
-lists the view's methods. The AAR runs TSX; a Rust app ships on Android as the APK `nsh package --target android`
+lists the view's methods. The AAR runs TSX. A Rust app ships on Android as the APK `nsh package --target android`
 builds.
 
 ## Desktop
@@ -179,7 +180,7 @@ view.load(Root::of::<my_app::App>().into());
 // On WM_SIZE of the parent, place it: MoveWindow(view.hwnd(), x, y, width, height, true)
 ```
 
-The view is a child window of `parent_hwnd`; its position and size are the area
+The view is a child window of `parent_hwnd`. Its position and size are the area
 ([Embedding in a Win32 app](./windows.md#embedding-in-a-win32-app)).
 
 ### Linux (GTK 4)
@@ -193,7 +194,7 @@ view.load(Root::of::<my_app::App>().into());
 paned.set_end_child(Some(&view.widget())); // any GTK container
 ```
 
-`view.widget()` is a GTK widget; stop the view when its window closes
+`view.widget()` is a GTK widget. Stop the view when its window closes
 ([Embedding in a GTK app](./linux.md#embedding-in-a-gtk-app)).
 
 ### GPUI

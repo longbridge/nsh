@@ -6,9 +6,20 @@ order: 15
 
 # 全局 API
 
-除了 ECMAScript 标准库，NSH 应用的 JS 环境还提供一组标准全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import，因此大量基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
+NSH 应用无需 import 就能使用一组标准全局对象。它们用 Rust 原生实现，遵循 WHATWG 标准，是 ECMAScript 标准库之外的补充：
 
-本页列出了应用拥有的全部全局对象。它们属于 TSX 环境：Rust 代码改用 Rust 标准库、crates.io 和 `nsh_core::prelude` 中 NSH 的服务（`fetch`、定时器、任务；见[用 Rust 开发](../docs/rust.md)），表格的 Rust 列给出了对应项。界面用[元素](../elements/index.md)和应用自己的组件搭建，其余能力来自应用导入的[模块](./index.md)。
+- `fetch` 及 `Headers`、`Request`、`Response`
+- Streams 标准
+- `URL` 和 `URLSearchParams`
+- `TextEncoder` / `TextDecoder`
+- `Blob`、`File` 和 `FormData`
+- `EventTarget`、`Event` 和 `AbortController`
+- 定时器、`requestAnimationFrame` 和 `console`
+- `Intl`，用于格式化数字和日期
+
+既然遵循标准，基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）都能直接用。
+
+本页列出全部全局对象。它们只在 TSX 环境里提供。Rust 代码用 Rust 标准库、crates.io 和 `nsh_core::prelude` 里的 NSH 服务（`fetch`、定时器、任务；见[用 Rust 开发](../docs/rust.md)），表格的 Rust 列给出对应项。界面用[元素](../elements/index.md)和你自己的组件搭建，其他能力来自导入的[模块](./index.md)。
 
 这些全局对象的 TypeScript 声明会生成到 `.nsh/types/nsh/globals.d.ts`（见[项目结构](../docs/project-structure.md)）。
 

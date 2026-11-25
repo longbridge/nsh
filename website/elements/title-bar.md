@@ -9,10 +9,10 @@ demo: el-title-bar
 
 A window with `titleBar: { style: "hidden" }` keeps the system's window controls (macOS's traffic lights, Windows'
 caption buttons, the window buttons of a Linux desktop) and leaves the rest of its top row to the app. `TitleBar` is
-that row: pressing and dragging it moves the window, double clicking it does what the system's title bar does, and the
-buttons, inputs and links inside it still take their presses. It is as tall as the window's title bar area at least,
-lays its children out in a row, and adds padding at its left and right edges only where it overlaps the window
-controls, so its background still reaches the window's edge under them.
+that row. Dragging it moves the window, and double clicking it does what the system's title bar does. Buttons,
+inputs and links inside it still take their presses. It is at least as tall as the window's title bar area and lays
+its children out in a row. It adds left or right padding only where it overlaps the window controls, so its
+background still reaches the window's edge under them.
 
 The overlap is measured where the bar is. A split view gives each pane a bar of its own: the sidebar's bar steps aside
 of the traffic lights at the left, the content pane's bar starts past them and gets none, and once the sidebar hides,

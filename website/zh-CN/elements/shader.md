@@ -8,7 +8,7 @@ demo: el-shader
 
 # Shader
 
-shader 是一个由 GPU 程序绘制其区域的视图：流动的渐变、噪点与颗粒、等离子、极光、全息箔、跟随点按扩散的波纹。你只需编写一个 WGSL 函数 `shade`，给出区域内每个点的颜色；平台以屏幕分辨率在 GPU 上运行它，绘制在视图背景之上、子元素之下。动画值逐帧在原生侧驱动它，应用代码无需参与。TSX 用从 `nsh` 导入的 `<Shader>` 创建，Rust 用 `shader().source(program)`。
+shader 是一个由 GPU 程序绘制其区域的视图：流动的渐变、噪点与颗粒、等离子、极光、全息箔、跟随点按扩散的波纹。你只需编写一个 WGSL 函数 `shade`，给出区域内每个点的颜色。平台以屏幕分辨率在 GPU 上运行它，绘制在视图背景之上、子元素之下。动画值逐帧在原生侧驱动它，应用代码无需参与。TSX 用从 `nsh` 导入的 `<Shader>` 创建，Rust 用 `shader().source(program)`。
 
 ```tsx tabs
 import { mount, Shader } from "nsh";
@@ -80,7 +80,7 @@ fn shade(uv: vec2f) -> vec4f
 | `nsh.time` | `f32` | shader 出现以来的秒数。读取它的 shader 会动起来：在屏幕上时每帧绘制。 |
 | `nsh.scale` | `f32` | 当前绘制帧每点的像素数。 |
 
-`uv * nsh.size` 是以点为单位的位置；`nsh.size.x / nsh.size.y` 是宽高比，用它可以让圆在非正方形区域里保持圆形。
+`uv * nsh.size` 是以点为单位的位置。`nsh.size.x / nsh.size.y` 是宽高比，用它可以让圆在非正方形区域里保持圆形。
 
 ### Uniform
 
@@ -120,7 +120,7 @@ const palette = signal<keyof typeof palettes>("Sunset");
 
 ## 动画 uniform
 
-uniform 可以是一个[原生动画值](../modules/nsh.md#animation)，或由它派生的节点（`interpolate`、算术运算）。平台在它变化的每一帧把值写入 shader 并重新绘制，全部在 UI 线程上完成：无论应用代码多忙，动画都以满帧率运行。数值驱动 `f32`、`i32`、`u32` 成员以及 `vec2f` 的分量；插值到颜色的节点驱动 `vec3f` 或 `vec4f`。
+uniform 可以是一个[原生动画值](../modules/nsh.md#animation)，或由它派生的节点（`interpolate`、算术运算）。平台在它变化的每一帧把值写入 shader 并重新绘制，全部在 UI 线程上完成：无论应用代码多忙，动画都以满帧率运行。数值驱动 `f32`、`i32`、`u32` 成员以及 `vec2f` 的分量。插值到颜色的节点驱动 `vec3f` 或 `vec4f`。
 
 ```tsx tabs
 import { Animated, cleanup, createAnimatedValue, Easing, Shader } from "nsh";
@@ -193,7 +193,7 @@ shader 也可以绘制其他视图绘制的内容。此时它的 WGSL 通过四�
 | `sample_from(uv)` | 过渡离开的一侧 |
 | `sample_to(uv)` | 过渡到达的一侧 |
 
-`nsh.progress` 是效果的 `progress`，或过渡进行到的程度（0 到 1）；`nsh.overflow` 是 shader 超出区域绘制的距离（点）。
+`nsh.progress` 是效果的 `progress`，或过渡进行到的程度（0 到 1）。`nsh.overflow` 是 shader 超出区域绘制的距离（点）。
 
 **`ShaderEffect`** 让子元素经过 shader 绘制：子元素保留点按、焦点和无障碍，显示的是 shader 的结果。`progress` 是一个数或一个动画值，动画值在原生侧驱动效果。`maxSampleOffset` 让 shader 超出区域绘制这么多点（光晕、模糊的边缘），此时 `uv` 会小于 0、大于 1。没有 `source` 时子元素按原样绘制。
 
@@ -224,7 +224,7 @@ const gone = createAnimatedValue(0);
 
 **`ScreenEffect`** 和 **`ScreenTransition`** 对整个界面（它的页面、对话框和浮层）做同样的事。它们不占空间，也没有子元素，可以放在应用中的任何位置。最后挂载且带 `source` 的屏幕效果生效。
 
-页面和对话框可以通过 **`transitionShader`** 经过 shader 出现和离开：在 `NavPage` 或 `Dialog` 上设置 `{ source, uniforms, duration }`（Rust：在 `nav_page()` 或 `dialog()` 上调用 `.transition_shader(TransitionShader::new(program))`）。页面入栈或出栈、对话框显示或关闭时，下层一侧（下面的页面、没有对话框的应用）是 `sample_from`，上层是 `sample_to`；页面或对话框出现时 `nsh.progress` 从 0 走到 1，离开时从 1 走到 0，因此一个 shader 就能画出两个方向。
+页面和对话框可以通过 **`transitionShader`** 经过 shader 出现和离开：在 `NavPage` 或 `Dialog` 上设置 `{ source, uniforms, duration }`（Rust：在 `nav_page()` 或 `dialog()` 上调用 `.transition_shader(TransitionShader::new(program))`）。页面入栈或出栈、对话框显示或关闭时，下层一侧（下面的页面、没有对话框的应用）是 `sample_from`，上层是 `sample_to`。页面或对话框出现时 `nsh.progress` 从 0 走到 1，离开时从 1 走到 0，因此一个 shader 就能画出两个方向。
 
 ```tsx tabs
 <NavPage title="详情" transitionShader={{ source: RIPPLE, duration: 500 }}>…</NavPage>
@@ -245,7 +245,7 @@ fn details() -> impl IntoElement {
 }
 ```
 
-shader 取代页面或对话框的 `animation`，无论它是什么（包括 `"none"`）。在没有 GPU 的设备上、用户要求减少动态效果时（减弱动态效果、移除动画），以及源码无法编译时，运行的是 `animation`；若为 `"none"`，变化会立即显示。一次切换进行中又开始新的入栈、出栈、显示或关闭时，先完成正在进行的那一次：它的页面或对话框到达或离开，`onShow` 或 `onDismiss` 触发，新的切换从那里开始。
+shader 取代页面或对话框的 `animation`，无论它是什么（包括 `"none"`）。在没有 GPU 的设备上、用户要求减少动态效果时（减弱动态效果、移除动画），以及源码无法编译时，运行的是 `animation`。若为 `"none"`，变化会立即显示。一次切换进行中又开始新的入栈、出栈、显示或关闭时，先完成正在进行的那一次：它的页面或对话框到达或离开，`onShow` 或 `onDismiss` 触发，新的切换从那里开始。
 
 平台在画面内容变化时重新获取画面，每个显示帧最多一次。画面由平台自己的渲染器绘制，因此它无法画进画面的内容（视频、网页、其他应用的视图）在画面中是透明的。
 
@@ -294,12 +294,12 @@ the shader of node 12: 2:1: `shade` takes the point's `uv: vec2f` and returns it
 
 ## 规则与限制
 
-- `shade` 的签名必须是 `fn shade(uv: vec2f) -> vec4f`。源码声明自己的函数、常量、结构体和 `var<private>` 变量；入口点和绑定由 NSH 提供。
+- `shade` 的签名必须是 `fn shade(uv: vec2f) -> vec4f`。源码声明自己的函数、常量、结构体和 `var<private>` 变量。入口点和绑定由 NSH 提供。
 - 源码最多 64 KiB。
 - `struct Uniforms` 最多 4096 字节，成员类型为上表中的类型。
 - 每帧每边最多 4096 像素：更大的视图以较低的缩放绘制 shader。
 
-生成噪声时，对点所在的整数格子做哈希（`bitcast<vec2u>(vec2i(floor(p)))` 再配合乘法和异或移位），而不是 `fract(sin(…) * 43758.5)`：整数哈希在每处计算同一格子时得到相同的值，因此值噪声在每种 GPU 上都无缝。示例库的 shader 中有一个这样的实现。
+生成噪声时，对点所在的整数格子做哈希（`bitcast<vec2u>(vec2i(floor(p)))` 再配合乘法和异或移位），而不是 `fract(sin(…) * 43758.5)`：同一格子无论在哪里计算，整数哈希都得到相同的值，因此值噪声在任何 GPU 上都不会出现接缝。示例库的 shader 中有一个这样的实现。
 
 ## 平台
 
@@ -309,7 +309,7 @@ shader 每个显示帧最多绘制一次，并且只在显示的内容变化时�
 
 ### shader 能否绘制
 
-`nsh` 的 `shadersAvailable()`（Rust 为 `shaders_available()`）表示平台能否绘制 shader，是响应式的。在上述平台和无头测试中它为 `true`；在终端中、以及关闭 `shader` 特性构建的应用中它为 `false`。它从 `true` 开始，当第一个 shader 挂载、而 NSH 打不开这台机器的 GPU 时（例如浏览器没有 WebGL 2）变为 `false`，之后不再变回。无论哪种情况都要显示画面的应用，在它为真时显示 shader，否则显示自己的绘制（画布或图片）：
+`nsh` 的 `shadersAvailable()`（Rust 为 `shaders_available()`）表示平台能否绘制 shader，是响应式的。在上述平台和无头测试中它为 `true`。在终端中、以及关闭 `shader` 特性构建的应用中它为 `false`。它从 `true` 开始，当第一个 shader 挂载、而 NSH 打不开这台机器的 GPU 时（例如浏览器没有 WebGL 2）变为 `false`，之后不再变回。无论哪种情况都要显示画面的应用，在它为真时显示 shader，否则显示自己的绘制（画布或图片）：
 
 ```tsx tabs
 function Backdrop() {

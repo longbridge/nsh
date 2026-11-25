@@ -7,10 +7,10 @@ group: start
 
 # Building with Rust
 
-Native Shell apps are written in TSX, with Rust where it pays off, or entirely in Rust. All of them run on the same
+You can write a Native Shell app in TSX, in TSX with some Rust, or entirely in Rust. All three run on the same Rust
 engine: the reactive graph, the renderer, Taffy layout and the native modules (navigation, dialogs, the keyboard, the
-status bar) are Rust in every case, and every platform renders with its own UI. What differs is the language of your
-own code, and with it whether the app carries a JavaScript VM.
+status bar). Every platform renders with its own UI. Only the language of your own code changes, and with it whether
+the app ships a JavaScript VM.
 
 | | TSX | TSX with Rust | Rust |
 |---|---|---|---|
@@ -38,7 +38,7 @@ code (not only for NSH's), and headless tests of the real UI with `cargo test`. 
 start to end: no JavaScript VM ships with it or runs in it, on iOS, Android, macOS, Windows, Linux, GPUI and the web.
 Components are functions that run once and bind signals to what they show, as in TSX ([Reactivity](./reactivity.md)),
 written with typed styles instead of class strings. A Rust app can still take TSX screens on top, for parts that
-change often or arrive at run time ([Extending a Rust app with TSX](#extending-a-rust-app-with-tsx)); the TSX runs on
+change often or arrive at run time ([Extending a Rust app with TSX](#extending-a-rust-app-with-tsx)). The TSX runs on
 QuickJS, which the app then carries.
 
 The rest of this page covers apps written in Rust: their structure, theme, tests and how TSX extends them.
@@ -135,10 +135,10 @@ package. The first build of a new Rust app compiles your crate and NSH's core, a
 the app's tests headless in a runner of your crate built the same way.
 
 On Linux, your crate selects optional platform features. Enable `webview` on your
-`nsh-platform-linux` dependency to use web views; this links WebKitGTK 6.0, which must be installed to build and run
+`nsh-platform-linux` dependency to use web views. This links WebKitGTK 6.0, which must be installed to build and run
 the app. The generated runner inherits that choice through Cargo feature unification.
 
-During `nsh run`, a change to the crate's Rust code builds the runner again and restarts the app; in the browser,
+During `nsh run`, a change to the crate's Rust code builds the runner again and restarts the app. In the browser,
 the open page loads the new runtime by itself. `cargo run` starts the same root directly on the desktop backend
 (`src/main.rs`), and native apps that embed NSH mount a Rust root with `AppSource::Rust` on the `AppView` of macOS,
 Windows, Linux, GPUI and iOS.
@@ -244,7 +244,7 @@ answers with the callback URL it redirects to: iOS shows it in an
 `ASWebAuthenticationSession` sheet (`.ephemeral(true)` keeps it apart from the user's
 Safari data), Android in a Custom Tab, the macOS, Windows and Linux backends in the
 system browser. Outside iOS the callback comes back as a link of a scheme the app
-claims (`nsh.json` `schemes`); the session takes it, so `next_url_scheme_open` never
+claims (`nsh.json` `schemes`). The session takes it, so `next_url_scheme_open` never
 hears it. The answer is `Completed(url)` or `Cancelled` (the user closed the page or
 came back to the app without signing in). A session with nothing to bring its
 callback back fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`: one whose
@@ -278,7 +278,7 @@ fn sign_in(authorize_url: String) {
 
 In tests, `Headless::on_auth_session` gives the platform an in-app session and ends
 each one with the outcome given, and `keep_auth_sessions_open` leaves each one open
-until the app closes it (`screen().auth_session_showing()`); without either the page
+until the app closes it (`screen().auth_session_showing()`). Without either the page
 is in `opened_urls()` and `open_with_url` delivers the callback (not in a test run as
 the web, where the session fails at once).
 
@@ -286,10 +286,10 @@ the web, where the session fails at once).
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components
 (`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, `#[module]` on a unit struct and its `impl`),
-classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets; the attribute also makes
+classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets. The attribute also makes
 `pub fn registry()` at the crate's root, the same set for your tests and other Rust code (`my_app_native::registry()`,
 next to `nsh_base::registry()`). In a `#[module]` or
-`#[class]` `impl`, the `pub fn`s are exported (`pub(crate)` too); functions without a visibility are helpers that
+`#[class]` `impl`, the `pub fn`s are exported (`pub(crate)` too). Functions without a visibility are helpers that
 stay in Rust. Their TypeScript
 declarations, doc comments included, are generated from the Rust types into `.nsh/types`, so TSX is checked against
 them by `nsh check` and your editor:
@@ -397,7 +397,7 @@ mount(() => (
 Each export is documented in TypeScript by the doc comment of the Rust item that names it: a component by its
 `#[component] fn` (`Chart`), a module and a class by their struct (`Portfolio`, `Ledger`), and props, events,
 functions and members by their own (a setter needs none beside its getter). The `Props` struct's and the event
-enum's own doc comments, and those of `impl` blocks, stay in Rust; a doc comment on a `#[module]` or `#[class]`
+enum's own doc comments, and those of `impl` blocks, stay in Rust. A doc comment on a `#[module]` or `#[class]`
 `impl` block is a compile error, since TypeScript would not show it. Each command that writes `.nsh/types` warns
 about an export TSX sees without a doc comment, naming it (`Ledger.add`, `Chart.range`).
 
@@ -420,7 +420,7 @@ pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
 
 Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
 both in camel case. Rust code places the same component with its constructor, a setter per prop and a listener
-method per event: `chart().symbol("NSH").range("1M").on_select(move |price: &f64| last.set(*price))`. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears
+method per event: `chart().symbol("NSH").range("1M").on_select(move |price: &f64| last.set(*price))`. A Rust component's own content, events and state stay in Rust. TSX passes props in and hears
 events. A prop of the wrong type (`level={1.5}` for a `u32` prop) is a warning, as on a built-in element: the
 prop keeps its value and the rest of the component renders.
 
@@ -428,24 +428,24 @@ A function or a member runs the way its Rust signature says. One that is not `as
 returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An
 `async fn` returns a Promise and runs as a task with NSH's services (`fetch`, `timer`, dialogs). A module function
 taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and may `spawn` a
-task, which runs to its end. A component's ref method also reaches the platform in order with the UI; their return type decides what TSX gets: one returning `()` gives `void`, with no reply
-(TSX calls it and moves on); one returning `Result<(), E>` gives `Promise<void>`, which rejects with the `Err`'s
+task, which runs to its end. A component's ref method also reaches the platform in order with the UI. Their return type decides what TSX gets: one returning `()` gives `void`, with no reply
+(TSX calls it and moves on). One returning `Result<(), E>` gives `Promise<void>`, which rejects with the `Err`'s
 message (the call runs with the UI's changes, after the TSX call returned, so the Promise carries its error; one
-nobody awaits or catches is logged as an [unhandled rejection](./dev-server-and-debugging.md#logs)); one
+nobody awaits or catches is logged as an [unhandled rejection](./dev-server-and-debugging.md#logs)). One
 returning a value gives `Promise<T>`. Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
 `#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
 (`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`; TS sees
 `(value: number) => void` for a `Callback<f64>`, and `#[args(balance)] listener: Callback<f64>` names the argument,
 `(balance: number) => void`). A function that starts listening is named `on(event, listener)` and returns `Stop`
-(`Stop::new(|| …)`), which TSX gets as a function that stops it (`() => void`); it runs once, when TSX calls it or
+(`Stop::new(|| …)`), which TSX gets as a function that stops it (`() => void`). It runs once, when TSX calls it or
 when what called `on` goes (a component, or the module's run under hot reload). An event's handler gets one object: a variant's value is its field `value`, which
 `#[args(price)]` on the variant names (`onSelect({ price })`), and `#[args(open, reason)]` names the fields of a
 variant of several. An argument of
-the wrong type throws a `TypeError` in the call, or rejects the Promise of one that returns a Promise; an `Err`
+the wrong type throws a `TypeError` in the call, or rejects the Promise of one that returns a Promise. An `Err`
 throws (or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
 updates, Rust edits rebuild and restart the app. The CLI bundles and compiles the TSX itself, knowing your crate's
-exports from its description; the development hosts and `nsh test`'s headless runner are built with your crate and
+exports from its description. The development hosts and `nsh test`'s headless runner are built with your crate and
 QuickJS.
 
 `examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports one
@@ -467,7 +467,7 @@ inline view). The content is kept per key while the value stays equal, and rende
 parent passes a closure to the prop's setter (`quote().render_badge(|symbol| ..)`), which makes the
 `Renderer` of it.
 
-Styles in a component are typed; the app's Tailwind classes reach one of its parts through a prop of classes and
+Styles in a component are typed. The app's Tailwind classes reach one of its parts through a prop of classes and
 `.app_class(..)` on that part's element. They apply after the element's own styles, with the app's theme, `dark:` and
 the states, as `class` on an element does.
 
@@ -513,7 +513,7 @@ pub fn Quote(props: QuoteProps) -> impl IntoElement {
 A Rust app's tests run it headless, in `cargo test` or in `nsh test`, with the same driver: on the real engine,
 without a window, with display frames at 60 Hz, so timers, tasks and animations run as on screen. The driver starts
 the app, keeps a model of the views it shows and takes steps (`press`, `type_text`, `submit`, `scroll`, `wait_for`)
-on views named by selectors (a text, an accessibility label or a test id; `text:`, `label:`, `id:`); a step that
+on views named by selectors (a text, an accessibility label or a test id; `text:`, `label:`, `id:`). A step that
 cannot be taken fails with the texts on screen.
 
 In `cargo test`, `nsh_testing::Headless` (nsh-testing's default features, without QuickJS) runs the root

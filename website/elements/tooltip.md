@@ -9,15 +9,16 @@ demo: el-tooltip
 
 A tooltip is a short hint next to what it is about: what an icon button does, the full text of a truncated label.
 On the desktops and in desktop browsers it shows once the pointer has rested on its trigger for `delay` (500 ms), and
-hides when the pointer leaves or presses the trigger. Once one tooltip has shown, the pointer reads on without
-waiting: moving to another trigger within 300 ms of leaving shows that one's tooltip at once, so each
-tool of a toolbar tells what it is as the pointer passes; a press on a trigger or Escape ends it, and the next
-tooltip waits for its `delay` again. On every device it also shows at once when the keyboard moves
-the focus to its trigger (Tab, the arrow keys, a shortcut, or the app's `focus()` after a key), and hides when the
-focus leaves or Escape is pressed, so keyboard users read the same hints. A click or a tap that focuses the trigger
-leaves the tooltip to the pointer, as `focus-visible:` styles do: the press hides it, and the pointer resting on the
-trigger again shows it. Phones and tablets otherwise show a tooltip only when the app opens it (`open`). It never
-takes the pointer or presses, so the trigger works exactly as it does without it.
+hides when the pointer leaves or presses the trigger. After one tooltip has shown, moving to another trigger within
+300 ms shows that tooltip at once. The user can sweep along a toolbar and read each tool's hint. A press on a
+trigger or Escape ends this, and the next tooltip waits for its `delay` again.
+
+On every device a tooltip also shows at once when the keyboard moves the focus to its trigger (Tab, the arrow keys, a
+shortcut, or the app's `focus()` after a key). It hides when the focus leaves or Escape is pressed, so keyboard users
+read the same hints. A click or tap that focuses the trigger leaves the tooltip to the pointer, as `focus-visible:`
+styles do: the press hides it, and resting the pointer on the trigger again shows it. Otherwise, phones and tablets
+show a tooltip only when the app opens it (`open`). A tooltip never takes the pointer or presses, so the trigger works
+exactly as it does without one.
 
 `Tooltip` from [`nsh/base`](../modules/nsh-base.md) is given as the `tooltip` prop every element has
 ([Common props](index.md#tooltips)), as GPUI's `.tooltip(..)`: the element is what the pointer rests on and what it
@@ -73,9 +74,9 @@ trigger or leaving it and the keyboard moving the focus to it or the focus leavi
 
 In a terminal a tooltip is a line, as terminal apps show a hint: what it says shows at once on the bottom row of
 the screen, in the terminal's own colors, while the focus the keyboard moved or the pointer is on its trigger, and the
-row clears when they leave. The pointer's hint shows over the focus's while the pointer is on its trigger; a toast's
+row clears when they leave. The pointer's hint shows over the focus's while the pointer is on its trigger. A toast's
 message takes the row while it shows. `delay` is not waited for there (`Infinity` still keeps it to the app's
-`open`), and the tooltip's own look and transitions apply only to the bubble the other devices show; its children, a
+`open`), and the tooltip's own look and transitions apply only to the bubble the other devices show. Its children, a
 shortcut's `Kbd` included, show as they are.
 
 It comes and goes with your transitions: `startingClass` is its look in its first frame and `endingClass` its look

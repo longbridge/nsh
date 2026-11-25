@@ -7,11 +7,14 @@ demo: el-pagination
 
 # Pagination
 
-A pagination moves among the pages of a set: search results, the rows of a table, an archive. It shows Previous, the
-pages around the current one (the first and the last always, an ellipsis for each run left out), the app's children and
-Next. It owns the behavior: which pages show, presses, the keyboard, Previous and Next disabled at the ends, the
-navigation landmark and the current page for screen readers. The look is the app's: the items have no color, size or
-label of their own, and the app styles them or draws them.
+A pagination lets the user move among the pages of a set, such as search results, the rows of a table or an archive.
+It shows Previous, the pages around the current one, your children and Next. The first and last pages always show, and
+an ellipsis stands for each run of pages left out.
+
+`Pagination` handles the behavior: which pages show, presses, the keyboard, disabling Previous and Next at the ends,
+and the navigation landmark and current page for screen readers. Your app owns the look. The items have no color, size
+or label of their own, and you style or draw them.
+
 
 ```tsx tabs
 import { mount, signal } from "nsh";

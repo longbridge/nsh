@@ -118,5 +118,5 @@ collapsible 本身不报告事件：触发控件是应用的，应用在它的�
 ## 平台说明
 
 - 每个平台都在 `open` 时把内容显示在子元素之后，否则把它留在布局之外。
-- 设置 `reveal` 时，每个平台（iOS、Android、macOS、Windows、Linux、GPUI 和 Web）都用自己的动画器弹动区域的高度；系统要求减少动态效果时立即打开和收起。
-- iOS、Android 和 Mac Catalyst：触发控件的按压是轻点。桌面（macOS、Windows、Linux、GPUI）和 Web：点击；在 macOS 和 Web 上，获得焦点的触发控件也响应空格或 Return。
+- 设置 `reveal` 时，每个平台（iOS、Android、macOS、Windows、Linux、GPUI 和 Web）都用自己的动画器弹动区域的高度。系统要求减少动态效果时立即打开和收起。
+- iOS、Android 和 Mac Catalyst：触发控件的按压是轻点。桌面（macOS、Windows、Linux、GPUI）和 Web：点击。在 macOS 和 Web 上，获得焦点的触发控件也响应空格或 Return。

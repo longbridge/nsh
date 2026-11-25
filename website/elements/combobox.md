@@ -7,9 +7,9 @@ demo: el-combobox
 
 # Combobox
 
-A combobox chooses values from a list of items, one or, with `multiple`, several: the tags of a post, the members of
-a channel, the languages of a document. Its trigger is an input: typing opens the list and filters it, as shadcn/ui's
-combobox does. It is [Select](./select.md)'s sibling and shares its list, presented as each device expects:
+A combobox picks one value from a list, or several with `multiple`. Use it for the tags of a post, the members of a
+channel or the languages of a document. Its trigger is an input: typing opens the list and filters it, as in
+shadcn/ui's combobox. It is [Select](./select.md)'s sibling and shares its list, presented as each device expects:
 
 - On the desktops and in desktop browsers, a popup under the field, as wide as the field (the app's `popupStyle` / `popupClass` width sets another) and as tall as its rows up
   to the room beside it.
@@ -128,12 +128,12 @@ select's are (see [Items](./select.md#items)).
 ## Value
 
 The value is an array of the selected items' values. With `value`, the app owns it: the combobox shows those items
-as selected and reports each change with `onChange({ value })`; the app sets `value` to follow it, or keeps its own.
+as selected and reports each change with `onChange({ value })`. The app sets `value` to follow it, or keeps its own.
 Left out, the combobox keeps its own value, from `defaultValue` at first.
 
 - With `multiple`, a press, Return or Space toggles the highlighted item: in the value if it was out, out if it was
   in. The list stays open.
-- Without it, a choice replaces the value with that item's and closes the list; choosing the selected item again only
+- Without it, a choice replaces the value with that item's and closes the list. Choosing the selected item again only
   closes it.
 
 `onConfirm({ value })` tells the value as the list closes: once per opening, however it closes (a choice, Escape, a
@@ -142,7 +142,7 @@ left it. Cmd+Return on a Mac (Ctrl+Return elsewhere) closes
 the list and confirms.
 
 `cleanable` adds a clear button while an item is selected: a press empties the value (`onChange({ value: [] })`).
-The button comes after the input, before the trigger button; a press on it never opens the list. The app fills it, as
+The button comes after the input, before the trigger button. A press on it never opens the list. The app fills it, as
 a [select's clear button](./select.md#value).
 
 ## Input
@@ -151,12 +151,12 @@ The trigger is a text input in the combobox's row (its `class` and `style`: the 
 app's `prefix` before it (the chosen items as chips, an icon) and, after it, the clear button, the app's
 `triggerButton` (a chevron) and `suffix`.
 
-- Typing opens the list and filters the items by title, ignoring case; `empty` shows while nothing matches. Down and
-  Up open it too, and a press on the input or the trigger button opens and closes it; on touch screens the tap that
+- Typing opens the list and filters the items by title, ignoring case. `empty` shows while nothing matches. Down and
+  Up open it too, and a press on the input or the trigger button opens and closes it. On touch screens the tap that
   focuses the input opens it.
 - With one value, the input shows the chosen item's title (`placeholder` while there is none). It is selected when
   the input gets the focus, so what is typed replaces it.
-- With `multiple`, the input shows the query; the app shows the chosen items, in `prefix` or beside the combobox.
+- With `multiple`, the input shows the query. The app shows the chosen items, in `prefix` or beside the combobox.
 
 The query is the combobox's own, starting each opening from `defaultQuery` (else empty), or the app's with `query`:
 `onQueryChange({ query })` reports what is typed, and the app sets `query` to follow it, to filter its own way or to
@@ -171,11 +171,11 @@ a count, a hint. It stays in place while the rows scroll.
 
 On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
 `popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its own
-look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run, and
+look. `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run, and
 `onClose` follows. The keyboard focus is back on the input as it closes, unless the choice's `onChange` focused another
 view (the next field of a form), which keeps it. Opened again on its way out, it returns to its look from where it is.
 `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user asks for less motion it
-appears and goes at once; the sheet of touch screens slides in and out on its own.
+appears and goes at once. The sheet of touch screens slides in and out on its own.
 
 ```tsx
 <Combobox
@@ -259,8 +259,8 @@ They come in this order: `onChange` for a choice, or `onCancel` for a close with
 ## Keyboard
 
 The keys are a select's (see [Keyboard](./select.md#keyboard)) while the input keeps the focus, with these differences:
-letters and digits are typed into the input, which filters the list, rather than typeahead; Down and Up open the closed
-list; Return toggles the highlighted item with `multiple` and keeps the list open; Cmd+Return on a Mac (Ctrl+Return
+letters and digits are typed into the input, which filters the list, rather than typeahead. Down and Up open the closed
+list. Return toggles the highlighted item with `multiple` and keeps the list open. Cmd+Return on a Mac (Ctrl+Return
 elsewhere) closes it and confirms. Tab and Shift+Tab close the open list and move the focus to the next or previous
 control. When the list closes otherwise on the desktops, the input keeps the focus, unless the choice's `onChange` moved
 it to another view.
@@ -269,9 +269,9 @@ it to another view.
 
 - The input is a combobox for screen readers: its label is `accessibilityLabel`, its value the selected items'
   titles, joined with commas, and it says whether the list is expanded. `disabled` dims it.
-- The list is a listbox and each row an option, named by its title; the selected options are selected and a disabled
+- The list is a listbox and each row an option, named by its title. The selected options are selected and a disabled
   one dimmed. Sections' headers are headers.
-- The clear button is a button named by `clearButtonAccessibilityLabel`; it is no stop of Tab. The trigger button
+- The clear button is a button named by `clearButtonAccessibilityLabel`. It is no stop of Tab. The trigger button
   is hidden from screen readers, as the input says whether the list is open, and is no stop of Tab either.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.

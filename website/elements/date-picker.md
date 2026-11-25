@@ -7,11 +7,11 @@ demo: el-date-picker
 
 # DatePicker
 
-A date picker sets a date from a [Calendar](./calendar.md) that opens from the app's trigger: a due date, a birthday,
-with `range` the days of a trip, with `timePrecision` a date and a time of day. Like [Select](./select.md), it opens as
+A date picker sets a date from a [Calendar](./calendar.md) that opens from your trigger. Use it for a due date or a
+birthday. With `range` it sets the days of a trip, and with `timePrecision` a date and a time of day. Like [Select](./select.md), it opens as
 each device expects:
 
-- On the desktops and in desktop browsers, a popup at the trigger; opening it puts the keyboard on the days.
+- On the desktops and in desktop browsers, a popup at the trigger. Opening it puts the keyboard on the days.
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop.
 
 The picker owns the behavior: the value (the app's, or its own), the open state, the calendar, the time, the presets,
@@ -114,35 +114,41 @@ fn trip_dates() -> impl IntoElement {
 `DatePicker` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `date_picker()`
 makes one with a setter per prop (`.value(..)`, `.range(..)`, `.time_precision(..)`) and a listener per event
 (`.on_change(..)`). Its value is a `DateTime` (`DateTime::Single`, `DateTime::Range`, from `chrono` dates or dates and
-times); `onChange` gives a `PickedDate`, the value with the picker's time precision.
+times). `onChange` gives a `PickedDate`, the value with the picker's time precision.
 
 ## Value
 
-The value is in the forms of the HTML inputs: an ISO date, `"2026-10-28"`, as `<input type="date">`'s; with `range`
-`[start, end]`; with `timePrecision` a date and time, `"2026-10-28T09:30"` (`"2026-10-28T09:30:15"` at seconds), as
-`<input type="datetime-local">`'s; `null` is none. With `value`, the app owns it: the picker shows it and reports each
-change with `onChange({ value })`; the app sets `value` to follow it. Left out, the picker keeps its own value, from
+The value uses the formats of the HTML inputs:
+
+- A date is an ISO date, `"2026-10-28"`, as in `<input type="date">`.
+- With `range`, it is `[start, end]`.
+- With `timePrecision`, it is a date and time, `"2026-10-28T09:30"` (`"2026-10-28T09:30:15"` at seconds), as in
+  `<input type="datetime-local">`.
+- `null` means no value.
+
+With `value`, the app owns it: the picker shows it and reports each
+change with `onChange({ value })`. The app sets `value` to follow it. Left out, the picker keeps its own value, from
 `defaultValue` at first.
 
 - A single date: a press on a day sets the value and closes the popup.
-- With `range`, the first press starts the range and the second ends it, as a [calendar's](./calendar.md#value); the
+- With `range`, the first press starts the range and the second ends it, as a [calendar's](./calendar.md#value). The
   complete range sets the value and closes the popup.
 - With `timePrecision` (a single date only), a time field shows under the calendar and every edit of the time is
-  reported. On the desktops, picking a day keeps the popup open for the time and reports the date with its time; a
+  reported. On the desktops, picking a day keeps the popup open for the time and reports the date with its time. A
   press on the selected day again closes the popup. On phones and tablets, a tap on a day picks it at its time and
-  closes the sheet, as a single date does; the sheet opens again for the time. A day picked before any time gets
+  closes the sheet, as a single date does. The sheet opens again for the time. A day picked before any time gets
   `defaultTime` (default `00:00`). `hourCycle` is how the field counts the hours, as
   [TimeField](./time-field.md)'s, the user's included.
 
 `cleanable` adds a clear button while there is a value: a press clears it (`onChange({ value: null })`). It comes
-after the trigger, not inside it, so a press on it never opens the popup; the app places it and fills it
+after the trigger, not inside it, so a press on it never opens the popup. The app places it and fills it
 (`clearButton`), as a [select's clear button](./select.md#value).
 
 ## Presets
 
 `presets` are buttons beside the calendar that set the value: "Today", "Last 7 days", "Tomorrow at 9". Each is
-`{ label, value }`, `value` a date, a range or dates and times, kept as given; a press sets it and closes the popup.
-`contentClass` lays out the presets' column and the calendar with the time (a row, `flex-row`); `presetsClass` styles
+`{ label, value }`, `value` a date, a range or dates and times, kept as given. A press sets it and closes the popup.
+`contentClass` lays out the presets' column and the calendar with the time (a row, `flex-row`). `presetsClass` styles
 the column, `presetClass` each button.
 
 ## The calendar
@@ -161,11 +167,11 @@ spread apart (`flex-row items-center justify-between`, as `gpui-component`'s). T
 
 On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
 `popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its own
-look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run, and
+look. `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run, and
 `onClose` follows. The keyboard focus is back on the trigger as it closes (on macOS and iOS, where it was before it opened,
 when a pointer opened it), unless the choice's `onChange` focused another view (the next field of a form), which keeps it. Opened again on its way out, it returns to its look from where
 it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user asks for less motion it
-appears and goes at once; the sheet of touch screens slides in and out on its own.
+appears and goes at once. The sheet of touch screens slides in and out on its own.
 
 ```tsx
 <DatePicker
@@ -255,8 +261,8 @@ time field's edit the time (see [Keyboard](./time-field.md#keyboard)).
 - The trigger is a combobox for screen readers: its label is `accessibilityLabel`, its value the date as `dateFormat`
   writes it (by default `2026/10/28`, with the time at `timePrecision`), and it says whether the popup is expanded.
   `disabled` dims it.
-- The calendar's days are buttons named by their ISO dates (see [Accessibility](./calendar.md#accessibility)); the
-  presets are buttons named by their labels; the time field is named by `timeAccessibilityLabel`.
+- The calendar's days are buttons named by their ISO dates (see [Accessibility](./calendar.md#accessibility)). The
+  presets are buttons named by their labels. The time field is named by `timeAccessibilityLabel`.
 - The clear button is a button named by `clearButtonAccessibilityLabel`.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.

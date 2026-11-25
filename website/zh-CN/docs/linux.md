@@ -7,8 +7,7 @@ group: platforms
 
 # Linux
 
-NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用，用 Pango 排版文字；核心、响应式图、渲染器、Taffy 布局以及
-原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 Linux 上，`os()` 为 `Os::Linux`（TSX 中
+NSH 应用可以在 Linux 的 GTK 4 窗口中运行。Linux 后端用 GTK 4 控件渲染，用 Pango 排版文字。核心、响应式图、渲染器、Taffy 布局和原生模块都与 iOS、Android 相同，所以同一个应用能在所有平台运行。在 Linux 上，`os()` 为 `Os::Linux`（TSX 中
 `platform.os` 为 `"linux"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单在 Rust 中由 `nsh_core::element::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
@@ -37,7 +36,7 @@ NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用�
 nsh run                        # 在 Linux 上默认就是 --target linux
 ```
 
-`nsh` 用你的 crate 构建一个 debug runner 并打开应用，在终端显示它的日志（`log::info!` 等）；修改 crate 的 Rust 代码会重新构建
+`nsh` 用你的 crate 构建一个 debug runner 并打开应用，在终端显示它的日志（`log::info!` 等）。修改 crate 的 Rust 代码会重新构建
 runner 并重启应用。`cargo run` 从 crate 的 `src/main.rs`（由 `nsh init --template rust` 生成）启动同一个根组件：用
 `AppSource::Rust` 调用 [`run_app`](#嵌入-gtk-应用)。
 
@@ -47,7 +46,7 @@ TSX 应用需写明入口，默认在 390×844 的窗口中打开，和其他目
 nsh run App.tsx
 ```
 
-在源码仓库中，`nsh run` 会先构建开发宿主（`nsh-linux-host`）；在 Linux 上制作的发行版把它放在 `runtime/linux/` 中。
+在源码仓库中，`nsh run` 会先构建开发宿主（`nsh-linux-host`）。在 Linux 上制作的发行版把它放在 `runtime/linux/` 中。
 Ctrl-C 会关闭窗口，关闭窗口也会结束 `nsh run`。宿主也可以单独运行一个构建好的 bundle：
 
 ```sh
@@ -55,7 +54,7 @@ nsh build my-app --release -o build
 dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --window-size 1024x768   # 源码仓库中：target/debug/nsh-linux-host
 ```
 
-`--window-size` 是窗口的默认尺寸（TSX 应用）；平铺式窗口管理器可能会给窗口另一个尺寸。
+`--window-size` 是窗口的默认尺寸（TSX 应用）。平铺式窗口管理器可能会给窗口另一个尺寸。
 
 ## 打包
 
@@ -124,25 +123,25 @@ let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
 view.load(Bundle::source(code).into());
 ```
 
-`AppView::load` 会替换正在运行的内容；`stop` 结束应用。`asset_base` 指定 `asset:/` URI 从哪里解析（`AssetBase::Directory`
+`AppView::load` 会替换正在运行的内容。`stop` 结束应用。`asset_base` 指定 `asset:/` URI 从哪里解析（`AssetBase::Directory`
 或 `AssetBase::Http`）。字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }` 加载：字节码是受信任的输入，
 只能从你自己应用的文件中加载。独立窗口用 `nsh_platform_linux::run_app(source, options)`，传入 `AppSource::Rust(root)` 或
 `AppSource::Bundle(bundle)`。
 
 `AppOptions::login_item` 让 `run_app` 运行的应用拥有[登录项](../modules/nsh-desktop.md#登录时打开)：XDG 自启动条目
 `~/.config/autostart/<app_id>.desktop`，启动本可执行文件。默认关闭，且只有 `run_app` 读取它，所以嵌入应用
-不会登录时打开；`nsh package` 构建的应用的运行器会打开它。
+不会登录时打开。`nsh package` 构建的应用的运行器会打开它。
 
 `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。
 
 `AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 
-`AppView::set_theme_overrides(Some(json))` 把你的应用的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件，其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变；`bg-primary` 等类名立即更新样式，之后加载的应用一开始就使用它（`None` 恢复应用自己的主题；无法解析的文件返回错误，不做任何改动）。
+`AppView::set_theme_overrides(Some(json))` 把你的应用的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件，其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变。`bg-primary` 等类名立即更新样式，之后加载的应用一开始就使用它（`None` 恢复应用自己的主题；无法解析的文件返回错误，不做任何改动）。
 
 ### 多个窗口共享数据
 
 Rust 宿主可以打开任意多个窗口，每个窗口一个 `AppView`，窗口之间像任何 Rust 程序那样共享数据：同一个进程，
-由根组件的 props 携带一个 `Arc`。窗口之间无需传递消息；每个根组件读取共享值，并像监听其他数据源（channel、watch、
+由根组件的 props 携带一个 `Arc`。窗口之间无需传递消息。每个根组件读取共享值，并像监听其他数据源（channel、watch、
 store 调用的回调）那样监听它的变化：
 
 ```rust
@@ -199,23 +198,23 @@ TSX 应用用 [`<Window>` 和 `Window.open`](../modules/nsh-desktop.md#windows) 
 | Ctrl+W、F11、Ctrl+Q | 关闭窗口、全屏、退出（`nsh package` 和 `nsh run` 的应用） |
 | Ctrl+R | 重新加载最新的构建（`nsh run`） |
 
-应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）是一个窗口范围的快捷键控制器；Ctrl+Q 和 F11 不能被绑定。
+应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）是一个窗口范围的快捷键控制器。Ctrl+Q 和 F11 不能被绑定。
 
 快捷键适用于任何键盘布局（在西里尔或希腊字母布局下，Ctrl+C 是美式布局中输入 C 的那个键）。确认输入法组合文字（中文、日文等）的回车
-不会提交。`onKeyPress` 报告的与 React Native 一致：输入的文字、`"Enter"`、`"Backspace"` 和 `"Escape"`；粘贴的文字不报告。
+不会提交。`onKeyPress` 报告的与 React Native 一致：输入的文字、`"Enter"`、`"Backspace"` 和 `"Escape"`。粘贴的文字不报告。
 
 Web 视图是绘制在 NSH 视图之内的 WebKitGTK 页面：sheet、对话框、toast 以及排在它后面的视图会绘制在页面之上，父视图会裁剪它、改变它的透明度。
 它的网站数据（cookie、存储、缓存）按应用分别保存在 `~/.local/share/<app id>/webkit` 和 `~/.cache/<app id>/webkit` 下。
 `webview` 权限同样作用于框架中的页面：应用未获授权的主机的 `iframe` 保持空白。在页面中按 Escape 会离开页面，与文本框中一样
-（除非页面自己用了它）；页面有历史记录时，Alt+Left 和鼠标的后退键在页面中后退。
+（除非页面自己用了它）。页面有历史记录时，Alt+Left 和鼠标的后退键在页面中后退。
 
 不支持：
 
 - **视频的 `rate`**：GTK 只能以正常速度播放。`onEnd` 只对不循环的视频触发。
 - **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
-- **`mixBlendMode` 和 `backdropFilter`**（背景色仍会绘制）。背景模糊尚未实现；使用 GTK 4.22 copy 和 paste 节点的实验不属于当前渲染实现。
+- **`mixBlendMode` 和 `backdropFilter`**（背景色仍会绘制）。背景模糊尚未实现。使用 GTK 4.22 copy 和 paste 节点的实验不属于当前渲染实现。
 - **输入辅助视图**和**状态栏**（桌面上没有对应物）。
-- **无障碍**：`accessible` 分组、自定义 `accessibilityActions`；实时区域改为播报。
+- **无障碍**：`accessible` 分组、自定义 `accessibilityActions`。实时区域改为播报。
 
 ## 另见
 

@@ -7,7 +7,7 @@ group: ui
 
 # Text
 
-All text is shown by text elements: `text(..)` in Rust, `<Text>` in TSX. A text element is one paragraph, typeset by the platform's text engine (CoreText on Apple platforms, `StaticLayout` on Android) on the engine thread when it is laid out, and only drawn on the main thread. Nested text elements are spans of the same paragraph, not separate views.
+All text is shown by text elements: `text(..)` in Rust, `<Text>` in TSX. A text element is one paragraph. The platform's text engine (CoreText on Apple platforms, `StaticLayout` on Android) typesets it on the engine thread during layout. The main thread only draws it. Nested text elements are spans of the same paragraph, not separate views.
 
 ```tsx tabs
 <Text style={{ fontSize: 16, lineHeight: 24, color: "#1f2328" }}>
@@ -36,7 +36,7 @@ text("By continuing you agree to the ")
 > [!IMPORTANT]
 > Strings are displayed by text elements. In TSX, a string placed directly in a `<View>` is not shown: wrap it in `<Text>`.
 
-The element itself is documented on [text](../elements/text.md); this page is about using it.
+The element itself is documented on [text](../elements/text.md). This page is about using it.
 
 ## Strings and whitespace
 
@@ -101,7 +101,7 @@ text("Read the ")
 ### Backgrounds of spans
 
 A span's background color and corner radius paint a box behind its characters on each line it reaches, as tall as
-its font; the text lays out the same and copies whole, so inline code is a span
+its font. The text lays out the same and copies whole, so inline code is a span
 ([Text element](../elements/text.md#span-backgrounds)):
 
 ```tsx tabs
@@ -117,7 +117,7 @@ text("Run ")
 ```
 
 Horizontal padding on a span takes room in its line at the span's two ends, and its background covers it, as a CSS
-inline box's does; vertical padding grows its background above and below the text, leaving the line's height as it
+inline box's does. Vertical padding grows its background above and below the text, leaving the line's height as it
 is, and borders leave a span as it is. A relative `fontSize` keeps the span in
 proportion to its paragraph wherever it is used:
 
@@ -174,17 +174,17 @@ text("Made with ")
     )
 ```
 
-Inline elements cut off by `numberOfLines` or an ellipsis are hidden; copying the text leaves them out, except an
+Inline elements cut off by `numberOfLines` or an ellipsis are hidden. Copying the text leaves them out, except an
 element with a `copyText` (`.copy_text(..)`), whose text the copy gives in its place (an inline formula's `$x^2$`). Text inside an
 inline element takes the color of the text around it, as CSS's `color` reaches an inline block, unless it sets its own
-(the `LIVE` badge above does); its font and line height stay its own.
+(the `LIVE` badge above does). Its font and line height stay its own.
 
 The style key `verticalAlign` places an inline element in its line, as CSS's `vertical-align` places an image:
 `"baseline"` (the default) stands its bottom on the baseline, `"text-top"` and `"text-bottom"` put its top or bottom
 at the top or bottom of the text's font, and `"middle"` centers it half the font's x height above the baseline. The
 line grows to hold the element wherever it reaches past the font, also with a fixed `lineHeight`. An icon at the start of a paragraph that should
 line up with the text's bottom, as Android's `ImageSpan` draws it, takes `"text-bottom"`. The classes are
-`align-baseline`, `align-text-top`, `align-text-bottom` and `align-middle`; in Rust `.align_text_bottom()` and the
+`align-baseline`, `align-text-top`, `align-text-bottom` and `align-middle`. In Rust `.align_text_bottom()` and the
 others of the same names.
 
 ```tsx
@@ -289,7 +289,7 @@ text(move || total.get())
     .w(px(200.0))
 ```
 
-The Tailwind classes `line-clamp-*`, `text-ellipsis` and `text-clip` set the same keys, and `truncate` (`.truncate()`) is one line cut with an ellipsis; as style keys they also take state styles and variants.
+The Tailwind classes `line-clamp-*`, `text-ellipsis` and `text-clip` set the same keys, and `truncate` (`.truncate()`) is one line cut with an ellipsis. As style keys they also take state styles and variants.
 
 `whitespace-nowrap` (`.whitespace_nowrap()`) keeps a text on one line. `text-pretty` (`.text_pretty()`) wraps without leaving a word or two alone on the last line: a last line shorter than a quarter of the box takes words from the lines above, without adding a line. `whitespace-normal` (`.whitespace_normal()`) wraps as usual. Set on a view, they reach the texts inside it, as CSS's `white-space` does:
 
@@ -338,8 +338,8 @@ text(order_number).select_text().selection_color(rgb(0x7c3aed))
 
 To copy from code (a Copy button), use `set_clipboard(..)` in Rust or [`Clipboard`](../modules/nsh.md#clipboard) in TSX.
 
-In the terminal host, drag across a selectable view or Text to select whole graphemes; a double click selects a word and a triple click its paragraph, and dragging on from either extends the selection by words or paragraphs.
-Selected Cells use reversed colors. Copy with Ctrl+C, Ctrl+Shift+C, Ctrl+Insert, Alt+W or Cmd+C; the host sends the
+In the terminal host, drag across a selectable view or Text to select whole graphemes. A double click selects a word and a triple click its paragraph, and dragging on from either extends the selection by words or paragraphs.
+Selected Cells use reversed colors. Copy with Ctrl+C, Ctrl+Shift+C, Ctrl+Insert, Alt+W or Cmd+C. The host sends the
 text through OSC 52 to the terminal clipboard. Shift+click extends the selection, Ctrl+A / Cmd+A selects the area,
 and Esc or any other key clears it. With nothing selected, Ctrl+C quits the terminal host.
 

@@ -8,7 +8,7 @@ demo: counter
 
 # Web
 
-Build web apps with Native Shell using the same components, styles and application logic as on native platforms. NSH renders the interface as HTML elements and CSS: text, images, inputs, scrolling, visual styles and interactions use the browser's DOM and web APIs.
+The web backend runs a Native Shell app in the browser, with the same components, styles and app logic as on native platforms. NSH renders the interface as HTML elements and CSS. Text, images, inputs, scrolling, visual styles and interactions use the browser's DOM and web APIs.
 
 `nsh package --target web` publishes the app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), and `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)). Every live demo on this site uses this web backend.
 
@@ -39,8 +39,8 @@ requestAnimationFrame ──────────────┘             
 
 Published apps behave as desktop apps in desktop browsers and as phone apps in phone browsers:
 
-- **Wheels and touchpads** scroll the innermost scroll view along their axis that can still move (a vertical wheel scrolls a horizontal list when nothing vertical can), and stay on it until the scroll ends; where the browser would scroll that same view it does, with its own smooth wheel and the touchpad's momentum, so a mouse feels as on any page; paging and snapping views move one page per scroll. Ctrl + wheel and touchpad pinches pinch views with native pinch values instead of zooming the page. Dragging with the mouse does not scroll, as on the desktop platforms: mouse drags go to pans, the responder system and text selection. Scroll views report `onScrollDragStart` / `onScrollDragEnd`, `onMomentumStart` / `End` and `onScrollEnd` as on the desktop platforms.
-- **Keyboard**: Tab and Shift+Tab move between pressables and inputs (the app's `focus-visible:` styles show the keyboard focus); Return presses the focused pressable, Space presses it when released; arrows, Page Up / Page Down, Space, Home and End scroll the scroll view around the focus or under the mouse; Escape leaves a field, closes the dialog, then goes back. `keymap` shortcuts work in the browser, matched on the spot (`mod` is Command in Safari and Chrome on a Mac, Control elsewhere).
+- **Wheels and touchpads** scroll the innermost scroll view along their axis that can still move (a vertical wheel scrolls a horizontal list when nothing vertical can), and stay on it until the scroll ends. Where the browser would scroll that same view it does, with its own smooth wheel and the touchpad's momentum, so a mouse feels as on any page. Paging and snapping views move one page per scroll. Ctrl + wheel and touchpad pinches pinch views with native pinch values instead of zooming the page. Dragging with the mouse does not scroll, as on the desktop platforms: mouse drags go to pans, the responder system and text selection. Scroll views report `onScrollDragStart` / `onScrollDragEnd`, `onMomentumStart` / `End` and `onScrollEnd` as on the desktop platforms.
+- **Keyboard**: Tab and Shift+Tab move between pressables and inputs (the app's `focus-visible:` styles show the keyboard focus). Return presses the focused pressable, Space presses it when released. Arrows, Page Up / Page Down, Space, Home and End scroll the scroll view around the focus or under the mouse. Escape leaves a field, closes the dialog, then goes back. `keymap` shortcuts work in the browser, matched on the spot (`mod` is Command in Safari and Chrome on a Mac, Control elsewhere).
 - **Going back**: Escape, Alt+Left (Cmd+[ on a Mac) and the mouse's back button close the newest dialog or pop the innermost shown stack (a stack in a tab that is not selected keeps its pages), as the Android back button does; `popOnBack` and `onBackPress` work as there. When the app is the whole page, every page pushed on a shown stack and every open dialog is a browser history entry, so the browser's back button goes back in the app. `nsh.json` `web.history` decides it for the packaged page and the dev server's: `false` keeps the browser's history to the page's own entries, `true` adds the app's in an iframe too.
 - **Addresses**: when the app is the whole page, [`UrlScheme.setUrl(url)`](../modules/nsh.md#urlscheme) sets the address of the current history entry, resolved against the page's address (or the site's `web.base`), and `UrlScheme.url()` reads it. The browser's back button goes back in the app: the stack's pages go back and the address becomes the entry's. An address the user types (a `#fragment`) is an entry of the app's at the pages shown, and a back or forward to an entry of the same pages tells the app the entry's address with [`UrlScheme.on("change")`](../modules/nsh.md#urlschemeonchange). `setUrl(url, { history: "push" })` makes such an entry for an address of the app's own, a tab or a filter.
 - **Touch**: only scroll views pan; the page itself never scrolls, zooms or pulls to refresh under the app, and taps have no delay. In an iframe, swipes the app does not take scroll the embedding page. Drags on views with native pans, pinches and the responder system are the app's.
@@ -66,12 +66,12 @@ components and modules.
 
 Either way the crate's assets (`assets!()`) are published with the app's, and its fonts load before the first frame.
 During `nsh run --target web`, a change to the crate's Rust code builds the runtime again and the open page loads it by
-itself; TSX edits stay hot updates. The development runtime builds incrementally, so a change to the crate is ready in
+itself. TSX edits stay hot updates. The development runtime builds incrementally, so a change to the crate is ready in
 about a second; `nsh package` builds the published one optimized for size.
 
 Rust code that runs on every platform, the web included, uses the engine's services: `fetch(url).await` makes
 HTTP requests through the same network stack as JS's `fetch` (the browser's here, with its CORS rules); `timer`,
-`set_timeout` and `set_interval` wait; and `nsh_core::time::Instant` and `nsh_core::time::unix_ms()` read the clock.
+`set_timeout` and `set_interval` wait. And `nsh_core::time::Instant` and `nsh_core::time::unix_ms()` read the clock.
 `background` and `blocking` run work on the native targets' threads.
 
 The build needs the Rust target and a clang that compiles to WebAssembly, as the runtime's own build does:
@@ -167,7 +167,7 @@ so the site works from any directory of any host (`https://example.com/apps/coun
 as it starts, so the files still load after the app moves the address to another path.
 
 To serve the files from a CDN while the page is served at the app's own address, give the CDN's URL with
-`--asset-url`: the page names each of its files under it, and the page's `connect-src` allows its origin; the CDN
+`--asset-url`: the page names each of its files under it, and the page's `connect-src` allows its origin. The CDN
 answers with `Access-Control-Allow-Origin`, as the page loads modules and fetches from it. `index.html` and
 `manifest.webmanifest`, whose names carry no digest, stay at the page's address, which keeps resolving the app's own
 relative URLs (the manifest is named relatively, as without the flag: at a deeper path `web.base`, above, resolves it
@@ -194,7 +194,7 @@ percent-encoded as browsers send them (`/%E5%BA%94%E7%94%A8/` for `/应用/`).
 
 Published apps need Safari 16.4 (iOS and iPadOS 16.4), Chrome and Edge 97, or Firefox 108 and later. The page loads
 its modules through an import map and uses JavaScript built-ins of those releases (`Object.hasOwn`,
-`Array.prototype.findLastIndex`, `OffscreenCanvas`); earlier browsers, such as iOS 15 Safari or the WebViews of
+`Array.prototype.findLastIndex`, `OffscreenCanvas`). Earlier browsers, such as iOS 15 Safari or the WebViews of
 older Android releases, show a blank page. NSH does not ship polyfills for them, so modern browsers download nothing
 extra.
 
@@ -232,7 +232,7 @@ An app whose own paths show in the address bar (`https://example.com/sports/foot
 one of those paths, or a reload there, loads `index.html`, and the app shows the page the path names. The host rewrites
 such requests to `index.html`: a `GET` whose path has no file extension in its last segment and whose `Accept` header
 asks for `text/html`. Files keep their own URLs and the app's own requests (`fetch` accepts `*/*`) get the host's
-answer. `nsh package --target web --run` and the dev server (`nsh run --target web`) follow this rule; on a host:
+answer. `nsh package --target web --run` and the dev server (`nsh run --target web`) follow this rule. On a host:
 
 | Host | The rewrite |
 |---|---|
@@ -242,7 +242,7 @@ answer. `nsh package --target web --run` and the dev server (`nsh run --target w
 | GitHub Pages | a copy of `index.html` as `404.html` |
 
 At a path with several segments (`/sports/football`), the page loads its files from the site's own path when
-`nsh.json` names it (`web.base`, above); the dev server's page loads them from `/`.
+`nsh.json` names it (`web.base`, above). The dev server's page loads them from `/`.
 
 An app published for the web runs like a packaged native app: as a release, with the capabilities its `nsh.json` declares
 ([Sandbox and capabilities](./sandbox-and-capabilities.md)), a TSX app on the browser's JavaScript engine. When they restrict `network`, the page also carries a
@@ -271,7 +271,7 @@ serves it as it is, and `nsh package` prints what it needs:
 With `web.base` the page names its files by absolute paths and gives the runtime the site's base itself, with no
 `<base href>`, so under `base-uri 'none'` the app loads at every one of its paths. A TSX app that loads a native module whole (`import * as base from "nsh/base"` passed on as a value,
 `import(name)`) has its modules linked as it starts, which needs `'unsafe-inline' blob:`; `nsh package` says so. A web
-view's bridge (`window.nsh.postMessage`) is a file too; scripts in the web view's own `html` and its
+view's bridge (`window.nsh.postMessage`) is a file too. Scripts in the web view's own `html` and its
 `injectedJavaScript*` are inline, the app's to allow, and `injectJavaScript` needs `'unsafe-eval'`.
 
 ### Embed it with an iframe
@@ -356,22 +356,22 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` runs an ES module given as source text, with the same options. With `nsh-playground.wasm`, `player.compileAndRun(tsx, name, options)` compiles TSX first, runs it with `runSource`'s options and resolves to the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
-The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
+The container's size is the app's window (`windowSize()`). Resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
 
 The app's lifecycle is the page's. An app that listens to quit requests (`Application.on("quitRequest")`,
 [Quitting](../modules/nsh-desktop.md#quitting)) is asked as the user leaves the page it is embedded in, and the browser
-may ask the user whether to leave; its `quit` listeners run as the page goes. A page that keeps leaving to itself runs
+may ask the user whether to leave. Its `quit` listeners run as the page goes. A page that keeps leaving to itself runs
 the app under capabilities without `"application": true` (`runModule(url, { capabilities })`): the user then leaves
 without the app being asked, and its `quit` listeners still run as the page goes.
 
-Dialogs and alerts cover the container. With `dialogs: "viewport"` they cover the whole browser window, as a page's own modal dialogs do, while the app keeps the container as its window: a `Dialog` lays out at the window's size and safe area and slides in from its bottom edge, its backdrop covers the whole page, and the mouse wheel over it leaves the page in place. The dialog shows in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later), so it is above the rest of the page wherever the container is; in earlier browsers it covers the container.
+Dialogs and alerts cover the container. With `dialogs: "viewport"` they cover the whole browser window, as a page's own modal dialogs do, while the app keeps the container as its window: a `Dialog` lays out at the window's size and safe area and slides in from its bottom edge, its backdrop covers the whole page, and the mouse wheel over it leaves the page in place. The dialog shows in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later), so it is above the rest of the page wherever the container is. In earlier browsers it covers the container.
 
-Popovers, menus, tooltips, a `Select`'s or a `Combobox`'s list, an editor's suggestions and every other overlay placed against an anchor (`<Overlay anchor>`) show inside the container. A page that gives the app a small part of its layout, such as a post composer 250 pixels high whose topic picker is 360 pixels high, sets `overlays: "viewport"`: they then show over the whole browser window, where the container would cut them off. They are placed and flipped by the window's edges and safe area rather than the container's, stay next to their anchor as the page scrolls or moves the container, and a press anywhere on the page outside them closes them as a press in the app does. Presses, the keyboard focus and Escape on them work as before, and dialogs over the window stay above them, so a page that sets `overlays: "viewport"` sets `dialogs: "viewport"` too. They show in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later); in earlier browsers they stay inside the container. Overlays without an anchor, such as a `fixed` view or a sheet's backdrop, stay in the container.
+Popovers, menus, tooltips, a `Select`'s or a `Combobox`'s list, an editor's suggestions and every other overlay placed against an anchor (`<Overlay anchor>`) show inside the container. A page that gives the app a small part of its layout, such as a post composer 250 pixels high whose topic picker is 360 pixels high, sets `overlays: "viewport"`: they then show over the whole browser window, where the container would cut them off. They are placed and flipped by the window's edges and safe area rather than the container's, stay next to their anchor as the page scrolls or moves the container, and a press anywhere on the page outside them closes them as a press in the app does. Presses, the keyboard focus and Escape on them work as before, and dialogs over the window stay above them, so a page that sets `overlays: "viewport"` sets `dialogs: "viewport"` too. They show in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later). In earlier browsers they stay inside the container. Overlays without an anchor, such as a `fixed` view or a sheet's backdrop, stay in the container.
 
 
 `Sheet` follows the same presentation setting as `Dialog` and `AlertDialog`. In a same-origin iframe,
 viewport presentation automatically covers the outer page, while the app keeps its original layout size.
-The iframe returns to its original position and size when the last popup closes; its engine and state stay alive.
+The iframe returns to its original position and size when the last popup closes. Its engine and state stay alive.
 The documentation demos enable this presentation.
 
 For a cross-origin or sandboxed iframe, the embedding page registers the host before loading the player:
@@ -386,11 +386,11 @@ frame.src = "https://apps.example.com/player.html"; // player uses dialogs: "vie
 
 The host accepts requests from this iframe's window, keeps the surrounding page inert and locks its scrolling
 while a popup is visible, and restores both on close. Each cross-origin embedding boundary requires its host's
-cooperation; without it, presentation remains within that document and the player reports a warning.
+cooperation. Without it, presentation remains within that document and the player reports a warning.
 
 ## The host's functions
 
-On the web the page is the app's host: it answers [`host`](../modules/nsh.md#host)'s `host.call(name, args)`, takes its `host.post(name, args)` and sends the events `host.on` listens to. `createPlayer`'s `host` is an object whose `call(name, args)` returns the result, or a promise of it; a throw or a rejection rejects the app's call with the error's message. Its optional `post(name, args)` takes the app's posts; without one, a post goes to `call`. A post has no answer: its result, a throw or a rejection stays with the page. `player.hostEvent(event, payload)` sends an event with a JSON payload (a payload that is not JSON throws). With a `host`, `host.available()` is `true`.
+On the web the page is the app's host: it answers [`host`](../modules/nsh.md#host)'s `host.call(name, args)`, takes its `host.post(name, args)` and sends the events `host.on` listens to. `createPlayer`'s `host` is an object whose `call(name, args)` returns the result, or a promise of it. A throw or a rejection rejects the app's call with the error's message. Its optional `post(name, args)` takes the app's posts. Without one, a post goes to `call`. A post has no answer: its result, a throw or a rejection stays with the page. `player.hostEvent(event, payload)` sends an event with a JSON payload (a payload that is not JSON throws). With a `host`, `host.available()` is `true`.
 
 ```js
 const player = await createPlayer(container, {
@@ -408,7 +408,7 @@ const player = await createPlayer(container, {
 player.hostEvent("theme", { dark: true });
 ```
 
-A published app gets its host from `nsh.json`: `web.host` names a JS module in the app's directory, relative to `nsh.json`, that exports `createHost(player)`. `nsh package --target web` copies it into the site as `host.<digest>.js`, and the page runs `createHost` with the player before the app starts; what it returns (or resolves with) must have a `call` function, or the page shows that the app could not be loaded. The player `createHost` receives sends events from then on:
+A published app gets its host from `nsh.json`: `web.host` names a JS module in the app's directory, relative to `nsh.json`, that exports `createHost(player)`. `nsh package --target web` copies it into the site as `host.<digest>.js`, and the page runs `createHost` with the player before the app starts. What it returns (or resolves with) must have a `call` function, or the page shows that the app could not be loaded. The player `createHost` receives sends events from then on:
 
 ```json
 {
@@ -446,7 +446,7 @@ The host looks each name up as it is in a table of its functions, as above, and 
 
 Events sent before the app runs, such as from `createHost` itself, are delivered in order as soon as it starts, so the app's top-level `host.on` listeners receive them. An event sent before a listener registers is not replayed to it: an app reads the state it starts with through a call (`host.call("user.info")`) and follows its changes through events.
 
-The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the page's `connect-src` holds the page's origin, the origin of `--asset-url`, the hosts `capabilities.network` lists and the hosts `web.connect` lists. `web.connect` names the hosts the host module's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach, as patterns like those of `capabilities.network.hosts` (`api.example.com`, `*.example.com`, `"*"`), as `api.example.com` above; the app's own requests stay checked against its `capabilities`.
+The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the page's `connect-src` holds the page's origin, the origin of `--asset-url`, the hosts `capabilities.network` lists and the hosts `web.connect` lists. `web.connect` names the hosts the host module's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach, as patterns like those of `capabilities.network.hosts` (`api.example.com`, `*.example.com`, `"*"`), as `api.example.com` above. The app's own requests stay checked against its `capabilities`.
 
 The module is copied as it is, so it imports other code by absolute URL. The app still needs its `host` [capability](./sandbox-and-capabilities.md) for each function it calls. `nsh run --target web` runs it on the development page, and `nsh test` runs the same module for every app its tests open, headless or in a browser (`--target web`), so the app and its host are tested together ([Testing](./testing-and-trace.md#the-pages-host)).
 
@@ -457,7 +457,7 @@ The module is copied as it is, so it imports other code by absolute URL. The app
 - `"desktop"`: a mouse (a fine pointer that hovers) and a container at least 600 points wide. `platform.desktop` is `true`, `platform.select` picks `desktop` and `desktop={{…}}` props apply.
 - `"pad"`: a touch screen whose short side is at least 600 points; `"phone"` otherwise. These are mobile: `platform.select` picks `mobile`.
 
-The idiom is decided when the app starts and stays the same while it runs, as on every platform; a narrow desktop window is still a desktop, laid out for its `windowSize()`. `web={{…}}` props, `platform.select({ web })` and `web:` classes apply in browsers only; `ios={{…}}`, `native` and `ios:` do not apply there.
+The idiom is decided when the app starts and stays the same while it runs, as on every platform. A narrow desktop window is still a desktop, laid out for its `windowSize()`. `web={{…}}` props, `platform.select({ web })` and `web:` classes apply in browsers only; `ios={{…}}`, `native` and `ios:` do not apply there.
 
 The page reports the rest of the environment, and keeps it current:
 
@@ -473,17 +473,17 @@ The page reports the rest of the environment, and keeps it current:
 | `safeArea()` | `env(safe-area-inset-*)` where it overlaps the container (`viewport-fit=cover` pages on phones) |
 | `keyboardFrame()` | how much of the container the on-screen keyboard covers (`visualViewport`) |
 
-`platform.version` is `"0.0"`, and `screenReaderEnabled()` stays `false` (browsers do not tell). The browser's bars around the page are the browser's; a page's [`statusBar`](../modules/nsh-base.md#status-bar) is for the phones.
+`platform.version` is `"0.0"`, and `screenReaderEnabled()` stays `false` (browsers do not tell). The browser's bars around the page are the browser's. A page's [`statusBar`](../modules/nsh-base.md#status-bar) is for the phones.
 
 ## Networking
 
 `fetch` (with streams, `AbortController` and `FormData`) and `<Image>` URLs go through the browser's own network stack, after NSH has checked the app's [capabilities](./sandbox-and-capabilities.md). Since the requests are the browser's, the browser's rules apply:
 
 - **Relative URLs** in `fetch` (a string or a `URL`) and in the app's images, videos and sounds resolve against the page's URL as the app started, or against the site's `web.base` when it has one: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. A link's `href` and a web view's `url` resolve against the site's `web.base` too when it has one, and against the page's address otherwise. (Native platforms have no page, so they need absolute URLs.)
-- **CORS.** A request to another origin than the page's only succeeds if that server allows the page's origin (`Access-Control-Allow-Origin`); otherwise `fetch` rejects with a network error. Only the response headers the server exposes are visible.
+- **CORS.** A request to another origin than the page's only succeeds if that server allows the page's origin (`Access-Control-Allow-Origin`). Otherwise `fetch` rejects with a network error. Only the response headers the server exposes are visible.
 - **Cookies** (and HTTP authentication) are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
 - **Redirects** are followed by the browser. A redirected request that must not follow it fails: `redirect: "manual"` and `"error"`, and requests of an app whose capabilities restrict `network` (NSH checks every hop, and browsers do not reveal a redirect before following it).
-- **Request bodies** that are a `ReadableStream` are collected first and sent in one piece; response bodies stream as they arrive.
+- **Request bodies** that are a `ReadableStream` are collected first and sent in one piece. Response bodies stream as they arrive.
 
 ## Split bundles
 
@@ -497,7 +497,7 @@ nsh build --release --split -o site/app
 # detail.js        what two chunks share, when they do (made by the bundler)
 ```
 
-The first `import("./Screen")` downloads `Screen.js` and the chunks it imports, all at once, then evaluates them; later imports of it resolve at once. The page says where the chunks are: by default next to the bundle, or one URL per chunk, for files renamed with a content digest so a CDN can cache them forever:
+The first `import("./Screen")` downloads `Screen.js` and the chunks it imports, all at once, then evaluates them. Later imports of it resolve at once. The page says where the chunks are: by default next to the bundle, or one URL per chunk, for files renamed with a content digest so a CDN can cache them forever:
 
 ```js
 await player.runModule(entry, {
@@ -505,9 +505,9 @@ await player.runModule(entry, {
 });
 ```
 
-A chunk that cannot be downloaded rejects the `import()` with a `TypeError` naming it; the next `import()` tries again. Chunk names are fixed file names from the bundle: the app cannot make the page download anything else.
+A chunk that cannot be downloaded rejects the `import()` with a `TypeError` naming it. The next `import()` tries again. Chunk names are fixed file names from the bundle: the app cannot make the page download anything else.
 
-The [gallery](/gallery) loads each demo this way: `lazy` (in `examples/gallery/ui.tsx`) makes a component that starts the import the first time it renders, shows a placeholder until it resolves, then renders what it loaded. Its first load is the index and the demo shown first; a font a demo imports comes with that demo's chunk. Native builds hold every module, so there the import resolves at once:
+The [gallery](/gallery) loads each demo this way: `lazy` (in `examples/gallery/ui.tsx`) makes a component that starts the import the first time it renders, shows a placeholder until it resolves, then renders what it loaded. Its first load is the index and the demo shown first. A font a demo imports comes with that demo's chunk. Native builds hold every module, so there the import resolves at once:
 
 ```tsx
 const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
@@ -538,7 +538,7 @@ reads as a document:
 </View>
 ```
 
-A press on a link is the app's `onOpen`, so the app navigates as it always does; a crawler follows the `href`, a
+A press on a link is the app's `onOpen`, so the app navigates as it always does. A crawler follows the `href`, a
 click with a modifier key or the middle button opens it in a new tab, and a right click shows the browser's menu for
 links (open in a new tab, copy the link) unless the app shows its own with `onContextMenu`.
 
@@ -546,7 +546,7 @@ links (open in a new tab, copy the link) unless the app shows its own with `onCo
 
 [`nsh/web`](../modules/nsh-web.md)'s `Head` sets the page's `<head>` while it is mounted: the title, the description,
 the canonical URL, the language, more `<meta>`s (Open Graph, Twitter cards, `robots`) and structured data. A head in
-each page describes the page that shows; the one mounted last wins for what it sets:
+each page describes the page that shows. The one mounted last wins for what it sets:
 
 ```tsx
 import { Head } from "nsh/web";
@@ -562,7 +562,7 @@ import { Head } from "nsh/web";
 </NavPage>
 ```
 
-The page's title comes from a mounted `Head`; a Rust app's root window title (nsh.json `window.title`, or a root
+The page's title comes from a mounted `Head`. A Rust app's root window title (nsh.json `window.title`, or a root
 `WindowAttributes` title) titles the tab when no head sets one. An empty title brings back the page's own `<title>`.
 The web has one surface and no window of the app's own: `currentWindow()` is that surface, whose title is the page's, and TSX
 titles the page with `<Head title>` (or nsh.json's `window.title`) rather than `currentWindow().set({ title })`. Each entry of the
@@ -585,11 +585,11 @@ The browser decides these, and the web backend follows it:
 
 - **Web views of other sites**: `WebView` is an `<iframe>`. Inline HTML (`html`) gets everything: `onMessage`, `postMessage`, `injectJavaScript`, the injected scripts and load events (it runs with an origin of its own, apart from the page). A page of another site only gets `postMessage` and load events with the URL it was given: browsers hide its navigations, title, history and errors from the page around it, and `userAgent` cannot be set.
 - **Videos with sound that start on their own**: `Video` is a `<video>` with every prop and event, but browsers only start a video with sound after a user gesture (muted videos play).
-- **Native components**: registered native components belong to the native apps that embed NSH; on the web their view stays empty, with a warning in the console.
+- **Native components**: registered native components belong to the native apps that embed NSH. On the web their view stays empty, with a warning in the console.
 - **Platform services**: reading the clipboard (`Clipboard.readText`, also `hasText`) needs a secure context (HTTPS) and may ask the user. Images do not report `onProgress`.
 - **Text shaping details**: line breaking is a subset of UAX #14 (spaces, CJK, hyphens, and the line start and end rules of CJK punctuation: closing marks such as `。`, `，` and `」` stay off the start of a line, opening marks such as `（` and `「` off its end), with no hyphenation and no bidirectional reordering beyond the paragraph direction.
 
-The player and the dev server run apps with development settings; published apps run as releases. Both run a TSX app's code on the browser's JavaScript engine, in a realm of the app's own.
+The player and the dev server run apps with development settings. Published apps run as releases. Both run a TSX app's code on the browser's JavaScript engine, in a realm of the app's own.
 
 ## See also
 

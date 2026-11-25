@@ -8,13 +8,15 @@ demo: guide-layout
 
 # 布局
 
-NSH 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局。Taffy 是 CSS flexbox、网格和块布局的 Rust 实现，NSH 对它做了配置，让子元素默认纵向排列且不收缩。布局在核心中运行，发生在你的代码每一轮执行之后，只有发生变化的 frame 会被发送到原生视图。文字由平台的文本引擎在同一线程上测量，因此布局从不需要等待主线程。
+NSH 用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素布局。Taffy 是 CSS flexbox、网格和块布局的 Rust 实现。NSH 的默认配置下，子元素纵向排列且不收缩。
 
-下面的布局属性都是样式属性。在 Rust 中它们是类型化的样式方法（`.flex_row()`、`.gap_4()`、`.grid_cols(3)`、`.absolute().inset_0()`）；在 TSX 中它们是 `style` 属性的键，每个都有对应的 [Tailwind](./tailwind.md) 类（`flex-row`、`gap-4`、`grid-cols-3`、`absolute inset-0` 等）。两者生成相同的原生样式。
+布局在核心中运行，时机是你的代码每轮执行之后。只有变化了的 frame 才会发给原生视图。平台的文本引擎在同一线程上测量文字，所以布局不用等主线程。
+
+下面的布局属性都是样式属性。在 Rust 中它们是类型化的样式方法（`.flex_row()`、`.gap_4()`、`.grid_cols(3)`、`.absolute().inset_0()`）。在 TSX 中它们是 `style` 属性的键，每个都有对应的 [Tailwind](./tailwind.md) 类（`flex-row`、`gap-4`、`grid-cols-3`、`absolute inset-0` 等）。两者生成相同的原生样式。
 
 ## Flexbox
 
-视图用 flexbox 排列子元素。未设置 `display` 的视图把子元素纵向排列；样式中的 `display: "flex"` 表示横向，除非设置了 `flexDirection`，与 CSS 以及 Tailwind 的 `flex` 类完全一致。没有设置时采用以下默认值：
+视图用 flexbox 排列子元素。未设置 `display` 的视图把子元素纵向排列。样式中的 `display: "flex"` 表示横向，除非设置了 `flexDirection`，与 CSS 以及 Tailwind 的 `flex` 类完全一致。没有设置时采用以下默认值：
 
 | 属性 | NSH 默认值 | Web 默认值 |
 |---|---|---|
@@ -65,9 +67,9 @@ view()
 | `flexGrow`、`flexShrink`、`flexBasis` | 与 CSS 相同 | `.flex_grow(n)`、`.flex_shrink(n)`、`.flex_shrink_0()`、`.basis(length)` |
 | `gap`、`rowGap`、`columnGap` | 子元素之间的间距 | `.gap(length)`、`.gap_y(length)`、`.gap_x(length)`，以及刻度方法 `.gap_2()`、`.gap_x_4()` 等 |
 
-`flex-start` 和 `flex-end` 跟随 flex 方向；`start` 和 `end` 与 CSS 一样跟随书写方向（从右到左时，`start` 是右侧），`self-start` / `self-end` 跟随子元素自身的方向。
+`flex-start` 和 `flex-end` 跟随 flex 方向。`start` 和 `end` 与 CSS 一样跟随书写方向（从右到左时，`start` 是右侧），`self-start` / `self-end` 跟随子元素自身的方向。
 
-`flex` 是 CSS 的简写，与 Tailwind 的 `flex-*` 类相同：数字 `n` 表示按 `n` 增长、按 1 收缩、基准尺寸为 0，因此 `flex: 1` 的兄弟元素（Rust 中的 `.flex_1()`、类 `flex-1`）无论内容多少都会平分空间；`"none"` 即 `0 0 auto`（视图保持自身尺寸），`"auto"` 即 `1 1 auto`，`"initial"` 即 `0 1 auto`，也可以写出增长、收缩和基准尺寸（`"2 0 50%"`、`"1 1 120px"`）。由于最小尺寸默认为 0，`flex: 0`（`0 1 0`）会把视图压缩到 0，除非用 `minWidth: "auto"` 保留内容的尺寸。
+`flex` 是 CSS 的简写，与 Tailwind 的 `flex-*` 类相同：数字 `n` 表示按 `n` 增长、按 1 收缩、基准尺寸为 0，因此 `flex: 1` 的兄弟元素（Rust 中的 `.flex_1()`、类 `flex-1`）无论内容多少都会平分空间。`"none"` 即 `0 0 auto`（视图保持自身尺寸），`"auto"` 即 `1 1 auto`，`"initial"` 即 `0 1 auto`，也可以写出增长、收缩和基准尺寸（`"2 0 50%"`、`"1 1 120px"`）。由于最小尺寸默认为 0，`flex: 0`（`0 1 0`）会把视图压缩到 0，除非用 `minWidth: "auto"` 保留内容的尺寸。
 
 ```tsx tabs
 <View style={{ flexDirection: "row", gap: 8 }}>
@@ -106,7 +108,7 @@ view()
 
 在 Rust 中长度是类型化的：`px(16.0)` 是 16 点，`relative(0.5)` 是父元素的 50%，`auto()` 是 `auto`。刻度方法遵循 Tailwind 的间距刻度，每一级 4 点（`.p_4()` 是 16 点，`.gap_0p5()` 是 2 点）。
 
-布局落在屏幕的设备像素上，相邻视图严丝合缝、边缘清晰。半点（`px(0.5)`、`0.5`）在 2x 屏上是一个像素宽的细线；在 1x 屏上，比一个像素还细的视图也至少占一个像素，分隔线不会消失。
+布局落在屏幕的设备像素上，相邻视图严丝合缝、边缘清晰。半点（`px(0.5)`、`0.5`）在 2x 屏上是一个像素宽的细线。在 1x 屏上，比一个像素还细的视图也至少占一个像素，分隔线不会消失。
 
 不指定尺寸时，视图的大小等于内容（加上内边距），并因默认的 `alignItems: "stretch"` 在父元素的交叉轴上被拉伸。百分比相对于父元素的尺寸（内边距和外边距与 CSS 一样，相对于父元素的宽度）。
 
@@ -207,7 +209,7 @@ view()
     )
 ```
 
-偏移量接受点和百分比（Rust 中的 `.top(..)`、`.right(..)`、`.bottom(..)`、`.left(..)`、`.inset(..)`）。同时设置了 `left` 和 `right`（或 `top` 和 `bottom`）而没有设置尺寸的视图，会在两者之间拉伸。靠后的兄弟元素绘制在靠前的之上；`zIndex`（`.z_index(n)`）可以改变这个顺序。
+偏移量接受点和百分比（Rust 中的 `.top(..)`、`.right(..)`、`.bottom(..)`、`.left(..)`、`.inset(..)`）。同时设置了 `left` 和 `right`（或 `top` 和 `bottom`）而没有设置尺寸的视图，会在两者之间拉伸。靠后的兄弟元素绘制在靠前的之上。`zIndex`（`.z_index(n)`）可以改变这个顺序。
 
 ## 测量
 
@@ -229,7 +231,7 @@ view()
     .child(text(move || format!("{} points wide", width.get())))
 ```
 
-frame 的单位是点：Rust 中是 `Bounds<Points>`，TSX 中是 `{ bounds }`，其值是一个 `Bounds`（`{ origin: { x, y }, size: { width, height } }`）。要获取整个 surface 的大小，在 Rust 中读取 `window()`，在 TSX 中读取 [`nsh` 的设备 API](../modules/nsh.md#device) 的 `windowSize()`；两者都跟随旋转和缩放变化，读取它们的样式会随 surface 改变。桌面平台上宿主不可见：窗口自己的尺寸是它的 `WindowRef.state()?.contentBounds`（Rust 为 `WindowRef::state()`），跟随该窗口缩放：
+frame 的单位是点：Rust 中是 `Bounds<Points>`，TSX 中是 `{ bounds }`，其值是一个 `Bounds`（`{ origin: { x, y }, size: { width, height } }`）。要获取整个 surface 的大小，在 Rust 中读取 `window()`，在 TSX 中读取 [`nsh` 的设备 API](../modules/nsh.md#device) 的 `windowSize()`。两者都跟随旋转和缩放变化，读取它们的样式会随 surface 改变。桌面平台上宿主不可见：窗口自己的尺寸是它的 `WindowRef.state()?.contentBounds`（Rust 为 `WindowRef::state()`），跟随该窗口缩放：
 
 ```tsx tabs
 import { View } from "nsh";
@@ -246,15 +248,15 @@ Tailwind 的断点（`sm:`、`md:` 等）以及 `portrait:` / `landscape:` 不�
 
 ## 安全区域
 
-根视图覆盖整个屏幕，包括状态栏和主屏幕指示条下方的区域。用 CSS 的 `env()` 按安全区域的 inset 为页面加内边距（`paddingTop: "env(safe-area-inset-top)"`、Tailwind `pt-[env(safe-area-inset-top)]`、Rust 中 `.p_safe_area()`；见[安全区域](../elements/safe-area.md)）；也可以在 Rust 中用 `safe_area()`、在 TSX 中用 `safeArea()` / `safeAreaInsets()` 读取 inset 自行处理。[导航栈](./navigation.md)中的页面本身已经位于标题栏下方。
+根视图覆盖整个屏幕，包括状态栏和主屏幕指示条下方的区域。用 CSS 的 `env()` 按安全区域的 inset 为页面加内边距（`paddingTop: "env(safe-area-inset-top)"`、Tailwind `pt-[env(safe-area-inset-top)]`、Rust 中 `.p_safe_area()`；见[安全区域](../elements/safe-area.md)）。也可以在 Rust 中用 `safe_area()`、在 TSX 中用 `safeArea()` / `safeAreaInsets()` 读取 inset 自行处理。[导航栈](./navigation.md)中的页面本身已经位于标题栏下方。
 
 ## 从右到左
 
 应用的布局方向跟随系统语言，视图的 `direction` 样式（`"ltr"`、`"rtl"` 或 `"inherit"`；Rust 中为 `.direction(LayoutDirection::Rtl)`）设置其子树的方向。当应用以从右到左方式布局时：
 
-- 行从右侧开始排列；
-- `left` 和 `right` 与浏览器一样保持原侧，样式键和类都是如此：`paddingLeft`、`marginLeft`、`left`、`borderLeftWidth`、`borderTopLeftRadius`、`textAlign: "left"` 以及 `pl-4`、`ml-2`、`left-0`、`border-l`、`rounded-tl-lg`、`text-left` 仍在左侧；
-- 逻辑属性跟随方向，行内起始侧是右侧：`marginStart`、`marginEnd`、`paddingStart`、`paddingEnd`、`start`、`end`、`borderStartWidth`、`borderEndColor`、`borderTopStartRadius` 等，以及 `textAlign: "start"` / `"end"`（类为 `ps-4`、`ms-2`、`start-0`、`border-s`、`rounded-ss-lg`、`text-start`；Rust 中为 `.ms(..)`、`.me(..)`、`.ps(..)`、`.pe(..)`、`.border_s(..)`、`.rounded_ss(..)` 等）；`marginHorizontal` 和 `paddingHorizontal` 同时设置两侧；
+- 行从右侧开始排列。
+- `left` 和 `right` 与浏览器一样保持原侧，样式键和类都是如此：`paddingLeft`、`marginLeft`、`left`、`borderLeftWidth`、`borderTopLeftRadius`、`textAlign: "left"` 以及 `pl-4`、`ml-2`、`left-0`、`border-l`、`rounded-tl-lg`、`text-left` 仍在左侧。
+- 逻辑属性跟随方向，行内起始侧是右侧：`marginStart`、`marginEnd`、`paddingStart`、`paddingEnd`、`start`、`end`、`borderStartWidth`、`borderEndColor`、`borderTopStartRadius` 等，以及 `textAlign: "start"` / `"end"`（类为 `ps-4`、`ms-2`、`start-0`、`border-s`、`rounded-ss-lg`、`text-start`；Rust 中为 `.ms(..)`、`.me(..)`、`.ps(..)`、`.pe(..)`、`.border_s(..)`、`.rounded_ss(..)` 等）。`marginHorizontal` 和 `paddingHorizontal` 同时设置两侧。
 - `textAlign: "auto"` 的文字右对齐，原生控件也会镜像。
 
 ```tsx tabs

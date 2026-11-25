@@ -7,7 +7,7 @@ demo: el-data-table
 
 # DataTable
 
-`DataTable` 像电子表格那样显示行和列，并向两个方向滚动，行数和列数都不限。只创建视野中的单元格，所以一百万行、一万列的表格滚动起来与小表格一样流畅。行、列或单元格可以用指针和键盘选择；列有固定的宽度，拖动边缘调整宽度，拖动标题移动，可以在其他列滚动时固定在左侧或右侧，也可以排序。标题可以位于分组标签之下，单元格和标题都可以由应用绘制。
+`DataTable` 像电子表格那样显示行和列，并向两个方向滚动，行数和列数都不限。只创建视野中的单元格，所以一百万行、一万列的表格滚动起来与小表格一样流畅。行、列或单元格可以用指针和键盘选择。列有固定的宽度，拖动边缘调整宽度，拖动标题移动，可以在其他列滚动时固定在左侧或右侧，也可以排序。标题可以位于分组标签之下，单元格和标题都可以由应用绘制。
 
 `DataTable` 提供布局、对齐、虚拟化和交互。应用通过 `classes` 和 `styles` 设置各部件的内边距、颜色、边框和选中态外观。Rust 用 `nsh_base::data_table()` 创建它，TSX 用 `nsh/base` 中的 `<DataTable>`。
 
@@ -146,7 +146,7 @@ const page = signal({ start: 0, rows: load(0) });
 
 开启 `cellSelectable` 并隐藏行号列（`rowHeader={false}`）时，再次按下已选中的单元格会选中它所在的行。`selectOnModifierPress` 为真（默认）时，按住 Shift 或平台的命令键按下会像没有按住那样选中行、单元格或标题。应用自己保存多行、多个单元格或多列的选择时把它设为 false：表格保留已有的选择，并报告这次按下。`onRowPress` 报告表体的每一次按下，带有所在行、指针下的列、连续点击次数和按住的修饰键。`onColumnPress` 以同样的方式报告标题被按下（`{ column, clicks, shift, control, alt, platform }`），`selectable` 为 false 的列也包括在内。排序按钮报告 `onSortChange`，拖动标题并完成移动则报告 `onColumnMove`。
 
-`cellClasses` 按数据行号和列在 `columns` 中的下标（与 `onRowPress` 报告的数字相同）给单个单元格附加类名，画在部件类和该列 `cellClass` 之后。单元格的文字仍由表格绘制。应用选中的列用该列的 `headerClass` 和 `cellClass` 上色。`selectable` 为 false 的列，它本身和它的单元格都不会被选中；按下它的标题仍会报告。
+`cellClasses` 按数据行号和列在 `columns` 中的下标（与 `onRowPress` 报告的数字相同）给单个单元格附加类名，画在部件类和该列 `cellClass` 之后。单元格的文字仍由表格绘制。应用选中的列用该列的 `headerClass` 和 `cellClass` 上色。`selectable` 为 false 的列，它本身和它的单元格都不会被选中。按下它的标题仍会报告。
 
 ```tsx
 <DataTable
@@ -169,7 +169,7 @@ const page = signal({ start: 0, rows: load(0) });
 
 方向键、Escape 和 `copy()` 仍作用于表格自己的那一项选择。应用从自己的数据复制它保存的集合。
 
-行从数据中的 0 开始计数，列是它在 `columns` 中的索引，不受用户移动后顺序的影响。`onSelectionChange` 报告用户的选择（没有选择时为 `null`）。`selection` 属性由应用设置选择；不设置时由表格自己保存。`onDoublePress` 报告一行、一个单元格或一个标题被连按两次，`onContextMenu` 报告次要按下或长按，并给出应用打开 [`Menu`](./menu.md) 的位置。两者都指出指针下的单元格（`row` 和 `column`）、行号（只有 `row`）或标题（只有 `column`）。在下一次按下之前，请求菜单的单元格带有 `cellActive` 部件；单元格不可选时，则是它所在的行带有 `rowActive` 部件。
+行从数据中的 0 开始计数，列是它在 `columns` 中的索引，不受用户移动后顺序的影响。`onSelectionChange` 报告用户的选择（没有选择时为 `null`）。`selection` 属性由应用设置选择。不设置时由表格自己保存。`onDoublePress` 报告一行、一个单元格或一个标题被连按两次，`onContextMenu` 报告次要按下或长按，并给出应用打开 [`Menu`](./menu.md) 的位置。两者都指出指针下的单元格（`row` 和 `column`）、行号（只有 `row`）或标题（只有 `column`）。在下一次按下之前，请求菜单的单元格带有 `cellActive` 部件。单元格不可选时，则是它所在的行带有 `rowActive` 部件。
 
 屏幕阅读器得到一个网格（名称来自 `accessibilityLabel`），由列标题和单元格组成，被选中的会读出为已选中。
 
@@ -177,7 +177,7 @@ const page = signal({ start: 0, rows: load(0) });
 
 ## 键盘
 
-按下表格，或用 Tab 移到表格上（macOS、Web），会让它获得键盘，直到再次按下别处、焦点移走或调用 `blur()`；应用可以用 `focus()` 让它获得键盘。整张表格是 Tab 的一个停靠点：在表格里 Tab 移动选择，Escape 交出键盘。列的调整宽度手柄只接受指针，在终端里也是如此；在终端里，指针移到手柄上时它才显示分隔线，标题的排序用一个字符表示（`▲`、`▼`，未排序时为 `↕`）。
+按下表格，或用 Tab 移到表格上（macOS、Web），会让它获得键盘，直到再次按下别处、焦点移走或调用 `blur()`。应用可以用 `focus()` 让它获得键盘。整张表格是 Tab 的一个停靠点：在表格里 Tab 移动选择，Escape 交出键盘。列的调整宽度手柄只接受指针，在终端里也是如此。在终端里，指针移到手柄上时它才显示分隔线，标题的排序用一个字符表示（`▲`、`▼`，未排序时为 `↕`）。
 
 | 按键 | 作用 |
 |---|---|
@@ -214,15 +214,15 @@ const page = signal({ start: 0, rows: load(0) });
 
 ## 调整和移动列
 
-拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize({ key, width })` 报告每一步。连续按两次边缘会把该列适配到最宽的文本和标题。拖动标题会移动列，并用一条线显示将放下的位置；`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在同一侧的固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
+拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize({ key, width })` 报告每一步。连续按两次边缘会把该列适配到最宽的文本和标题。拖动标题会移动列，并用一条线显示将放下的位置。`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在同一侧的固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
 
 <a id="filling-the-width"></a>
 
 ## 铺满宽度
 
-应用事先不知道内容的列（查询结果、文件的字段）从内容和表格取得宽度。带 `autoFit` 的列在表格第一次有它的文字时，像 `fitColumn` 那样适配到最宽的文字和标题；在此之前用它的 `width`。每个 `key` 只适配一次：之后的数据不改变宽度，实时数据不会让列跳动；新 `key` 的列在它的行到来时适配。
+应用事先不知道内容的列（查询结果、文件的字段）从内容和表格取得宽度。带 `autoFit` 的列在表格第一次有它的文字时，像 `fitColumn` 那样适配到最宽的文字和标题。在此之前用它的 `width`。每个 `key` 只适配一次：之后的数据不改变宽度，实时数据不会让列跳动。新 `key` 的列在它的行到来时适配。
 
-各列比表格窄时，它们留出的宽度按 `grow` 的比例分给带 `grow` 的列，如同 CSS 的 `flex-grow`：加在它们的宽度（或适配出的宽度）上，各自不超过 `maxWidth`。份额随表格宽度变化；各列比表格宽时都不再伸长，表格横向滚动。用户调整过宽度、或应用设过宽度（`setColumnWidth`、`fitColumn`）的列保持那个宽度，不再伸长。伸长和自动适配本身不报告 `onColumnResize`；`columnWidths()` 给出显示的宽度。
+各列比表格窄时，它们留出的宽度按 `grow` 的比例分给带 `grow` 的列，如同 CSS 的 `flex-grow`：加在它们的宽度（或适配出的宽度）上，各自不超过 `maxWidth`。份额随表格宽度变化。各列比表格宽时都不再伸长，表格横向滚动。用户调整过宽度、或应用设过宽度（`setColumnWidth`、`fitColumn`）的列保持那个宽度，不再伸长。伸长和自动适配本身不报告 `onColumnResize`。`columnWidths()` 给出显示的宽度。
 
 ```tsx
 <DataTable
@@ -259,7 +259,7 @@ const columns: DataTableColumn[] = [
 
 ## 绘制单元格和标题
 
-当某一列不只是文字时（徽标、按钮），用 `renderCell` 绘制应用自己的单元格。它只为视野中的单元格调用，参数是 `DataTableCell`：`row`、`column`、`key`、`text`（表格原本会显示的文字）和 `selected`。应用按 `row` 查找自己的数据。它绘制的视图和表格外的视图一样响应按下和指针：`onPress`、`hover:` 类、`onMouseEnter` / `onMouseMove` / `onMouseLeave`；`classes.row` 设为 `"group"` 时，指针所在行的 `group-hover:` 类也会生效。`renderHeaderCell` 绘制铺满单元格的标题，参数是 `DataTableHeaderCell`：`column`、`key`、`title`、`sort`（方向，或无）和 `selected`。
+当某一列不只是文字时（徽标、按钮），用 `renderCell` 绘制应用自己的单元格。它只为视野中的单元格调用，参数是 `DataTableCell`：`row`、`column`、`key`、`text`（表格原本会显示的文字）和 `selected`。应用按 `row` 查找自己的数据。它绘制的视图和表格外的视图一样响应按下和指针：`onPress`、`hover:` 类、`onMouseEnter` / `onMouseMove` / `onMouseLeave`。`classes.row` 设为 `"group"` 时，指针所在行的 `group-hover:` 类也会生效。`renderHeaderCell` 绘制铺满单元格的标题，参数是 `DataTableHeaderCell`：`column`、`key`、`title`、`sort`（方向，或无）和 `selected`。
 
 ```tsx
 <DataTable
@@ -278,7 +278,7 @@ const columns: DataTableColumn[] = [
 />
 ```
 
-单元格里带 `onPress` 的视图（例如复制按钮）会收到按在它上面的按下，这时表格不会选中该行，也不会触发 `onRowPress`；按在单元格其他位置照常选中行。这类视图只收到 `onPress`，不显示悬停和按下状态的样式。
+单元格里带 `onPress` 的视图（例如复制按钮）会收到按在它上面的按下，这时表格不会选中该行，也不会触发 `onRowPress`。按在单元格其他位置照常选中行。这类视图只收到 `onPress`，不显示悬停和按下状态的样式。
 
 `fontFamily` 和 `fontSize`（默认 `14`）设置单元格的字体，表格也用它来测量文字以适配列宽。
 
@@ -286,7 +286,7 @@ const columns: DataTableColumn[] = [
 
 ## Ref
 
-`ref` 提供 `DataTableRef`。方法收到表格中没有的行、列或列键时什么也不改变，并在日志中记一条警告，写明方法和那个值；`fitColumn` 遇到未知的键时以 `TypeError` 拒绝。
+`ref` 提供 `DataTableRef`。方法收到表格中没有的行、列或列键时什么也不改变，并在日志中记一条警告，写明方法和那个值。`fitColumn` 遇到未知的键时以 `TypeError` 拒绝。
 
 | 方法 | 说明 |
 |---|---|
@@ -307,7 +307,7 @@ const columns: DataTableColumn[] = [
 
 ## 为部件设置样式
 
-`class` 和 `style` 设置表格盒子的样式。`classes` 按部件接受 Tailwind 类，`styles` 按部件接受内联样式；部件提供表格的基本结构和对齐，类设置外观，`styles` 优先于类。
+`class` 和 `style` 设置表格盒子的样式。`classes` 按部件接受 Tailwind 类，`styles` 按部件接受内联样式。部件提供表格的基本结构和对齐，类设置外观，`styles` 优先于类。
 
 ```tsx
 <DataTable
@@ -430,7 +430,7 @@ const columns: DataTableColumn[] = [
 
 ### Rust 中的固定列
 
-`nsh_base::data_table::ColumnFixed` 沿用 GPUI Kit 按列所在一侧的命名。`None`（默认）正常滚动；`Left` 和 `Right`
+`nsh_base::data_table::ColumnFixed` 沿用 GPUI Kit 按列所在一侧的命名。`None`（默认）正常滚动。`Left` 和 `Right`
 把列固定在对应的一侧。TS 中使用 `false`、`"left"` 和 `"right"`，并保留 `true` 作为 `"left"` 的简写。
 
 ```rust

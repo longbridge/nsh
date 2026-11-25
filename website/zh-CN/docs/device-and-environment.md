@@ -10,7 +10,7 @@ demo: guide-device
 
 应用运行时，所处的环境会不断变化：窗口改变尺寸（旋转、分屏、Mac 窗口），用户切换到深色模式或更大的字号，键盘出现又消失。NSH 把这些都以**响应式访问器**的形式提供：像 signal 一样调用它，读取了它的东西（样式、文本、计算值）就会在它变化时更新。不需要添加或移除监听器。
 
-在 Rust 中，访问器是 `nsh_core::prelude` 中的函数；在 TSX 中，它们来自表中列出的模块。
+Rust 中的访问器是 `nsh_core::prelude` 里的函数。TSX 中的访问器来自表中列出的模块。
 
 | Rust | TSX | 值 |
 |---|---|---|
@@ -345,7 +345,7 @@ use nsh_core::prelude::*;
 text(move || format!("Times in {}", locale_settings().time_zone))
 ```
 
-`Date` 的本地时间一如既往地跟随系统时区：`time_zone` 给出它的名称。`Intl` 也按这个时区格式化本地时间，给出的名称与它相同：`Intl.DateTimeFormat().resolvedOptions().timeZone` 就是 `localeSettings().timeZone`，`{ timeZone: localeSettings().timeZone }` 按本地时间格式化。测试中，`localeSettings()` 给出的是 `open` 或 `app.setLocaleSettings` 设置的时区（否则是 `UTC`）；`Date` 和 `Intl` 的本地时间仍是这台机器的，`Intl` 给出的也是这台机器的时区。
+`Date` 的本地时间一如既往地跟随系统时区：`time_zone` 给出它的名称。`Intl` 也按这个时区格式化本地时间，给出的名称与它相同：`Intl.DateTimeFormat().resolvedOptions().timeZone` 就是 `localeSettings().timeZone`，`{ timeZone: localeSettings().timeZone }` 按本地时间格式化。测试中，`localeSettings()` 给出的是 `open` 或 `app.setLocaleSettings` 设置的时区（否则是 `UTC`）。`Date` 和 `Intl` 的本地时间仍是这台机器的，`Intl` 给出的也是这台机器的时区。
 
 ## 在嵌入它的应用中
 
@@ -372,7 +372,7 @@ effect(move || {
 });
 ```
 
-用 `background` 暂停工作，并在用户做出更改时就保存它：系统可能在应用进入后台几秒后就将其挂起，早于读取这一变化的副作用运行。显示在原生应用中的应用跟随该应用的状态；应用有多个窗口时（iPad、桌面），视图跟随它所在的窗口。在 macOS 和 Windows 上，屏幕锁定或关闭时、窗口在另一个桌面（Space、虚拟桌面）上时，独立应用以及嵌入 AppKit 和 Win32 应用中的视图也处于 `background`。在 Windows 上，用户注销、Windows 关机或重启、安装程序关闭应用时，应用会进入 `background`，它的处理函数在会话结束前运行；随后应用退出（[`Application.on("quit")`](../modules/nsh-desktop.md#退出)）。Linux 上的独立应用在用户注销、系统关机或重启时，以及收到 `SIGTERM` 时（systemd 结束会话或停止服务时会发送它）也是如此。在测试中，`nsh/test` 的 `app.setLifecycle("background")` 会把应用移到后台（[测试](./testing-and-trace.md#操作步骤)）。
+用 `background` 暂停工作。用户一改动就保存，因为应用进入后台几秒后系统就可能挂起它，读取这次改动的 effect 可能还没来得及运行。显示在原生应用中的应用跟随宿主应用的状态。应用有多个窗口时（iPad、桌面），视图跟随它所在的窗口。在 macOS 和 Windows 上，屏幕锁定或关闭时、窗口在另一个桌面（Space、虚拟桌面）上时，独立应用以及嵌入 AppKit 和 Win32 应用中的视图也处于 `background`。在 Windows 上，用户注销、Windows 关机或重启、安装程序关闭应用时，应用会进入 `background`，它的处理函数在会话结束前运行；随后应用退出（[`Application.on("quit")`](../modules/nsh-desktop.md#退出)）。Linux 上的独立应用在用户注销、系统关机或重启时，以及收到 `SIGTERM` 时（systemd 结束会话或停止服务时会发送它）也是如此。在测试中，`nsh/test` 的 `app.setLifecycle("background")` 会把应用移到后台（[测试](./testing-and-trace.md#操作步骤)）。
 
 ## 睡眠之后
 
@@ -412,9 +412,9 @@ effect(move || {
 });
 ```
 
-在中国大陆销售的 iPhone 上，应用第一次联网时系统会询问用户是否允许它使用无线数据，用户回答之前应用的请求都会失败。在此之前 `cellularData` 为 `"unknown"`：在 `"unknown"` 时失败的请求等它变化后再重试；在 `"restricted"`（用户选了「关闭」，或蜂窝网络下只允许 WLAN）时失败的请求应告诉用户，`nsh/mobile` 的 `AppSettings.open()` 会打开应用在「设置」里的页面，用户在那里修改。
+在中国大陆销售的 iPhone 上，应用第一次联网时，系统会询问用户是否允许使用无线数据。用户回答之前，应用的请求都会失败，`cellularData` 也一直是 `"unknown"`。在 `"unknown"` 时失败的请求，应等它变化后再重试。在 `"restricted"`（用户选了「关闭」，或蜂窝网络下只允许 WLAN）时失败的请求，应提示用户。`nsh/mobile` 的 `AppSettings.open()` 会打开应用在「设置」里的页面，用户在那里修改。
 
-iOS 和 macOS 跟随系统的路径监视器（Network.framework），iOS 另外跟随 CoreTelephony 的蜂窝数据状态。Android 跟随默认网络（`ConnectivityManager`，需要 `ACCESS_NETWORK_STATE` 权限，`nsh package` 和 Android SDK 的 AAR 都会声明；没有这个权限时 kind 保持 `"unknown"`）。Web 读取 `navigator.onLine`，以及浏览器提供时的 `navigator.connection`（桌面浏览器不报告链路：在线时为 `"unknown"`）。Windows、Linux、GPUI 和终端报告 `"unknown"`。有路由不代表一定能连上：`online` 的链路上服务器仍可能不可达，应用仍要处理失败的请求。在测试中，`nsh/test` 的 `app.setNetworkState({ kind: "none" })` 让设备离线（[测试](./testing-and-trace.md#操作步骤)）。
+iOS 和 macOS 跟随系统的路径监视器（Network.framework），iOS 另外跟随 CoreTelephony 的蜂窝数据状态。Android 通过 `ConnectivityManager` 跟随默认网络。这需要 `ACCESS_NETWORK_STATE` 权限，`nsh package` 和 Android SDK 的 AAR 都已声明。没有这个权限时，kind 保持 `"unknown"`。Web 读取 `navigator.onLine`，以及浏览器提供时的 `navigator.connection`（桌面浏览器不报告链路：在线时为 `"unknown"`）。Windows、Linux、GPUI 和终端报告 `"unknown"`。有路由不代表一定能连上：`online` 的链路上服务器仍可能不可达，应用仍要处理失败的请求。在测试中，`nsh/test` 的 `app.setNetworkState({ kind: "none" })` 让设备离线（[测试](./testing-and-trace.md#操作步骤)）。
 
 ## 安全区域
 
@@ -528,7 +528,7 @@ let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().
 
 ## 应用数据目录
 
-Rust 中的 `data_dir()`，即 TSX 中的 `process.dataDir`，是应用存放自己文件（例如 SQLite 数据库）的目录，与 `storage.json` 同一目录，在所有原生平台上可用，包括 Android 和 iOS。默认是系统应用数据目录下以应用 id 命名的目录：macOS 为 `~/Library/Application Support/<id>`，Windows 为 `%APPDATA%\<id>`，Linux 为 `$XDG_DATA_HOME/<id>`（`~/.local/share/<id>`）；嵌入到其他应用中时，位于宿主应用的数据目录下。桌面应用可以用 `nsh.json` 的 `dataDir` 指定自己的目录（见[项目结构](./project-structure.md)），`process.dataDir` 和 `${dataDir}` 随之改变。宿主不为应用保存文件时（例如 Web）为 `None`（`undefined`）。目录可能尚未创建，写入前先创建。
+Rust 的 `data_dir()` 和 TSX 的 `process.dataDir` 返回应用存放自有文件（例如 SQLite 数据库）的目录，`storage.json` 也在这里。所有原生平台都支持，包括 Android 和 iOS。默认是系统应用数据目录下以应用 id 命名的目录：macOS 为 `~/Library/Application Support/<id>`，Windows 为 `%APPDATA%\<id>`，Linux 为 `$XDG_DATA_HOME/<id>`（`~/.local/share/<id>`）；嵌入到其他应用中时，位于宿主应用的数据目录下。桌面应用可以用 `nsh.json` 的 `dataDir` 指定自己的目录（见[项目结构](./project-structure.md)），`process.dataDir` 和 `${dataDir}` 随之改变。宿主不为应用保存文件时（例如 Web）为 `None`（`undefined`）。目录可能尚未创建，写入前先创建。
 
 打包的桌面应用把日志写到其中的 `logs/app.log`：Rust 中是 `log_file()`，TSX 中是 `process.logFile`
 （[桌面上的日志文件和级别](./dev-server-and-debugging.md#log-files-and-levels-on-the-desktop)）。
@@ -586,7 +586,7 @@ view()
 
 ## 从右到左
 
-当设备语言是从右到左书写的（阿拉伯语、希伯来语、波斯语等），NSH 会从右到左布局应用：横排从右侧开始，逻辑样式属性取从右到左时的那一侧，文字右对齐，原生控件镜像显示。布局方向自动跟随用户的语言。视图的 `direction` 样式（`"ltr"`、`"rtl"` 或 `"inherit"`；Rust 中为 `.direction(LayoutDirection::..)`）设置其子树的方向；设在根视图上即设置整个应用的方向。
+当设备语言是从右到左书写的（阿拉伯语、希伯来语、波斯语等），NSH 会把应用改为从右到左布局。横排从右侧开始，逻辑样式属性使用从右到左时的那一侧，文字右对齐，原生控件镜像显示。布局方向自动跟随用户的语言。视图的 `direction` 样式（`"ltr"`、`"rtl"` 或 `"inherit"`；Rust 中为 `.direction(LayoutDirection::..)`）设置其子树的方向；设在根视图上即设置整个应用的方向。
 
 修改会立即生效，无需重启应用；本页的演示就在切换 `direction` 样式。
 

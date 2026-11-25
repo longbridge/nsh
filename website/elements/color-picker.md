@@ -7,7 +7,7 @@ demo: el-color-picker
 
 # ColorPicker
 
-A color picker holds one color, and the parts inside it show and change it: a `ColorArea` of saturation and
+A color picker holds one color. The parts inside it show and change that color: a `ColorArea` of saturation and
 brightness, `ColorSlider`s of any channel of RGB, HSL, HSB or OKLCH and of the alpha, `ColorField`s that take the
 color as text or one channel as a number, `ColorSwatch`es of preset colors and a `ColorEyeDropper` that picks a color
 anywhere on the screen. The app lays the parts out with its
@@ -135,14 +135,14 @@ fn primary(color: Signal<Hsla>) -> impl IntoElement {
 
 `ColorPicker`, `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` come from [`nsh/base`](../modules/nsh-base.md),
 the `nsh-base` crate in Rust. In Rust, `color_picker()` and its parts' functions make them with a setter per prop
-(`.channel(..)`, `.thumb_style(..)`), a listener method per event (`.on_change(..)`) and the typed style methods; the
+(`.channel(..)`, `.thumb_style(..)`), a listener method per event (`.on_change(..)`) and the typed style methods. The
 color is an `Hsla`, the spaces, channels and formats are `ColorSpace`, `ColorChannel` and `ColorFormat`.
 
 ## Value
 
 The color is a CSS color: hex (`#3b82f6`, `#3b82f680` with its alpha), `rgb()`, `hsl()`, `hsb()`, `oklch()` or a CSS
-name; in Rust an `Hsla`. The app owns it with `value` and sets the one `onChange` reports, as for every control of
-`nsh/base`; or it leaves the color to the picker with `defaultValue` and hears the changes all the same.
+name. In Rust it is an `Hsla`. The app owns it with `value` and sets the one `onChange` reports, as for every control of
+`nsh/base`. Or it leaves the color to the picker with `defaultValue` and hears the changes all the same.
 
 - `onChange({ value, formatted })` reports each color the user asks for: at each step of a drag on the area or a slider,
   for each key, a field's number as it is typed, a swatch pressed. `value` is the color, `formatted` the same color
@@ -150,7 +150,7 @@ name; in Rust an `Hsla`. The app owns it with `value` and sets the one `onChange
 - `onChangeEnd({ value, formatted })` reports the color the change ended at, once: when the pointer lifts, after each key,
   when a field is left or submitted, when a swatch is pressed.
 - The picker keeps the color in each space as the user set it. A gray keeps its hue and saturation, so the hue slider
-  stays where the user left it; a color edited in OKLCH keeps its lightness, chroma and hue as typed, also past what
+  stays where the user left it. A color edited in OKLCH keeps its lightness, chroma and hue as typed, also past what
   sRGB shows (the color reported is the nearest one sRGB shows, and `formatted` in `"oklch"` keeps the channels).
 - A `value` the app sets that the picker did not report replaces the color in every space.
 
@@ -219,7 +219,7 @@ channel its space does not have is the space's first (a warning says so).
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the field. |
 | `class`, `style` | style methods | `string`, `StyleProp<TextStyle>` | none | The field, a text input. |
 
-A channel's field changes the color as a number is typed, held to the channel's range; the whole color's field changes
+A channel's field changes the color as a number is typed, held to the channel's range. The whole color's field changes
 it when the field is left or submitted, if the text reads as a color. Leaving a field writes its value again in its
 form.
 
@@ -246,7 +246,7 @@ form.
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The button. |
 
 A press shows the system's eyedropper: AppKit's color sampler on macOS, the browser's `EyeDropper` on the web (Chrome
-and Edge). The color picked becomes the picker's (`onChange`, then `onChangeEnd`); Escape picks none. Where the platform
+and Edge). The color picked becomes the picker's (`onChange`, then `onChangeEnd`). Escape picks none. Where the platform
 has no eyedropper the button is disabled, and `disabled:hidden` hides it there.
 
 ## Events
@@ -294,15 +294,15 @@ On macOS and the web each thumb is a stop of the keyboard focus (Tab):
 
 In a right-to-left layout a horizontal slider and the area run from the right, the smallest value (the least
 saturation) at the right end: Left is a step up and Right a step down, and a press or a drag picks the value under the
-pointer as it is drawn. A vertical slider keeps Right and Up as a step up; Up and Down on the area keep the brightness.
+pointer as it is drawn. A vertical slider keeps Right and Up as a step up. Up and Down on the area keep the brightness.
 
-A swatch takes Space and Return. Each key reports `onChange` and then `onChangeEnd`; arrows repeat while held.
+A swatch takes Space and Return. Each key reports `onChange` and then `onChangeEnd`. Arrows repeat while held.
 
 ## Accessibility
 
 - The area's and each slider's thumb are adjustable elements (`"adjustable"`, a slider in the browser) with their
-  label, value and range; screen readers' increment and decrement step them.
-- Each field is a text field with its label; each swatch a button, selected while it is the picker's color, named by
+  label, value and range. Screen readers' increment and decrement step them.
+- Each field is a text field with its label. Each swatch a button, selected while it is the picker's color, named by
   its color in hex unless `accessibilityLabel` names it. The eyedropper is a button with the app's label.
 - While disabled, screen readers say the parts are dimmed, and they take no actions.
 
@@ -310,8 +310,8 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and actions in g
 
 ## Platform notes
 
-- Every platform draws what the app styles; the tracks' and the panel's colors are gradients drawn by the platform.
+- Every platform draws what the app styles. The tracks' and the panel's colors are gradients drawn by the platform.
   Presses and drags are followed in the core, for a mouse, a pen or a finger, and a scroll view around the picker
   keeps its scrolling to drags that start elsewhere.
-- `ColorEyeDropper` picks with AppKit's color sampler on macOS and the browser's `EyeDropper` on the web; the color
+- `ColorEyeDropper` picks with AppKit's color sampler on macOS and the browser's `EyeDropper` on the web. The color
   arrives in sRGB.

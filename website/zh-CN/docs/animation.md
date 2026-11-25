@@ -8,7 +8,7 @@ demo: guide-animation
 
 # 动画
 
-NSH 中的所有动画都运行在 UI 线程上。你用 TSX 或 Rust 描述一次，平台就逐帧播放（iOS 上是 Core Animation 和 display link，Android 上是 UI 线程的动画器），不再回调你的代码。繁忙的引擎线程不会让动画卡顿，动画运行期间也不消耗你的任何代码。
+NSH 中的所有动画都运行在 UI 线程上。你用 TSX 或 Rust 描述一次动画，之后由平台逐帧播放，不再回调你的代码。iOS 上用 Core Animation 和 display link，Android 上用 UI 线程的动画器。引擎线程再忙也不会让动画卡顿，动画运行期间你的代码也不用做任何工作。
 
 共有六种工具，从最现成到最灵活：
 
@@ -23,7 +23,7 @@ NSH 中的所有动画都运行在 UI 线程上。你用 TSX 或 Rust 描述一�
 
 ## 动效
 
-动效（motion）以原生方式让视图的不透明度和变换走过一组关键帧。在拥有该视图的组件中创建它（Rust 中的 `motion()`，TSX 中 `nsh` 的 `createMotion()`），绑定到视图上，再在它上面播放现成的动效或你自己的动效。`enter` 让视图从某个动效的起点开始，并立即播放它，于是视图从第一帧起就在入场。
+动效（motion）以原生方式让视图的不透明度和变换走过一组关键帧。在拥有该视图的组件中创建动效（Rust 用 `motion()`，TSX 用 `nsh` 的 `createMotion()`），绑定到视图，再播放现成的或自定义的动效。`enter` 先把视图放到动效的第一帧，再立即播放，视图从第一帧就开始入场。
 
 ```tsx tabs
 import { mount, View } from "nsh";
@@ -66,9 +66,9 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-动效的每个通道都有一个动画值：`opacity`（0..1）、`translateX` 和 `translateY`（点）、`rotate`、`rotateX` 和 `rotateY`（度）、`scale`、`scaleX` 和 `scaleY`。它们从静止状态开始（不透明度和缩放为 1，其余为 0），并按这个顺序作用：先平移，再旋转，最后缩放，都绕视图的变换原点进行。动效本身没有外观：它只移动你设置好样式的东西。
+动效的每个通道都有一个动画值：`opacity`（0..1）、`translateX` 和 `translateY`（点）、`rotate`、`rotateX` 和 `rotateY`（度）、`scale`、`scaleX` 和 `scaleY`。各通道从静止状态开始：不透明度和缩放为 1，其余为 0。它们绕视图的变换原点，按先平移、再旋转、最后缩放的顺序作用。动效本身没有外观，只移动你已经设好样式的视图。
 
-动效只移动不透明度和变换。展开 `m.style` 会设置视图的 `opacity` 和 `transform`；想保留你自己的不透明度，就只绑定这些步骤（`transform: m.transform`）。颜色用动画值和 [`interpolate`](#插值) 来驱动。
+动效只移动不透明度和变换。展开 `m.style` 会设置视图的 `opacity` 和 `transform`。想保留你自己的不透明度，就只绑定这些步骤（`transform: m.transform`）。颜色用动画值和 [`interpolate`](#插值) 来驱动。
 
 | TSX | Rust | 说明 |
 |---|---|---|
@@ -85,7 +85,7 @@ pub fn App() -> impl IntoElement {
 
 ### 预设
 
-现成的动效就是数据：`nsh` 的 `motions`（`play("fadeInUp")` 播放的就是 `motions.fadeInUp`），以及 Rust 中的 `MotionPreset`（`MotionPreset::FadeInUp.spec()`）。距离以点为单位，按控件和卡片的尺寸设定；对更大的视图，可以按比例放大动效的数值，或者编写自己的关键帧。`swing` 等旋转都绕视图的变换原点进行：给摇摆的挂牌加上 `transformOrigin: "top"`（`.origin_top()`）。
+现成的动效就是数据：`nsh` 的 `motions`（`play("fadeInUp")` 播放的就是 `motions.fadeInUp`），以及 Rust 中的 `MotionPreset`（`MotionPreset::FadeInUp.spec()`）。距离以点为单位，按控件和卡片的尺寸设定。视图更大时，可以按比例放大动效的数值，或者自己写关键帧。`swing` 等旋转都绕视图的变换原点进行，所以要给摇摆的挂牌加上 `transformOrigin: "top"`（`.origin_top()`）。
 
 **入场（enter）**：从隐藏或偏离的位置开始，在静止状态结束。
 
@@ -186,7 +186,7 @@ card.play(flip);
 
 ### 弹簧动效
 
-给动效设置 `spring` 后，每个通道以弹簧运动到它的关键帧终点，而不是逐帧经过各关键帧。它从通道当前所在的位置出发并保留当前速度，所以一个动效打断另一个时（面板还在上升就被收起，卡片回弹途中又被按下）会平滑地转向，而不是从第一帧重新开始。第一个关键帧仍是 `enter` 让视图起步的位置；`delay` 在弹簧开始前等待；中间的关键帧以及 `duration`、`easing`、`iterations` 不参与，动效多久结束由弹簧决定。刚度、阻尼和质量与 [`spring`](#animatedvalue-的方法) 的相同（默认 170、26、1）。预设可以像接受时间参数一样接受弹簧选项。用户要求减少动态效果时，弹簧动效和其他动效一样立即落在终点。
+给动效设置 `spring` 后，每个通道以弹簧运动到它的关键帧终点，而不是逐帧经过各关键帧。弹簧从通道的当前值出发，并保留当前速度。所以一个动效打断另一个时，会平滑地转向，不会从第一帧重来。比如面板还在上升就收起，或卡片回弹途中又按下。`enter` 仍从第一个关键帧起步，`delay` 仍在弹簧开始前等待。动效时长由弹簧决定，所以中间的关键帧以及 `duration`、`easing`、`iterations` 都不起作用。刚度、阻尼和质量与 [`spring`](#animatedvalue-的方法) 的相同（默认 170、26、1）。预设可以像接受时间参数一样接受弹簧选项。用户要求减少动态效果时，弹簧动效和其他动效一样立即落在终点。
 
 ```tsx tabs
 // 约 380 毫秒静止，过冲 3%。
@@ -234,7 +234,7 @@ each(items, |item: &Item| item.id, |item, index| {
 })
 ```
 
-动效也可以组合：`m.animation(..)` 把动效变成尚未启动的[组合动画](#组合动画)，于是 `Animated.stagger` 能以原生方式运行一组动效，从第一项、最后一项、中间一项或任意下标开始计数。给它们一个隐藏的 `initial`（或让它们从动效的起点开始），这样轮到之前什么都不会显示。
+动效也可以组合：`m.animation(..)` 把动效变成尚未启动的[组合动画](#组合动画)，这样 `Animated.stagger` 就能以原生方式运行一组动效，从第一项、最后一项、中间一项或任意下标开始计数。给它们一个隐藏的 `initial`（或让它们从动效的起点开始），这样轮到之前什么都不会显示。
 
 ```tsx tabs
 const cards = [0, 1, 2, 3, 4].map(() => createMotion({ initial: { opacity: 0 } }));
@@ -397,7 +397,7 @@ Tailwind：`animate-spin`、`animate-ping`、`animate-pulse`、`animate-bounce`�
 
 ## 动画值
 
-动画值是一个存在于 UI 线程上的数字。创建它（Rust 中用 `animated_value(..)`，TSX 中用 `nsh` 的 `createAnimatedValue`），把它绑定到样式，再让它动起来；绑定它的视图每一帧都跟随它，而无需更新。
+动画值是一个存在于 UI 线程上的数字。创建它（Rust 中用 `animated_value(..)`，TSX 中用 `nsh` 的 `createAnimatedValue`），把它绑定到样式，再让它动起来。绑定它的视图每一帧都跟着它变化，不需要重新渲染。
 
 ```tsx tabs
 import { mount, Text, View } from "nsh";
@@ -497,7 +497,7 @@ text(move || price.get().to_string()).bind_color(&color)
 | `spring(to, { stiffness?, damping?, mass?, velocity?, frameRate? })` | `spring(to, Spring { .. })` | 以弹簧运动到 `to`（默认 stiffness 170、damping 26、mass 1）。stiffness 和 mass 大于 0 且 damping 为有限值时值才会运动，否则直接跳到 `to`；负的 damping 按 0 处理，值会一直振荡。 |
 | `decay({ velocity?, deceleration?, clamp?, bounce?, frameRate? })` | `decay(velocity, deceleration)`、`decay_within(velocity, deceleration, (min, max), bounce)` | 以 `velocity`（每秒单位数）开始滑行并逐渐减速（默认每毫秒 deceleration 0.998）。设置范围 `[min, max]` 时，它停在边界上，或以 `bounce`（0..1）保留的速度从边界反弹。 |
 
-每个动画都给出一个可以 await 的结果，表示它是否完成：播放到终点时为 `true`，被打断时（`stop()`、`set()`，或同一个值上启动了新动画）为 `false`。在 TSX 中它是 `Promise<{ finished: boolean }>`，在 Rust 中是 `AnimationEnd`，任务 await 它得到这个 `bool`。在运动中的值上启动新动画会平滑地接替旧动画：没有指定速度的弹簧或衰减会沿用该值当前的速度。
+每个动画都给出一个可以 await 的结果，表示它是否完成：播放到终点时为 `true`，被打断时（`stop()`、`set()`，或同一个值上启动了新动画）为 `false`。这个结果在 TSX 中是 `Promise<{ finished: boolean }>`。在 Rust 中是 `AnimationEnd`，任务 await 它得到 `bool`。在运动中的值上启动新动画，会平滑地接替旧动画。没有指定速度的弹簧或衰减，会沿用该值当前的速度。
 
 ```tsx tabs
 // 弹簧参数：damping 越小越容易过冲，stiffness 越大越快。
@@ -533,7 +533,7 @@ let at = x.value().await;
 
 ### 关键帧
 
-`keyframes` 像 CSS 关键帧那样让一个值走过一组关键帧：TSX 中是 `value.keyframes(frames, options)`，Rust 中是 `value.keyframes(frames, KeyframeTiming)`（作为[组合动画](#组合动画)的一步时用 `Animated.keyframes(value, { keyframes, ... })` 和 `Animation::keyframes(..)`）。关键帧可以是一个数字（或 `"90deg"` 这样的角度字符串），与其他关键帧均匀分布；也可以是 `{ offset, value, easing }`（Rust 中为 `Keyframe::new(value)`、`Keyframe::at(offset, value)`、`.ease(easing)`）。
+`keyframes` 像 CSS 关键帧那样让一个值走过一组关键帧：TSX 中是 `value.keyframes(frames, options)`，Rust 中是 `value.keyframes(frames, KeyframeTiming)`（作为[组合动画](#组合动画)的一步时用 `Animated.keyframes(value, { keyframes, ... })` 和 `Animation::keyframes(..)`）。关键帧可以是一个数字（或 `"90deg"` 这样的角度字符串），与其他关键帧均匀分布。也可以是 `{ offset, value, easing }`（Rust 中为 `Keyframe::new(value)`、`Keyframe::at(offset, value)`、`.ease(easing)`）。
 
 ```tsx tabs
 const y = createAnimatedValue(0);
@@ -578,7 +578,7 @@ hand.keyframes(
 
 ### 插值
 
-`interpolate` 通过分段线性映射把值转换为数字、颜色或角度，并返回一个可以绑定的新节点。一个值可以驱动多个属性。在 Rust 中，`interpolate(&input, &output)` 映射为数字，`interpolate_colors(&input, &colors)` 映射为颜色，`interpolate_with(&input, output, Interpolation { .. })` 接受外推和缓动；在 TSX 中，`value.interpolate({ inputRange, outputRange })` 接受全部选项。
+`interpolate` 通过分段线性映射把值转换为数字、颜色或角度，并返回一个可以绑定的新节点。一个值可以驱动多个属性。在 Rust 中，`interpolate(&input, &output)` 映射为数字，`interpolate_colors(&input, &colors)` 映射为颜色，`interpolate_with(&input, output, Interpolation { .. })` 接受外推和缓动。在 TSX 中，`value.interpolate({ inputRange, outputRange })` 接受全部选项。
 
 ```tsx tabs
 const t = createAnimatedValue(0);
@@ -623,7 +623,7 @@ view()
 
 ### 算术运算与 diffClamp
 
-节点之间也可以做算术运算，同样在原生端执行：`a.add(b)`、`a.sub(b)`、`a.mul(b)`、`a.div(b)`、`a.mod(b)`（Rust 中为 `a.modulo(b)`；当 `b` 为正时结果不为负，例如 0..360 的角度），其中 `b` 可以是节点或数字。在 TSX 中，`Animated.add`、`subtract`、`multiply`、`divide` 和 `modulo` 是对应的函数形式。
+节点之间也可以做算术运算，同样在原生端执行：`a.add(b)`、`a.sub(b)`、`a.mul(b)`、`a.div(b)`、`a.mod(b)`（Rust 中为 `a.modulo(b)`），其中 `b` 可以是节点或数字。`b` 为正时 `mod` 的结果不为负，适合 0..360 的角度。在 TSX 中，`Animated.add`、`subtract`、`multiply`、`divide` 和 `modulo` 是对应的函数形式。
 
 `diffClamp(min, max)`（`diff_clamp`）跟随节点的*变化量*，同时把结果限制在 `min..max` 之内。把它用在滚动偏移上，就得到内容上滑时隐藏、一往下滑就重新出现的标题栏：
 
@@ -643,7 +643,7 @@ scroll().flex_1().scroll_value(&offset)
 view().absolute().top_0().left_0().right_0().h(px(56.0)).bind_translate_y(&header.mul(-1.0))
 ```
 
-加上 `{ snap: true }`（Rust 中为 `diff_clamp_with(min, max, DiffClamp::snapping())`）后，滚动停止时只显示了一部分的标题栏会把移动做完：它在 UI 线程上用 200 ms 停到完全显示或完全隐藏，取较近的一端。只有当页面滚动的距离至少达到标题栏的高度时它才会隐藏，因此滚动距离不足的页面会显示整个标题栏。移动过程中再次滚动，标题栏会从当前位置继续跟随滚动。
+加上 `{ snap: true }`（Rust 中为 `diff_clamp_with(min, max, DiffClamp::snapping())`）后，如果滚动停止时标题栏只露出一部分，它会把移动做完：在 UI 线程上用 200 ms 停到完全显示或完全隐藏，取较近的一端。只有当页面滚动的距离至少达到标题栏的高度时它才会隐藏，因此滚动距离不足的页面会显示整个标题栏。移动过程中再次滚动，标题栏会从当前位置继续跟随滚动。
 
 ```tsx tabs
 const header = scroll.diffClamp(0, 56, { snap: true });
@@ -745,7 +745,13 @@ spawn(async move {
 | `Animated.delay(ms)` | `Animation::delay(ms)` | 等待。 |
 | `Animated.loop(animation, { iterations?, resetBeforeIteration? })` | `.looped(iterations)`、`.reset_before_iteration(..)` | 重复（默认无限次；Rust 中为 `None`）。 |
 
-组合动画提供 `start()`（在 TSX 中也可以带回调并返回 promise，两者都得到 `{ finished }`；在 Rust 中返回可 await 的 `bool`；再次调用会重新运行）、`stop()`（停在原处）和 `reset()`（停止，并把各个值恢复到开始时的状态）。回调对整棵动画树只调用一次。
+组合动画有三个方法：
+
+- `start()` 运行动画，再次调用会重新运行。在 TSX 中它还可以带回调，并返回 promise，两者都得到 `{ finished }`。在 Rust 中它返回可 await 的 `bool`。
+- `stop()` 让动画停在原处。
+- `reset()` 停止动画，并把各个值恢复到开始时的状态。
+
+回调对整棵动画树只调用一次。
 
 正在运行的动画不会让它的值保持存活：拥有这些值的组件（它的视图和变量）消失时，无限循环的动画随之停止，结果是未完成（`false`）。
 
@@ -765,7 +771,7 @@ spawn(async move {
 | `Easing.steps(count, position?)` | `Easing::Steps(count, StepPosition::JumpEnd)` | 在 `count` 个级别之间跳变而不连续移动，与 CSS `steps()` 相同：逐帧的精灵图、跳动的指针。`position` 为 `"jump-end"`（默认，也可写 `"end"`）、`"jump-start"`（`"start"`）、`"jump-none"` 或 `"jump-both"`。 |
 | `Easing.in(e)`、`Easing.out(e)`、`Easing.inOut(e)` | `Easing::Curve(curve, EaseMode::In)`、`EaseMode::Out`、`EaseMode::InOut` | 曲线本身都是 "in" 形式；`out` 和 `inOut` 把它们反转。 |
 
-在 TSX 中，凡是接受缓动的地方，也可以传入名称（`"linear"`、`"ease"`、`"easeIn"`、`"easeOut"`、`"easeInOut"`）或贝塞尔数组 `[x1, y1, x2, y2]`；在 Rust 中，`Easing::EaseIn`、`Easing::EaseOut` 和 `Easing::EaseInOut` 就是 CSS 的对应曲线。
+在 TSX 中，凡是接受缓动的地方，也可以传入名称（`"linear"`、`"ease"`、`"easeIn"`、`"easeOut"`、`"easeInOut"`）或贝塞尔数组 `[x1, y1, x2, y2]`。在 Rust 中，`Easing::EaseIn`、`Easing::EaseOut` 和 `Easing::EaseInOut` 就是 CSS 的对应曲线。
 
 ```tsx tabs
 x.timing(1, { easing: Easing.out(Easing.back()) });
@@ -870,7 +876,7 @@ animate_layout(LayoutAnimation {
 
 布局动画覆盖这次更新改变的所有帧，无论它们在屏幕上的什么位置：同一次更新中刷新的列表或到达的实时数据也会随之动画。
 
-在 `List` 中，已经显示的行滑到新位置，新来的行出现在它自己的位置，和 UIKit 的批量更新一样：`inverted` 列表底部来了一条新消息，它上面的消息被推上去，列表同时保持与末尾的距离。使用回收单元格的新行直接显示在它的位置。要只为一个元素的变化所移动的内容做动画，Rust 用 `ElementRef::animate_layout(transition)`，TSX 用 `ref.animateLayout(transition)`（`transition` 是上面的一个阶段；不传时 300 ms 缓入缓出）：元素自己和其内容的帧，被它的尺寸推动的视图（它的兄弟视图，以及各级祖先的兄弟视图）的帧，以及被它改变尺寸的视图的内容。这次更新的其他帧立即变化：同一次更新中增删行的列表，即使跟着变高，它的行也不会一起动画。插入和删除不做动画；同一次更新里调用了 `configureNext` 时，改为所有帧一起动画。`nsh/base` 的 `Collapsible` 和 `AccordionPanel` 就是这样展开内容的，header 在持续更新的列表上方折叠也是这样。
+在 `List` 中，已显示的行滑到新位置，新行出现在自己的位置，和 UIKit 的批量更新一样。比如聊天时 `inverted` 列表底部来了新消息，上面的消息会往上推，列表仍保持与末尾的距离。使用回收单元格的新行直接显示在它的位置。要只为一个元素的变化所移动的内容做动画，Rust 用 `ElementRef::animate_layout(transition)`，TSX 用 `ref.animateLayout(transition)`。`transition` 是上面说的一个阶段，不传时为 300 ms 缓入缓出。参与动画的有：元素自身及其内容的帧；被它的尺寸推动的视图的帧，包括它的兄弟视图和各级祖先的兄弟视图；以及被它改变尺寸的视图的内容。这次更新中的其他帧立即变化。同一次更新中增删行的列表，即使跟着变高，它的行也不会一起动画。插入和删除不做动画。同一次更新里调用了 `configureNext` 时，改为所有帧一起动画。`nsh/base` 的 `Collapsible` 和 `AccordionPanel` 就是这样展开内容的，header 在持续更新的列表上方折叠也是这样。
 
 ```rust
 use nsh_core::element::{LayoutTransition, Spring};
@@ -901,7 +907,7 @@ const collapse = () => {
 <View ref={(r) => (header = r)} style={{ height: compact() ? 56 : 120 }} />;
 ```
 
-按物理参数给出的弹簧（设计系统通常这样给出）为 `LayoutTransition::spring(spring)`，其中 `Spring` 与 gpui-base 的一致：`Spring::new(response_ms)`（无阻尼时的周期，临界阻尼）或 `Spring::from_stiffness(stiffness)`（质量为 1），再用 `.damping_ratio(ζ)` 调整阻尼比。动画持续到弹簧停留在目标的千分之一以内为止（`Spring::settle_ms`），与过渡给定的时长无关，并在每个平台上都按同样的物理规律运动（`LayoutCurve::Spring`）。在 TSX 中，写了 `stiffness`、`damping`（阻尼系数，不是阻尼比）或 `mass` 的 `"spring"` 阶段就是这样的弹簧，未写的取 `Animated.spring` 的默认值（170、26 和 1）；此时不使用它的 `duration` 和 `springDamping`。`configureNext` 和 `ref.animateLayout` 都可以这样写。不带这些参数的 `"spring"` 阶段（`springDamping`）是 `LayoutCurve::FittedSpring { damping_ratio }`：它的刚度按过渡的时长拟合。
+按物理参数给出的弹簧（设计系统通常这样给出）为 `LayoutTransition::spring(spring)`，其中 `Spring` 与 gpui-base 的一致：`Spring::new(response_ms)`（无阻尼时的周期，临界阻尼）或 `Spring::from_stiffness(stiffness)`（质量为 1），再用 `.damping_ratio(ζ)` 调整阻尼比。动画持续到弹簧停留在目标的千分之一以内为止（`Spring::settle_ms`），与过渡给定的时长无关。它在每个平台上都按同样的物理规律运动（`LayoutCurve::Spring`）。在 TSX 中，写了 `stiffness`、`damping`（阻尼系数，不是阻尼比）或 `mass` 的 `"spring"` 阶段就是这样的弹簧，没写的参数取 `Animated.spring` 的默认值（170、26 和 1）。此时不使用它的 `duration` 和 `springDamping`。`configureNext` 和 `ref.animateLayout` 都可以这样写。不带这些参数的 `"spring"` 阶段（`springDamping`）是 `LayoutCurve::FittedSpring { damping_ratio }`：它的刚度按过渡的时长拟合。
 
 ```tsx tabs
 // 刚度 620、阻尼 36、质量 1：阻尼比约 0.72，约 380 ms 停稳。
@@ -935,7 +941,7 @@ region.animate_layout(LayoutTransition::spring(Spring::from_stiffness(800.0).dam
 
 ## 帧率
 
-每个动画默认以屏幕的最高帧率运行：ProMotion 屏幕上是 120 Hz。小而慢的动效（如加载指示器、轻柔的脉动）在较低帧率下看起来一样，为它声明一个帧率，就能在只有它在动时让屏幕降低刷新频率，更省电。`frameRate` 是动画需要的最高帧率，单位 Hz：可写在 `timing`、`spring`、`decay` 的选项里，`Animated.*` 的步骤、关键帧和动效（`play`）的选项里，以及关键帧动画的样式键 `animationFrameRate` 里。
+每个动画默认以屏幕的最高帧率运行：ProMotion 屏幕上是 120 Hz。小而慢的动效（如加载指示器、轻柔的脉动）在较低帧率下看起来一样，给它声明较低的帧率后，当屏幕上只有它在动时，屏幕可以降低刷新频率，更省电。`frameRate` 是动画需要的最高帧率，单位 Hz：可写在 `timing`、`spring`、`decay` 的选项里，`Animated.*` 的步骤、关键帧和动效（`play`）的选项里，以及关键帧动画的样式键 `animationFrameRate` 里。
 
 ```tsx tabs
 // 每秒 30 帧就够的加载指示器。
@@ -957,7 +963,7 @@ opacity.timing_with(1.0, Timing::new(600.0, Easing::Linear).frame_rate(30.0));
 glow.keyframes([Keyframe::new(0.4), Keyframe::new(1.0), Keyframe::new(0.4)], KeyframeTiming::new(1600.0).infinite().frame_rate(24.0));
 ```
 
-屏幕以其上所有内容所需的最高帧率运行：没有 `frameRate` 的动画、过渡、滚动、手势或 `requestAnimationFrame` 循环运行时，屏幕回到最高帧率；组合动画以其步骤中最高的帧率运行。动画的时间与帧率无关：它在全帧率下结束的时刻结束。macOS 和 iOS 会按这些声明降低屏幕帧率；其他平台以屏幕的帧率运行所有动画。
+屏幕以其上所有内容所需的最高帧率运行：没有 `frameRate` 的动画、过渡、滚动、手势或 `requestAnimationFrame` 循环运行时，屏幕回到最高帧率。组合动画以其步骤中最高的帧率运行。帧率不影响动画时长，动画总在全帧率下应当结束的时刻结束。macOS 和 iOS 会按这些声明降低屏幕帧率，其他平台以屏幕的帧率运行所有动画。
 
 ## 减少动态效果
 

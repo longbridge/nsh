@@ -8,7 +8,9 @@ demo: el-keyboard
 
 # 键盘
 
-`env(keyboard-inset-height)` 是软键盘覆盖在界面上的高度，键盘隐藏时为 0。把它用作视图的底部内边距或外边距，可以让内容保持在键盘之上：键盘显示或隐藏时，视图按键盘高度让出空间，变化在原生侧随键盘一起动画。它用于滚动视图之外的内容，例如聊天界面底部的消息栏；[滚动视图](./scroll.md)或 [List](./list.md) 中的输入框会在原生侧滚动到可见位置。与它配套的还有隐藏键盘的 `Keyboard.dismiss()`，以及用于自定义布局的键盘高度。
+`env(keyboard-inset-height)` 是软键盘遮住界面的高度，键盘隐藏时为 0。把它设为视图的底部 padding 或 margin，内容就会留在键盘上方。键盘弹出或收起时，视图随之让出或收回空间，并在原生侧跟着键盘一起动画。
+
+它适合滚动视图之外的内容，比如聊天界面底部的消息栏。[滚动视图](./scroll.md)和 [List](./list.md) 里的输入框会由原生侧自动滚动到可见位置。本页还介绍用来收起键盘的 `Keyboard.dismiss()`，以及供自定义布局使用的键盘高度。
 
 ```tsx tabs
 import { mount, Scroll, signal, Text, View } from "nsh";

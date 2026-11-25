@@ -8,7 +8,7 @@ demo: el-canvas
 
 # Canvas
 
-canvas 是一个由你自己用 2D 绘图 API（即 HTML Canvas 2D API）绘制的视图：图表、仪表盘、圆环、签名、自定义形状都可以用它来画。绘制代码记录操作，平台在原生侧以屏幕分辨率回放这些操作（iOS 和 Mac Catalyst 上是 Core Graphics，Android 上是 `android.graphics.Canvas`）。Rust 用 `canvas(painter)` 创建，`Painter` 记录绘制内容；TSX 用从 `nsh` 导入的 `<Canvas>` 及其 `draw` 函数。
+canvas 是一个由你自己用 2D 绘图 API（即 HTML Canvas 2D API）绘制的视图：图表、仪表盘、圆环、签名、自定义形状都可以用它来画。绘制代码记录操作，平台在原生侧以屏幕分辨率回放这些操作（iOS 和 Mac Catalyst 上是 Core Graphics，Android 上是 `android.graphics.Canvas`）。Rust 用 `canvas(painter)` 创建，`Painter` 记录绘制内容。TSX 用从 `nsh` 导入的 `<Canvas>` 及其 `draw` 函数。
 
 ```tsx tabs
 import { Canvas, mount } from "nsh";
@@ -67,7 +67,7 @@ fn ring(progress: f32) -> impl IntoElement {
 }
 ```
 
-在 TSX 中，`Canvas` 会创建原生画布视图、测量它的尺寸，再把上下文和尺寸传给你的 `draw` 函数（参见 [Canvas API](../modules/nsh-canvas.md)）。在 Rust 中，`canvas(..)` 接收一个 `Painter`，或返回 `Painter` 的闭包：闭包读取的内容变化时会重新绘制；绘制依赖尺寸时，尺寸来自 `on_layout`。
+在 TSX 中，`Canvas` 会创建原生画布视图、测量它的尺寸，再把上下文和尺寸传给你的 `draw` 函数（参见 [Canvas API](../modules/nsh-canvas.md)）。在 Rust 中，`canvas(..)` 接收一个 `Painter`，或返回 `Painter` 的闭包：闭包读取的内容变化时会重新绘制。绘制依赖尺寸时，尺寸来自 `on_layout`。
 
 ## 属性
 
@@ -151,7 +151,7 @@ canvas(
 
 ## 上下文
 
-`CanvasRenderingContext2D` 是浏览器版本的一个子集，`Painter` 以 snake case 方法提供同样的操作（`move_to`、`line_to`、`fill_rect`、`fill_text`、`stroke_color` 等）：状态栈（`save`、`restore`）、变换、路径（`moveTo`、`lineTo`、`arc`、`arcTo`、`ellipse`、`rect`、`roundRect`、贝塞尔曲线）、`fill` / `stroke` / `clip`（也可作用于 `Path2D`，后者接受 SVG 路径数据；Rust 中为 `fill_svg` / `stroke_svg`）、矩形、文字（`fillText`、`strokeText`、`measureText`）、线性 / 径向 / 锥形渐变、虚线、阴影、`globalAlpha`、`globalCompositeOperation` 以及 `drawImage`（图片可以是 URL 或资源）。所有成员见 [Canvas API 参考](../modules/nsh-canvas.md)；[画布指南](../docs/canvas.md)介绍了如何绘制图表和动画图形。
+`CanvasRenderingContext2D` 是浏览器版本的一个子集，`Painter` 以 snake case 方法提供同样的操作（`move_to`、`line_to`、`fill_rect`、`fill_text`、`stroke_color` 等）：状态栈（`save`、`restore`）、变换、路径（`moveTo`、`lineTo`、`arc`、`arcTo`、`ellipse`、`rect`、`roundRect`、贝塞尔曲线）、`fill` / `stroke` / `clip`（也可作用于 `Path2D`，后者接受 SVG 路径数据；Rust 中为 `fill_svg` / `stroke_svg`）、矩形、文字（`fillText`、`strokeText`、`measureText`）、线性 / 径向 / 锥形渐变、虚线、阴影、`globalAlpha`、`globalCompositeOperation` 以及 `drawImage`（图片可以是 URL 或资源）。所有成员见 [Canvas API 参考](../modules/nsh-canvas.md)。[画布指南](../docs/canvas.md)介绍了如何绘制图表和动画图形。
 
 坐标单位是点，原点在左上角。`measureText` 是同步的，返回 `width`。Rust 的 `Painter` 也能做命中测试（`is_point_in_path`、`is_point_in_stroke`）。
 

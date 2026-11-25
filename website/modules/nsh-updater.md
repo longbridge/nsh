@@ -6,11 +6,7 @@ order: 12.7
 
 # nsh/updater
 
-`nsh/updater` checks for a newer version of a packaged app, downloads it and replaces the app. Where updates come
-from is set in [`nsh.json`'s `"updater"`](#nshjson), never by the code that calls the module, and every step is checked
-in Rust: the manifest's signature, a newer version, the archive's size and SHA-256. `promptForUpdate()` asks the
-user in a built-in prompt; for a UI of your own, the other functions return state and do the work.
-[App Updates](../docs/app-updates.md) walks through the whole flow, from setting the source to publishing a release.
+`nsh/updater` checks for a newer version of a packaged app, downloads it and replaces the app. The update source is set in [`nsh.json`'s `"updater"`](#nshjson). Code that calls the module cannot change it. Rust checks every step: the manifest's signature, that the version is newer, and the archive's size and SHA-256. `promptForUpdate()` asks the user in a built-in prompt. If you want your own UI, the other functions return state and do the work. [App Updates](../docs/app-updates.md) walks through the whole flow, from setting the source to publishing a release.
 
 It also updates the app's code alone: a [signed package](../docs/signed-packages.md) of a newer build, which the app
 runs from its next start on every native platform, iOS and Android included ([OTA updates](#ota-updates)).

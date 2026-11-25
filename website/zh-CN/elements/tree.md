@@ -97,7 +97,7 @@ fn files() -> impl IntoElement {
 }
 ```
 
-`Tree` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。应用设置 `expanded` 和 `selected` 时，展开的项目和选中的项目由应用持有，并在 `onExpandedChange` 和 `onSelectedChange` 中更新；不设置时树自己保存状态，从 `defaultExpanded` 和 `defaultSelected` 开始。项目由 `id` 标识，这是应用自己的标识（路径、记录的键），永远不是标签。在 Rust 中由 `tree()` 创建，每个属性有一个 setter（`.items(..)`、`.expanded(..)`、`.render_item(..)`），每个事件有一个监听方法，以及有类型的样式方法。
+`Tree` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。应用设置 `expanded` 和 `selected` 时，展开的项目和选中的项目由应用持有，并在 `onExpandedChange` 和 `onSelectedChange` 中更新。不设置时树自己保存状态，从 `defaultExpanded` 和 `defaultSelected` 开始。项目由 `id` 标识，这是应用自己的标识（路径、记录的键），永远不是标签。在 Rust 中由 `tree()` 创建，每个属性有一个 setter（`.items(..)`、`.expanded(..)`、`.render_item(..)`），每个事件有一个监听方法，以及有类型的样式方法。
 
 ## 项目
 
@@ -188,7 +188,7 @@ files?.revealItem("src/ui/tree.rs");
 
 ## 无障碍
 
-- 树的角色是 `"tree"`，名字来自 `accessibilityLabel`；每一行是一个 `"treeitem"`，名字是项目的标签，带有层级（深度 + 1）、是否展开（文件夹）、是否选中和是否禁用。
+- 树的角色是 `"tree"`，名字来自 `accessibilityLabel`。每一行是一个 `"treeitem"`，名字是项目的标签，带有层级（深度 + 1）、是否展开（文件夹）、是否选中和是否禁用。
 - 树获得键盘焦点时，以及按键移动选中项时，按键作用的行获得屏幕阅读器的焦点。
 
 标签、角色和播报的一般说明见[无障碍](../docs/accessibility.md)。
@@ -214,6 +214,6 @@ files?.revealItem("src/ui/tree.rs");
 
 ## 平台说明
 
-- iOS、Android 和 Mac Catalyst：轻点选中一行，并展开或收起文件夹；连续轻点两次对项目执行操作（`onAction`）。
-- 桌面（macOS、Windows、Linux、GPUI）和 Web：点击效果相同，并让树获得键盘焦点，可用上面的按键在其中移动；双击对项目执行操作。
+- iOS、Android 和 Mac Catalyst：轻点选中一行，并展开或收起文件夹。连续轻点两次对项目执行操作（`onAction`）。
+- 桌面（macOS、Windows、Linux、GPUI）和 Web：点击效果相同，并让树获得键盘焦点，可用上面的按键在其中移动。双击对项目执行操作。
 - 每个平台都绘制应用设置的样式：树、行以及行的内容。

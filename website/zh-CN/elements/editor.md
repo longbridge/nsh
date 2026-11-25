@@ -49,7 +49,7 @@ fn code() -> impl IntoElement {
 }
 ```
 
-编辑器填满应用给它的盒子（`flex-1`、一个高度），在其中滚动文本：纵向总是可以滚动；行比盒子长时可以横向滚动；开启 `softWrap` 后长行在编辑器的宽度处换行，不再横向滚动。
+编辑器填满应用给它的盒子（`flex-1`、一个高度），在其中滚动文本：纵向总是可以滚动。行比盒子长时可以横向滚动。开启 `softWrap` 后长行在编辑器的宽度处换行，不再横向滚动。
 
 <a id="the-text"></a>
 
@@ -78,7 +78,7 @@ fn code() -> impl IntoElement {
 
 Rust 代码可以让应用的编辑器认识更多语言，并用应用自己的高亮器（tree-sitter 语法、应用自己的解析器）高亮任何语言。`register_language` 注册一个 `EditorLanguage`：它的名称、别名、扩展名和文件名，以及编辑规则（注释、括号、输入时自动闭合的符号对、单词字符、缩进），`syntax` 指定用来高亮它的内置语法。`register_highlighter` 为一种语言（内置的或注册的）指定应用的高亮器：一个实现 `EditorHighlighter` 的类型，它收到每次编辑（行、字节和位置，与 tree-sitter 的编辑所需一致），在时间预算内、在 UI 线程之外给出每一行的记号（`EditorToken`，或经 `EditorToken::from_scope` 转换的 tree-sitter 捕获名或 TextMate 作用域）。编辑器保存这些记号，在编辑时让它们随文本移动，并为可见的行再次请求，与对内置高亮器的做法一样。`language` 先按名称、别名、扩展名或路径查找注册的语言，编辑器和差异视图都是如此。
 
-每个引擎保存各自的语言。Rust 应用在挂载编辑器之前在根组件中注册；应用的 crate 在其 UI 集的 setup 中为 TSX 应用注册，运行该应用的每个引擎都会先调用它。
+每个引擎保存各自的语言。Rust 应用在挂载编辑器之前在根组件中注册。应用的 crate 在其 UI 集的 setup 中为 TSX 应用注册，运行该应用的每个引擎都会先调用它。
 
 ```rust
 use nsh_base::editor::{EditorLanguage, register_highlighter, register_language};
@@ -108,9 +108,9 @@ fn native(registry: &mut Registry) {
 
 编辑器的工作方式与代码编辑器相同：
 
-- **多光标。** Alt 点击（Option 点击）添加一个光标，`mod+d` 选中选区的下一处出现，`mod+shift+l` 选中全部出现，添加光标的按键在上一行或下一行添加一个。输入、删除、移动和每个命令都在每个光标处执行；Escape 回到一个。`undoSelection`（`cmd+u`、`ctrl+u`）回到上一次移动之前的选区。编辑器有焦点时光标闪烁；在 Linux 上，十秒内没有编辑、移动光标或焦点变化后，光标保持显示、不再闪烁（GTK 的默认值），直到下一次操作。
-- **选区扩展。** `expandSelection`（`ctrl+shift+cmd+right`、`shift+alt+right`）按单位扩大选区：单词、字符串的内容和整个字符串、一对括号的内容和这对括号、整行、全文；`shrinkSelection` 按原路缩回。`splitSelectionIntoLines`（`shift+alt+i`）把跨多行的选区拆成每行一个选区。
-- **缩进。** 新行保持当前行的缩进，在左括号（Python 的 `:`、Ruby 的 `do` 等）之后再加一级；在一对括号之间按 Enter，右括号单独放到下一行。Tab 和 Shift+Tab 缩进和反缩进所选的行；在行首空格中按 Backspace 回到上一个缩进位置。`autoIndent` 关闭这些行为。
+- **多光标。** Alt 点击（Option 点击）添加一个光标，`mod+d` 选中选区的下一处出现，`mod+shift+l` 选中全部出现，添加光标的按键在上一行或下一行添加一个。输入、删除、移动和每个命令都在每个光标处执行。Escape 回到一个。`undoSelection`（`cmd+u`、`ctrl+u`）回到上一次移动之前的选区。编辑器有焦点时光标闪烁。在 Linux 上，十秒内没有编辑、移动光标或焦点变化后，光标保持显示、不再闪烁（GTK 的默认值），直到下一次操作。
+- **选区扩展。** `expandSelection`（`ctrl+shift+cmd+right`、`shift+alt+right`）按单位扩大选区：单词、字符串的内容和整个字符串、一对括号的内容和这对括号、整行、全文。`shrinkSelection` 按原路缩回。`splitSelectionIntoLines`（`shift+alt+i`）把跨多行的选区拆成每行一个选区。
+- **缩进。** 新行保持当前行的缩进，在左括号（Python 的 `:`、Ruby 的 `do` 等）之后再加一级。在一对括号之间按 Enter，右括号单独放到下一行。Tab 和 Shift+Tab 缩进和反缩进所选的行。在行首空格中按 Backspace 回到上一个缩进位置。`autoIndent` 关闭这些行为。
 - **括号和引号** 在输入时自动闭合，包住选区，再次输入闭合符号时跳过它（`autoClose`）。光标处的括号和与它配对的括号会加上边框。
 - **撤销** 以一整段输入为单位：一个单词、一次删除、一个命令。移动或点击开始新的一步。
 - **折叠。** 后面跟着缩进更深的行的那一行，可以用行号栏中的标记把这些行折叠起来：`⌄` 折叠，`›` 和行后的 `⋯` 展开。光标移入折叠处时，折叠会打开（[折叠](#folding)）。
@@ -123,7 +123,7 @@ fn native(registry: &mut Registry) {
 
 ## 按键
 
-编辑器的按键在它拥有焦点时生效；其他输入框保留各自的按键。`mod` 在 macOS 和 iOS 上是 Command，在其他平台上是 Control（`keymap` 的按键写法）。
+编辑器的按键在它拥有焦点时生效。其他输入框保留各自的按键。`mod` 在 macOS 和 iOS 上是 Command，在其他平台上是 Control（`keymap` 的按键写法）。
 
 | 按键（macOS） | 按键（Windows、Linux） | 命令 |
 |---|---|---|
@@ -185,7 +185,7 @@ keymap.bind({
 
 ## 查找与替换
 
-`search` 是要查找的内容：`{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`。它的匹配项会被高亮，选区所在的那一项更醒目，`onSearchChange` 报告 `{ result }`，即 `{ count, current, error }`：匹配项的数量、选区所在的是哪一项（从 0 开始），以及正则表达式无效的原因。`findNext` 和 `findPrevious` 选中下一个和上一个匹配项，到头后绕回；`replace(text)` 替换当前匹配项并选中下一个，`replaceAll(text)` 把所有匹配项作为一次编辑替换，并返回 `{ count }`，即替换的数量。正则表达式的替换文本用 `$1` 和 `${name}` 引用它的分组。
+`search` 是要查找的内容：`{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`。它的匹配项会被高亮，选区所在的那一项更醒目，`onSearchChange` 报告 `{ result }`，即 `{ count, current, error }`：匹配项的数量、选区所在的是哪一项（从 0 开始），以及正则表达式无效的原因。`findNext` 和 `findPrevious` 选中下一个和上一个匹配项，到头后绕回。`replace(text)` 替换当前匹配项并选中下一个，`replaceAll(text)` 把所有匹配项作为一次编辑替换，并返回 `{ count }`，即替换的数量。正则表达式的替换文本用 `$1` 和 `${name}` 引用它的分组。
 
 `inSelection` 只在它打开时选中的内容里查找（没有选中内容时为光标所在的行）：只要它保持打开，这个范围就一直保留，随编辑移动，选区从一个匹配项移到另一个时也不变。`findWithSelection`（macOS 上为 `cmd+e`）用 `onFindWithSelection` 报告选中的文本或光标处的单词，供查找栏作为查询内容。
 
@@ -231,9 +231,9 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
 
 ## 诊断
 
-`diagnostics` 标记语言服务器或 linter 报告的问题：在每个范围的文字下方画一条细波浪线，颜色由严重程度决定（`error`、`warning`、`info`、`hint`）。位置是从 0 开始的行和 UTF-16 列，与语言服务器相同，所以它的诊断可以原样传入。用户输入时这些标记留在它们的文本上，直到应用传入新的诊断；消息的显示（一个列表、行旁的悬浮卡片）由应用负责。
+`diagnostics` 标记语言服务器或 linter 报告的问题：在每个范围的文字下方画一条细波浪线，颜色由严重程度决定（`error`、`warning`、`info`、`hint`）。位置是从 0 开始的行和 UTF-16 列，与语言服务器相同，所以它的诊断可以原样传入。用户输入时这些标记留在它们的文本上，直到应用传入新的诊断。消息的显示（一个列表、行旁的悬浮卡片）由应用负责。
 
-诊断也带着语言服务器 `Diagnostic` 的其余字段。它的 `tags` 按语言客户端的方式绘制文本：`unnecessary` 的代码（未使用的变量、不可达的代码）淡化显示，`deprecated` 的代码加删除线，分别使用 `unnecessaryText` 和 `deprecatedText` 部件；带标签的提示只体现在它的文本上。`codeDescription.href` 是描述其代码的页面（一条 lint 规则的页面），`relatedInformation` 列出与它相关的其他位置（`{ location: { uri?, range }, message }`）：悬停把两者交给应用，由应用在悬浮卡片中显示并打开页面。语言服务器以数字（`1`、`2`）发送标签，编辑器接收它们的名称。
+诊断也带着语言服务器 `Diagnostic` 的其余字段。它的 `tags` 按语言客户端的方式绘制文本：`unnecessary` 的代码（未使用的变量、不可达的代码）淡化显示，`deprecated` 的代码加删除线，分别使用 `unnecessaryText` 和 `deprecatedText` 部件。带标签的提示只体现在它的文本上。`codeDescription.href` 是描述其代码的页面（一条 lint 规则的页面），`relatedInformation` 列出与它相关的其他位置（`{ location: { uri?, range }, message }`）：悬停把两者交给应用，由应用在悬浮卡片中显示并打开页面。语言服务器以数字（`1`、`2`）发送标签，编辑器接收它们的名称。
 
 ```tsx
 const problems = signal<EditorDiagnostic[]>([]);
@@ -260,7 +260,7 @@ async function lint(text: string) {
 
 ## 装饰
 
-`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式；`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。输入法组字时，组字文本就地显示在该行中，该行保留其装饰：其后的文本连同自己的装饰一起后移，组字文本的样式与上屏后相同（光标两侧都被装饰覆盖时在装饰之内，装饰在光标处开始或结束时不在其内）。
+`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式。`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。输入法组字时，组字文本就地显示在该行中，该行保留其装饰：其后的文本连同自己的装饰一起后移，组字文本的样式与上屏后相同（光标两侧都被装饰覆盖时在装饰之内，装饰在光标处开始或结束时不在其内）。
 
 ```tsx
 const range = (line: number, start: number, end: number) => ({ start: { line, column: start }, end: { line, column: end } });
@@ -304,7 +304,7 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 
 装饰的 `overviewRuler` 在概览标尺上放一个标记。概览标尺是编辑器右侧边缘宽 14 点（与滚动条相同；`overviewRuler` 部件可设置其他宽度）的窄带，按其高度映射整个文本，与 Monaco 的相同。标记至少 6 点高，占标尺的一条 `lane`：`left`、`center`（默认）、`right` 或 `full`。有装饰带标尺标记时显示标尺。
 
-每个标记采用应用的 `class` 和 `style`，没有时以前景色绘制。两者都像装饰的范围一样跟随编辑；删除带标记的范围后，原处留下一个空范围。
+每个标记采用应用的 `class` 和 `style`，没有时以前景色绘制。两者都像装饰的范围一样跟随编辑。删除带标记的范围后，原处留下一个空范围。
 
 ```tsx
 <Editor
@@ -324,7 +324,7 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 
 ### 应用自己的高亮
 
-装饰的 `token` 按内置高亮给这类记号的颜色给其文本着色（`comment`、`keyword`、`string`、`number`、`title`、`attr`、`built`、`deletion`），取代内置高亮器在那里找到的记号：应用自己的高亮器（语言服务器的语义记号、应用自己的解析器）把它的记号映射到这些种类上，就得到编辑器在浅色和深色下的颜色。最内层装饰的记号优先；`class` 和 `style` 作用在它之上。`highlighting={false}` 关闭内置高亮器，文本只由应用的记号着色，而 `language` 仍然决定注释、括号和缩进。
+装饰的 `token` 按内置高亮给这类记号的颜色给其文本着色（`comment`、`keyword`、`string`、`number`、`title`、`attr`、`built`、`deletion`），取代内置高亮器在那里找到的记号：应用自己的高亮器（语言服务器的语义记号、应用自己的解析器）把它的记号映射到这些种类上，就得到编辑器在浅色和深色下的颜色。最内层装饰的记号优先。`class` 和 `style` 作用在它之上。`highlighting={false}` 关闭内置高亮器，文本只由应用的记号着色，而 `language` 仍然决定注释、括号和缩进。
 
 ```tsx
 const kinds: Record<string, EditorToken> = { keyword: "keyword", function: "title", string: "string", type: "built" };
@@ -395,14 +395,14 @@ const breakpoints = signal<number[]>([]);
 
 ## 语言功能
 
-建议、悬停信息、跳转到定义和代码操作来自应用的语言服务器。补全列表、行内补全和定义链接由编辑器自己绘制，并带有它们的按键；其余的，编辑器告诉应用时机和位置，由应用画出自己的弹出层（锚定到 `pageBounds` 的 [`Overlay`](./overlay.md)）。
+建议、悬停信息、跳转到定义和代码操作来自应用的语言服务器。补全列表、行内补全和定义链接由编辑器自己绘制，并带有它们的按键。其余的，编辑器告诉应用时机和位置，由应用画出自己的弹出层（锚定到 `pageBounds` 的 [`Overlay`](./overlay.md)）。
 
 ### 补全
 
 设置 `completion` 后，编辑器向应用请求建议，并把它们显示为正在输入的单词下方的列表（靠近窗口底部时显示在上方）：
 
-- 在单词末尾输入字母、数字或 `_` 时，以 `onCompletionRequest(event)` 请求，触发方式为 `"typing"`：`event` 包含它的 `id`、光标的 `offset` 和 `position`、`query`（目前输入的单词）以及查询开始处的偏移 `queryStart`。`completionTriggerCharacters` 中的每一项（`["."]`、`["::", "<"]`）在输入后以空查询请求，触发方式为 `"character"`（并带有 `character`）；`showCompletions()` 或 `run("showCompletions")` 在光标处请求，触发方式为 `"invoked"`。
-- 应用以 `presentCompletions(event.id, items)` 回应。每一项是语言服务器 `CompletionItem` 的形状：`label`，以及可选的 `kind`（`"function"`、`"variable"`、`"class"`……）、`detail`、`documentation`、`insertText`、`filterText`、`sortText` 和 `range`。显示的是对最新请求的回应；更早的回应，或光标已离开的单词的回应，会被搁置。
+- 在单词末尾输入字母、数字或 `_` 时，以 `onCompletionRequest(event)` 请求，触发方式为 `"typing"`：`event` 包含它的 `id`、光标的 `offset` 和 `position`、`query`（目前输入的单词）以及查询开始处的偏移 `queryStart`。`completionTriggerCharacters` 中的每一项（`["."]`、`["::", "<"]`）在输入后以空查询请求，触发方式为 `"character"`（并带有 `character`）。`showCompletions()` 或 `run("showCompletions")` 在光标处请求，触发方式为 `"invoked"`。
+- 应用以 `presentCompletions(event.id, items)` 回应。每一项是语言服务器 `CompletionItem` 的形状：`label`，以及可选的 `kind`（`"function"`、`"variable"`、`"class"`……）、`detail`、`documentation`、`insertText`、`filterText`、`sortText` 和 `range`。显示的是对最新请求的回应。更早的回应，或光标已离开的单词的回应，会被搁置。
 - 继续输入时列表就地过滤：查询按顺序、不区分大小写地匹配每一项的 `filterText`（否则是它的标签），以查询开头的项在前，其次是最紧凑的匹配，再按 `sortText` 排序。匹配的字母会突出显示。传入 `incomplete: true`（`presentCompletions(id, items, true)`）时，编辑器随着继续输入再次请求。
 - 上下方向键（以及 Control+P / Control+N）在列表中移动，Page Up 和 Page Down 按页移动，Enter 和 Tab 接受，Escape 关闭。指针标记一项，点击（触摸屏上轻点）接受它。选中项的 `documentation` 显示在列表旁边。
 - 接受时，用该项的 `insertText`（否则是它的标签）替换它的 `range`（否则是查询），作为撤销一次撤回的一步，在光标处以及前面文本相同的其他每个光标处进行，并报告 `onCompletionAccept({ item })`。
@@ -464,8 +464,8 @@ const hover = signal<EditorHoverEvent | null>(null);
 
 按住 Mod（macOS 和 iOS 上是 Command，其他平台是 Control）时，鼠标下的单词变成链接，与代码编辑器一样：
 
-- 在单词上按住 Mod（鼠标停在那里时按下，或按住时把鼠标移到那里），编辑器以 `onDefinitionRequest(event)` 请求，触发方式 `"hover"`：`event` 包含它的 `id`、字符的 `position` 和 `offset`，以及单词的 `range`。语言服务器找到定义时，以 `presentDefinitionLink(event.id, range)` 回应：这个范围加上下划线（`definitionLink` 部件），指针在它上面变成手形。松开 Mod、鼠标离开它、文本改变或滚动，或者调用 `hideDefinitionLink()` 时，链接消失。显示的是对最新请求的回应；更早的回应会被搁置。
-- 在单词上 Mod 点击，以触发方式 `"press"` 请求；在链接上点击时光标保持原位。F12（`goToDefinition`，`run("goToDefinition")`）请求光标处的单词，触发方式 `"key"`。由应用跳转到定义：同一文本中的定义用 `revealPosition` 和 `setSelections`，另一个文件中的用它自己的导航。
+- 在单词上按住 Mod（鼠标停在那里时按下，或按住时把鼠标移到那里），编辑器以 `onDefinitionRequest(event)` 请求，触发方式 `"hover"`：`event` 包含它的 `id`、字符的 `position` 和 `offset`，以及单词的 `range`。语言服务器找到定义时，以 `presentDefinitionLink(event.id, range)` 回应：这个范围加上下划线（`definitionLink` 部件），指针在它上面变成手形。松开 Mod、鼠标离开它、文本改变或滚动，或者调用 `hideDefinitionLink()` 时，链接消失。显示的是对最新请求的回应。更早的回应会被搁置。
+- 在单词上 Mod 点击，以触发方式 `"press"` 请求。在链接上点击时光标保持原位。F12（`goToDefinition`，`run("goToDefinition")`）请求光标处的单词，触发方式 `"key"`。由应用跳转到定义：同一文本中的定义用 `revealPosition` 和 `setSelections`，另一个文件中的用它自己的导航。
 - Mod+.（`showCodeActions`，`run("showCodeActions")`）报告 `onCodeActionRequest({ range, position, bounds })`：主选区（起点在前）、光标和它的方框。应用向语言服务器请求操作，在 `bounds.pageBounds` 处显示自己的菜单（[`Menu`](./menu.md) 或 `Overlay`），再用 `edit(edits)` 应用所选操作的编辑。
 
 ```tsx
@@ -497,7 +497,7 @@ let editor!: EditorRef;
 
 设置 `minRows` 和 / 或 `maxRows` 时，编辑器随文本增高：它和文本的行一样高，至少 `minRows` 行，到 `maxRows` 行起文本滚动，就像消息输入框或笔记本的单元格。否则由应用决定它的尺寸，`scrollBeyondLastLine` 让文本滚动到最后一行之后：最多一屏（`true`，默认）、完全不（`false`）或若干行。光标移动时，它上下各保留 `cursorSurroundingLines` 行在视野内。拖动选择越过编辑器的边缘时会继续滚动，指针越远滚得越快。
 
-编辑器放在圆角容器里，或上面浮着栏时，`scrollbarInset` 让滚动条与编辑器各边保持这段距离，和[滚动视图](./scroll.md)的一样；文本仍从下面滚过。竖向滚动条和概览标尺按它的上、下、右边让开，横向滚动条（未开 `softWrap` 时）按它的左、右、下边让开。
+编辑器放在圆角容器里，或上面浮着栏时，`scrollbarInset` 让滚动条与编辑器各边保持这段距离，和[滚动视图](./scroll.md)的一样。文本仍从下面滚过。竖向滚动条和概览标尺按它的上、下、右边让开，横向滚动条（未开 `softWrap` 时）按它的左、右、下边让开。
 
 ```tsx
 <View class="flex-1 overflow-hidden rounded-xl border border-border">
@@ -518,7 +518,7 @@ let editor!: EditorRef;
 />
 ```
 
-`onScroll({ offset, contentSize, size })` 报告文本滚动到的位置，键与 [`Scroll`](./scroll.md) 的相同：`offset` 即 `scrollOffset()`，`contentSize` 是文本滚动经过的内容的尺寸，`size` 是视口的尺寸。不设 `softWrap` 时，内容的宽度是视口的宽度加上文本能横向滚动的距离；自动换行时，内容与视口同宽，`offset.x` 为 0。编辑器完成布局时触发一次，之后其中任何一项变化时再触发：滚动、改变大小，以及改变了内容尺寸的编辑或折叠。放在标题下面的编辑器可以在文本滚到顶边下面时，在顶边画一条线或做渐隐：
+`onScroll({ offset, contentSize, size })` 报告文本滚动到的位置，键与 [`Scroll`](./scroll.md) 的相同：`offset` 即 `scrollOffset()`，`contentSize` 是文本滚动经过的内容的尺寸，`size` 是视口的尺寸。不设 `softWrap` 时，内容的宽度是视口的宽度加上文本能横向滚动的距离。自动换行时，内容与视口同宽，`offset.x` 为 0。编辑器完成布局时触发一次，之后其中任何一项变化时再触发：滚动、改变大小，以及改变了内容尺寸的编辑或折叠。放在标题下面的编辑器可以在文本滚到顶边下面时，在顶边画一条线或做渐隐：
 
 ```tsx
 const scrolled = signal(false);
@@ -626,7 +626,7 @@ let editor!: EditorRef;
 
 ## 部件样式
 
-`class` 和 `style` 设置编辑器盒子的样式。`classes` 按部件接受 Tailwind 类，`styles` 按部件接受内联样式；部件的类在它自己的默认样式之后应用，因此优先，它的 `styles` 又优先于类。字体用 `fontFamily`、`fontSize` 和 `lineHeight` 设置，编辑器用它们测量文本；和所有文本一样，它随用户的文字大小（`fontScale()`）放大，行也随之变高。
+`class` 和 `style` 设置编辑器盒子的样式。`classes` 按部件接受 Tailwind 类，`styles` 按部件接受内联样式。部件的类在它自己的默认样式之后应用，因此优先，它的 `styles` 又优先于类。字体用 `fontFamily`、`fontSize` 和 `lineHeight` 设置，编辑器用它们测量文本。和所有文本一样，它随用户的文字大小（`fontScale()`）放大，行也随之变高。
 
 ```tsx
 <Editor
@@ -759,7 +759,7 @@ let editor!: EditorRef;
 
 ## 无障碍
 
-读屏软件用 `accessibilityLabel` 称呼编辑器；它的焦点就是一个文本输入框的焦点，所以平台的文本服务（输入法、听写、软键盘）都能在其中使用。
+读屏软件用 `accessibilityLabel` 称呼编辑器。它的焦点就是一个文本输入框的焦点，所以平台的文本服务（输入法、听写、软键盘）都能在其中使用。
 
 <a id="related"></a>
 

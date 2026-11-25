@@ -7,10 +7,14 @@ demo: el-popover
 
 # Popover
 
-A popover shows content next to its trigger, on top of everything else: details, a small form, a color picker.
-Pressing the trigger opens and closes it; a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. It is placed
-on a side of the trigger, moves to the other side when there is no room, stays inside the safe area and above the
-software keyboard, and follows the trigger as it scrolls. It draws nothing of its own: the popup and its content are the app's.
+A popover shows content next to its trigger, on top of everything else. Typical content is details, a small form or a
+color picker.
+
+Pressing the trigger opens and closes it. A press outside, Escape, the Android back button and VoiceOver's escape
+gesture also close it. The popover sits on one side of the trigger and flips to the other side when there is no room.
+It stays inside the safe area and above the software keyboard, and follows the trigger as it scrolls. It draws nothing
+of its own: the popup and its content are your app's.
+
 
 ```tsx tabs
 import { Text, View } from "nsh";

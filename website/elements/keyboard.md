@@ -8,12 +8,14 @@ demo: el-keyboard
 
 # Keyboard
 
-`env(keyboard-inset-height)` is the software keyboard's height over the surface, 0 while it is hidden. As a view's
-bottom padding or margin it keeps the content above the keyboard: when the keyboard shows or hides, the view makes room
-by its height, and the change animates with the keyboard natively. Use it for content outside scroll views, such as a
-message bar at the bottom of a chat screen; inputs inside a [scroll view](./scroll.md) or a [List](./list.md) are
-scrolled into view natively. With it come `Keyboard.dismiss()`, which hides the keyboard, and the keyboard's height,
-for layouts of your own.
+`env(keyboard-inset-height)` is the height of the software keyboard over the surface. It is 0 while the keyboard is
+hidden. Use it as a view's bottom padding or margin to keep content above the keyboard. When the keyboard shows or
+hides, the view changes its size, and the change animates with the keyboard natively.
+
+Use it for content outside scroll views, such as the message bar at the bottom of a chat screen. Inputs inside a
+[scroll view](./scroll.md) or a [List](./list.md) are scrolled into view natively. This page also covers
+`Keyboard.dismiss()`, which hides the keyboard, and the keyboard's height for your own layouts.
+
 
 ```tsx tabs
 import { mount, Scroll, signal, Text, View } from "nsh";

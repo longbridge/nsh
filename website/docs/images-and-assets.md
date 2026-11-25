@@ -7,7 +7,11 @@ group: ui
 
 # Images and assets
 
-The image element (`image(..)` in Rust, `<Image>` in TSX) shows a bitmap or an SVG drawing: a file shipped with the app, or an image downloaded from a URL. Images are read and decoded off the main thread, downsampled to the size the view shows them at, and cached; the main thread only displays the decoded result.
+The image element (`image(..)` in Rust, `<Image>` in TSX) shows a bitmap or an SVG drawing. The image can be a file
+shipped with the app or a download from a URL.
+
+NSH reads and decodes images off the main thread, downsamples them to the size the view shows, and caches the result.
+The main thread only displays the decoded image.
 
 ```tsx tabs
 import { Image } from "nsh";
@@ -51,7 +55,7 @@ logo; // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
 
 Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`, and `.svg` ([SVG images](#svg-images)).
 
-**Sizes are in points.** An `@2x` or `@3x` suffix in the file name says the file has 2 or 3 pixels per point, so `logo@2x.png` at 128×128 pixels is a 64×64 point asset. Without a suffix, one pixel is one point. A file named with a suffix is the one that shows; a file named without one shows its [pixel-density variants](#pixel-densities) when it has them.
+**Sizes are in points.** An `@2x` or `@3x` suffix in the file name says the file has 2 or 3 pixels per point, so `logo@2x.png` at 128×128 pixels is a 64×64 point asset. Without a suffix, one pixel is one point. A file named with a suffix is the one that shows. A file named without one shows its [pixel-density variants](#pixel-densities) when it has them.
 
 **Natural size.** An image from an asset lays out at its natural size when its style leaves the width or height open, so `image(LOGO)` and `<Image src={logo} />` need no style. Set one dimension and the aspect ratio, or both, to size it differently.
 
@@ -83,14 +87,14 @@ const LOGO: ImageAsset = asset!("logo.png");
 // LOGO.size: 64 × 64 points, LOGO.scales: [1.0, 2.0, 3.0]
 ```
 
-- `asset!` and the bundler look for `@1.5x`, `@2x`, `@3x` and `@4x` siblings of an image named without a suffix. `scales` lists them, with 1 for the named file; an image without siblings has no scales (in TSX it imports as `{ url, size }`). The bundler ships the siblings it finds, and `assets!()` ships the whole directory.
+- `asset!` and the bundler look for `@1.5x`, `@2x`, `@3x` and `@4x` siblings of an image named without a suffix. `scales` lists them, with 1 for the named file. An image without siblings has no scales (in TSX it imports as `{ url, size }`). The bundler ships the siblings it finds, and `assets!()` ships the whole directory.
 - The image loads the smallest scale at least the screen's pixel ratio, otherwise the largest, as React Native picks: `logo.png` on a 1× screen, `logo@2x.png` on a 2× one, `logo@3x.png` on a 3× phone (and at 2.625). On the web only that file is downloaded.
 - When the pixel ratio changes (a window moved to another screen, browser zoom), the images whose choice changes load again, with their [load events](#load-events). Their size stays the named file's size, in points.
 - A variant whose pixels are not the named file's size times its scale gets a build warning in TSX and fails the build in Rust.
 - A file named with a density suffix (`./logo@3x.png`, `asset!("logo@3x.png")`) is that file alone.
 - An [SVG image](#svg-images) is drawn for the screen at any ratio, so it ships no variants.
 
-One file is fine too: export it at the highest density you need (`@3x` for the sharpest result on every phone) and name it with its suffix; images are downsampled to the screen when decoded. Variants let each screen download, decode and keep the file that fits it.
+One file is fine too: export it at the highest density you need (`@3x` for the sharpest result on every phone) and name it with its suffix. Images are downsampled to the screen when decoded. Variants let each screen download, decode and keep the file that fits it.
 
 ## SVG images
 
@@ -106,9 +110,9 @@ logo; // { url: "asset:/assets/logo.svg", size: { width: 120, height: 40 } }
 <Image src={star} style={{ width: 36, height: 36, tintColor: "#0969da" }} />
 ```
 
-An SVG is sharp at the size it is shown. The browser draws it as vectors; iOS, macOS and Android draw it at the size the view shows it, in pixels, when the image loads (as they downsample bitmaps; a view that grows afterwards scales that drawing, until the image loads again); Windows, Linux and GPUI draw it once at four pixels per point (up to 2048 pixels a side) and scale it to each view. Everything else works as for bitmaps: `objectFit`, `tintColor` (through the SVG's opaque shapes, so one-color icons follow the theme), filters, `blurRadius`, placeholders, the load events, `Image.getSize` and `Image.prefetch`. `onLoad` and `Image.getSize` report an SVG's size in whole points; the image lays out at its exact size. Remote SVG files load the same way, through the same downloads and [capability](./sandbox-and-capabilities.md) checks; NSH recognizes an SVG by its content (also gzip-compressed, `.svgz`), whatever its URL ends with.
+An SVG is sharp at the size it is shown. The browser draws it as vectors. iOS, macOS and Android draw it at the size the view shows it, in pixels, when the image loads (as they downsample bitmaps; a view that grows afterwards scales that drawing, until the image loads again); Windows, Linux and GPUI draw it once at four pixels per point (up to 2048 pixels a side) and scale it to each view. Everything else works as for bitmaps: `objectFit`, `tintColor` (through the SVG's opaque shapes, so one-color icons follow the theme), filters, `blurRadius`, placeholders, the load events, `Image.getSize` and `Image.prefetch`. `onLoad` and `Image.getSize` report an SVG's size in whole points. The image lays out at its exact size. Remote SVG files load the same way, through the same downloads and [capability](./sandbox-and-capabilities.md) checks; NSH recognizes an SVG by its content (also gzip-compressed, `.svgz`), whatever its URL ends with.
 
-**What native platforms draw.** iOS, macOS, Android, Windows, Linux and GPUI draw SVGs with one renderer (resvg), so a drawing looks the same on each: shapes and paths, fills and strokes, gradients and patterns, clip paths and masks, opacity, filters and transforms. Text (`<text>`) and inline raster `data:` images (`<image>`) draw natively, with the system fonts and decoder; animation (SMIL and CSS) and HTML (`<foreignObject>`) show only in the browser, and an `<image>` naming a file, a URL or another SVG document is left out. `nsh build` names the files that use features only browsers draw. Export text as outlines (paths) for the same result everywhere.
+**What native platforms draw.** iOS, macOS, Android, Windows, Linux and GPUI draw SVGs with one renderer (resvg), so a drawing looks the same on each: shapes and paths, fills and strokes, gradients and patterns, clip paths and masks, opacity, filters and transforms. Text (`<text>`) and inline raster `data:` images (`<image>`) draw natively, with the system fonts and decoder. Animation (SMIL and CSS) and HTML (`<foreignObject>`) show only in the browser, and an `<image>` naming a file, a URL or another SVG document is left out. `nsh build` names the files that use features only browsers draw. Export text as outlines (paths) for the same result everywhere.
 
 **A self-contained picture.** On native platforms an SVG draws only what it holds: files, URLs and nested SVG documents it references are left out, while inline raster `data:` images are drawn and count toward the layer bound. Native platforms draw SVGs, remote ones included, within bounds that keep memory in check: a document of up to 16 MiB (a compressed one once inflated), text of up to 64 Ki characters, a drawing of up to 8192 pixels a side and 4096 × 4096 pixels in all (64 MiB; a larger one is drawn smaller), and layers (groups with opacity, masks, clip paths and filters, which the renderer draws apart) of up to 256 MiB at once. An SVG over the document or layer bound fails to load, with `onError`.
 
@@ -131,9 +135,9 @@ let src = ImageSrc::rgba(200, 100, pixels).size(Size::new(px(100.0), px(50.0)));
 view().items_start().child(image(src)) // 100 × 50 points
 ```
 
-The natural size sets the intrinsic layout when the element's style leaves a dimension unset. Setting just a width or height keeps its aspect ratio; setting both sizes the box. The buffer keeps its original pixel dimensions and bytes, and `onLoad` reports its pixel dimensions.
+The natural size sets the intrinsic layout when the element's style leaves a dimension unset. Setting just a width or height keeps its aspect ratio. Setting both sizes the box. The buffer keeps its original pixel dimensions and bytes, and `onLoad` reports its pixel dimensions.
 
-Each buffer is an image of its own: give the view a new source for a new frame, and the caches drop the old one once no view shows it. Windows, macOS, Linux and GPUI draw the pixels as they are; iOS, Android and the browser load images from encoded bytes, so there the buffer becomes an uncompressed PNG the first time it is shown (a copy, no compression). TSX has `Blob` URLs for bytes it holds.
+Each buffer is an image of its own: give the view a new source for a new frame, and the caches drop the old one once no view shows it. Windows, macOS, Linux and GPUI draw the pixels as they are. iOS, Android and the browser load images from encoded bytes, so there the buffer becomes an uncompressed PNG the first time it is shown (a copy, no compression). TSX has `Blob` URLs for bytes it holds.
 
 ## Remote images
 
@@ -154,7 +158,7 @@ image(move || user.with(|u| u.avatar_url.clone()))
 - **A background color** shows while the image loads, or use a placeholder (below).
 - Downloads are shared: several views showing the same URL download it once, also when they decode it at different sizes. A download nobody waits for any more is cancelled.
 - Decoded images are cached in memory (the cache is purged under memory pressure), keyed by URL, decode size and blur radius.
-- When the app declares [capabilities](./sandbox-and-capabilities.md), the image's host must be allowed under `network`; a refused image fails with its error event. A local file (an absolute path or a `file:` URL, as `onFileDrop`, the clipboard and `import.meta.url` give on the desktops) needs an `fs.read` root that holds it, and loads on every native platform.
+- When the app declares [capabilities](./sandbox-and-capabilities.md), the image's host must be allowed under `network`. A refused image fails with its error event. A local file (an absolute path or a `file:` URL, as `onFileDrop`, the clipboard and `import.meta.url` give on the desktops) needs an `fs.read` root that holds it, and loads on every native platform.
 
 ### Kept on disk
 
@@ -175,10 +179,10 @@ The cache follows the server's HTTP caching headers:
 - When a request for the image is redirected to an address the app's `network` capability does not allow, the image
   fails and the kept copy is dropped.
 - A kept copy remembers the addresses its download was redirected to. When the app is opened again and the copy is
-  read from disk, they are checked against the app's current `network` capability; when one is no longer allowed, the
+  read from disk, they are checked against the app's current `network` capability. When one is no longer allowed, the
   copy is dropped and the image is requested again, as an image requested for the first time.
 
-Each app has its own cache of 256 MiB; past that, the images used least recently are dropped first. Several views,
+Each app has its own cache of 256 MiB. Past that, the images used least recently are dropped first. Several views,
 surfaces and processes of one app share it safely. Embedding apps choose where it is and how large, or turn it off:
 
 ```rust tabs
@@ -296,7 +300,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 
 ## Animated images
 
-Animated GIF, WebP and APNG files play automatically, as assets or from URLs. They take the same styles, `objectFit` included; a tinted animated image shows its first frame on iOS.
+Animated GIF, WebP and APNG files play automatically, as assets or from URLs. They take the same styles, `objectFit` included. A tinted animated image shows its first frame on iOS.
 
 ## Load events
 
@@ -432,11 +436,11 @@ fn Greeting() -> impl IntoElement {
 }
 ```
 
-The engine reads the file from the app's files off its thread (from the dev server during `nsh run`), with no capability needed: they are the app's own. A web app downloads what the page did not preload from where it serves its assets. The response is `200` with the file's bytes, its `Content-Length` and the `Content-Type` its extension gives (`image/png`, `application/json`, ...), and its `url` is the `asset:/` URL asked for, without its fragment, however the file arrived; a file the app does not ship rejects as a network error that names it. The URL names the file by its path inside the app's files, on every platform alike: the scheme reads in any case, as URLs' schemes do, and a query or a fragment leaves the file the same (`asset:/locales/en.json?v=2` reads `locales/en.json`). The request reads the file with `GET` (or `HEAD`): a URL whose path leaves the app's files (`..`, an absolute path) and a request with another method reject the same way, before anything is read or downloaded.
+The engine reads the file from the app's files off its thread (from the dev server during `nsh run`), with no capability needed: they are the app's own. A web app downloads what the page did not preload from where it serves its assets. The response is `200` with the file's bytes, its `Content-Length` and the `Content-Type` its extension gives (`image/png`, `application/json`, ...), and its `url` is the `asset:/` URL asked for, without its fragment, however the file arrived. A file the app does not ship rejects as a network error that names it. The URL names the file by its path inside the app's files, on every platform alike: the scheme reads in any case, as URLs' schemes do, and a query or a fragment leaves the file the same (`asset:/locales/en.json?v=2` reads `locales/en.json`). The request reads the file with `GET` (or `HEAD`): a URL whose path leaves the app's files (`..`, an absolute path) and a request with another method reject the same way, before anything is read or downloaded.
 
 ### A module's own URL
 
-In TSX, `import.meta.url` is the URL of the module it is written in, so `new URL("./data.json", import.meta.url)` names a file beside it. A local or packaged desktop app's modules have `file:` URLs in the app's directory, which `fs/promises` reads under a `${pluginDir}` grant; a web app's are the page's; a packaged mobile app's are `asset:/` URLs like those of imported images. Import an image to ship it: a URL made this way names the file, it does not package it.
+In TSX, `import.meta.url` is the URL of the module it is written in, so `new URL("./data.json", import.meta.url)` names a file beside it. A local or packaged desktop app's modules have `file:` URLs in the app's directory, which `fs/promises` reads under a `${pluginDir}` grant. A web app's are the page's. A packaged mobile app's are `asset:/` URLs like those of imported images. Import an image to ship it: a URL made this way names the file, it does not package it.
 
 Bitmap and SVG images are also drawn on a canvas with `draw_image` / `drawImage` ([Canvas](./canvas.md)), and gradients replace many decorative images ([Styling](./styling.md#gradients)).
 

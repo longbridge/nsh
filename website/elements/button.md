@@ -7,9 +7,9 @@ demo: el-button
 
 # Button
 
-A button is a press target. It owns the behavior: presses, press feedback through the app's state styles, the
-disabled and selected states, keyboard focus, and its role for screen readers. The look is the app's: a `Button` has no colors, sizes, paddings or label of its own, so one component becomes a primary button,
-an icon button, a menu's trigger or the row of a list, depending on the styles and children you give it.
+A button is a press target. It owns the behavior: presses, press feedback through your state styles, the disabled
+and selected states, keyboard focus and its role for screen readers. It has no colors, sizes, paddings or label of its
+own. The styles and children you give it make it a primary button, an icon button, a menu trigger or a list row.
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
@@ -80,7 +80,7 @@ the typed style methods (`.px_4()`, `.bg(..)`) for its look, the state methods (
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Its look, all of it. |
 | `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle` | `.active(\|s\| ..)`, `.hover(..)`, `.focus(..)`, `.disabled_style(..)` | `StyleProp<ViewStyle>` | none | The style while pressed, hovered, focused or disabled, as the `<state>:` classes. Later states win; `disabled` wins over all. |
 
-In Rust each prop is a setter that takes a value, a signal or a closure; the props you leave out keep their defaults:
+In Rust each prop is a setter that takes a value, a signal or a closure. The props you leave out keep their defaults:
 
 ```rust
 button()
@@ -200,7 +200,7 @@ fn save(saving: Signal<bool>) -> impl IntoElement {
 
 `selected` shows a button as the current one of its kind or as the trigger of what is open: the folder a sidebar
 shows, the active filter, a menu button while its menu is open (Design Guides, "Interaction states"). The app holds
-the value and styles the selected state; screen readers announce the button as selected.
+the value and styles the selected state. Screen readers announce the button as selected.
 
 ```tsx tabs
 <Button
@@ -261,9 +261,9 @@ fn close(open: Signal<bool>) -> impl IntoElement {
 ## Accessibility
 
 - Give `accessibilityHint` when the label does not explain the result of pressing the button. It follows reactive
-  values; setting it to `undefined` removes the hint.
+  values. Setting it to `undefined` removes the hint.
 - A button is one element for screen readers, with the role `"button"` unless `role` says otherwise. Its label is its
-  text content; give `accessibilityLabel` when the content is an icon or says too little.
+  text content. Give `accessibilityLabel` when the content is an icon or says too little.
 - `disabled`, `selected` and `busy` are announced as the platform announces them (VoiceOver, TalkBack, UI Automation, the
   browser's accessibility tree).
 - On macOS and the web a button is a stop of the keyboard focus: Tab reaches it, Return and Space press it, and
@@ -273,7 +273,7 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
 
 ## Platform notes
 
-- iOS, Android and Mac Catalyst: a press is a tap that ends on the button; moving away cancels it, as with the
+- iOS, Android and Mac Catalyst: a press is a tap that ends on the button. Moving away cancels it, as with the
   system's own buttons.
 - Desktops (macOS, Windows, Linux, GPUI) and the web: a press is a click. On macOS and the web, Return and Space also
   press the button that has the keyboard focus. `hover:` styles apply under a mouse or a trackpad's pointer.

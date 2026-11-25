@@ -67,7 +67,7 @@ makes one with a setter per prop (`.value(..)`, `.precision(..)`, `.hour_cycle(.
 
 The value is a time of day on a 24-hour clock, as an HTML `<input type="time">`'s: `"HH:MM"`, or `"HH:MM:SS"` with
 `precision="second"`, whatever `hourCycle` the field shows. With `value`, the app owns it: the field shows it and
-reports each edit with `onChange({ value })`; the app sets `value` to follow it. Left out, the field keeps its own
+reports each edit with `onChange({ value })`. The app sets `value` to follow it. Left out, the field keeps its own
 time, from `defaultValue` at first (default `00:00`).
 
 `precision` is the smallest unit the field edits, `"minute"` (the default) or `"second"`. `hourCycle` is how it counts
@@ -83,7 +83,7 @@ bound when the segment completes (a half-typed segment is held when the selectio
 
 ## Editing
 
-One segment is selected; the keys edit it, as `gpui-base`'s time field:
+One segment is selected. The keys edit it, as `gpui-base`'s time field:
 
 - Up and Down step the segment by one and wrap around (59 to 00) without carrying into the next segment. With
   `min` / `max`, a step that would go past a bound lands on it instead, and one at the bound does nothing.
@@ -117,7 +117,7 @@ phones and tablets it brings up the number pad.
 (the hour on the field's clock, the minute or the second; `0` for AM and `1` for PM) and `label` (two digits, or `AM` /
 `PM`). It never gets the segment's state: the segment is `focus:` while the keys edit it and `disabled:` with the
 field, and with `group` in `segmentClass` its content follows with `group-focus:` and `group-disabled:`. So a segment
-is drawn again only when its value changes; moving between the segments and the focus coming and going draw nothing:
+is drawn again only when its value changes. Moving between the segments and the focus coming and going draw nothing:
 
 ```tsx
 <TimeField
@@ -155,7 +155,7 @@ Tab reaches the field with its selected segment. Then:
 
 ## Accessibility
 
-- The field is a text field named by `accessibilityLabel`; screen readers read the time it shows. `disabled` dims it.
+- The field is a text field named by `accessibilityLabel`. Screen readers read the time it shows. `disabled` dims it.
 - Phones and tablets show the number pad.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.

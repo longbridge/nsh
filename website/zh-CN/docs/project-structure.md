@@ -7,7 +7,7 @@ group: start
 
 # 项目结构
 
-一个 NSH 应用就是一个目录，包含一个 `nsh.json` 和它的代码：一个 TSX 入口模块（有 Rust 时，再加上 `ext/` 里的 Rust crate），或一个由 `nsh.json` 指定根组件的 Rust crate。其他一切（更多模块、图片、字体、JSON 文件）都从这里找到：TSX 入口导入的文件，或者 crate 的模块和它的 `assets/` 目录，因此不需要维护文件清单。
+一个 NSH 应用就是一个目录，包含一个 `nsh.json` 和它的代码：一个 TSX 入口模块（有 Rust 时，再加上 `ext/` 里的 Rust crate），或一个由 `nsh.json` 指定根组件的 Rust crate。其他文件（模块、图片、字体、JSON）都由 NSH 从这里找到：TSX 入口导入的文件，或 crate 的模块和 `assets/` 目录。你不需要维护文件清单。
 
 TSX 应用是一个入口及它导入的模块：
 
@@ -45,9 +45,9 @@ my-app/
 └── target/            Cargo's build directory
 ```
 
-TSX 应用通过 `ext/` 里自己的 nshm crate 用 Rust 扩展自己，在 `"dependencies"` 中按路径列出（[应用自己的 Rust：ext/](./nshm.md#应用自己的-rustext)）；`src/` 放 TSX，`ext/` 放 Rust。Rust 应用也可以在 `"rust"` 中列出它的 crate，再加一个导入它们的 TSX 入口（[用 Rust 开发](./rust.md#用-tsx-扩展-rust-应用)）。
+TSX 应用通过 `ext/` 里自己的 nshm crate 用 Rust 扩展自己，在 `"dependencies"` 中按路径列出（[应用自己的 Rust：ext/](./nshm.md#应用自己的-rustext)）。`src/` 放 TSX，`ext/` 放 Rust。Rust 应用也可以在 `"rust"` 中列出它的 crate，再加一个导入它们的 TSX 入口（[用 Rust 开发](./rust.md#用-tsx-扩展-rust-应用)）。
 
-每个命令都以应用目录或它的入口作为参数（`nsh run my-app`、`nsh run my-app/App.tsx`）。`nsh.json` 所在的目录就是应用的根目录：`nsh.json` 从这里读取，它写的路径和资源路径都相对于它，`.nsh/` 也写在这里。入口默认是它旁边的 `App.tsx`，`nsh.json` 也可以用 `"entry"` 指定别的入口。在 Rust 应用中（`nsh.json` 带 `"root"`），目录运行根组件；指定 TSX 入口则运行该入口。
+每个命令都以应用目录或它的入口作为参数（`nsh run my-app`、`nsh run my-app/App.tsx`）。`nsh.json` 所在的目录就是应用的根目录：`nsh.json` 从这里读取，它写的路径和资源路径都相对于它，`.nsh/` 也写在这里。入口默认是它旁边的 `App.tsx`，`nsh.json` 也可以用 `"entry"` 指定别的入口。在 Rust 应用中（`nsh.json` 带 `"root"`），目录运行根组件。指定 TSX 入口则运行该入口。
 
 ### 放在更大项目里的应用
 
@@ -65,7 +65,7 @@ my-project/
     └── theme.json
 ```
 
-这样 `nsh run`、`nsh test` 等命令在项目根目录执行，和在应用目录执行一样：根目录就是应用的根目录（`.nsh/`、`locales/` 以及 `nsh.json` 写的 `theme`、`icon`、`web.host` 等路径都相对于它）；`nsh test` 只在入口所在目录（`app/`）里找测试文件，不会扫到服务端的测试；`nsh check` 和 `.nsh/types` 跟随入口目录的 `tsconfig.json`。
+这样 `nsh run`、`nsh test` 等命令在项目根目录执行，和在应用目录执行一样：根目录就是应用的根目录（`.nsh/`、`locales/` 以及 `nsh.json` 写的 `theme`、`icon`、`web.host` 等路径都相对于它）。`nsh test` 只在入口所在目录（`app/`）里找测试文件，不会扫到服务端的测试。`nsh check` 和 `.nsh/types` 跟随入口目录的 `tsconfig.json`。
 
 ## 根组件
 
@@ -103,7 +103,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-在 TSX 中，`mount(component, props?)` 把组件渲染为应用根，并返回一个用于移除它的函数；应用只调用它一次。在桌面平台上，应用根用 `<Window>` 声明自己的窗口（声明窗口的应用也要声明第一个；裸 root 渲染在隐式首窗口中）；其他平台上 `<Window>` 在唯一界面中显示它的内容。入口顶层的代码在 bundle 加载时、第一帧之前运行。`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。
+在 TSX 中，`mount(component, props?)` 把组件渲染为应用根，并返回一个用于移除它的函数。应用只调用它一次。在桌面平台上，应用根用 `<Window>` 声明自己的窗口（声明窗口的应用也要声明第一个；裸 root 渲染在隐式首窗口中）。其他平台上 `<Window>` 在唯一界面中显示它的内容。入口顶层的代码在 bundle 加载时、第一帧之前运行。`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。
 
 ## nsh.json
 
@@ -121,7 +121,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-其他键都是可选的；TSX 应用也可以省略这四个。TSX 应用的 `nsh.json` 可以是这样：
+其他键都是可选的。TSX 应用也可以省略这四个。TSX 应用的 `nsh.json` 可以是这样：
 
 ```json
 {
@@ -203,7 +203,7 @@ NSH 读不懂的能力不会被授予，因此略过的内容永远不会扩大�
 }
 ```
 
-`network` 涵盖 `fetch`、远程图片和视频源；本地资源始终允许访问。嵌入 NSH 的应用可以授予比应用声明更少的权限。详情见 [沙箱与权限](./sandbox-and-capabilities.md)。
+`network` 涵盖 `fetch`、远程图片和视频源。本地资源始终允许访问。嵌入 NSH 的应用可以授予比应用声明更少的权限。详情见 [沙箱与权限](./sandbox-and-capabilities.md)。
 
 ## tsconfig.json 与 .nsh/types
 
@@ -229,17 +229,17 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 | `mobile.d.ts`、`desktop.d.ts` | 每个模块一个文件（`nsh/mobile`、`nsh/desktop`） |
 | `base.d.ts` | `nsh/base` |
 
-`lib` 是不含 `DOM` 的 `ES2023`：没有 `document` 或 `window`。`.nsh` 中的文件会被重新生成（只在内容变化时），所以不要编辑，也不要提交；`.gitignore` 已经排除了 `.nsh/`。如果克隆项目后编辑器提示找不到 `nsh`，运行任意一个构建命令即可，例如 `nsh check`。
+`lib` 是不含 `DOM` 的 `ES2023`：没有 `document` 或 `window`。`.nsh` 中的文件会被重新生成（只在内容变化时），所以不要编辑，也不要提交。`.gitignore` 已经排除了 `.nsh/`。如果克隆项目后编辑器提示找不到 `nsh`，运行任意一个构建命令即可，例如 `nsh check`。
 
-`.nsh/tsconfig.json` 加入了 `"ESNext.Disposable"`，它声明了运行时提供的 `using` 声明和 `Symbol.dispose`：`using account = new Account()` 在块结束时释放一个 [Rust 类](./rust.md)的值。其中的 `jsxImportSource: "nsh"` 和 `jsx: "preserve"` 只对编辑器有意义：无论 `tsconfig.json` 怎么写，NSH 都用自己的编译器编译 JSX。TypeScript 类型由编辑器检查（如果装了 `tsc` 也可以用它）；`nsh` 只剥离类型，不做检查。
+`.nsh/tsconfig.json` 加入了 `"ESNext.Disposable"`，它声明了运行时提供的 `using` 声明和 `Symbol.dispose`：`using account = new Account()` 在块结束时释放一个 [Rust 类](./rust.md)的值。其中的 `jsxImportSource: "nsh"` 和 `jsx: "preserve"` 只对编辑器有意义：无论 `tsconfig.json` 怎么写，NSH 都用自己的编译器编译 JSX。TypeScript 类型由编辑器检查（如果装了 `tsc` 也可以用它）。`nsh` 只剥离类型，不做检查。
 
 由较早的 `nsh init` 创建的应用，如果它的 `tsconfig.json` 是 NSH 的模板且没有改动过，会在下一次构建时换成新的 `tsconfig.json`，NSH 会打印一行说明。你改过的 `tsconfig.json` 归你所有：它没有继承 `./.nsh/tsconfig.json` 时，`nsh check` 会指出来，你加上 `extends` 这一行并删掉它已经设置的选项即可。
 
 ## 模块
 
-Rust 应用的代码就是它的 crate 的模块（`mod screens;`），依赖和任何 crate 一样来自 crates.io；NSH 自己的 crate 是 `nsh-core`（基础元素、signal 和带类型的样式，`use nsh_core::prelude::*`）和 `nsh-base`（基础组件和主题）。
+Rust 应用的代码就是它的 crate 的模块（`mod screens;`），依赖和任何 crate 一样来自 crates.io。NSH 自己的 crate 是 `nsh-core`（基础元素、signal 和带类型的样式，`use nsh_core::prelude::*`）和 `nsh-base`（基础组件和主题）。
 
-在 TSX 中，可以把应用拆成任意多个 `.ts` 和 `.tsx` 模块，用相对路径导入；扩展名可以省略：
+在 TSX 中，可以把应用拆成任意多个 `.ts` 和 `.tsx` 模块，用相对路径导入。扩展名可以省略：
 
 ```tsx
 import { Header } from "./components/Header";
@@ -253,7 +253,7 @@ import strings from "./strings.json";
 
 平台 crate 默认开启全部可选功能：`js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`term`、`highlight`、`math`、`emoji-picker`（`EmojiPicker`）、`zlib`、`crypto`、`websocket` 和 `updater`，以及平台自己的功能：Linux 上的 `net` 和 `sound`，Windows 上的 `net`、`webview` 和 `media`。SVG 图片始终包含在内。`nsh run` 和开发宿主带有全部功能。
 
-`nsh package` 在本机构建 release runner 时（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统或 Android），只保留应用 bundle 用得到的功能，并输出每项保留或去掉的原因。用到 `TextView` 时保留 `highlight` 和 `math`，因为它显示的文本可能含有代码和公式。它看不到应用的 Rust 代码用了什么，也看不到动态 `import()` 加载什么：这些功能写在 [`nsh.json` 的 `features`](#nshjson) 中，例如 `"features": ["shader"]`。依赖 `nsh-base` 默认功能的 Rust crate 会通过 Cargo 保留 `editor`、`rich-editor`、`plot`、`term` 和 `highlight`；但 Rust 代码绘制 `Shader` 仍需写上 `"shader"`，否则着色器视图不绘制任何内容。`nsh-base` 默认不开启的功能（`math`、`emoji-picker`）写在 crate 自己的依赖中：`nsh-base = { version = "0.6", features = ["emoji-picker"] }`。
+`nsh package` 在本机构建 release runner 时（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统或 Android），只保留应用 bundle 用得到的功能，并输出每项保留或去掉的原因。用到 `TextView` 时保留 `highlight` 和 `math`，因为它显示的文本可能含有代码和公式。它看不到应用的 Rust 代码用了什么，也看不到动态 `import()` 加载什么：这些功能写在 [`nsh.json` 的 `features`](#nshjson) 中，例如 `"features": ["shader"]`。依赖 `nsh-base` 默认功能的 Rust crate 会通过 Cargo 保留 `editor`、`rich-editor`、`plot`、`term` 和 `highlight`。但 Rust 代码绘制 `Shader` 仍需写上 `"shader"`，否则着色器视图不绘制任何内容。`nsh-base` 默认不开启的功能（`math`、`emoji-picker`）写在 crate 自己的依赖中：`nsh-base = { version = "0.6", features = ["emoji-picker"] }`。
 
 如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），由你自己选择功能：在平台 crate 和 `nsh-base` 上都设置 `default-features = false`（任何一个保留默认功能，都会把它们重新开启），再列出要保留的项：
 
@@ -262,7 +262,7 @@ nsh-base = { version = "0.6", default-features = false, features = ["editor"] }
 nsh-platform-macos = { version = "0.6", default-features = false, features = ["js", "editor", "highlight", "shader"] }
 ```
 
-Rust 代码用到构建时去掉的功能会无法编译；TSX 导入它会在加载时报错（`Could not find export 'Editor' in module 'nsh/base'`）。去掉 `shader` 时着色器视图不绘制任何内容；去掉 `highlight` 和 `math` 时代码和公式显示为纯文本。
+Rust 代码用到构建时去掉的功能会无法编译。TSX 导入它会在加载时报错（`Could not find export 'Editor' in module 'nsh/base'`）。去掉 `shader` 时着色器视图不绘制任何内容。去掉 `highlight` 和 `math` 时代码和公式显示为纯文本。
 
 ### 按需加载代码
 
@@ -296,7 +296,7 @@ const open = async () => {
 
 NSH 本身不依赖 npm 上的任何东西，但如果你用包管理器安装了包，打包器会从 `node_modules` 目录解析裸导入。包会解析到它们的浏览器版本，因为运行时提供的是 Web API（`fetch`、streams、`URL`、`TextEncoder` 等），而不是 Node 的 API（`fs`、`Buffer`、`process`）。依赖 DOM 的包无法工作：这里没有 DOM。
 
-浏览器版本依赖 DOM 的包，往往另有面向 worker 或 React Native 的版本。`resolve.conditions` 指定解析包时使用的导出条件，取代默认的 `["browser"]`：`import`、`require`、`module` 和 `default` 始终生效；不含 `browser` 时，包通过 `module` 和 `main` 字段解析。`resolve.alias` 替换一个导入：换成相对 `nsh.json` 的路径（`./` 或 `../`）、另一个包，或用 `false` 换成空模块。TypeScript（`nsh check` 和编辑器）按导入原本的写法做类型检查：不是已安装包的名称，其类型由应用里的 `.d.ts` 文件声明。
+浏览器版本依赖 DOM 的包，往往另有面向 worker 或 React Native 的版本。`resolve.conditions` 指定解析包时使用的导出条件，取代默认的 `["browser"]`：`import`、`require`、`module` 和 `default` 始终生效。不含 `browser` 时，包通过 `module` 和 `main` 字段解析。`resolve.alias` 替换一个导入：换成相对 `nsh.json` 的路径（`./` 或 `../`）、另一个包，或用 `false` 换成空模块。TypeScript（`nsh check` 和编辑器）按导入原本的写法做类型检查：不是已安装包的名称，其类型由应用里的 `.d.ts` 文件声明。
 
 ```json
 "resolve": {
@@ -314,7 +314,7 @@ declare module "node-polyfill";
 
 ## 资源
 
-图片和字体随应用一起发布。Rust crate 在编译时用 `asset!` 读取它的 `assets/` 目录中的每个文件，并在它的 `#[native_module]` 函数中用 `registry.assets(assets!())` 把它们全部发布；TSX 像模块一样导入它们，打包器会记录每个被导入的文件（以及图片的像素密度变体）。`nsh build` 把它们复制到 `.nsh/out/assets/`，`nsh package` 把它们放进应用，开发期间则提供给应用。
+图片和字体随应用一起发布。Rust crate 在编译时用 `asset!` 读取它的 `assets/` 目录中的每个文件，并在它的 `#[native_module]` 函数中用 `registry.assets(assets!())` 把它们全部发布。TSX 像模块一样导入它们，打包器会记录每个被导入的文件（以及图片的像素密度变体）。`nsh build` 把它们复制到 `.nsh/out/assets/`，`nsh package` 把它们放进应用，开发期间则提供给应用。
 
 ```tsx tabs
 import { Image, Text } from "nsh";
@@ -346,5 +346,5 @@ text("Hello").font_family(INTER.family)
 
 ## 生成的目录
 
-- **`.nsh/`**：NSH 生成的一切：类型声明（`.nsh/types`）、Rust 应用运行器的源码（`.nsh/rust`）、`nsh run` 安装到模拟器和设备上的内容（Catalyst 宿主应用、Android 开发 APK），以及 `.nsh/out`，即 `nsh build` 的默认输出（`bundle.js`、`bundle.js.map`、`bundle.nshc`、`capabilities.json`、`assets/`；Rust 应用是 `app.json` 和 `assets/`）和 `nsh package` 的输出（`.app`、`.ipa`、`.apk`、网站）；用 `-o` 写到别处。可以放心删除，会被重新生成。
+- **`.nsh/`**：NSH 生成的一切：类型声明（`.nsh/types`）、Rust 应用运行器的源码（`.nsh/rust`）、`nsh run` 安装到模拟器和设备上的内容（Catalyst 宿主应用、Android 开发 APK），以及 `.nsh/out`，即 `nsh build` 的默认输出（`bundle.js`、`bundle.js.map`、`bundle.nshc`、`capabilities.json`、`assets/`；Rust 应用是 `app.json` 和 `assets/`）和 `nsh package` 的输出（`.app`、`.ipa`、`.apk`、网站）。用 `-o` 写到别处。可以放心删除，会被重新生成。
 - **`target/`**：应用的 crate 和运行器的 Cargo 构建目录（或 `CARGO_TARGET_DIR`）。使用我们推荐的 [huacnlee/cargo](https://github.com/huacnlee/cargo) 时，这里只放可执行文件，构建产物放在 `~/.cargo/targets/` 下。

@@ -93,7 +93,7 @@ A video takes the props of a [view](./view.md) (it has no children) plus:
 | `objectFit` (style), `object-*` classes | `.object_fit(ResizeMode::Contain)` | `"cover" \| "contain" \| "fill" \| "none" \| "scale-down"` | `"contain"` | How the video fits its box, as CSS's `object-fit` (`class="object-cover"`). iOS, macOS and Android play `"none"` and `"scale-down"` as `"contain"`, Linux both as `"scale-down"`. |
 | `progressUpdateInterval` | `.progress_interval(ms)` | `number` | `250` | Milliseconds between `onProgress` events. |
 
-Give the video a size through its styles; its size is the one its styles give it. Use the size `onLoad` reports to set
+Give the video a size through its styles. Its size is the one its styles give it. Use the size `onLoad` reports to set
 an aspect ratio when you want the video's own proportions.
 
 ## Events
@@ -132,8 +132,8 @@ video(url)
 ## Capabilities
 
 When the app declares [capabilities](../docs/sandbox-and-capabilities.md), video sources load from the hosts `network`
-allows; a source on another host shows an empty view and reports `onError` with `code` `"ERR_ACCESS_DENIED"`. A local
-file (an absolute path or a `file:` URL) plays on the desktops when `fs.read` holds it, and not on mobile or the web; a
+allows. A source on another host shows an empty view and reports `onError` with `code` `"ERR_ACCESS_DENIED"`. A local
+file (an absolute path or a `file:` URL) plays on the desktops when `fs.read` holds it, and not on mobile or the web. A
 relative path plays only on the web, as the page's.
 
 ## Platform notes

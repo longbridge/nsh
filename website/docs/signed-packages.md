@@ -7,14 +7,14 @@ group: delivery
 
 # Signed Packages
 
-A signed package (`.nshpkg`) is how a host app runs NSH code it did not ship with: an update to its own NSH screens,
-or a third-party mini app. `nsh publish` builds the app and signs it; the host app verifies the signature, the
-certificate chain, revocations and the build number before anything runs.
+A signed package (`.nshpkg`) lets a host app run NSH code it did not ship with. Examples are an update to the app's
+own NSH screens or a third-party mini app. `nsh publish` builds and signs the package. Before anything runs, the host
+app checks the signature, the certificate chain, revocations and the build number.
 
-A package holds TSX. The host app's Rust code (an app written in Rust, its crates' components, modules and classes)
-is part of the host app itself and is delivered with it, and the TSX of a package imports it by its specifiers, as
-any TSX does ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). So a Rust app keeps its core in Rust and
-delivers the screens that change often as signed packages.
+A package holds only TSX. The host app's Rust code (its components, modules and classes) ships inside the host app.
+Package TSX imports that code by its specifiers, like any other TSX
+([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). A Rust app can keep its core in Rust and deliver
+the screens that change often as signed packages.
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/signed-packages-light.svg" alt="Signed packages: an offline root key certifies a release key for app ids; nsh publish signs the package with it; on the device, NshTrust trusts only the root and the newest revocation list, checks the certificate, revocations, signature, app id, file hashes and build number, then runs the module or refuses it.">
@@ -22,7 +22,7 @@ delivers the screens that change often as signed packages.
 </div>
 
 > [!NOTE]
-> NSH verifies and runs packages; it does not deliver them. Where packages come from (your update server, a CDN, a
+> NSH verifies and runs packages. It does not deliver them. Where packages come from (your update server, a CDN, a
 > store of mini apps) and when the app downloads them is up to the host app. A packaged NSH app updating its own TSX
 > is the exception: [OTA updates](./ota-updates.md) fetch, verify, run and roll back its packages for it.
 
@@ -36,7 +36,7 @@ Anything else must be JS source.
 
 ## Keys: two levels
 
-- A **root key** stays offline. Host apps trust its public key; they can trust several roots, which is how a root is
+- A **root key** stays offline. Host apps trust its public key. They can trust several roots, which is how a root is
   rotated.
 - A root **certifies release keys**: a certificate names the release key, the app ids it may sign for and a time
   window.
@@ -82,7 +82,7 @@ keys/release.cert: key 3428d7136788c9ee certified by root 4e0b637f5e10f6a6 for c
 | `--days <n>` | How long it may sign, from now. Default 365. |
 | `-o, --out <file>` | The certificate to write. |
 
-The certificate is a small JSON file; it is not secret.
+The certificate is a small JSON file. It is not secret.
 
 ## Publish a package
 
@@ -132,7 +132,7 @@ what that runtime has, publish for it with `--min-runtime` (or `minRuntime` in `
 nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --min-runtime 0.1.0
 ```
 
-The version is `MAJOR.MINOR.PATCH`; a pre-release suffix (`0.2.0-beta.1`) counts as its version without it. It cannot
+The version is `MAJOR.MINOR.PATCH`. A pre-release suffix (`0.2.0-beta.1`) counts as its version without it. It cannot
 be newer than the CLI. Try the package on a host app with that runtime before you upload it: an import or a function
 the older runtime lacks fails when the module loads.
 
@@ -222,7 +222,7 @@ A device checks, in order:
 7. that the package itself is not revoked;
 8. that its build is not older than the highest build of that app accepted before (rollback protection).
 
-A refused package raises an error that says which check failed; the app that was running keeps running.
+A refused package raises an error that says which check failed. The app that was running keeps running.
 
 ## Revoke keys and packages
 
@@ -260,7 +260,7 @@ record it later, once the new package proved healthy (`verify_package`, then `ac
 ## Loading packages in a host app
 
 Verification hashes the whole package and extracts its assets (once per package, under the trust store's directory),
-so it runs off the UI thread; running the result happens on it.
+so it runs off the UI thread. Running the result happens on it.
 
 **GPUI (Rust)**, where the host app can also accept a package only once it proved healthy:
 
@@ -373,13 +373,13 @@ refused there too.
 
 ## A release checklist
 
-1. Keep the root key offline; certify a release key per team or per app family, for a year or less.
+1. Keep the root key offline. Certify a release key per team or per app family, for a year or less.
 2. Raise `build` in `nsh.json` for every release; `nsh publish` refuses a package without one.
 3. Run `nsh verify --root root.pub` on the package before uploading it.
-4. Ship `root.pub` inside the host app; ship revocation lists separately, so you can revoke without an app update.
+4. Ship `root.pub` inside the host app. Ship revocation lists separately, so you can revoke without an app update.
 5. If a release key leaks, revoke it (`nsh revoke --extend … --key <id>`), certify a new one and publish again.
 6. With a platform that signs for its apps, give CI a root of its own that only the test apps trust, and ship the
-   platform's root in the production apps; the platform signs CI's packages again (`nsh publish <package>`).
+   platform's root in the production apps. The platform signs CI's packages again (`nsh publish <package>`).
 
 ## See also
 

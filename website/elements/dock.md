@@ -7,8 +7,8 @@ demo: el-dock
 
 # Dock
 
-A dock area is a workspace the user arranges: panels in tab groups, groups split side by side or stacked, and docks on
-the left, right and bottom edges that open, close and resize. A tab dragged onto another group joins it, dragged to a
+A dock area is a workspace the user arranges. Panels sit in tab groups, and groups split side by side or stack. Docks
+on the left, right and bottom edges open, close and resize. A tab dragged onto another group joins it, dragged to a
 group's edge splits it, and every panel keeps what it holds as it moves. `DockArea` owns the behavior: tab drags and
 drops, which run natively frame by frame, resizing splits and docks, opening and closing docks, zoom and the lock. The
 look is the app's: the tabs, the tab bars, the handles, the drop indicator and each panel's content are what the app
@@ -90,7 +90,7 @@ fn workspace() -> impl IntoElement {
 
 `DockArea` and the values it takes come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust
 (`nsh_base::dock_area()`, the values in `nsh_base::dock`). In Rust, `dock_area()` makes it, with a setter per
-prop, a listener per event and the typed style methods; `DockLayout` describes a layout by the panels' keys
+prop, a listener per event and the typed style methods. `DockLayout` describes a layout by the panels' keys
 (`h_split()`, `v_split()`, `tabs()`, `.child(layout, size)`, `.panel(key)`).
 
 ## The layout
@@ -123,7 +123,7 @@ still reports every change.
 ## Panels' content
 
 What a panel shows is the app's: `renderPanel` renders it from the panel's key (`panel.id`). Every panel of a group is
-placed and only the displayed one shown, so switching tabs keeps each panel's content; and when a panel moves (to
+placed and only the displayed one shown, so switching tabs keeps each panel's content. And when a panel moves (to
 another group, into a dock, into a zoom and back), the same content moves with it: the signals it created, an input's
 text, a scroll position, a web view's page all stay. The area renders a panel once, when it first appears, and lets its
 content go when the panel leaves the layout (`onPanelRemove`).
@@ -138,7 +138,7 @@ content go when the panel leaves the layout (`onPanelRemove`).
 />
 ```
 
-`panels` sets what each panel allows, by key; a panel not listed allows everything:
+`panels` sets what each panel allows, by key. A panel not listed allows everything:
 
 | Field | Default | Description |
 |---|---|---|
@@ -150,7 +150,7 @@ content go when the panel leaves the layout (`onPanelRemove`).
 ## Tabs
 
 Each group has a tab bar with a tab per visible panel, in the order of its `panels`. `renderTab` renders what a tab
-shows (its title, an icon, a close button of the app's); without it a tab shows the panel's key. The area makes it the
+shows (its title, an icon, a close button of the app's). Without it a tab shows the panel's key. The area makes it the
 tab: a press selects it, a drag moves its panel, screen readers hear it as a tab with its selected state, and
 `tabClass`'s `selected:` classes style the displayed one. A tab's value says what the app needs to draw it:
 
@@ -224,19 +224,19 @@ While a drag hovers, the area shows the drop indicator over the part of the grou
 content to join, half of it to split): a part the
 app styles (`dropIndicatorClass`), with content of its own if the app renders some (`renderDropIndicator`, told the
 `group`, the `side` it splits off or the tab bar `index`). It moves to each new place natively, easing there and fading in on another group as the last one fades out (at once when the user asks for less motion). What follows the pointer or finger is the app's too
-(`renderDragPreview`). A drop is one change of the layout, reported once; a drop that would change nothing changes nothing.
+(`renderDragPreview`). A drop is one change of the layout, reported once. A drop that would change nothing changes nothing.
 
 A locked area, a zoomed one, and a group's last panel when nothing sits beside the group drag nothing.
 
 ## Docks
 
 A dock opens and closes without losing its panels or its size: closing it keeps its tree, and opening it shows the
-same groups at the same size. The edge between a dock and the center is a handle the user drags to resize the dock;
-it stays at least 100 points and the center keeps at least 100 points, and a collapsible dock let go below 50 points
+same groups at the same size. The edge between a dock and the center is a handle the user drags to resize the dock.
+It stays at least 100 points and the center keeps at least 100 points, and a collapsible dock let go below 50 points
 closes and keeps its size for when it opens. The area always fits its bounds: a dock shows at its `size` within what
 the area leaves it, and when even that does not fit, the docks shrink with the rest and the splits' minimum sizes
 yield. `renderDock` draws a dock's own chrome before its layout (a title strip, a collapse button), told its
-`placement`, `open`, `size` and `collapsible`; `dockClass` styles its frame.
+`placement`, `open`, `size` and `collapsible`. `dockClass` styles its frame.
 
 Open, close and resize docks from the app through the ref (`toggleDock`, `setDockOpen`, `setDockSize`), which work
 in both presentations, or by writing the dock's `open` and `size` in the layout it passes (`open` is the full
@@ -322,7 +322,7 @@ pane becomes a bottom sheet:
   a panel of another group makes that group the one shown.
 - The left and right docks are drawers over the center from their edge, as wide as the dock, and the bottom dock is a
   sheet as tall as the dock. One shows at a time, when the app presents it (`toggleDock`, `setDockOpen`, which
-  dismiss the other); it slides in and out, and a press on its backdrop, Escape or back dismiss it. Entering the
+  dismiss the other). It slides in and out, and a press on its backdrop, Escape or back dismiss it. Entering the
   compact presentation shows none.
 - A tab dragged (a finger after a long press, a pointer at once) moves within the tab bar to reorder it.
 

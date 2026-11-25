@@ -13,7 +13,7 @@ opens the list, presented as each device expects:
 - On the desktops and in desktop browsers, a popup as wide as the trigger (the app's `popupStyle` / `popupClass`
   width sets another, as `gpui-component`'s `menu_width`) and as tall as its rows up to the room on the screen. On
   macOS it opens with the selected row laid over the trigger, so the chosen title stays where it was, as the
-  system's pop-up buttons do (shadcn/ui's `item-aligned` position); with nothing selected it opens below the
+  system's pop-up buttons do (shadcn/ui's `item-aligned` position). With nothing selected it opens below the
   trigger. On Windows, Linux and in browsers it opens below the trigger, as their drop-down lists do; `cover` chooses
   one way on every desktop. The keyboard moves through the items and chooses one.
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop.
@@ -163,13 +163,13 @@ and the popup scrolls when its rows are taller than the room it has.
 ## Value
 
 With `value`, the app owns the chosen item: the select shows the item of that value and reports a choice with
-`onChange({ value })`; the app sets `value` to follow it, or keeps its own. `value={null}` is nothing chosen. Left out, the
+`onChange({ value })`. The app sets `value` to follow it, or keeps its own. `value={null}` is nothing chosen. Left out, the
 select keeps its own value, from `defaultValue` at first. `onChange` reports changes: choosing the chosen item again
 closes the list.
 
 `cleanable` adds a clear button while an item is chosen: a press clears the value, reported as `onChange({ value: null })`, and
 the list stays closed. The button comes after the trigger in the select's view, not inside it, so a press on it never
-opens the list; the app places it (over the trigger's end with `absolute`, where a chevron would be) and fills it:
+opens the list. The app places it (over the trigger's end with `absolute`, where a chevron would be) and fills it:
 
 ```tsx
 <Select
@@ -204,7 +204,7 @@ look; `popupEndingClass` is its look once closed, which it keeps, taking no pres
 `onClose` follows. The keyboard focus is back on the trigger as it closes, unless the choice's `onChange` focused
 another view (the next field of a form), which keeps it. Opened again on its way out, it returns to its look from where
 it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user asks for less motion it
-appears and goes at once; the sheet of touch screens slides in and out on its own.
+appears and goes at once. The sheet of touch screens slides in and out on its own.
 
 ```tsx
 <Select
@@ -234,7 +234,7 @@ keyboard, and Return chooses it. `empty` is what the list shows while nothing ma
 />
 ```
 
-On the desktops the search field takes the keyboard as the list opens; on touch screens the keyboard comes up when
+On the desktops the search field takes the keyboard as the list opens. On touch screens the keyboard comes up when
 the field is pressed. Each opening starts with an empty search.
 
 ## Rows the app draws
@@ -368,7 +368,7 @@ open:
 Once the list closes, the keyboard focus returns to the trigger, unless a press outside, Tab or the choice's `onChange`
 took it elsewhere. On macOS and iOS, a list a pointer opened gives the focus back where it was before it opened instead: a
 press leaves the focus where it is there, as AppKit and UIKit do, so the trigger never had it, and Space and Return go on to your app's
-shortcuts rather than opening the list again. The pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
+shortcuts rather than opening the list again. The pointer highlights the row it moves over. The highlighted row is revealed as the keys move to it.
 
 ## On each device
 
@@ -379,19 +379,19 @@ shortcuts rather than opening the list again. The pointer highlights the row it 
 | Search | the field takes the keyboard as the list opens | the keyboard comes up when the field is pressed |
 | A choice | the press going down chooses, so the search field keeps the keyboard | a tap |
 
-`popupClass` styles the popup on desktops and the sheet on phones; a style that differs between them can compare
+`popupClass` styles the popup on desktops and the sheet on phones. A style that differs between them can compare
 `platform.idiom` (`nsh/device`) with `"desktop"`.
 
 ## Accessibility
 
 - The trigger is a combobox for screen readers: its label is `accessibilityLabel`, its value the chosen item's title
   (the `placeholder` while none is chosen), and it says whether the list is expanded. `disabled` dims it.
-- The clear button is a button named by `clearButtonAccessibilityLabel`; it is no stop of Tab.
-- The search field is a text field named by `searchAccessibilityLabel`; its placeholder is a hint shown while it is
+- The clear button is a button named by `clearButtonAccessibilityLabel`. It is no stop of Tab.
+- The search field is a text field named by `searchAccessibilityLabel`. Its placeholder is a hint shown while it is
   empty.
-- The list is a listbox and each row an option, named by its title; the chosen option is selected and a disabled one
+- The list is a listbox and each row an option, named by its title. The chosen option is selected and a disabled one
   dimmed. Sections' headers are headers.
-- As the keys move the highlight, the screen reader's focus moves to the highlighted row; while the search field has
+- As the keys move the highlight, the screen reader's focus moves to the highlighted row. While the search field has
   the keyboard, the highlighted item's title is announced instead, so typing goes on.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.

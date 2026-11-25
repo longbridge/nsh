@@ -7,7 +7,7 @@ group: delivery
 
 # OTA 更新
 
-OTA（over-the-air，空中下发）更新把打包应用的 TSX 作为[签名包](./signed-packages.md)（`.nshpkg`）下发：已安装的应用下载、验证它，并从下次启动开始运行。所有原生平台（包括 iOS 和 Android）都适用，无需构建新应用。一次发布就是这个包加一份签名的清单，放在 GitHub Releases 或自己的服务器上。在应用中，[`nsh/updater`](../modules/nsh-updater.md#ota-更新) 的四个函数负责检查、下载、重启进入和报告包。第一次启动就失败的包会被删除，应用回到之前运行的版本。
+OTA（over-the-air，空中下发）更新让已安装的应用直接拿到新的 TSX 代码，不用重新构建应用。代码以[签名包](./signed-packages.md)（`.nshpkg`）下发：应用下载、校验，下次启动时运行。所有原生平台都支持，包括 iOS 和 Android。一次发布就是这个包加一份签名清单，放在 GitHub Releases 或自己的服务器上。在应用中，[`nsh/updater`](../modules/nsh-updater.md#ota-更新) 的四个函数负责检查、下载、重启进入和报告包。第一次启动就失败的包会被删除，应用回到之前运行的版本。
 
 | 平台 | OTA 的行为 |
 | --- | --- |
@@ -28,7 +28,7 @@ OTA（over-the-air，空中下发）更新把打包应用的 TSX 作为[签名�
 | 超出已安装应用声明的[能力](./sandbox-and-capabilities.md) | | 需要：包最多获得已安装应用的能力 |
 | `nsh.json` 的 `"updater"`：清单来源、信任的根密钥 | | 需要 |
 
-每个包都写明能运行它的最低 NSH 运行时（`minRuntime`），默认是发布它的 `nsh` 的版本；运行时更旧的应用不会收到它。请用构建线上应用时的 `nsh` 版本发布 OTA 版本；如果 TSX 只用了旧运行时已有的功能，也可以用 `--min-runtime` 发布（见[哪些运行时能运行包](./signed-packages.md#哪些运行时能运行包)）。应用需要更新的运行时时，请发布新的应用构建；下文的应用会先检查包，没有包时再检查新应用。
+每个包都写明能运行它的最低 NSH 运行时（`minRuntime`），默认是发布它的 `nsh` 的版本。运行时更旧的应用不会收到它。请用构建线上应用时的 `nsh` 版本发布 OTA 版本。如果 TSX 只用了旧运行时已有的功能，也可以用 `--min-runtime` 发布（见[哪些运行时能运行包](./signed-packages.md#哪些运行时能运行包)）。应用需要更新的运行时时，请发布新的应用构建。下文的应用会先检查包，没有包时再检查新应用。
 
 ## 一次性设置
 
@@ -41,7 +41,7 @@ nsh keygen keys/update    # 给清单签名，放在 CI 中
 nsh certify --root keys/root.secret --key keys/release.pub --apps com.example.notes -o keys/release.cert
 ```
 
-根密钥为应用 id 认证发布密钥；应用只信任根密钥，所以更换发布密钥或证书都不需要更新应用。证书默认有效 365 天（可用 `--days` 指定），到期前请重新认证发布密钥。密钥的说明，以及如何吊销发布密钥或包，见[签名包](./signed-packages.md#密钥两个层级)。
+根密钥为应用 id 认证发布密钥。应用只信任根密钥，所以更换发布密钥或证书都不需要更新应用。证书默认有效 365 天（可用 `--days` 指定），到期前请重新认证发布密钥。密钥的说明，以及如何吊销发布密钥或包，见[签名包](./signed-packages.md#密钥两个层级)。
 
 > [!CAUTION]
 > 请离线保管 `root.secret`，例如放在保险柜里的加密硬盘上：拿到它的人可以让每一台安装了该应用的设备运行他的代码。不要提交任何 `.secret` 文件。
@@ -61,7 +61,7 @@ nsh certify --root keys/root.secret --key keys/release.pub --apps com.example.no
 }
 ```
 
-`"packages": { "roots" }` 列出根公钥，由它们认证的发布密钥可以为应用的包签名；配多个根密钥就可以轮换。配了 `publicKey`，应用会拒绝不是由 `keys/update.secret` 签名的清单；用 `"url"` 代替 `"github"` 时它是必填的（见[应用更新](./app-updates.md#设置来源)）。
+`"packages": { "roots" }` 列出根公钥，由它们认证的发布密钥可以为应用的包签名。配多个根密钥就可以轮换。配了 `publicKey`，应用会拒绝不是由 `keys/update.secret` 签名的清单。用 `"url"` 代替 `"github"` 时它是必填的（见[应用更新](./app-updates.md#设置来源)）。
 
 `nsh package` 会把 `"updater"` 和 `build` 写进应用，所以应用信任哪些根密钥、拿哪个构建号和包比较，在构建应用时就已确定。只有用这份配置构建的应用才接收 OTA 更新：请在第一次 OTA 发布前先发布这样一个应用构建。
 
@@ -79,7 +79,7 @@ gh secret set NSH_UPDATE_KEY < keys/update.secret
 
 ### 构建号
 
-`nsh.json` 中的 `build` 是应用构建和包共用的计数器：每次发布其中任何一个都要调高它。只有包的构建号高于应用构建时的构建号，应用才运行它；应用也只会收到比当前运行的代码更新的包。当用户装上构建号为 20 的新应用时，已下载的 15 号包是旧代码，会被删除，下一个 OTA 版本必须是 21 号。`version` 也请一起调高；`runningPackage()` 会报告包的版本和构建号。
+`nsh.json` 中的 `build` 是应用构建和包共用的计数器：每次发布其中任何一个都要调高它。只有包的构建号高于应用构建时的构建号，应用才运行它。应用也只会收到比当前运行的代码更新的包。当用户装上构建号为 20 的新应用时，已下载的 15 号包是旧代码，会被删除，下一个 OTA 版本必须是 21 号。`version` 也请一起调高。`runningPackage()` 会报告包的版本和构建号。
 
 ### 手动发布
 
@@ -108,7 +108,7 @@ nsh update-manifest --package dist/com.example.notes-13.nshpkg --notes CHANGES.m
 }
 ```
 
-包的 `url` 是它的文件名，与清单放在一起；`--base-url` 可以放到别处。只有包的版本不传压缩包也不传 `--link`，所以 `checkForUpdate` 在其中找不到新应用。一个版本也可以两者都有：`nsh update-manifest *.tar.gz *.zip --package … --link ios=…`（见[应用更新](./app-updates.md#发布新版本)）。
+包的 `url` 是它的文件名，与清单放在一起。`--base-url` 可以放到别处。只有包的版本不传压缩包也不传 `--link`，所以 `checkForUpdate` 在其中找不到新应用。一个版本也可以两者都有：`nsh update-manifest *.tar.gz *.zip --package … --link ios=…`（见[应用更新](./app-updates.md#发布新版本)）。
 
 把包、`latest.json` 和 `latest.json.sig` 上传到 GitHub Release：
 
@@ -220,7 +220,7 @@ export async function installApp() {
 }
 ```
 
-应用启动后调用一次 `checkForUpdates()`；如果应用会长时间开着，隔一段时间再调用。在桌面端提示用户重启：
+应用启动后调用一次 `checkForUpdates()`。如果应用会长时间开着，隔一段时间再调用。在桌面端提示用户重启：
 
 ```tsx
 import { Text, View } from "nsh";
@@ -252,7 +252,7 @@ const running = runningPackage(); // { version, build }；运行应用构建时�
 const shell = shellInfo(); // { version, build, nshVersion, packages }：已安装的应用
 ```
 
-在支持包之前安装的应用（或用不支持包的运行时构建的应用）永远收不到包：这时 `packages` 为 false；比 `shellInfo` 更早的运行时连这个函数都没有。只有重新安装完整应用才能解决。
+在支持包之前安装的应用（或用不支持包的运行时构建的应用）永远收不到包：这时 `packages` 为 false。比 `shellInfo` 更早的运行时连这个函数都没有。只有重新安装完整应用才能解决。
 
 所有函数及其错误见 [nsh/updater](../modules/nsh-updater.md#ota-更新)。
 
@@ -279,8 +279,8 @@ const shell = shellInfo(); // { version, build, nshVersion, packages }：已安�
 ### 每次启动时
 
 1. 如果 `trying.nshpkg` 还在，说明上次启动没能证明运行正常：应用在试运行期间崩溃或被强制结束。它会被删除。
-2. `next.nshpkg` 会再验证一次：由某个根密钥认证的发布密钥签名、未被吊销、属于本应用、适用于当前运行时、构建号高于应用自带的构建号，并且不低于之前接受过的任何构建号。通过后它变成 `trying.nshpkg` 并开始试运行；被拒绝则删除。
-3. 否则，如果 `current.nshpkg` 仍能通过验证且构建号高于应用自带的构建号，就运行它；否则删除它。
+2. `next.nshpkg` 会再验证一次：由某个根密钥认证的发布密钥签名、未被吊销、属于本应用、适用于当前运行时、构建号高于应用自带的构建号，并且不低于之前接受过的任何构建号。通过后它变成 `trying.nshpkg` 并开始试运行。被拒绝则删除。
+3. 否则，如果 `current.nshpkg` 仍能通过验证且构建号高于应用自带的构建号，就运行它。否则删除它。
 4. 否则运行应用构建时自带的代码。
 
 应用总能启动：包有任何问题都会记录到日志，然后按顺序运行下一个选择。
@@ -293,7 +293,7 @@ const shell = shellInfo(); // { version, build, nshVersion, packages }：已安�
 
 ### 回滚保护
 
-被接受的构建号会抬高下限：此后应用拒绝更旧的构建，即使它由受信任的密钥签名，因此带有已知缺陷的旧包无法再被运行。要撤回有问题的包，请发布修复后更高的构建号；如果它在任何地方都不能再运行，再[吊销](./signed-packages.md#吊销密钥和包)它。
+被接受的构建号会抬高下限：此后应用拒绝更旧的构建，即使它由受信任的密钥签名，因此带有已知缺陷的旧包无法再被运行。要撤回有问题的包，请发布修复后更高的构建号。如果它在任何地方都不能再运行，再[吊销](./signed-packages.md#吊销密钥和包)它。
 
 ## 问题排查
 
@@ -328,8 +328,8 @@ const shell = shellInfo(); // { version, build, nshVersion, packages }：已安�
 ### 下次启动时包没有运行
 
 启动器会在终端或平台日志中记录原因：macOS 和 iOS 上是统一日志，以应用的 id 为子系统（“控制台”应用，或
-`log stream --predicate 'subsystem == "com.example.notes"'`；参见[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)），
-Android 上是 `adb logcat`。下面前三行是警告，每个平台都会记录；最后一行是 info 日志，在 Android 上记录：
+`log stream --predicate 'subsystem == "com.example.notes"'`。参见[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)），
+Android 上是 `adb logcat`。下面前三行是警告，每个平台都会记录。最后一行是 info 日志，在 Android 上记录：
 
 ```text
 updates: downloaded package refused: …

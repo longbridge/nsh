@@ -6,7 +6,7 @@ order: 2.4
 
 # Video
 
-`nsh` exports `Video`: a video player built on the platform's player (`AVPlayer` on iOS and Mac Catalyst, `MediaPlayer` on Android). Playback is controlled with props, so pausing is a signal away.
+`nsh` exports `Video`: a video player built on the platform's player (`AVPlayer` on iOS and Mac Catalyst, `MediaPlayer` on Android). Props control playback, so you pause a video by setting a signal.
 
 ```ts
 import { Video, type VideoProps } from "nsh";

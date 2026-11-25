@@ -4,7 +4,7 @@ description: "Eleven Node-shaped standard modules: pinned LLRT utilities and cap
 order: 14.5
 ---
 
-Native Shell provides eleven standard modules for TSX, imported by their bare names (Rust code uses Rust's own libraries: [From Rust](#from-rust)): Node-shaped APIs compatible with gpui-shell's, running in the app's VM on NSH's native runtime, with their capabilities checked in Rust. Their TypeScript declarations in `.nsh/types` are generated from the same specs as the modules, so what the types show is what the runtime exports.
+Native Shell provides eleven standard modules for TSX. You import them by bare name, such as `path` or `crypto`. They have Node-shaped APIs compatible with gpui-shell's. They run in the app's VM on NSH's native runtime, and Rust checks their capabilities. Rust code uses Rust's own libraries instead (see [From Rust](#from-rust)). The TypeScript declarations in `.nsh/types` are generated from the same specs as the modules, so the types match what the runtime exports.
 
 | Module | Exports |
 |---|---|

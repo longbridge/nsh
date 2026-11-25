@@ -91,7 +91,7 @@ fn palette() -> impl IntoElement {
 }
 ```
 
-`Command` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。应用设置 `query` 时，查询词由应用持有，应用在 `onQueryChange` 里更新它；不设置时由搜索框自己保存，从 `defaultQuery` 开始。项目用应用自己的 `id` 标识，而不是标签：`onSelect({ id })` 告诉应用用户选了哪一个。在 Rust 中由 `command()` 创建，每个 prop 有对应的 setter（`.items(..)`、`.query(..)`、`.render_item(..)`），每个事件有对应的监听方法，以及类型化的样式方法。
+`Command` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。应用设置 `query` 时，查询词由应用持有，应用在 `onQueryChange` 里更新它。不设置时由搜索框自己保存，从 `defaultQuery` 开始。项目用应用自己的 `id` 标识，而不是标签：`onSelect({ id })` 告诉应用用户选了哪一个。在 Rust 中由 `command()` 创建，每个 prop 有对应的 setter（`.items(..)`、`.query(..)`、`.render_item(..)`），每个事件有对应的监听方法，以及类型化的样式方法。
 
 ## 项目
 
@@ -181,7 +181,7 @@ palette?.focus();
 
 ## 放在对话框里的面板
 
-把命令面板放进 [`Dialog`](./dialog.md)，用应用自己的快捷键打开。Escape 先清空查询词；查询词为空时触发 `onCancel`，由应用在其中关闭对话框。
+把命令面板放进 [`Dialog`](./dialog.md)，用应用自己的快捷键打开。Escape 先清空查询词。查询词为空时触发 `onCancel`，由应用在其中关闭对话框。
 
 ```tsx
 import { keymap } from "nsh";
@@ -219,8 +219,8 @@ keymap.bind("mod+k", () => open.set(!open()));
 
 ## 无障碍
 
-- 列表的角色是 `"listbox"`，名称来自 `accessibilityLabel`；每一行是一个 `"option"`，名称是项目的标签，勾选和禁用状态与项目一致；分区标题是 `"header"`，分隔行对屏幕阅读器隐藏。
-- 搜索框是一个文本框，名称来自 `searchAccessibilityLabel`（未设置时为 `accessibilityLabel`）；占位文字是它为空时显示的提示。
+- 列表的角色是 `"listbox"`，名称来自 `accessibilityLabel`。每一行是一个 `"option"`，名称是项目的标签，勾选和禁用状态与项目一致。分区标题是 `"header"`，分隔行对屏幕阅读器隐藏。
+- 搜索框是一个文本框，名称来自 `searchAccessibilityLabel`（未设置时为 `accessibilityLabel`）。占位文字是它为空时显示的提示。
 - 方向键移动高亮时键盘焦点留在搜索框里，屏幕阅读器读出高亮项的标签。没有搜索框时，高亮的行获得屏幕阅读器的焦点。
 - `loading` 期间列表处于忙碌状态。
 

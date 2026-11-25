@@ -7,9 +7,9 @@ group: platforms
 
 # Linux
 
-NSH apps also run on Linux. The Linux backend renders them with GTK 4 widgets and lays out text with Pango; the core,
-the reactive graph, the renderer, Taffy layout and the native modules are the same as on iOS and Android,
-so one app runs everywhere. On Linux, `os()` is `Os::Linux` (`platform.os` is `"linux"` in TSX) and TSX's
+NSH apps run on Linux in GTK 4 windows. The Linux backend renders them with GTK 4 widgets and lays out text with
+Pango. The core, the reactive graph, the renderer, Taffy layout and the native modules are the same as on iOS and
+Android, so one app runs everywhere. On Linux, `os()` is `Os::Linux` (`platform.os` is `"linux"` in TSX) and TSX's
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come
 from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
@@ -41,7 +41,7 @@ nsh run                        # --target linux is the default on Linux
 ```
 
 `nsh` builds a debug runner with your crate and opens the app, with its logs (`log::info!` and the rest) in the
-terminal; a change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts the same
+terminal. A change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts the same
 root from the crate's `src/main.rs`, which `nsh init --template rust` writes: [`run_app`](#embedding-in-a-gtk-app)
 with `AppSource::Rust`.
 
@@ -52,7 +52,7 @@ error overlay as on the other targets:
 nsh run App.tsx
 ```
 
-In a checkout, `nsh run` builds the development host (`nsh-linux-host`) first; the distribution made on Linux ships
+In a checkout, `nsh run` builds the development host (`nsh-linux-host`) first. The distribution made on Linux ships
 it in `runtime/linux/`. Ctrl-C closes the window, and closing the window ends `nsh run`. The host also runs a built
 bundle on its own:
 
@@ -61,7 +61,7 @@ nsh build my-app --release -o build
 dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --window-size 1024x768   # in a checkout: target/debug/nsh-linux-host
 ```
 
-`--window-size` is the window's default size (TSX apps); tiling window managers may give the window another one.
+`--window-size` is the window's default size (TSX apps). Tiling window managers may give the window another one.
 
 ## Packaging
 
@@ -89,12 +89,12 @@ WebKitGTK 6.0 must be installed where the app runs. To show the app in a desktop
 `PATH`, the `.desktop` file in `~/.local/share/applications` and the icon in an icon theme directory. `--run` launches
 the app after packaging it.
 
-AppImage and Flatpak packages are in [Packaging](./packaging.md#appimage-and-flatpak); releases on Flathub in [Publishing](./publish.md#publish-to-flathub).
+AppImage and Flatpak packages are in [Packaging](./packaging.md#appimage-and-flatpak). Releases on Flathub in [Publishing](./publish.md#publish-to-flathub).
 
 ## Embedding in a GTK app
 
 The `nsh-platform-linux` crate (from the NSH repository) gives a Rust GTK app `AppView`: one NSH engine as a GTK widget.
-Each `AppView` is independent; several can run at once. It runs a Rust root, the root component of your crate:
+Each `AppView` is independent. Several can run at once. It runs a Rust root, the root component of your crate:
 
 ```rust
 use std::rc::Rc;
@@ -141,7 +141,7 @@ QuickJS bytecode is trusted input, so only load it from your own app's files. A 
 
 `AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): an
 XDG autostart entry, `~/.config/autostart/<app_id>.desktop`, starting this executable. It is off by default and read
-by `run_app` alone, so an embedded app never launches at login; the runner of the apps `nsh package` builds sets it.
+by `run_app` alone, so an embedded app never launches at login. The runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
@@ -153,13 +153,13 @@ follow at once ([Device and environment](./device-and-environment.md#in-an-embed
 
 `AppView::set_theme_overrides(Some(json))` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file
 in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light and dark mode
-while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
+while the app's others stay. Classes such as `bg-primary` restyle at once, and apps loaded later start with it
 (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
 
 ### Several windows sharing data
 
 A Rust host opens as many windows as it likes, an `AppView` in each, and shares its data between them as any Rust
-program does: one process, an `Arc` the roots' props carry. There is nothing to send between the windows; each root
+program does: one process, an `Arc` the roots' props carry. There is nothing to send between the windows. Each root
 reads the shared value and listens for its changes the way it listens to any other source (a channel, a watch, a
 callback the store calls):
 
@@ -194,7 +194,7 @@ A TSX app opens its windows with [`<Window>` and `Window.open`](../modules/nsh-d
 app's one JS runtime, so they share its signals and modules directly. Dialogs, panels and popups are transient for
 their parent window, and the window manager places every window.
 
-Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
+Native components are registered with `AppView::register_component`. See [Native components](./native-components.md#registering-on-linux-rust).
 `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'
 (`my_app::registry()`, which `#[native_module]` makes), so the TSX a view loads imports your Rust components and
 modules too.
@@ -225,7 +225,7 @@ F11 cannot be bound.
 
 Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is the key that types C on a US layout).
 A return that commits an input method's composition (Chinese, Japanese, ...) never submits. `onKeyPress` reports
-what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escape"`; pasted text is not reported.
+what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escape"`. Pasted text is not reported.
 
 Web views are WebKitGTK pages, drawn inside NSH's views: sheets, dialogs, toasts and views after them draw over a page,
 and parents clip it and fade it. Their website data (cookies, storage, the cache) is kept per app, under
@@ -240,7 +240,7 @@ Not supported:
 - **`mixBlendMode` and `backdropFilter`** (the background color still draws). Backdrop blur is not implemented;
   experiments using GTK 4.22's copy and paste nodes are not part of the renderer.
 - **Input accessory views** and the **status bar** (no desktop equivalent).
-- **Accessibility**: `accessible` grouping, custom `accessibilityActions`; live regions are announced instead.
+- **Accessibility**: `accessible` grouping, custom `accessibilityActions`. Live regions are announced instead.
 
 ## See also
 

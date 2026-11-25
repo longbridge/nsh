@@ -7,12 +7,17 @@ demo: el-rich-editor
 
 # RichEditor
 
-`RichEditor` is a rich text editor built after ProseMirror's architecture. The app defines what a document is made
-of with a schema (paragraphs, headings, lists, mentions, whatever node and mark types it needs), and the editor keeps
-every document valid against it. Changes are steps grouped into transactions, so they undo, map positions and travel
-as JSON; behavior comes from plugins (history, keymaps, input rules, Markdown shortcuts, the app's own); commands are
-values a toolbar runs and asks about. The editor's state, its commands and its plugins run in Rust: typing, key
-bindings and input rules never wait for JS, and the app reads the state as JSON when it asks for it.
+`RichEditor` is a rich text editor modeled on ProseMirror's architecture. Your app defines what a document contains
+with a schema: paragraphs, headings, lists, mentions, or any node and mark types it needs. The editor keeps every
+document valid against that schema.
+
+- Changes are steps grouped into transactions. Transactions can be undone, map positions and serialize to JSON.
+- Plugins add behavior: history, keymaps, input rules, Markdown shortcuts, or your own.
+- Commands are values that a toolbar runs and queries.
+
+The editor's state, commands and plugins run in Rust. Typing, key bindings and input rules never wait for JS. Your app
+reads the state as JSON when it asks for it.
+
 
 An editor has two parts: the session (`createRichEditor`), which owns the state and which the app's code drives, and
 the view (`<RichEditor editor={…} />`), which renders the session natively and turns the platform's input into

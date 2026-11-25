@@ -1,14 +1,14 @@
 ---
 title: Carousel
-description: "Carousel and its parts: slides shown one place at a time, moved by swiping, the wheel and the touchpad on the platform's own scrolling, by previous and next controls, a pagination and the keyboard, around the ends seamlessly. The carousel owns which slide shows, snapping, looping, the keys and accessibility; the look and every label are the app's."
+description: "Carousel and its parts: slides shown one place at a time, moved by swiping, the wheel and the touchpad on the platform's own scrolling, by previous and next controls, a pagination and the keyboard, and around the ends without a jump. The carousel owns which slide shows, snapping, looping, the keys and accessibility; the look and every label are the app's."
 group: base
 demo: el-carousel
 ---
 
 # Carousel
 
-A carousel shows slides one place at a time: the photos of a product, the steps of an onboarding, a banner that moves
-on by itself, a row of cards. `Carousel` owns the behavior: which slide shows, swiping between them, the previous and
+A carousel shows one slide at a time in the same place. Use it for product photos, onboarding steps, a banner that
+moves on by itself or a row of cards. `Carousel` owns the behavior: which slide shows, swiping between them, the previous and
 next controls, a pagination, the arrow keys, going around the ends, and what screen readers hear. Its parts find it through
 context, so the app arranges them freely in its own layout. The look is the app's: no colors, sizes, arrows, dots or
 labels of its own.
@@ -155,7 +155,7 @@ animated, when the app keeps the `index` it had. Without `index` the carousel ke
 | `index` | `.index(..)` | `number` | none | The slide shown, from 0, held to the slides there are. The app owns it: changes are reported with `onChange`, and a new `index` scrolls there, animated. |
 | `defaultIndex` | `.default_index(..)` | `number` | `0` | The slide shown at first, while `index` is not set. |
 | `axis` | `.axis(..)` | `"horizontal" \| "vertical"` | `"horizontal"` | The direction the slides follow each other; read when the carousel is made. A vertical carousel's arrow keys are Up and Down. |
-| `looping` | `.looping(..)` | `boolean` | `false` | The slides go around: after the last comes the first, and before the first the last, seamlessly, for a swipe, previous, next, the keys and the app's `index` alike ([Looping](#looping)). Read when the carousel is made. |
+| `looping` | `.looping(..)` | `boolean` | `false` | The slides go around: after the last comes the first, and before the first the last, with no rewind, for a swipe, previous, next, the keys and the app's `index` alike ([Looping](#looping)). Read when the carousel is made. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call the carousel, a region: what its slides are (`"Featured products"`). |
 | `children` | `.child(..)` | `JSX.Element` | none | The `CarouselContent`, the controls and whatever the app lays out around them. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The carousel's layout: where the content and the controls go. |
@@ -231,7 +231,7 @@ animated, when the app keeps the `index` it had. Without `index` the carousel ke
 A slide's width is its own class's, so a row of cards is several slides in the viewport. Each slide is a snap point
 where it starts: the content rests with that slide where the first one rests, so a padding before the first is kept
 before each. At the end of the range the slides that cannot reach that place rest with the last one, and next stops
-there. `index` names the slide in the first place; the slides that rest with the last one show the same place, and a
+there. `index` names the slide in the first place. The slides that rest with the last one show the same place, and a
 swipe there reports the first of them:
 
 ```tsx
@@ -253,13 +253,13 @@ swipe there reports the first of them:
 
 ## Looping
 
-With `looping`, the slides go around seamlessly: after the last comes the first, swiped, stepped with next or the
-keys, or set by the app's `index`, with no rewind across the slides between. The content keeps room of a whole turn
-of slides before and after them, and draws each slide where it is nearest the middle of the view; the animation runs
+With `looping`, the slides go around: after the last comes the first. This holds for a swipe, next, previous, the
+keys and the app's `index`, with no rewind across the slides between. The content keeps room of a whole turn
+of slides before and after them, and draws each slide where it is nearest the middle of the view. The animation runs
 this on the platform's own frames, with the scroll. Each slide is there once: screen readers and the pagination see
 it once.
 
-The loop is seamless while the slides span the viewport and one slide more (three full-width slides, or five a
+The loop has no visible jump while the slides span the viewport and one slide more (three full-width slides, or five a
 third wide). With fewer, previous, next and the keys still go around, scrolling back across the slides.
 
 ## Slides that move on by themselves
@@ -310,9 +310,9 @@ Reading `index()` in the effect starts a whole interval again after each change,
 
 ## Accessibility
 
-- The carousel is a region named by `accessibilityLabel`; each slide is a group named by its own (its place among the
+- The carousel is a region named by `accessibilityLabel`. Each slide is a group named by its own (its place among the
   others and what it shows).
-- Previous and next are buttons, disabled at the ends unless the carousel loops; each pagination item is a button,
+- Previous and next are buttons, disabled at the ends unless the carousel loops. Each pagination item is a button,
   selected while its slide shows.
 - Every label is the app's, in the app's language.
 - A looping carousel's slides are each there once, wherever they are drawn.
@@ -331,7 +331,7 @@ and so are its controls and pagination items. While one of them has the focus:
 | Space, Return | Presses the focused control or pagination item. |
 
 In a right-to-left layout a horizontal carousel's slides run from the right, so Left moves to the next slide and Right
-to the previous; a vertical carousel keeps Up and Down. A control that turns disabled while it has the focus (next on
+to the previous. A vertical carousel keeps Up and Down. A control that turns disabled while it has the focus (next on
 the last slide) hands the focus to the carousel, so the keys go on working there. Focusable views of the app's in the
 slides keep their own keys: an input's arrows move its caret.
 
@@ -339,15 +339,15 @@ slides keep their own keys: an input's arrows move its caret.
 
 - A swipe, the wheel and the touchpad move the slides with the pointer, in the same frame: the platform scrolls them.
 - On release the content glides to the nearest slide, one slide per fling, as the platform snaps.
-- Previous, next, a pagination item, a key and the app's `index` scroll the content to the slide, animated;
-  with reduced motion, at once.
-- The pagination's indicator springs to the item of the slide shown; with reduced motion it moves at once.
-- `looping` goes from the last slide to the first one step forward, across the seam; once the content rests, it
+- Previous, next, a pagination item, a key and the app's `index` scroll the content to the slide, animated.
+  With reduced motion, it jumps at once.
+- The pagination's indicator springs to the item of the slide shown. With reduced motion it moves at once.
+- `looping` goes from the last slide to the first one step forward, across the seam. Once the content rests, it
   moves back by a whole turn without animation, which changes nothing on screen.
 
 ## Platform notes
 
-- iOS, Android and Mac Catalyst: a finger swipes the slides; a tap presses a control.
+- iOS, Android and Mac Catalyst: a finger swipes the slides. A tap presses a control.
 - Desktops (macOS, Windows, Linux, GPUI) and the web: the wheel and the touchpad scroll the slides, and a click
   presses a control. A mouse drag over the content is the app's, as on every scroll view there.
 - Every platform draws what the app styles: the slides, the controls, the pagination and its indicator.

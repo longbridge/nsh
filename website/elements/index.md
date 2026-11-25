@@ -6,11 +6,13 @@ order: 1
 
 # Elements
 
-Native Shell builds every screen from a small set of elements: primitives such as `View`, `Text` and `Image`, and base
-components such as `Button`, `Dialog` and `NavStack`. Each primitive is a native view (a UIView subclass on iOS and Mac
-Catalyst, an Android `View`, an AppKit, GTK or Win32 view on the desktops), created and laid out by the NSH runtime.
-Everything an app shows is made of them: an app's buttons, cards, rows and screens are its own components, drawn with
-these elements and styled by the app, so the app's look is entirely its own.
+Native Shell builds every screen from a small set of elements. Primitives include `View`, `Text` and `Image`. Base
+components include `Button`, `Dialog` and `NavStack`.
+
+Each primitive is a native view: a UIView subclass on iOS and Mac Catalyst, an Android `View`, and an AppKit, GTK or
+Win32 view on the desktops. The NSH runtime creates and lays them out. Your app's buttons, cards, rows and screens are
+your own components, built from these elements and styled by you. The look of your app is entirely yours.
+
 
 Every example on these pages comes in TSX and Rust: pick a tab, and every example on the page follows.
 
@@ -111,7 +113,7 @@ and take their look from the app.
 | `<Accordion>` and its parts | `nsh_base::accordion()`, `accordion_item()`, ... | Stacked sections that expand and collapse under their headings, one at a time or several | [Accordion](./accordion.md) |
 | `<Avatar>`, `<AvatarGroup>` | `nsh_base::avatar()`, `avatar_group()` | A person's picture, or a fallback while it loads or when it fails, and a row of them that shows the first few | [Avatar](./avatar.md) |
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
-| `<Carousel>` and its parts | `nsh_base::carousel()`, `carousel_content()`, ... | Slides shown one place at a time, swiped natively, with previous / next, a pagination, the keys and a seamless loop | [Carousel](./carousel.md) |
+| `<Carousel>` and its parts | `nsh_base::carousel()`, `carousel_content()`, ... | Slides shown one place at a time, swiped natively, with previous / next buttons, pagination, keyboard keys and an endless loop | [Carousel](./carousel.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | A region whose content expands and collapses | [Collapsible](./collapsible.md) |
 | `<Command>` | `nsh_base::command()` | A command palette: a search field over commands filtered natively, a virtualized list, the keys of a Cmd+K palette | [Command](./command.md) |

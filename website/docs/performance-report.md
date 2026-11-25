@@ -47,7 +47,7 @@ frame at the 95th percentile: under 8.3 ms, a frame fits a 120 Hz refresh.
 
 Every page of the gallery, as it opens and while the test scrolls it, in a 1200 × 800 window on a 144 Hz display (the
 same machine). NSH draws a frame only when something on screen changes, so *FPS* here is the rate while something
-moves: one frame per median gap between drawn frames (`perf.py`'s `moving`); at the display's 144, every frame of an
+moves: one frame per median gap between drawn frames (`perf.py`'s `moving`). At the display's 144, every frame of an
 animation or a scroll comes one refresh after the last. *Over one refresh* is the share of frames that took longer
 than a refresh (6.9 ms). Images' GIF and WebP play at their own frame rates (about 50 FPS here), as does video. Physics, Overlays and Menus are short: in 1200 × 800 a scroll reaches their end within a few frames, so they are measured in a 900 × 500 window, where they have room to scroll.
 
@@ -105,7 +105,7 @@ them whole, mostly GTK's and the GPU driver's, which every GTK app maps:
 
 *Over the GTK window* compares private dirty memory: what NSH adds to a bare GTK window, its engine, layout, renderer
 and modules, and for TSX QuickJS with the app's code. The rest of each figure is GTK's and the driver's. With GL, one of
-the two launches of the GTK window and of the Rust app held about 60 MiB more (99.4 and 98.6 MiB private dirty); the bare
+the two launches of the GTK window and of the Rust app held about 60 MiB more (99.4 and 98.6 MiB private dirty). The bare
 GTK window does it too, so it is the driver's, and the table gives the other launch. The samples are in
 [the record](https://github.com/longbridge/nsh/blob/main/docs/benchmarks/linux-memory-baseline-2026-11-05.json).
 
@@ -115,8 +115,8 @@ A separate run on revision `e4cc287dd`: Intel i7-13700KF, 31 GiB RAM, NVIDIA RTX
 (driver 615.78.08), GTK 4.24.1, Hyprland/Wayland at 1.6×. These are **MiB** (1,048,576 bytes).
 Each row spans two fresh processes, sampled 8 s after the window was floated and resized to 480 × 640 points.
 The record also contains the 3 s samples. Filesystem and driver caches stayed in place between launches.
-The release runner uses the workspace's fat LTO and one codegen unit; the CLI/build processes are excluded.
-Minimal TSX mounts one `Text`; the TSX template is `nsh init --template ts`; gallery starts on its phone-layout
+The release runner uses the workspace's fat LTO and one codegen unit. The CLI/build processes are excluded.
+Minimal TSX mounts one `Text`. The TSX template is `nsh init --template ts`. Gallery starts on its phone-layout
 index with a dedicated app id and fresh storage. All three use bytecode bundles built with `--release`.
 
 | App / renderer | RSS (MiB) | PSS (MiB) | USS (MiB) |
@@ -151,12 +151,12 @@ that feature set. The complete gallery exercises those optional features and use
 
 Cairo reduces the minimal app's RSS from about 162 to 114 MiB with the full runner. The js-only Cairo runner
 measures about 97 MiB RSS and 31 MiB USS. These configurations remain above **50 MB RSS** (50,000,000 bytes,
-47.7 MiB); reporting their USS separately preserves that target's meaning. Cairo's memory result is a static-screen
-measurement; use the animated and scrolling scenarios above to evaluate its CPU/frame-time tradeoff.
+47.7 MiB). Reporting their USS separately preserves that target's meaning. Cairo's memory result is a static-screen
+measurement. Use the animated and scrolling scenarios above to evaluate its CPU/frame-time tradeoff.
 `GDK_DISABLE=gl,vulkan,dmabuf` adds essentially no saving on this host for the js-only Cairo app. GTK describes
 these switches as debugging controls ([GTK environment variables](https://docs.gtk.org/gtk4/running.html)).
 
-Launch variation matters. The full minimal app with an unset `GSK_RENDERER` measured 164–229 MiB RSS; the
+Launch variation matters. The full minimal app with an unset `GSK_RENDERER` measured 164–229 MiB RSS. The
 js-only app with explicit GL measured 146–211 MiB. Both endpoints were still present at 8 s in different launches.
 The table keeps those ranges in the raw record rather than treating the lowest launch as a guaranteed baseline.
 With a 1200 × 800 window, the full gallery's desktop layout opens its initial Text demo and measured
@@ -174,14 +174,14 @@ With a 1200 × 800 window, the full gallery's desktop layout opens its initial T
   optimization candidate. The exploratory no-map runs changed restored gallery state or launch overrides, so they
   establish no controlled saving and are excluded from these tables.
 - Image decode costs belong to the framework/app pipeline too. Compare source sizes, target pixel dimensions,
-  cache entries and their CPU/GPU copies when testing image-heavy pages; the image budget is a ceiling, not a
+  cache entries and their CPU/GPU copies when testing image-heavy pages. The image budget is a ceiling, not a
   preallocation. The desktop default is RAM / 16, capped at 256 MiB, with entries leased by visible views retained.
 
 #### Reproduce
 
 Run on an interactive Linux desktop. Keep scratch files under the checkout's `target/` and test temporary
 files outside the checkout. Capture the GPU/driver, GTK version, window size, scale, appearance, app id and page
-alongside the measurements. `--size` below uses Hyprland's Lua dispatchers; on another compositor, size the window
+alongside the measurements. `--size` below uses Hyprland's Lua dispatchers. On another compositor, size the window
 there and omit that option. Give gallery a fresh dedicated app id in the benchmark copy of `app.json` so its saved
 page remains separate from everyday use.
 
@@ -205,7 +205,7 @@ cc -O2 examples/gallery/tools/memory-gtk.c -o target/agents/memory/gtk $(pkg-con
 python3 examples/gallery/tools/memory.py --out target/agents/memory/gtk.json --size 480x640 -- target/agents/memory/gtk
 ```
 
-The script defaults to three processes per renderer, at 3 and 10 s; this investigation used `--repeats 2
+The script defaults to three processes per renderer, at 3 and 10 s. This investigation used `--repeats 2
 --seconds 3,8`. It writes totals, per-mapping residency and window metadata, and rejects early exits and logged
 JS startup errors. [The recorded readings](https://github.com/longbridge/nsh/blob/main/docs/benchmarks/linux-memory-2026-11-05.json) retain the
 individual samples, selected file mappings and excluded experiments.
@@ -214,7 +214,7 @@ individual samples, selected file mappings and excluded experiments.
 ### App size
 
 A hello world app made by `nsh init` with each template, and two apps people use, as `nsh package --target linux`
-builds them for x86_64. The runner is the app's one executable; the archive is the `.tar.gz` it ships as. The hello
+builds them for x86_64. The runner is the app's one executable. The archive is the `.tar.gz` it ships as. The hello
 worlds are built with link-time optimization and stripped (`CARGO_PROFILE_RELEASE_LTO=fat`,
 `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`, `CARGO_PROFILE_RELEASE_STRIP=true`):
 
@@ -230,7 +230,7 @@ worlds are built with link-time optimization and stripped (`CARGO_PROFILE_RELEAS
 
 </div>
 
-The TSX runners hold the QuickJS runtime, the native modules and the renderer; an app's own code is its bundle beside
+The TSX runners hold the QuickJS runtime, the native modules and the renderer. An app's own code is its bundle beside
 the runner, under 1 KB for a hello world.
 
 What makes these numbers:
@@ -238,7 +238,7 @@ What makes these numbers:
 - **The renderer**: under NVIDIA's driver NSH draws with GSK's GL renderer, whose frames cost a fraction of the Vulkan
   renderer's there (the Animations demo: ~1 ms of drawing per frame instead of ~9.5 ms). `GSK_RENDERER` still chooses.
 - **Canvas rasters**: each canvas is rasterized once into 256 px tiles kept on the GPU. An animated value redraws only
-  the area the operations reading it cover, over the kept pixels of the drawing's static part; a canvas out of sight
+  the area the operations reading it cover, over the kept pixels of the drawing's static part. A canvas out of sight
   waits until it scrolls into view.
 - **Paths set aside once**: `fillRect` and `fillText` after a long path leave it in place until it is used again (a
   400-point line then 240 bars: 0.63 ms).
@@ -268,7 +268,7 @@ Core Animation draws the rest of each canvas on its own threads.
 ### Every page
 
 Every page of the gallery, as it opens and while the test scrolls it, in the same 1200 × 800 window. As on Linux, *FPS*
-is the rate while something moves (one frame per median gap between drawn frames); at the display's 120, every frame
+is the rate while something moves (one frame per median gap between drawn frames). At the display's 120, every frame
 of an animation or a scroll comes one refresh after the last. *Over one refresh* is the share of frames that took
 longer than a refresh (8.3 ms). A page at rest draws no frame and uses 2–5% CPU. Images' GIF and WebP play in Core
 Animation and video in AVFoundation, at their own frame rates.
@@ -324,14 +324,14 @@ Monitor shows); *resident* adds the pages of the system's shared libraries:
 
 Through the gallery's tour the process holds 84–230 MB up to the Canvas page and ~350–360 MB from the Text View page
 on, with what it caches on purpose (decoded images, bounded at 128 MB; the Text View page's documents) and the
-frameworks it loads on first use (WebKit for web views); the Canvas page's rasters, up to ~310 MB with all three
+frameworks it loads on first use (WebKit for web views). The Canvas page's rasters, up to ~310 MB with all three
 canvases on screen, go when the page closes.
 
 ### App size
 
 The hello world apps made by `nsh init` with each template, as `nsh package --target macos` builds them for Apple
 silicon (arm64), with link-time optimization and stripped as on Linux, and the two apps above as they ship for Apple
-silicon. The executable is the runner inside the `.app`; the zip is the `.app` compressed (`ditto -c -k`):
+silicon. The executable is the runner inside the `.app`. The zip is the `.app` compressed (`ditto -c -k`):
 
 <div class="data-table">
 
@@ -347,14 +347,14 @@ silicon. The executable is the runner inside the `.app`; the zip is the `.app` c
 
 What makes these numbers:
 
-- **Frames only for changes**: the display link ticks while a native animation runs and stops with it; an animation
+- **Frames only for changes**: the display link ticks while a native animation runs and stops with it. An animation
   stops with its page (its view's deletion ends its keyframes, a loop stops in its component's `cleanup`).
 - **Canvases drawn where they cost least**: a canvas that paints often (an animation, live data) draws on Core
-  Animation's threads (`drawsAsynchronously`), which keeps the main thread free; one redrawn now and then draws at
+  Animation's threads (`drawsAsynchronously`), which keeps the main thread free. One redrawn now and then draws at
   once, without the graphics memory asynchronous drawing holds. An animated value redraws only the area the
   operations reading it cover.
 - **Static canvas parts kept**: once a drawing stays unchanged, a long part before its first animated operation is
-  kept as a layer; each frame draws that layer and replays only the animated rest, at once on the main thread (the
+  kept as a layer. Each frame draws that layer and replays only the animated rest, at once on the main thread (the
   Canvas page's gauge, clock and dot matrix: no GPU work and half the memory).
 - **Content drawn when it changes**: texts and canvases draw into layers of their own, again when their content or
   size changes, not when they move or scroll.
@@ -391,7 +391,7 @@ Stocks commits 16–17 times a second, each in up to 2.1 ms of JS and 1.7 ms of 
 ### Every page
 
 Every page of the gallery, as it opens and while the test scrolls it, in the same 1200 × 800 window. As on Linux and
-macOS, *FPS* is the rate while something moves (one frame per median gap between drawn frames); at the display's 144,
+macOS, *FPS* is the rate while something moves (one frame per median gap between drawn frames). At the display's 144,
 every frame of an animation or a scroll comes one refresh after the last. *Over one refresh* is the share of frames
 that took longer than a refresh (6.9 ms). A page at rest draws no frame and uses 0–2% CPU. Images' GIF and WebP play
 at their own frame rates (about 40 FPS here). Physics, Overlays, Menus and Storage are measured in a 900 × 500 window,
@@ -472,7 +472,7 @@ What makes these numbers:
   ~34 views a frame).
 - **Canvases record their animated part**: a drawing is recorded as Direct2D command lists, vector and sharp at any
   scale. When an animated value changes, only the operations from the first one that reads an animated value on are
-  recorded again; what comes before is kept (Stocks: ~26 ms of recording a second for 22 pulsing sparklines and the
+  recorded again. What comes before is kept (Stocks: ~26 ms of recording a second for 22 pulsing sparklines and the
   chart).
 - **Only what shows is drawn**: the children of a scroll view or a clipping view that lie out of sight are left out of
   the frame, and views with no content of their own draw no more than their background and border.
@@ -481,7 +481,7 @@ What makes these numbers:
 
 Measured in the iOS simulator (an iPhone 18 Pro Max, on the MacBook Pro above), release builds, with the same tour
 (`perf.py --target ios`: `nsh test --target ios --fps`, a finger's touches as UIKit gets them). The simulator presents
-at 60 Hz; on an iPhone with a ProMotion screen NSH's display links run at the screen's 120 Hz (apps that `nsh package`
+at 60 Hz. On an iPhone with a ProMotion screen NSH's display links run at the screen's 120 Hz (apps that `nsh package`
 builds and the development host ask for it with `CADisableMinimumFrameDurationOnPhone`). The phases are *tick* (native
 animations), *drain* (applying the engine's batches) and *scroll* (what follows a scroll view: lists, sticky cells,
 bound values).

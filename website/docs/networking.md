@@ -7,7 +7,14 @@ group: ui
 
 # Networking
 
-NSH apps make HTTP requests with `fetch`: in Rust the function of `nsh_core::prelude`, awaited in a task, and in TSX the standard global. Both run on the platform's network stack (NSURLSession on iOS, HttpURLConnection on Android, the browser's [on the web](./web.md#apps-with-rust-components)), so requests use the system's TLS, proxies and HTTP/2, and both pass the same [capability checks](#capabilities-which-hosts-an-app-may-reach). Rust's `fetch` takes a URL or an `HttpRequest` and gives the whole response (`HttpResponse`: `status()`, `ok()`, `header(name)`, `text()`, `body`). TSX's streams both ways: a response body arrives as a stream as the stack delivers it, and a request body can be a stream sent as you produce it. TSX has the Fetch API's companions too: `Headers`, `Request`, `Response`, `AbortController`, `FormData`, `Blob`, `File`, `URL`, `URLSearchParams`, `TextEncoder` / `TextDecoder` and Web Streams.
+NSH apps make HTTP requests with `fetch`. In Rust it is a function of `nsh_core::prelude` that you await in a task. In TSX it is the standard global.
+
+Both run on the platform's network stack: NSURLSession on iOS, HttpURLConnection on Android and the browser's [on the web](./web.md#apps-with-rust-components). Requests therefore use the system's TLS, proxies and HTTP/2. Both pass the same [capability checks](#capabilities-which-hosts-an-app-may-reach), which decide the hosts an app may reach.
+
+- Rust's `fetch` takes a URL or an `HttpRequest` and returns the whole response (`HttpResponse`: `status()`, `ok()`, `header(name)`, `text()`, `body`).
+- TSX's `fetch` streams both ways. A response body arrives as a stream while the network stack delivers it. A request body can be a stream that is sent as you produce it.
+
+TSX also has the Fetch API's companions: `Headers`, `Request`, `Response`, `AbortController`, `FormData`, `Blob`, `File`, `URL`, `URLSearchParams`, `TextEncoder` / `TextDecoder` and Web Streams.
 
 ## Getting JSON
 
@@ -93,9 +100,9 @@ fn App() -> impl IntoElement {
 }
 ```
 
-[`resource`](./reactivity.md#resource) keeps the value, the error and whether a load runs, loads again from a source that changes (or on `refetch()`), and cancels a load that no longer counts (the component goes away, or a newer load starts): in Rust by dropping the load's task, which cancels its request, in TSX through the `signal` it passes on. Rust's `fetch` takes absolute URLs; JSON is parsed with a crate such as `serde_json`.
+[`resource`](./reactivity.md#resource) keeps the value, the error and whether a load is running. It loads again when its source changes or you call `refetch()`. It cancels a load that is no longer needed, because the component went away or a newer load started. Rust cancels by dropping the load's task, which cancels its request. TSX cancels through the `signal` that `resource` passes to your loader. Rust's `fetch` takes absolute URLs. Parse JSON with a crate such as `serde_json`.
 
-In TSX, a `Response` reads its body once, as `json()`, `text()`, `arrayBuffer()`, `bytes()`, `blob()` or `formData()`, or as the `body` stream. `response.ok` is true for 2xx statuses; like in browsers, an HTTP error status does not reject the promise.
+In TSX, a `Response` reads its body once, as `json()`, `text()`, `arrayBuffer()`, `bytes()`, `blob()` or `formData()`, or as the `body` stream. `response.ok` is true for 2xx statuses. As in browsers, an HTTP error status does not reject the promise.
 
 ## Sending data
 
@@ -253,7 +260,7 @@ A streamed body cannot be sent twice, so a 307 or 308 redirect of a streamed req
 
 ## Cancelling and timeouts
 
-In Rust, a request runs in a task and is cancelled with it: when the task's component goes away, or with `cancel()` on the task `spawn` returns. In TSX, pass an `AbortSignal` to cancel a request; the promise rejects with the signal's reason (an `AbortError` `DOMException` by default), and a body being read stops.
+In Rust, a request runs in a task and is cancelled with it: when the task's component goes away, or with `cancel()` on the task `spawn` returns. In TSX, pass an `AbortSignal` to cancel a request. The promise rejects with the signal's reason (an `AbortError` `DOMException` by default), and a body being read stops.
 
 ```tsx tabs
 const controller = new AbortController();
@@ -377,20 +384,20 @@ The checks are enforced in NSH's runtime, outside your app's code, before a requ
 - The same `network` grants cover remote images (also in canvases and `Image.getSize` / `prefetch`) and video sources. `asset:` URIs of your own bundle are always allowed.
 - The host is taken after the last `@`, so `https://ok.com@evil.io` counts as `evil.io`.
 
-An app without `"capabilities"` may reach every host: a standalone app is its developer's own. Apps embedded in a host app or distributed as [signed packages](./signed-packages.md) should declare them; the host app can grant less than an app declares, and a request must be allowed by both. Development with `nsh dev` / `nsh run` enforces the same capabilities. See [Sandbox and capabilities](./sandbox-and-capabilities.md).
+An app without `"capabilities"` may reach every host: a standalone app is its developer's own. Apps embedded in a host app or distributed as [signed packages](./signed-packages.md) should declare them. The host app can grant less than the app declares, and a request must be allowed by both. Development with `nsh dev` / `nsh run` enforces the same capabilities. See [Sandbox and capabilities](./sandbox-and-capabilities.md).
 
 ## Differences from browsers
 
 TSX's `fetch` follows the Fetch standard with the differences that make sense for an app rather than a web page:
 
-- **No CORS.** An app talks to any host its capabilities allow; there are no preflight requests and no opaque responses.
-- **No forbidden headers.** An app may set `Cookie`, `User-Agent`, `Origin` and others. For an app with `"capabilities"`, NSH follows redirects itself, and the credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`) stay with the origin they were set for; without them, the platform's network stack follows redirects with its own rules.
+- **No CORS.** An app talks to any host its capabilities allow. There are no preflight requests and no opaque responses.
+- **No forbidden headers.** An app may set `Cookie`, `User-Agent`, `Origin` and others. For an app with `"capabilities"`, NSH follows redirects itself, and the credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`) stay with the origin they were set for. Without `"capabilities"`, the platform's network stack follows redirects with its own rules.
 - **`redirect: "manual"`** gives the 3xx response itself (with its `Location` header) rather than an opaque redirect. `redirect: "error"` rejects on a redirect.
 - **`data:` and `blob:` URLs** are answered locally. `URL.createObjectURL(blob)` makes a `blob:` URL that `fetch` can read until you revoke it.
 - **`asset:/` URLs** are the files the app ships, read from the app's own files with no capability needed ([Reading a file at run time](./images-and-assets.md#reading-a-file-at-run-time)).
 - Browser-only options (`mode`, `credentials`, `cache`, `referrer`, `integrity`, `keepalive`, `priority`) are accepted for compatibility with libraries.
 
-Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`; native hosts provide the global `WebSocket` and the [`websocket` module](../modules/standard-modules.md), checked against the same grants as `fetch`.
+Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`. Native hosts provide the global `WebSocket` and the [`websocket` module](../modules/standard-modules.md), checked against the same grants as `fetch`.
 
 ## Related
 

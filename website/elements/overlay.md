@@ -8,12 +8,14 @@ demo: el-overlay
 
 # Overlay
 
-An overlay shows its children on top of everything in the root view it is in: the window, or the dialog around it.
-Its parent's size, `overflow: hidden` and scroll views do not clip it. It stays where you wrote it for everything
-else: it reads the context around it, its handlers are its component's, and it goes away with its parent. Popovers,
-menus, tooltips and sheets are built on it; [`nsh/base`](../modules/nsh-base.md) has them ready
-([Popover](./popover.md), [Menu](./menu.md), [Tooltip](./tooltip.md), [Sheet](./sheet.md)), and an overlay is what you
-use to build your own.
+An overlay shows its children on top of everything in its root view: the window, or the dialog around it. Its parent's
+size, `overflow: hidden` and scroll views do not clip it.
+
+In every other way it stays where you wrote it. It reads the context around it, its handlers belong to its component,
+and it goes away with its parent. Popovers, menus, tooltips and sheets are built on overlays.
+[`nsh/base`](../modules/nsh-base.md) ships them ready ([Popover](./popover.md), [Menu](./menu.md),
+[Tooltip](./tooltip.md), [Sheet](./sheet.md)). Use an overlay to build your own.
+
 
 ```tsx tabs
 import { Overlay, signal, Text, View, type ViewRef } from "nsh";

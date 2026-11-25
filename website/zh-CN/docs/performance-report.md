@@ -26,7 +26,7 @@ NSH 应用的实测开销。NSH 如何保持高速、如何测量你自己的应
 ## Linux（GTK 4）
 
 测量环境：Linux 桌面（x86_64，24 线程，NVIDIA GPU），release 构建，gallery 运行在 120 Hz 显示器上一个 1896 × 1030 的窗口里，
-所有读数都由 `examples/gallery/tools/perf.py` 自动采集（`nsh test --target linux --fps`，每秒一行；CPU 指整个进程，以单核的百分比计）。
+所有读数都由 `examples/gallery/tools/perf.py` 自动采集（`nsh test --target linux --fps`，每秒一行。CPU 指整个进程，以单核的百分比计）。
 *帧 p95* 是主线程绘制一帧所用时间的第 95 百分位：低于 8.3 ms，一帧就能放进 120 Hz 的一次刷新。
 
 ### 动画演示
@@ -45,7 +45,7 @@ NSH 应用的实测开销。NSH 如何保持高速、如何测量你自己的应
 ### 每个页面
 
 gallery 的每个页面，分别在刚打开时和测试滚动它时测量，窗口 1200 × 800，显示器 144 Hz（同一台机器）。NSH 只在屏幕上有内容变化时才绘制一帧，
-所以这里的 *FPS* 是画面在动时的帧率：按相邻两帧间隔的中位数计算（`perf.py` 的 `moving`）；等于显示器的 144 时，动画或滚动的每一帧都紧接着上一次刷新。
+所以这里的 *FPS* 是画面在动时的帧率：按相邻两帧间隔的中位数计算（`perf.py` 的 `moving`）。等于显示器的 144 时，动画或滚动的每一帧都紧接着上一次刷新。
 *超过一次刷新* 是耗时超过一次刷新（6.9 ms）的帧所占的比例。Images 页的 GIF 和 WebP 按它们自己的帧率播放（这里约 50 FPS），视频也一样。Physics、Overlays 和 Menus 页面很短：在 1200 × 800 下滚动几帧就到底了，所以它们在 900 × 500 的窗口里测量，那里有足够的内容可以滚动。
 
 <div class="data-table">
@@ -82,8 +82,8 @@ gallery 的每个页面，分别在刚打开时和测试滚动它时测量，窗
 
 窗口调整到 480 × 640 点之后第 8 秒的静止内存：release 构建，在下面调查所用的机器上测量（Intel i7-13700KF、
 NVIDIA RTX 3060 Ti、GTK 4.24.1、Wayland 1.6×），三个应用在同一批次里依次运行，单位 **MiB**。*私有脏页*（Private dirty）是进程
-写过且独占的内存，最接近 macOS 的 footprint 和 Windows 的私有工作集；*USS* 再加上私有的干净页，主要是可执行文件自己的代码
-（Rust 应用约 16 MiB，带 QuickJS 的 TSX 应用约 20 MiB）；*PSS* 再加上按进程分摊的共享库页面；*RSS* 把共享库页面全部计入，
+写过且独占的内存，最接近 macOS 的 footprint 和 Windows 的私有工作集。*USS* 再加上私有的干净页，主要是可执行文件自己的代码
+（Rust 应用约 16 MiB，带 QuickJS 的 TSX 应用约 20 MiB）。*PSS* 再加上按进程分摊的共享库页面。*RSS* 把共享库页面全部计入，
 大部分是每个 GTK 应用都会映射的 GTK 和 GPU 驱动：
 
 <div class="data-table">
@@ -99,8 +99,8 @@ NVIDIA RTX 3060 Ti、GTK 4.24.1、Wayland 1.6×），三个应用在同一批次
 
 </div>
 
-*比 GTK 窗口多*按私有脏页比较：NSH 在一个裸 GTK 窗口之上增加的内存，即引擎、布局、渲染器和模块，TSX 应用还有 QuickJS 和应用代码；
-其余都属于 GTK 和驱动。使用 GL 时，GTK 窗口和 Rust 应用各有一次启动多占约 60 MiB（私有脏页 99.4 和 98.6 MiB）；
+*比 GTK 窗口多*按私有脏页比较：NSH 在一个裸 GTK 窗口之上增加的内存，即引擎、布局、渲染器和模块，TSX 应用还有 QuickJS 和应用代码。
+其余都属于 GTK 和驱动。使用 GL 时，GTK 窗口和 Rust 应用各有一次启动多占约 60 MiB（私有脏页 99.4 和 98.6 MiB）。
 裸 GTK 窗口同样如此，因此这部分来自驱动，表中给出的是另一次启动。样本见[原始记录](https://github.com/longbridge/nsh/blob/main/docs/benchmarks/linux-memory-baseline-2026-11-05.json)。
 
 #### Linux 启动内存调查（2026-11-05）
@@ -109,7 +109,7 @@ NVIDIA RTX 3060 Ti、GTK 4.24.1、Wayland 1.6×），三个应用在同一批次
 （驱动 615.78.08）、GTK 4.24.1、Hyprland/Wayland，显示缩放 1.6×。本节单位为 **MiB**（1,048,576 字节）。
 每行是两个独立进程在窗口浮动并调整至 480 × 640 点之后第 8 秒的范围，记录同时保留第 3 秒的数据。
 两次启动之间保留文件系统和驱动缓存。release 运行器使用工作区的 fat LTO 和单个 codegen unit，测量仅统计应用进程。
-最小 TSX 只挂载一个 `Text`；TSX 模板由 `nsh init --template ts` 生成；gallery 使用专用应用 id 和全新存储，
+最小 TSX 只挂载一个 `Text`。TSX 模板由 `nsh init --template ts` 生成。gallery 使用专用应用 id 和全新存储，
 启动至手机布局的索引页。三个应用均运行 `--release` 构建的字节码包。
 
 | 应用 / 渲染器 | RSS (MiB) | PSS (MiB) | USS (MiB) |
@@ -123,9 +123,9 @@ NVIDIA RTX 3060 Ti、GTK 4.24.1、Wayland 1.6×），三个应用在同一批次
 | Gallery 索引页 / GL | 256.5–257.4 | 162.9–163.9 | 147.3–148.3 |
 | Gallery 索引页 / Cairo | 207.4–207.8 | 141.6–141.9 | 128.7–129.0 |
 
-RSS 统计驻留页面；PSS 按实际共享进程数量分摊共享页；USS 是 `Private_Clean` 与 `Private_Dirty` 之和。
+RSS 统计驻留页面。PSS 按实际共享进程数量分摊共享页。USS 是 `Private_Clean` 与 `Private_Dirty` 之和。
 macOS footprint 和 Windows 私有工作集各有系统自己的计费规则，比较时需保留各自口径。
-本节覆盖运行器进程，GPU 专有分配、合成器和 WebKit 子进程单独计量；驻留快照与启动峰值也属于不同指标。
+本节覆盖运行器进程，GPU 专有分配、合成器和 WebKit 子进程单独计量。驻留快照与启动峰值也属于不同指标。
 
 #### 更小的运行器配置
 
@@ -140,13 +140,13 @@ macOS footprint 和 Windows 私有工作集各有系统自己的计费规则，�
 | TSX 模板，仅 JS / Cairo | 97.6–97.6 | 40.2–40.3 | 30.6–30.8 |
 | 最小 TSX，仅 JS / Cairo + GDK_DISABLE | 96.8–97.3 | 39.4–39.8 | 30.2–30.7 |
 
-使用完整运行器时，Cairo 将最小应用的 RSS 从约 162 MiB 降至 114 MiB；仅启用 JS 的 Cairo 运行器约为
-97 MiB RSS、31 MiB USS。这些配置的 RSS 均超过 **50 MB**（50,000,000 字节，47.7 MiB）；
+使用完整运行器时，Cairo 将最小应用的 RSS 从约 162 MiB 降至 114 MiB。仅启用 JS 的 Cairo 运行器约为
+97 MiB RSS、31 MiB USS。这些配置的 RSS 均超过 **50 MB**（50,000,000 字节，47.7 MiB）。
 USS 单独列出，以保持 RSS 目标的含义。Cairo 的内存数据来自静态页面，CPU 和帧耗时的权衡需用前面的动画、滚动场景测量。
 在这台机器上，为仅启用 JS 的 Cairo 应用设置 `GDK_DISABLE=gl,vulkan,dmabuf` 基本没有额外收益。
 GTK 将这些环境变量定义为调试控制项（[GTK 环境变量](https://docs.gtk.org/gtk4/running.html)）。
 
-不同启动轮次之间有明显波动：完整最小应用在未设置 `GSK_RENDERER` 时为 164–229 MiB RSS；仅启用 JS、显式 GL 时为
+不同启动轮次之间有明显波动：完整最小应用在未设置 `GSK_RENDERER` 时为 164–229 MiB RSS。仅启用 JS、显式 GL 时为
 146–211 MiB。不同轮次的高低值在第 8 秒仍然存在，原始记录保留整个范围，最低值代表一次实测而非保证值。
 1200 × 800 窗口下，完整 gallery 的桌面布局打开初始的 Text 示例，约为 307–337 MiB RSS、189–219 MiB USS。
 每次比较都需记录窗口大小和实际挂载的页面。
@@ -160,12 +160,12 @@ GTK 将这些环境变量定义为调试控制项（[GTK 环境变量](https://d
 - 引擎启动时读取相邻的 `bundle.js.map`（`Bundle::read_trusted`），按需符号化是一个优化方向。
   去掉 map 的探索性实验改变了 gallery 恢复的页面或启动覆盖值，因此这些结果被排除，当前实验没有确立其可重复的节省量。
 - 图片解码成本同样属于框架与应用管线。图片密集页面需比较源尺寸、目标像素尺寸、缓存项及 CPU/GPU 副本。
-  图片预算是上限而非预分配；桌面默认取内存的 1/16，最多 256 MiB，屏幕上视图持有租约的缓存项会保留。
+  图片预算是上限而非预分配。桌面默认取内存的 1/16，最多 256 MiB，屏幕上视图持有租约的缓存项会保留。
 
 #### 复现
 
 在交互式 Linux 桌面运行，构建和测量文件放在工作区 `target/`，测试临时文件放在工作区以外。
-同时记录 GPU/驱动、GTK 版本、窗口大小、缩放、外观、应用 id 和页面。下面的 `--size` 使用 Hyprland 的 Lua dispatchers；
+同时记录 GPU/驱动、GTK 版本、窗口大小、缩放、外观、应用 id 和页面。下面的 `--size` 使用 Hyprland 的 Lua dispatchers。
 其他合成器需自行固定窗口大小并省略这个参数。为基准测试的 gallery 副本在 `app.json` 设置新的专用 id，
 让测试的页面恢复记录与日常使用分别保存。
 
@@ -189,14 +189,14 @@ cc -O2 examples/gallery/tools/memory-gtk.c -o target/agents/memory/gtk $(pkg-con
 python3 examples/gallery/tools/memory.py --out target/agents/memory/gtk.json --size 480x640 -- target/agents/memory/gtk
 ```
 
-脚本默认每个渲染器启动三个进程，在第 3、10 秒采样；本次调查使用 `--repeats 2 --seconds 3,8`。
+脚本默认每个渲染器启动三个进程，在第 3、10 秒采样。本次调查使用 `--repeats 2 --seconds 3,8`。
 输出包括总量、各映射的驻留量与窗口信息，进程提前退出或记录 JS 启动错误时会失败。
 [测量记录](https://github.com/longbridge/nsh/blob/main/docs/benchmarks/linux-memory-2026-11-05.json) 保留各次采样、部分文件映射及被排除的实验。
 
 
 ### 应用体积
 
-用 `nsh init` 的每种模板生成的 hello world 应用，以及两个实际在用的应用，由 `nsh package --target linux` 为 x86_64 构建。运行器是应用唯一的可执行文件；
+用 `nsh init` 的每种模板生成的 hello world 应用，以及两个实际在用的应用，由 `nsh package --target linux` 为 x86_64 构建。运行器是应用唯一的可执行文件。
 压缩包是它发布用的 `.tar.gz`。hello world 都以链接时优化构建并去除符号（`CARGO_PROFILE_RELEASE_LTO=fat`、
 `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`、`CARGO_PROFILE_RELEASE_STRIP=true`）：
 
@@ -212,18 +212,18 @@ python3 examples/gallery/tools/memory.py --out target/agents/memory/gtk.json --s
 
 </div>
 
-TSX 运行器包含 QuickJS 运行时、原生模块和渲染器；应用自己的代码是运行器旁边的 bundle，hello world 的不到 1 KB。
+TSX 运行器包含 QuickJS 运行时、原生模块和渲染器。应用自己的代码是运行器旁边的 bundle，hello world 的不到 1 KB。
 
 这些数字来自：
 
 - **渲染器**：在 NVIDIA 驱动下，NSH 使用 GSK 的 GL 渲染器绘制，在那里它每帧的开销只是 Vulkan 渲染器的一小部分（Animations 演示：每帧绘制 ~1 ms，Vulkan 下约 9.5 ms）。仍可用 `GSK_RENDERER` 指定渲染器。
-- **Canvas 栅格**：每个 canvas 只栅格化一次，分成保存在 GPU 上的 256 px 图块。动画值变化时，只重绘读取它的操作覆盖的区域，并叠加在绘制中静态部分保留下来的像素上；看不见的 canvas 会等到滚入视野再绘制。
+- **Canvas 栅格**：每个 canvas 只栅格化一次，分成保存在 GPU 上的 256 px 图块。动画值变化时，只重绘读取它的操作覆盖的区域，并叠加在绘制中静态部分保留下来的像素上。看不见的 canvas 会等到滚入视野再绘制。
 - **路径只暂存一次**：长路径之后的 `fillRect` 和 `fillText` 会把路径留在原处，直到再次用到它（一条 400 点的折线加 240 根柱子：0.63 ms）。
 
 ## macOS（AppKit）
 
 测量环境：MacBook Pro（Apple M3，24 GB）的内置 120 Hz ProMotion 显示屏，release 构建，gallery 运行在 1200 × 800 的窗口里，
-所有读数都由 `examples/gallery/tools/perf.py` 自动采集（`nsh test --target macos --fps`，每秒一行；CPU 指整个进程，以单核的百分比计，
+所有读数都由 `examples/gallery/tools/perf.py` 自动采集（`nsh test --target macos --fps`，每秒一行。CPU 指整个进程，以单核的百分比计，
 GPU 是它占用 GPU 的比例）。阶段是主线程每帧的开销：*tick*（display link 上的原生动画）和 *canvas*（重放绘制）。
 
 ### 动画演示
@@ -238,12 +238,12 @@ GPU 是它占用 GPU 的比例）。阶段是主线程每帧的开销：*tick*�
 
 </div>
 
-Stocks 上一帧的主线程时间约 1.6 ms 用于 tick，其中约 0.45 ms 重放 canvas 中的动画部分；每个 canvas 的其余部分由 Core Animation
+Stocks 上一帧的主线程时间约 1.6 ms 用于 tick，其中约 0.45 ms 重放 canvas 中的动画部分。每个 canvas 的其余部分由 Core Animation
 在自己的线程上绘制。
 
 ### 每个页面
 
-gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 800 的窗口里。与 Linux 一样，*FPS* 是有东西在动时的速率（每个相邻绘制帧间隔的中位数一帧）；
+gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 800 的窗口里。与 Linux 一样，*FPS* 是有东西在动时的速率（每个相邻绘制帧间隔的中位数一帧）。
 达到显示器的 120 时，动画或滚动的每一帧都在上一帧之后的下一次刷新到来。*超过一次刷新*是耗时超过一次刷新（8.3 ms）的帧所占的比例。
 静止的页面不绘制帧，CPU 为 2–5%。图片的 GIF 和 WebP 由 Core Animation 播放，视频由 AVFoundation 播放，按各自的帧率。
 
@@ -283,7 +283,7 @@ gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 
 
 ### 内存
 
-启动 3 秒后的静止内存（release 运行器）。*占用（footprint）*是 macOS 计入这个进程的内存（活动监视器显示的值）；*常驻内存*还包含系统共享库的页面：
+启动 3 秒后的静止内存（release 运行器）。*占用（footprint）*是 macOS 计入这个进程的内存（活动监视器显示的值）。*常驻内存*还包含系统共享库的页面：
 
 <div class="data-table">
 
@@ -296,13 +296,13 @@ gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 
 </div>
 
 浏览 gallery 的过程中，进程在 Canvas 页之前占用 84–230 MB，从 Text View 页起约 350–360 MB，增长的是它有意保留的缓存（解码后的图片，
-上限 128 MB；Text View 页的文档）以及首次使用时加载的框架（网页视图用的 WebKit）；Canvas 页的栅格在三个 canvas 都可见时最多约
+上限 128 MB。Text View 页的文档）以及首次使用时加载的框架（网页视图用的 WebKit）。Canvas 页的栅格在三个 canvas 都可见时最多约
 310 MB，离开页面即释放。
 
 ### 应用体积
 
-用 `nsh init` 的每种模板生成的 hello world 应用，由 `nsh package --target macos` 为 Apple 芯片（arm64）构建，与 Linux 一样以链接时优化构建并去除符号；以及上面两个应用为 Apple 芯片发布的版本。
-可执行文件是 `.app` 里的运行器；zip 是压缩后的 `.app`（`ditto -c -k`）：
+用 `nsh init` 的每种模板生成的 hello world 应用，由 `nsh package --target macos` 为 Apple 芯片（arm64）构建，与 Linux 一样以链接时优化构建并去除符号。以及上面两个应用为 Apple 芯片发布的版本。
+可执行文件是 `.app` 里的运行器。zip 是压缩后的 `.app`（`ditto -c -k`）：
 
 <div class="data-table">
 
@@ -318,16 +318,16 @@ gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 
 
 这些数字来自：
 
-- **只为变化绘制帧**：display link 在原生动画运行时跳动，并随动画一起停止；动画随页面一起停止（视图删除时它的关键帧动画结束，循环在组件的 `cleanup` 中停止）。
-- **Canvas 在开销最小的地方绘制**：频繁重绘的 canvas（动画、实时数据）在 Core Animation 的线程上异步绘制（`drawsAsynchronously`），不占用主线程；偶尔才重绘的 canvas 直接在主线程上绘制，省下异步绘制占用的显存。动画值变化时只重绘读取它的操作覆盖的区域。
-- **保留 canvas 的静态部分**：绘制内容稳定后，第一个动画操作之前较长的部分保留为一个图层；每帧绘制这个图层，只重放动画的其余部分，并直接在主线程上完成（Canvas 页的仪表盘、时钟和点阵：不占 GPU，内存减半）。
+- **只为变化绘制帧**：display link 在原生动画运行时跳动，并随动画一起停止。动画随页面一起停止（视图删除时它的关键帧动画结束，循环在组件的 `cleanup` 中停止）。
+- **Canvas 在开销最小的地方绘制**：频繁重绘的 canvas（动画、实时数据）在 Core Animation 的线程上异步绘制（`drawsAsynchronously`），不占用主线程。偶尔才重绘的 canvas 直接在主线程上绘制，省下异步绘制占用的显存。动画值变化时只重绘读取它的操作覆盖的区域。
+- **保留 canvas 的静态部分**：绘制内容稳定后，第一个动画操作之前较长的部分保留为一个图层。每帧绘制这个图层，只重放动画的其余部分，并直接在主线程上完成（Canvas 页的仪表盘、时钟和点阵：不占 GPU，内存减半）。
 - **内容变化时才绘制**：文本和 canvas 绘制在各自的 layer 里，内容或尺寸变化时才重绘，移动或滚动时不重绘。
 
 ## Windows（Win32、Direct2D）
 
 测量环境：一台 Windows 11 台式机（Intel Core i7-13700KF，32 GB，NVIDIA GeForce RTX 3060 Ti），4K 144 Hz 显示器、150% 缩放，
 release 构建，gallery 运行在 1200 × 800 的窗口里（1800 × 1200 像素），所有读数都由 `examples/gallery/tools/perf.py` 自动采集
-（`nsh test --target windows --fps`，每秒一行；CPU 指整个进程，以单核的百分比计）。阶段是主线程每帧的开销：*paint*（Direct2D
+（`nsh test --target windows --fps`，每秒一行。CPU 指整个进程，以单核的百分比计）。阶段是主线程每帧的开销：*paint*（Direct2D
 绘制窗口）以及其中的 *canvas*（录制和重放绘制）。
 
 ### 动画演示
@@ -345,14 +345,14 @@ release 构建，gallery 运行在 1200 × 800 的窗口里（1800 × 1200 像�
 Stocks 每秒 commit 16–17 次，每次在引擎线程上用时最多 2.1 ms 的 JS 和 1.7 ms 的 core（p95）。
 
 > [!NOTE]
-> 动画让视图在大片区域里移动的页面，在这里的 CPU 占用比 Linux 和 macOS 高（Animations 为 20–41%，而那两者为 5–13%；Gestures 为 36%，
+> 动画让视图在大片区域里移动的页面，在这里的 CPU 占用比 Linux 和 macOS 高（Animations 为 20–41%，而那两者为 5–13%。Gestures 为 36%，
 > 而那两者为 1–5%）。Windows 的一帧会在主线程上用 Direct2D 重画变化区域里的每一个视图：一个变大的圆环每帧都要重画它下面的卡片。
-> 在 macOS 上，Core Animation 在 GPU 上直接移动、缩放和淡化它保留的 layer，不需要重画；在 Linux 上，GSK 保留没有变化的渲染节点。
+> 在 macOS 上，Core Animation 在 GPU 上直接移动、缩放和淡化它保留的 layer，不需要重画。在 Linux 上，GSK 保留没有变化的渲染节点。
 > 此外，这里的数字是每秒 144 帧、1800 × 1200 像素下的读数。
 
 ### 每个页面
 
-gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 800 的窗口里。与 Linux 和 macOS 一样，*FPS* 是有东西在动时的速率（每个相邻绘制帧间隔的中位数一帧）；
+gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 800 的窗口里。与 Linux 和 macOS 一样，*FPS* 是有东西在动时的速率（每个相邻绘制帧间隔的中位数一帧）。
 达到显示器的 144 时，动画或滚动的每一帧都在上一帧之后的下一次刷新到来。*超过一次刷新*是耗时超过一次刷新（6.9 ms）的帧所占的比例。
 静止的页面不绘制帧，CPU 为 0–2%。图片的 GIF 和 WebP 按各自的帧率播放（这里约 40 FPS）。Physics、Overlays、Menus 和 Storage
 在 900 × 500 的窗口里测量，在那里它们有足够的内容可以滚动。
@@ -391,8 +391,8 @@ gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 
 
 ### 内存
 
-启动 3 秒后的静止内存（release 运行器，1200 × 800 的窗口）。*专用工作集*是只有这个进程使用的内存（任务管理器“内存”一列的值）；
-*专用字节*是它提交的内存；*工作集*还包含它与其他进程共享的系统库的页面（Direct3D、Direct2D、DirectWrite、GPU 驱动）：
+启动 3 秒后的静止内存（release 运行器，1200 × 800 的窗口）。*专用工作集*是只有这个进程使用的内存（任务管理器“内存”一列的值）。
+*专用字节*是它提交的内存。*工作集*还包含它与其他进程共享的系统库的页面（Direct3D、Direct2D、DirectWrite、GPU 驱动）：
 
 <div class="data-table">
 
@@ -405,12 +405,12 @@ gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 
 
 浏览 gallery 的过程中，工作集在 Stocks 页约 108–115 MB，从 Canvas 页起约 230 MB，从 Text View 页起约 320–340 MB，
 Web and video 页打开 WebView2 之后约 390–405 MB（网页运行在 WebView2 自己的进程里），增长的是它有意保留的缓存（解码后的图片，
-上限 128 MB；Text View 页的文档）。
+上限 128 MB。Text View 页的文档）。
 
 ### 应用体积
 
 用 `nsh init` 的每种模板生成的 hello world 应用，由 `nsh package --target windows` 为 x86_64 构建（Rust 运行器与 Linux 一样以链接时优化构建并去除符号）。
-可执行文件是应用的 `<Name>.exe`；zip 是写在它的目录旁边的 `.zip`：
+可执行文件是应用的 `<Name>.exe`。zip 是写在它的目录旁边的 `.zip`：
 
 <div class="data-table">
 
@@ -433,7 +433,7 @@ Web and video 页打开 WebView2 之后约 390–405 MB（网页运行在 WebVie
 ## iOS（UIKit）
 
 测量环境：iOS 模拟器（iPhone 18 Pro Max，运行在上面那台 MacBook Pro 上），release 构建，与上面相同的浏览流程（`perf.py --target ios`：
-`nsh test --target ios --fps`，以 UIKit 收到的手指触摸操作）。模拟器以 60 Hz 呈现；在配有 ProMotion 屏幕的 iPhone 上，NSH 的 display link
+`nsh test --target ios --fps`，以 UIKit 收到的手指触摸操作）。模拟器以 60 Hz 呈现。在配有 ProMotion 屏幕的 iPhone 上，NSH 的 display link
 以屏幕的 120 Hz 运行（`nsh package` 构建的应用和开发宿主通过 `CADisableMinimumFrameDurationOnPhone` 请求它）。阶段是 *tick*（原生动画）、
 *drain*（应用引擎的批次）和 *scroll*（跟随滚动视图的工作：列表、吸顶单元格、绑定的值）。
 

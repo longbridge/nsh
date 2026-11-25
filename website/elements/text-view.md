@@ -97,9 +97,9 @@ to every part.
 `TextView` is made of [`Text`](./text.md) elements, and its text behaves exactly as the Text page describes. Every
 paragraph, heading, table cell and code block is one native `Text`: one block that lays out, wraps, follows the font
 scale and, with `selectable`, selects and copies. Strong, emphasis, struck-through and the other inline marks
-are its [spans](./text.md#spans); inline code is a span with a [span background](./text.md#span-backgrounds), so
-`code: "rounded bg-neutral-100"` gives it a rounded background; links are
-[pressable spans](./text.md#links); images and inline custom nodes are
+are its [spans](./text.md#spans). Inline code is a span with a [span background](./text.md#span-backgrounds), so
+`code: "rounded bg-neutral-100"` gives it a rounded background. Links are
+[pressable spans](./text.md#links). Images and inline custom nodes are
 [inline attachments](./text.md#inline-views-and-images). Text styles on the root pass to every part, as
 [text styles](./text.md#text-styles) pass from a `Text` to its spans.
 
@@ -108,7 +108,7 @@ and the handles) runs from one paragraph, list item, cell or code block to the n
 all, leaving generated markers and controls (bullets, numbers, task checkmarks, alert icons, disclosure triangles and
 action buttons) out of the selection. A part's classes or styles can take one back in: with
 `classes={{ listMarker: "select-text" }}`, bullets and numbers are selected and copied with their items. A
-`selectable` `TextView` selects as one of its own; inside a
+`selectable` `TextView` selects as one of its own. Inside a
 [selectable view](./text-selection.md), its selection also runs on into the texts and other `TextView`s around it.
 
 What `TextView` adds is the rest: reading Markdown, HTML or a document into blocks, the views around the texts (lists,
@@ -125,7 +125,7 @@ The content is one of three props, read in this order:
   written in angle brackets (`<https://zh.wikipedia.org/wiki/中文>`) or as a link keeps every character.
   A tag that names no HTML element and no `tag` extension (`<US tech>`, `<公司名>`) shows as written.
 - **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through, text colors too (a
-  `<span style="color: …">` or a `<font color="…">` is a `textStyle` in its color); scripts, styles, form
+  `<span style="color: …">` or a `<font color="…">` is a `textStyle` in its color). Scripts, styles, form
   controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body).
 - **`document`**: blocks the app builds or keeps: plain objects in TSX, `nsh_base::text_view::Document` in Rust
   ([The document model](#the-document-model)).
@@ -163,10 +163,10 @@ documents.
 
 ## Styling the parts
 
-`class` and `style` style the root, a column of the blocks; text styles set there (color, size, font) pass to every
+`class` and `style` style the root, a column of the blocks. Text styles set there (color, size, font) pass to every
 part. The root is also the part `root`: `styles.root` takes text styles with their types (`style` is typed as a
 view's), and `classes.root` classes. `classes` takes Tailwind classes by part and `styles` inline styles by part. A part's classes come after its own
-default styles, so they win; its `styles` win over its classes. In Rust, the parts take typed styles: `TextViewParts`
+default styles, so they win. Its `styles` win over its classes. In Rust, the parts take typed styles: `TextViewParts`
 gives each `TextViewPart` a function refining its style, for every `TextView` below the view that provides it
 ([Typed part styles](#typed-part-styles)), and the root takes the style methods. Line heights in the defaults are set in points: a
 class that changes a part's size sets its line height too (Tailwind's `text-*` classes do). A block's position variants
@@ -226,9 +226,9 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 }
 ```
 
-Some nodes are several parts, which apply in order: a level 2 heading is `heading` then `heading2`; an alert is
-`blockquote`, `alert`, then its kind (`alertNote`, ...); a task marker is `listMarker`, `taskMarker`, then
-`taskMarkerChecked` when done; the header row is `tableRow` then `tableHead`, and its cells `tableCell` then
+Some nodes are several parts, which apply in order: a level 2 heading is `heading` then `heading2`. An alert is
+`blockquote`, `alert`, then its kind (`alertNote`, ...). A task marker is `listMarker`, `taskMarker`, then
+`taskMarkerChecked` when done. The header row is `tableRow` then `tableHead`, and its cells `tableCell` then
 `tableHeaderCell`.
 
 | Part | Rust | What it is |
@@ -286,7 +286,7 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 
 Pass the reply as it grows, with `options={{ streaming: true }}` (`MarkdownOptions { streaming: true, .. }` in Rust). The end of a text that is still arriving often leaves
 syntax open (`**bold`, `**bold*`, `` `code ``, `[a link]` before its `(`, `[a link](htt`, a table whose header just
-arrived); streaming shows it as it will look once closed, so the reader never sees stray `**` or `[`. A last line whose
+arrived). Streaming shows it as it will look once closed, so the reader never sees stray `**` or `[`. A last line whose
 meaning the next characters decide appears once its line ends: a list marker alone, a task box alone (`- [x]`), a `-`
 or `=` line under a paragraph, a code fence's opening line or a closer half typed, so each list item, heading and code block appears as what it will be. A `*` inside a word (`a*b`)
 stays as written. Once the reply ends (`streaming` off), the text is read as written. Blocks are kept by position: the
@@ -339,13 +339,13 @@ blocks can fade in with the app's animations.
 
 ## Links
 
-Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress` with `{ url }`; the app decides what it opens (a page of its own, a
+Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress` with `{ url }`. The app decides what it opens (a page of its own, a
 [`WebView`](./web-view.md), a scroll to a heading). Headings have anchors (GitHub's: `## Getting started` is
 `#getting-started`), so a link to `#getting-started` arrives as that string, and a footnote reference arrives as
 `#footnote-<label>`. In a terminal Tab reaches each link and footnote reference in turn, and Return presses the focused
 one: `onLinkPress` hears it as it hears a press. The event also has the modifier keys held when the press began
 (`modifiers`, as a press's), so an app can open a Command-click (Control off macOS) in the browser and route a plain
-one itself; a press from the keyboard or an assistive technology holds none.
+one itself. A press from the keyboard or an assistive technology holds none.
 
 ```tsx tabs
 <TextView
@@ -375,7 +375,7 @@ fn doc(markdown: &'static str) -> impl IntoElement {
 
 With `links="open"`, a press on a link to another site or app (a URL with a scheme: `https:`, `mailto:`, ...) also
 opens it outside the app with [`openUrl`](../modules/nsh.md#openurl), under the app's `openUrl` capability,
-after `onLinkPress` reported it; anchors in the document (`#…`) are only reported. The default, `"report"`, opens
+after `onLinkPress` reported it. Anchors in the document (`#…`) are only reported. The default, `"report"`, opens
 nothing.
 
 ```tsx tabs
@@ -392,21 +392,21 @@ On the desktops and the web in the desktop idiom, the pointer resting on a link 
 pointer: the link's title, when it has one (`[docs](https://example.com/docs "The guide")`, an HTML link's `title`),
 over its destination in the theme's `muted-foreground`, on one line. A URL shows as it is parsed, its scheme, host and
 port always whole (an international host in its ASCII form, so a look-alike letter shows as what it is), a long path
-cut in the middle; a path or an anchor of the document (`#…`) shows as written. An image in a link shows the link's
+cut in the middle. A path or an anchor of the document (`#…`) shows as written. An image in a link shows the link's
 destination and title the same way, below the image. It is the same check as a
 [Link's](./link.md#where-it-goes).
 
 On the web, a link to a web page, a path of the site, an e-mail address or a phone number (`https:`, `http:`, a path,
 `mailto:`, `tel:`) is an `<a href>` in the page, as a [Link](./link.md#platform-notes) with an `href` is: crawlers follow
 it, the browser shows where it goes, and a click with a modifier key or the middle button opens it in a new tab or
-window as the browser does, with no `onLinkPress`; a right click shows the browser's menu for links. A plain click is
+window as the browser does, with no `onLinkPress`. A right click shows the browser's menu for links. A plain click is
 the app's, reported by `onLinkPress`. A path goes under the site's base, as a `Link`'s `href` does. Anchors of the
 document (`#…`) and links to the app's own routes (a scheme of the app's, such as `myapp:`) are pressable text,
 reported on every click with its modifier keys.
 
 ## Render functions
 
-Render functions put the app's own content into the document. Each one takes the value of a part and returns its content (JSX in TSX, an element in Rust); a
+Render functions put the app's own content into the document. Each one takes the value of a part and returns its content (JSX in TSX, an element in Rust). A
 part keeps what was rendered for it while its value stays the same, so during streaming only the part being written is
 rendered again.
 
@@ -462,8 +462,8 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 
 Code blocks are highlighted out of the box: for a language named on the fence (`ts`, `tsx`, `rust`, `python`, `bash`,
 `json`, `toml`, `yaml`, `diff` and about two hundred more), the code shows in Allsum's code palette, light or dark with the
-appearance; a block without a language shows plain. An app with highlighting of its own shows its code with
-`renderCodeBlock`, from its own component or one of its Rust crate; a Rust view gives `TextView` its highlighter with
+appearance. A block without a language shows plain. An app with highlighting of its own shows its code with
+`renderCodeBlock`, from its own component or one of its Rust crate. A Rust view gives `TextView` its highlighter with
 [`CodeHighlighter`](#syntax-highlighting). Here code with highlighting of the app's own, and an image that fills the
 width:
 
@@ -641,7 +641,7 @@ A view returned for an inline node (a chip) sits in its line by its own `vertica
 
 ### Options
 
-`options` picks the Markdown syntax read beyond CommonMark and GitHub's; in Rust it is a `MarkdownOptions` with the
+`options` picks the Markdown syntax read beyond CommonMark and GitHub's. In Rust it is a `MarkdownOptions` with the
 same fields (`MarkdownOptions { streaming: true, ..Default::default() }`):
 
 | Key | Type | Default | Description |
@@ -695,7 +695,7 @@ A document also has `footnotes?`: `{ label, index, children }`, shown after the 
 reference. An app can store replies as documents, build them from its own data, or mix in custom nodes that
 `renderCustom` shows.
 
-A code block's `id` is the app's: `onCodeBlockAction` hands the block back with it, so an action knows which block it acts on. `wrap: true` fits the code to the view instead of scrolling it sideways. `content` is the code as inline content (the app's annotations: emphasis, highlights, custom nodes shown as their content in the `custom` part); it shows in place of the highlighted code when its plain text is `code`, so what shows is what copying takes.
+A code block's `id` is the app's: `onCodeBlockAction` hands the block back with it, so an action knows which block it acts on. `wrap: true` fits the code to the view instead of scrolling it sideways. `content` is the code as inline content (the app's annotations: emphasis, highlights, custom nodes shown as their content in the `custom` part). It shows in place of the highlighted code when its plain text is `code`, so what shows is what copying takes.
 
 ### Parsing and plain text
 
@@ -777,7 +777,7 @@ fn chat() -> impl IntoElement {
 
 `TextViewParts` styles parts with typed styles instead of class strings, for Rust views: each `TextViewPart` (one per
 part of the [table above](#styling-the-parts)) gets a function refining its `StyleRefinement`. Given with
-`provide_context`, they apply to every `TextView` below, before its `classes` and `styles`; theme colors read in them
+`provide_context`, they apply to every `TextView` below, before its `classes` and `styles`. Theme colors read in them
 follow the light and dark appearance.
 
 ```rust
@@ -797,7 +797,7 @@ fn chat_parts() {
 ### Markdown plugins
 
 A `MarkdownPlugin` reads Markdown syntax in Rust: it gets each node of the syntax tree (markdown-rs's `mdast`) before
-the parser reads it, and returns a block or inline content of its own, usually a `CustomNode`; it can also show the
+the parser reads it, and returns a block or inline content of its own, usually a `CustomNode`. It can also show the
 custom nodes it makes. A view provides plugins to every `TextView` below it:
 
 ```rust
@@ -833,7 +833,7 @@ A plugin's `render` comes first, then `renderCustom`, then the node's content. `
 markdown-rs's syntax, and `ParseContext` reads a node's children as the parser does.
 
 `ParseContext::source` is the whole Markdown text and node positions are offsets in it, also when a long text is
-read a part at a time. Long documents stay fast with plugins; a plugin whose `configure` turns a construct on or off
+read a part at a time. Long documents stay fast with plugins. A plugin whose `configure` turns a construct on or off
 has each text parsed in one go.
 
 ## Props
@@ -861,7 +861,7 @@ has each text parsed in one go.
 | `renderImage` | `.render_image(\|image\| ..)` | `(image: TextViewImage) => JSX.Element` | | Shows images. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The root, a column of the blocks; its text styles pass to every part (typed text styles: `styles.root`). |
 
-In Rust the classes and styles by part are `TextViewClasses` and `TextViewStyles`; a Rust view usually styles the
+In Rust the classes and styles by part are `TextViewClasses` and `TextViewStyles`. A Rust view usually styles the
 parts with [`TextViewParts`](#typed-part-styles).
 
 ## Events

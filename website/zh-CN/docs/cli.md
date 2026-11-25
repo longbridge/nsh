@@ -7,7 +7,7 @@ group: start
 
 # 命令行
 
-`nsh` 是构建 NSH 应用的工具，无论用 Rust 还是 TSX 编写。所有构建应用的子命令都接受 `[ENTRY]`：应用目录（默认为当前目录，所以 `cd my-app && nsh run` 即可），它运行 Rust 应用的根组件（`nsh.json` 的 `"root"`）或 TSX 应用的 `App.tsx`；也可以是一个 TSX 入口模块。命令会读取应用根目录中的 `nsh.json`，并刷新 `.nsh/types` 中的类型声明。
+`nsh` 是构建、运行和打包 NSH 应用的命令行工具，TSX 和 Rust 应用都用它。所有构建应用的子命令都接受 `[ENTRY]`，可以是应用目录，也可以是 TSX 入口模块。目录默认是当前目录，所以 `cd my-app && nsh run` 就能运行。传入目录时，`nsh` 运行 Rust 应用的根组件（`nsh.json` 的 `"root"`）或 TSX 应用的 `App.tsx`。命令会读取应用根目录中的 `nsh.json`，并刷新 `.nsh/types` 中的类型声明。
 
 ```text
 nsh <COMMAND>
@@ -27,7 +27,7 @@ nsh <COMMAND>
   revoke       Sign a revocation list
 ```
 
-`nsh <command> --help` 打印某个命令的参数；`nsh -V`（`--version`）打印版本号和构建它的 Git 提交。
+`nsh <command> --help` 打印某个命令的参数。`nsh -V`（`--version`）打印版本号和构建它的 Git 提交。
 
 ## 输出
 
@@ -42,7 +42,7 @@ warn iOS Simulator: image failed: An SSL error has occurred and a secure connect
 ✓ rebuilt App.tsx (18ms), 1 device
 ```
 
-`✓` 表示完成的步骤，`→` 是连接地址，`•` 是设备的动态；`warn` 和 `error` 行是问题，不带符号的行是应用自己的输出
+`✓` 表示完成的步骤，`→` 是连接地址，`•` 是设备的动态。`warn` 和 `error` 行是问题，不带符号的行是应用自己的输出
 （`console.log`）。在终端里，正在进行的步骤会显示一个转动的指示符，各行带颜色（设置了 `NO_COLOR` 时不带）；重定向到
 文件时只写入结果行，不带颜色。NSH 调用的工具（应用 Rust crate 的 cargo 构建、开发宿主）出错时，它们的输出打印在
 `error` 行下面。
@@ -70,7 +70,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 | `--template <TEMPLATE>` | `rust`、`ts` 或 `mixed`（见上表）。`rust` 和 `mixed` 需要 Rust 工具链；`cargo run` 还需要原生桌面后端的开发库。 |
 | `--nsh-source <DIR>` | 与 `rust` 或 `mixed` 一起使用：crate 按路径依赖 `DIR` 中 NSH 源码仓库的 crate，基于 NSH 源码构建应用。 |
 
-`rust` 和 `mixed` 的 crate 依赖 crates.io 上与 CLI 同版本的 NSH crate（使用 `--nsh-source` 时依赖该源码仓库中的 crate），`nsh` 命令用同样的 crate 构建应用的运行器和宿主。对这样的应用，`nsh` 在每条命令之前构建一个由应用 crate 和 NSH 核心组成的小程序，用它描述这些 crate 的组件、模块和类（crate 有改动时才重新运行）；有了这份描述，CLI 自己完成打包、编译、类型检查、开发服务和打包发布。Rust 应用的构建只编译它的 crate 和 NSH 的核心。请在新的应用目录中创建它们：只要其中任何一个文件已存在，就会在写入之前报告为冲突。
+`rust` 和 `mixed` 模板的 crate 依赖 crates.io 上与 CLI 同版本的 NSH crate。加 `--nsh-source` 时改为依赖本地源码仓库里的 crate。`nsh` 命令也用这些 crate 构建应用的运行器和宿主。每条命令执行前，`nsh` 会用应用的 crate 和 NSH 核心构建一个小程序，描述其中的组件、模块和类。crate 有改动时才重新运行它。CLI 根据这份描述完成打包、编译、类型检查、开发服务和打包发布。Rust 应用构建时只编译自己的 crate 和 NSH 核心。这两种模板要在新的应用目录中创建：只要有一个文件已经存在，`nsh init` 就会在写入前报告冲突。
 
 当应用的 Rust crate 通过 Git 依赖 NSH 时，CLI 使用 Cargo 根据应用锁文件解析的 checkout。生成的宿主使用同一份源码，并统一应用通过 Cargo patch 重定向的 NSH 依赖。
 
@@ -86,9 +86,9 @@ nsh run my-app --target ios        # 在 iOS 模拟器中
 nsh run my-app/App.tsx --target web
 ```
 
-对 TSX 入口，`nsh run` 启动开发服务器（同 `nsh dev`），启动一个从它加载应用的开发宿主，并在每次保存时重新构建。热模块替换会就地修补正在运行的应用；应用的日志和错误会打印在终端里。用 Ctrl-C 停止（或关闭 Catalyst、macOS、Linux、Windows 或 GPUI 窗口）。
+对 TSX 入口，`nsh run` 启动开发服务器（同 `nsh dev`），启动一个从它加载应用的开发宿主，并在每次保存时重新构建。热模块替换（HMR）会就地更新正在运行的应用。应用的日志和错误会打印在终端里。用 Ctrl-C 停止（或关闭 Catalyst、macOS、Linux、Windows 或 GPUI 窗口）。
 
-在原生窗口和移动端目标上，Rust 应用（`nsh.json` 中有 `"root"`，见[用 Rust 开发](./rust.md)）运行时不需要开发服务器，也没有 QuickJS：`nsh run` 为目标平台构建挂载了根组件的应用运行器并启动它（桌面上是 debug 构建，日志打印在终端；模拟器和 Android 上会安装应用），修改 crate 的 Rust 代码后重新构建并重启。使用 `--target web` 时会打印页面地址，已打开的页面会自动加载新的运行时。指定 TSX 入口（`nsh run App.tsx`）则运行 TSX 入口。
+在原生窗口和移动端目标上，Rust 应用（`nsh.json` 中有 `"root"`，见[用 Rust 开发](./rust.md)）运行时不需要开发服务器，也没有 QuickJS：`nsh run` 为目标平台构建应用运行器，挂载根组件后启动。桌面上是 debug 构建，日志打印在终端；模拟器和 Android 上会先安装应用。crate 的 Rust 代码改动后，它会重新构建并重启。使用 `--target web` 时会打印页面地址，已打开的页面会自动加载新的运行时。指定 TSX 入口（`nsh run App.tsx`）则运行 TSX 入口。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
@@ -105,12 +105,12 @@ nsh run my-app/App.tsx --target web
 | `--display <N>` | 主显示器 | 窗口在哪个显示器上居中打开：`1` 是主显示器（带菜单栏的那个），`2` 是下一个，依此类推；没有这个编号的显示器时在主显示器上打开（`--target macos`，TSX 入口）。 |
 | `--background` | | 应用不会成为当前活跃的应用，和 `nsh test` 运行应用的方式一样：窗口照常显示，键盘留在你正在输入的应用里，发给它窗口的输入（驱动它的 agent、UI 测试）照样能到达。在 macOS 上它运行时没有 Dock 图标和菜单栏。用于不需要你盯着的运行，比如你工作时 agent 在检查一处改动（`--target macos`、`linux`、`windows` 和 `gpui`，TSX 入口）。 |
 
-使用 `--target android` 时，会选用 `--device` 或 `ANDROID_SERIAL` 指定的设备，否则选用 `adb devices` 列出的第一台（连着多台时 `nsh` 会提示用的是哪一台）；开发服务器的端口通过 `adb reverse` 转发到设备上。参见[快速开始](./getting-started.md)和[开发服务器与调试](./dev-server-and-debugging.md)。
+使用 `--target android` 时，会选用 `--device` 或 `ANDROID_SERIAL` 指定的设备，否则选用 `adb devices` 列出的第一台。连着多台时，`nsh` 会提示用的是哪一台。开发服务器的端口通过 `adb reverse` 转发到设备上。参见[快速开始](./getting-started.md)和[开发服务器与调试](./dev-server-and-debugging.md)。
 
-新会话最多等待十秒，让旧会话完成清理。多个应用可同时运行，各用自己的端口，再次运行同一应用会替换它之前的会话。`--port` 指定的端口被其他程序或旧版 NSH CLI 占用时，会报错并指出端口；`--port 0` 由操作系统分配空闲端口。`nsh run` 只服务本机，使用 `--target ios`、`android` 或 `web` 时也服务局域网。
-使用 `--target tui` 时，应用在当前终端中运行，保存源文件时热更新。CLI 和宿主的诊断日志写入应用的 `.nsh/tui.log`；按 `C-h e` 查看日志与错误，按 Escape 或 `C-g` 关闭面板，按 `r` 重新加载。应用错误会自动打开面板，更新后恢复应用画面。每个单元格默认是 8×16 点；`--points-per-cell 10x20` 优先于 `nsh.json` 中的 `"tui": { "pointsPerCell": "10x20" }`，宽高均须是有限正数，重启运行后生效。Rust 应用在为它生成的终端开发宿主中运行根组件，Rust 代码保存后重新构建并重启。
+新会话最多等待十秒，让旧会话完成清理。多个应用可同时运行，各用自己的端口，再次运行同一应用会替换它之前的会话。`--port` 指定的端口被其他程序或旧版 NSH CLI 占用时，会报错并指出端口。`--port 0` 由操作系统分配空闲端口。`nsh run` 只服务本机，使用 `--target ios`、`android` 或 `web` 时也服务局域网。
+使用 `--target tui` 时，应用在当前终端中运行，保存源文件时热更新。CLI 和宿主的诊断日志写入应用的 `.nsh/tui.log`。按 `C-h e` 查看日志与错误，按 Escape 或 `C-g` 关闭面板，按 `r` 重新加载。应用错误会自动打开面板，更新后恢复应用画面。单元格（Cell）是终端里的一个字符位置，默认 8×16 点。`--points-per-cell 10x20` 优先于 `nsh.json` 中的 `"tui": { "pointsPerCell": "10x20" }`。宽高均须是有限正数，重启运行后生效。Rust 应用在为它生成的终端开发宿主中运行根组件，Rust 代码保存后重新构建并重启。
 
-在 Unix 上，终端宿主收到 SIGHUP、SIGTERM、SIGINT 或终端断开时退出，并恢复仍可访问的终端设置。应用空闲时在输入检查之间休眠；交互运行使用有效的终端输入，测试使用 `--headless` 接受重定向输入。
+在 Unix 上，终端宿主收到 SIGHUP、SIGTERM、SIGINT 或终端断开时退出，并恢复仍可访问的终端设置。应用空闲时，在两次输入检查之间休眠。交互运行读取实时终端输入；测试时用 `--headless` 接受重定向输入。
 
 ## nsh dev
 
@@ -128,7 +128,7 @@ nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst]
   browsers on this network: http://192.168.1.20:8790/
 ```
 
-用 `nsh dev --server-only` 连接嵌入了开发版 SDK（`NativeShellDev.xcframework`、`nsh-dev.aar`）的应用。`--target`、`--device`、`--port`、`--release` 和 `--limits` 的含义与 `nsh run` 相同。`--host <HOST>` 用于将开发服务器绑定到指定的 IPv4 地址，覆盖默认行为（`--server-only` 以及 `--target ios`、`android`、`web` 默认绑定 `0.0.0.0`；本机目标默认绑定 `127.0.0.1`），例如用 `nsh dev App.tsx --server-only --host 127.0.0.1` 仅监听本机回环地址。使用 `--target android` 时，由于 `adb reverse` 将设备的 `127.0.0.1` 转发到本机的 `127.0.0.1`，`--host` 只能指定为 `127.0.0.1` 或 `0.0.0.0`。
+用 `nsh dev --server-only` 连接嵌入了开发版 SDK（`NativeShellDev.xcframework`、`nsh-dev.aar`）的应用。`--target`、`--device`、`--port`、`--release` 和 `--limits` 的含义与 `nsh run` 相同。`--host <HOST>` 把开发服务器绑定到指定的 IPv4 地址。默认情况下，`--server-only` 以及 `--target ios`、`android`、`web` 绑定 `0.0.0.0`，本机目标绑定 `127.0.0.1`。例如用 `nsh dev App.tsx --server-only --host 127.0.0.1` 仅监听本机回环地址。使用 `--target android` 时，`--host` 只能是 `127.0.0.1` 或 `0.0.0.0`，因为 `adb reverse` 把设备的 `127.0.0.1` 转发到本机的 `127.0.0.1`。
 
 ## nsh test
 
@@ -136,7 +136,13 @@ nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst]
 nsh test [PATH] [--filter <NAME>] [--release] [--trace] [--fps] [--junit <FILE>] [--jobs <N>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground]
 ```
 
-以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）：运行目录 `PATH`（默认为当前目录；跳过隐藏目录、`node_modules` 和 `target`）中的测试文件（`*.test.tsx`、`*.test.ts`，导入 `nsh/test`），或者测试文件 `PATH` 本身。如果传入的是带有自己 Rust crate 的应用（`nsh.json` `"rust"`：Rust 应用，或带 crate 的 TSX 应用）的目录，它会先在目录中每个 crate 自己的目录下运行 `cargo test`，并把每个 Rust 测试与 TypeScript 测试一起显示和计数，归在其测试目标的文件下（`src/lib.rs › tests::adds`）；只有 Rust 测试的 Rust 应用也这样测试。每个测试文件在各自的引擎上运行，测试打开的每个应用又在另一个全新的引擎上运行。它为每个测试打印一行；失败时还会打印抛出的内容、它在测试文件中的位置和屏幕上的文字。只要有失败，就以非零退出码结束。如果传入的是应用入口（`nsh test App.tsx`；Rust 应用为 `nsh test nsh.json`），它会在真实网络下打开应用，让它运行 1.2 s，然后执行标准输入给出的步骤（`await app.press("Add")`，其中 `app` 就是这个应用）。TSX 应用在 CLI 自己的进程里运行；带有自己 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，由 CLI 为它构建入口。除非测试以 Android 打开应用（`open` 的 `platform`），无界面运行按 iOS 处理：`platform.os` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
+以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）。测试文件是导入 `nsh/test` 的 `*.test.tsx` 和 `*.test.ts`。`PATH` 可以是目录，也可以是单个测试文件，默认为当前目录。隐藏目录、`node_modules` 和 `target` 会跳过。
+
+如果目录是带有自己 Rust crate 的应用（`nsh.json` `"rust"`：Rust 应用，或带 crate 的 TSX 应用），`nsh test` 会先在每个 crate 的目录下运行 `cargo test`。每个 Rust 测试和 TypeScript 测试一起显示、一起计数，归在它的测试目标文件下（`src/lib.rs › tests::adds`）。只有 Rust 测试的 Rust 应用也这样测试。
+
+每个测试文件用独立的引擎运行，测试打开的每个应用再用一个全新的引擎。每个测试打印一行。失败时还会打印抛出的内容、出错的测试文件位置和屏幕上的文字。只要有失败，就以非零退出码结束。
+
+如果传入的是应用入口（`nsh test App.tsx`；Rust 应用为 `nsh test nsh.json`），它会在真实网络下打开应用，运行 1.2 s，再执行标准输入给出的步骤（`await app.press("Add")`，`app` 就是这个应用）。TSX 应用在 CLI 自己的进程里运行。带有自己 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，CLI 会为它构建入口。无界面运行默认按 iOS 处理，除非测试以 Android 打开应用（`open` 的 `platform`）。所以 `platform.os` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
 
 ```text
 ✓ App.test.tsx › counts taps (321ms)
@@ -158,7 +164,7 @@ nsh test [PATH] [--filter <NAME>] [--release] [--trace] [--fps] [--junit <FILE>]
 | `--foreground` | 配合 `--target macos`、`windows`、`gpui` 或 `linux`：让应用成为当前活跃的应用，和用户使用时一样。默认应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，测试的点击、按键和快捷键直接发给这些窗口。在 Linux 桌面上，后台的按键直接输入到控件里，和 Wayland 上一样；测试 Tab、方向键或输入法时请带上 `--foreground`。在没有人输入的显示器上（Xvfb），Linux 应用无论是否带这个选项都按前台方式运行。依赖应用处于活跃状态的测试（`lifecycle()` 随应用是否活跃而变），或 `examples/gallery/tools/perf.py` 这类性能测量（它会传入该选项），应带上它运行。 |
 | `--web-host <JS>` | headless 运行时测试打开的应用所用的 Web 页面宿主模块（默认：`nsh.json` 的 `web.host`；它导出 `createHost(player)`）：它应答应用的 [`host`](../modules/nsh.md#host) 调用，它的 `player.hostEvent` 会送到 `host.on`（[测试](./testing-and-trace.md#页面的宿主)）。只用于 headless 运行；`--target web` 运行 `nsh.json` 的 `web.host`。 |
 
-NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及默认的构建和打包输出 `.nsh/out/`。Cargo 保留它通常的 `target/` 缓存和已有的 `CARGO_TARGET_DIR` 行为；NSH 不会添加 Cargo 配置来移动它。`--out` 仍可指定输出位置。使用我们推荐的 [huacnlee/cargo](https://github.com/huacnlee/cargo) 时，构建产物放在 `~/.cargo/targets/` 下，可执行文件仍在 `target/`。
+NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及默认的构建和打包输出 `.nsh/out/`。Cargo 照常使用 `target/` 缓存，`CARGO_TARGET_DIR` 的行为也不变。NSH 不会添加 Cargo 配置来移动它。`--out` 仍可指定输出位置。使用我们推荐的 [huacnlee/cargo](https://github.com/huacnlee/cargo) 时，构建产物放在 `~/.cargo/targets/` 下，可执行文件仍在 `target/`。
 
 ## nsh check
 
@@ -166,7 +172,7 @@ NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及
 nsh check [ENTRY] [--tsc <TSC>] [-- <TSC ARGS>...]
 ```
 
-对应用做类型检查。带有自己 Rust crate 的应用（`nsh.json` `"rust"`）会先在每个 crate 自己的目录下用 `cargo check --all-targets` 检查它（包括它的测试）；Cargo 报错时以非零退出码结束。Rust 应用（`"root"`）随后只检查它所拥有的 TypeScript：有 `tsconfig.json`（`nsh init --template rust` 为 `App.test.tsx` 写入的那个）时，它的测试文件也会做类型检查。TypeScript 检查会刷新 `.nsh/types` 和 `.nsh/tsconfig.json`，然后以应用的 `tsconfig.json` 运行 `tsc -p <应用目录> --noEmit`。它使用原生编译器 TypeScript 7，不需要 Node：第一次运行时从 npm registry 下载（约 9 MB），按 NSH 记录的校验和校验，并保存在 NSH 的缓存里（macOS 上为 `~/Library/Caches/nsh`，Linux 上为 `~/.cache/nsh`，Windows 上为 `%LOCALAPPDATA%\nsh`，或 `NSH_CACHE`）。有类型错误时以非零退出码结束。`tsconfig.json` 没有继承 `./.nsh/tsconfig.json`（NSH 在那里维护它的 TypeScript 设置）时会给出警告（[项目结构](./project-structure.md)）。
+对应用做类型检查。带有自己 Rust crate 的应用（`nsh.json` `"rust"`）会先在每个 crate 自己的目录下运行 `cargo check --all-targets`，测试代码也一并检查。Cargo 报错时以非零退出码结束。Rust 应用（`"root"`）随后只检查它所拥有的 TypeScript：有 `tsconfig.json`（`nsh init --template rust` 为 `App.test.tsx` 写入的那个）时，它的测试文件也会做类型检查。TypeScript 检查会刷新 `.nsh/types` 和 `.nsh/tsconfig.json`，然后以应用的 `tsconfig.json` 运行 `tsc -p <应用目录> --noEmit`。它使用原生编译器 TypeScript 7，不需要 Node。第一次运行时从 npm registry 下载（约 9 MB），按 NSH 记录的校验和校验，并保存在 NSH 的缓存里（macOS 上为 `~/Library/Caches/nsh`，Linux 上为 `~/.cache/nsh`，Windows 上为 `%LOCALAPPDATA%\nsh`，或 `NSH_CACHE`）。有类型错误时以非零退出码结束。`tsconfig.json` 没有继承 `./.nsh/tsconfig.json`（NSH 在那里维护它的 TypeScript 设置）时会给出警告（[项目结构](./project-structure.md)）。
 
 | 参数 | 说明 |
 |---|---|
@@ -204,7 +210,16 @@ nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [-o <OUT>] [flags]
 ```
 
-以 release 模式构建可安装的应用。Rust 应用（`nsh.json` 中有 `"root"`）用它自己的运行器打包，运行器由 Cargo 用你的 crate 和 NSH 的 crate 构建，挂载根组件，不带 QuickJS（见[用 Rust 开发](./rust.md)）；TSX 应用使用预构建的运行时。整个过程不需要 Xcode 工程或 Gradle 构建：NSH 自己组装应用包，并使用 Xcode 的 `actool` 和 `codesign`（iOS）或 SDK 中的 `aapt2`、`zipalign` 和 `apksigner`（Android）；macOS 则用 `codesign` 组装一个默认 ad hoc 签名或用 `--sign` 签名的 `.app`（图标用 `sips` 转换）；Linux 则复制运行器并用 `tar` 生成 `.tar.gz`；Windows 则复制运行器、嵌入图标并生成 `.zip`，不需要任何工具；Web 则写出一个静态站点，同样不需要任何工具。元数据来自 `nsh.json`，可被参数覆盖。
+以 release 模式构建可安装的应用。Rust 应用（`nsh.json` 中有 `"root"`）用自己的运行器打包：Cargo 用你的 crate 和 NSH 的 crate 构建它，挂载根组件，不带 QuickJS（见[用 Rust 开发](./rust.md)）。TSX 应用使用预构建的运行时。整个过程不需要 Xcode 工程或 Gradle 构建，NSH 自己组装应用包。各平台用到的工具如下：
+
+- iOS：Xcode 的 `actool` 和 `codesign`。
+- Android：SDK 中的 `aapt2`、`zipalign` 和 `apksigner`。
+- macOS：用 `codesign` 组装 `.app`，默认 ad hoc 签名，或用 `--sign` 签名。图标用 `sips` 转换。
+- Linux：复制运行器，用 `tar` 生成 `.tar.gz`。
+- Windows：复制运行器、嵌入图标并生成 `.zip`，不需要外部工具。
+- Web：写出静态站点，不需要外部工具。
+
+元数据来自 `nsh.json`，可用参数覆盖。
 
 | 参数 | 说明 |
 |---|---|
@@ -241,7 +256,7 @@ nsh package my-app --target web
 
 ## 外部 target
 
-`nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行在 NSH 之外构建的同名平台：应用的[平台 nshm](./nshm.md#平台-nshm) 提供的那个，否则是 `PATH` 上的程序 `nsh-platform-<name>`，就像 Cargo 运行 `cargo-<name>` 一样。它收到命令和除 `--target` 及其值以外的所有参数，以及环境变量 `NSH`（当前的 `nsh` 可执行文件）、`NSH_VERSION` 和 `NSH_TARGET`（平台名）；它的退出码就是命令的退出码。
+`nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行在 NSH 之外构建的同名平台。NSH 先找应用的[平台 nshm](./nshm.md#平台-nshm)，找不到再运行 `PATH` 上的程序 `nsh-platform-<name>`，就像 Cargo 运行 `cargo-<name>` 一样。它收到命令和除 `--target` 及其值以外的所有参数，以及环境变量 `NSH`（当前的 `nsh` 可执行文件）、`NSH_VERSION` 和 `NSH_TARGET`（平台名）。它的退出码就是命令的退出码。
 
 ```sh
 nsh package my-app --target miniprogram --out dist
@@ -252,7 +267,7 @@ nsh package my-app --target miniprogram --out dist
 
 ## nsh update
 
-把已安装的 `nsh` 更新到所在渠道的最新构建；指定渠道即切换（与 `rustup update nightly` 一致）（[安装](./installation.md#更新)）。
+把已安装的 `nsh` 更新到所在渠道的最新构建。指定渠道就会切换过去（与 `rustup update nightly` 一致）（[安装](./installation.md#更新)）。
 
 ```sh
 nsh update [stable|nightly]
@@ -274,15 +289,15 @@ nsh add nsh-extra --features camera                  # 开启 crate 的 Cargo fe
 
 它像 `Cargo.toml` 一样按包名（crate 名，或 Git、本地 nshm 的 `nsh.json` 中的 `"name"`）把 nshm 记录到 `nsh.json` 的 `"dependencies"`：`"acme-gauge": "^1.2.0"`、`{ "github": "acme/ui", "version": "^1.4" }`、`{ "git": "…", "tag": "v1.4.0" }`、`{ "git": "…", "rev": "…" }` 或 `{ "path": "../gauge" }`，对象形式可加 `"version"`、`"features"` 和 `"targets"`（要链接 Rust nshm 的 target，再次 `nsh add` 时保留：[nshm](./nshm.md#使用-nshm)）。没写版本时写入 `^` 加解析到的版本。随后它重新解析应用用到的所有 nshm，把缺少的安装到 `~/.nsh/nshms`，锁定在 `nsh.lock`（随应用提交），应用有自己的 crate（`"rust"`）时把 Rust nshm 加入该 crate 的 `[dependencies]`。它会打印要导入的标识；如果 nshm 给纯 TSX 应用带来了 Rust，也会说明，此后开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。若 nshm 无法解析、与应用的 crate 或其他 nshm 冲突（同一个包、标识或模块），或不兼容当前 NSH，应用的文件保持不变。
 
-`--features` 开启 Rust nshm 的 Cargo feature，即应用用到的模块，已列出的会保留（在 `camera` 之后 `nsh add nsh-extra --features push` 仍保留 `camera`）；crate 未定义的名字会让 `nsh add` 停止。要关闭某个 feature，从 `nsh.json` 和应用 crate 的 `Cargo.toml` 依赖中删掉它。crate 在 `[package.metadata.nsh]` 中为开启的 feature 声明的内容会进入打包结果，除 entitlements 外也进入开发宿主（[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。
+`--features` 开启 Rust nshm 的 Cargo feature，每个 feature 对应应用用到的一个模块。已列出的 feature 会保留：先加了 `camera`，再运行 `nsh add nsh-extra --features push`，`camera` 仍在。crate 未定义的名字会让 `nsh add` 停止。要关闭某个 feature，从 `nsh.json` 和应用 crate 的 `Cargo.toml` 依赖中删掉它。crate 在 `[package.metadata.nsh]` 中为开启的 feature 声明的内容会进入打包结果，除 entitlements 外也进入开发宿主（[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。
 
-版本是语义化版本要求，含义与 Cargo 相同：`1.2` 和 `^1.2` 接受 1.2.0 起的任何 1.x，`~1.2`、`=1.2.3`、`>=1.2, <2` 和 `*` 与 `Cargo.toml` 中一样（在 shell 里要加引号：`nsh add "acme-gauge@>=1.2, <2"`）。Git 上的 nshm 以标签（`v1.4.0` 或 `1.4.0`）为版本。`nsh.json` 写可以接受什么，`nsh.lock` 记录解析出了什么：只要锁定的版本仍满足要求，所有命令都用它构建，不访问网络；要求改变时重新解析。整个应用中每个包只解析出一个版本，即所有要求都接受的最新版本；没有满足的版本时，错误会指出谁要求了什么。nshm 适用的 NSH 版本是它 `nsh.json` 中的 `"nsh"` 要求，Rust nshm 还有它的 `nsh-core` 要求，二者都会与当前运行的 `nsh` 比对。
+版本是语义化版本要求，含义与 Cargo 相同：`1.2` 和 `^1.2` 接受 1.2.0 起的任何 1.x，`~1.2`、`=1.2.3`、`>=1.2, <2` 和 `*` 与 `Cargo.toml` 中一样（在 shell 里要加引号：`nsh add "acme-gauge@>=1.2, <2"`）。Git 上的 nshm 以标签（`v1.4.0` 或 `1.4.0`）为版本。`nsh.json` 写可以接受什么，`nsh.lock` 记录实际解析出的版本。只要锁定的版本仍满足要求，所有命令都用它构建，不访问网络。要求改变时重新解析。整个应用中每个包只解析出一个版本，即所有要求都接受的最新版本。没有满足的版本时，错误会指出谁要求了什么。nshm 适用的 NSH 版本是它 `nsh.json` 中的 `"nsh"` 要求，Rust nshm 还有它的 `nsh-core` 要求，二者都会与当前运行的 `nsh` 比对。
 
 nshm 的构建脚本和过程宏会在应用构建时执行，它的代码以应用的权限运行：请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。
 
 ## nsh upgrade
 
-把应用的 nshm（全部或指定的几个）升级到其要求接受的最新版本，并锁定在 `nsh.lock`；Rust nshm 在应用 crate 中的依赖随之更新。要越过某个要求，在 `nsh.json` 中修改它，或用新的要求运行 `nsh add`。
+把应用的 nshm（全部或指定的几个）升级到其要求接受的最新版本，并锁定在 `nsh.lock`。Rust nshm 在应用 crate 中的依赖随之更新。要越过某个要求，在 `nsh.json` 中修改它，或用新的要求运行 `nsh add`。
 
 ```sh
 nsh upgrade [NAME]...
@@ -316,7 +331,7 @@ nsh component remove <NAME>...
 nsh keygen <NAME>
 ```
 
-创建一对 Ed25519 密钥：`<NAME>.secret` 和 `<NAME>.pub`（例如 `nsh keygen keys/root`）。根密钥的 `.secret` 应离线保存；应用信任的是它的 `.pub`。
+创建一对 Ed25519 密钥：`<NAME>.secret` 和 `<NAME>.pub`（例如 `nsh keygen keys/root`）。根密钥的 `.secret` 要离线保存。应用信任的是它的 `.pub`。
 
 ### nsh update-manifest
 
@@ -394,7 +409,7 @@ nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 | `--store <DIR>` | [商店目录](./publish.md#store-listing)。默认：应用目录下的 `store`。 |
 | `--listing` | 同时按商店目录更新商店信息（名称、描述、图片），覆盖 Play 上这些语言已有的内容。 |
 
-要扩大分阶段发布，用更大的 `--rollout` 再发布同一版本；要全量发布，不带 `--rollout` 再发布一次。
+要扩大分阶段发布，用更大的 `--rollout` 再发布同一版本。要全量发布，不带 `--rollout` 再发布一次。
 
 ### nsh publish status android
 
@@ -423,7 +438,7 @@ nsh publish status linux [--entry <DIR>] [--json]
 nsh publish doctor linux [--entry <DIR>]
 ```
 
-为发布压缩包写入或更新应用的 Flathub manifest（`<id>.yml`）：下载 URL 与 SHA-256。下载 URL 默认取 `nsh.json` 的 `store.linux.archiveUrl`（其中 `{version}` 替换为版本号），也可用 `--url` 指定。不会创建 Pull Request，需自行提交到 `flathub/<id>` 仓库。`status` 显示 Flathub 上的版本，与 `nsh.json` 不一致时退出码为 1；`doctor` 检查 Flathub 要求的元数据（`id`、商店文案、`store.linux`、图标），并校验 metainfo 与 desktop 文件。
+为发布压缩包写入或更新应用的 Flathub manifest（`<id>.yml`）：下载 URL 与 SHA-256。下载 URL 默认取 `nsh.json` 的 `store.linux.archiveUrl`（其中 `{version}` 替换为版本号），也可用 `--url` 指定。不会创建 Pull Request，需自行提交到 `flathub/<id>` 仓库。`status` 显示 Flathub 上的版本，与 `nsh.json` 不一致时退出码为 1。`doctor` 检查 Flathub 要求的元数据（`id`、商店文案、`store.linux`、图标），并校验 metainfo 与 desktop 文件。
 
 ### nsh publish windows
 
@@ -433,7 +448,7 @@ nsh publish status windows [--entry <DIR>] [--product-id <ID>] [--submission <ID
 nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
 ```
 
-用 Store submission API 把 MSIX 包提交到 Microsoft Store：基于上次发布创建 submission、替换包、设置各 listing 的更新说明（默认取商店文案各语言的 `releaseNotes`，也可用 `--notes` 指定）、上传并提交认证。提交前失败会删除该 submission；已有 pending submission 时拒绝执行。`--wait` 轮询直到认证结束。`status` 退出码：已发布 0、进行中 2、失败 1。`doctor` 只读检查 `nsh.json`、凭据和 Store ID。Store ID 写在 `nsh.json` 的 `store.windows.productId`（或用 `--product-id`）。凭据为关联 Partner Center 的 Azure AD 应用，只从 `NSH_MS_TENANT_ID`、`NSH_MS_CLIENT_ID`、`NSH_MS_CLIENT_SECRET` 读取。首次提交（定价、分级、商店页）需在 Partner Center 完成。
+用 Store submission API 把 MSIX 包提交到 Microsoft Store：基于上次发布创建 submission、替换包、设置各 listing 的更新说明（默认取商店文案各语言的 `releaseNotes`，也可用 `--notes` 指定）、上传并提交认证。提交前失败会删除该 submission。如果已有待处理的 submission（Partner Center 里的草稿），命令拒绝执行，不会覆盖别人开始的工作。`--wait` 轮询直到认证结束。`status` 退出码：已发布 0、进行中 2、失败 1。`doctor` 只读检查 `nsh.json`、凭据和 Store ID。Store ID 写在 `nsh.json` 的 `store.windows.productId`（或用 `--product-id`）。凭据为关联 Partner Center 的 Azure AD 应用，只从 `NSH_MS_TENANT_ID`、`NSH_MS_CLIENT_ID`、`NSH_MS_CLIENT_SECRET` 读取。首次提交（定价、分级、商店页）需在 Partner Center 完成。
 
 ### nsh verify
 

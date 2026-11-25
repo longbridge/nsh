@@ -6,7 +6,9 @@ order: 16
 
 # 样式参考
 
-本页列出 `style` 属性可用的每一个键，以及在 Rust 中设置它的 `Styled` 方法。Rust 组件用以 Tailwind 工具类命名的类型化方法为元素设置样式（`.p_4()`、`.rounded(px(12.0))`、`.bg(color)`，来自 `nsh_core::prelude`），它们会落到同样的键上；TSX 传入 `style` 对象（以及 class）。Rust 列给出对应的方法；大多数方法接受一个值、一个 signal 或一个闭包，`.style_when(…)` / `.style_with(…)` 可以让任意样式按条件生效。键名和类型来自生成的声明文件 `.nsh/types/nsh/types.d.ts`，编辑器会在你输入时检查它们。样式键表示与它同名的 CSS 属性，与设置该属性的类名相同：`paddingLeft` 就是 CSS 的 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow` 和 `shadow-md`；少数键采用应用里更直白的名字（`paddingHorizontal` 对应 `padding-inline`，`marginStart` 对应 `margin-inline-start`，`numberOfLines` 对应 `line-clamp`）。数字的单位是点，同时支持这些 CSS 能力：网格、渐变、盒阴影、滤镜、混合模式、轮廓线、变换、过渡和关键帧动画。
+本页列出 `style` 属性的每一个键，以及在 Rust 中设置它的 `Styled` 方法。TSX 传入 `style` 对象（以及 class）。Rust 组件调用以 Tailwind 工具类命名的类型化方法，例如 `nsh_core::prelude` 里的 `.p_4()`、`.rounded(px(12.0))`、`.bg(color)`。两种写法最终落到同样的键上。大多数 Rust 方法接受值、signal 或闭包，`.style_when(…)` / `.style_with(…)` 可以让任意样式按条件生效。
+
+键名和类型来自生成的声明文件 `.nsh/types/nsh/types.d.ts`，编辑器会在你输入时检查。每个键对应同名的 CSS 属性，也对应设置它的 class：`paddingLeft` 就是 CSS 的 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow` 和 `shadow-md`。少数键用了更直白的名字：`paddingHorizontal` 对应 `padding-inline`，`marginStart` 对应 `margin-inline-start`，`numberOfLines` 对应 `line-clamp`。数字的单位是点。网格、渐变、盒阴影、滤镜、混合模式、轮廓线、变换、过渡和关键帧动画这些 CSS 能力也都支持。
 
 样式怎么写、怎样与 class 组合、文字样式如何继承，见 [样式](../docs/styling.md)。class 的语法见 [Tailwind 参考](./tailwind-reference.md)。
 

@@ -7,11 +7,11 @@ group: delivery
 
 # OTA Updates
 
-OTA (over-the-air) updates deliver a packaged app's TSX as a [signed package](./signed-packages.md) (`.nshpkg`): the
-installed app downloads it, verifies it and runs it from its next start, on every native platform, iOS and Android
-included, without a new app build. A release is the package and a signed manifest, on GitHub Releases or your own
-host. In the app, four functions of [`nsh/updater`](../modules/nsh-updater.md#ota-updates) check, download, restart into
-and report the package. A package that fails at its first start is deleted, and the app goes back to what it ran
+OTA (over-the-air) updates ship new TSX code to an installed app without a new app build. The code travels as a
+[signed package](./signed-packages.md) (`.nshpkg`). The installed app downloads it, verifies it and runs it from its
+next start. This works on every native platform, iOS and Android included. A release is the package plus a signed
+manifest, hosted on GitHub Releases or your own server. In the app, four functions of
+[`nsh/updater`](../modules/nsh-updater.md#ota-updates) check for, download, restart into and report the package. A package that fails at its first start is deleted, and the app goes back to what it ran
 before.
 
 | Platform | What OTA does |
@@ -39,7 +39,7 @@ Each package names the lowest NSH runtime that runs it (`minRuntime`), by defaul
 published it, and an app with an older runtime is not offered it. Publish OTA releases with the `nsh` version the apps
 in the field were built with, or with `--min-runtime` when the TSX uses only what that runtime has ([Which runtimes run
 a package](./signed-packages.md#which-runtimes-run-a-package)). When the app needs a newer runtime, ship a new app
-build; the app below checks for a package first and for a new app when there is none.
+build. The app below checks for a package first and for a new app when there is none.
 
 ## Set up once
 
@@ -52,7 +52,7 @@ nsh keygen keys/update    # signs the manifest, in CI
 nsh certify --root keys/root.secret --key keys/release.pub --apps com.example.notes -o keys/release.cert
 ```
 
-The root certifies the release key for the app's id; the app trusts only the root, so a new release key or
+The root certifies the release key for the app's id. The app trusts only the root, so a new release key or
 certificate needs no app update. A certificate lasts 365 days unless `--days` says otherwise: certify the release key
 again before it runs out. [Signed Packages](./signed-packages.md#keys-two-levels) explains the keys, and how to revoke
 a release key or a package.
@@ -76,7 +76,7 @@ a release key or a package.
 }
 ```
 
-`"packages": { "roots" }` lists the root public keys whose certified release keys may sign the app's packages; several
+`"packages": { "roots" }` lists the root public keys whose certified release keys may sign the app's packages. Several
 roots let you rotate one. `publicKey` makes the app refuse a manifest that `keys/update.secret` did not sign. With
 `"url"` instead of `"github"`, it is required ([App Updates](./app-updates.md#set-the-source)).
 
@@ -316,7 +316,7 @@ The packages live in the `updates` directory of the app's data directory (`proce
 2. A `next.nshpkg` is verified again: signed by a release key one of the roots certifies, not revoked, for this app,
    for this runtime, its build higher than the app's own and not older than any build accepted before. It becomes
    `trying.nshpkg` and runs on trial. Refused, it is deleted.
-3. Otherwise `current.nshpkg` runs when it still verifies and its build is higher than the app's own; otherwise it is
+3. Otherwise `current.nshpkg` runs when it still verifies and its build is higher than the app's own. Otherwise it is
    deleted.
 4. Otherwise the code the app was built with runs.
 
@@ -377,7 +377,7 @@ partial file keyed to the package so the next `downloadPackage()` call resumes w
 The launcher logs why, in the terminal or the platform's log: the unified log on macOS and iOS, under the app's id
 (Console, `log stream --predicate 'subsystem == "com.example.notes"'`;
 [A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs)), `adb logcat` on Android. The first
-three lines below are warnings, logged on every platform; the last one is an info line, logged on Android:
+three lines below are warnings, logged on every platform. The last one is an info line, logged on Android:
 
 ```text
 updates: downloaded package refused: …
@@ -403,7 +403,7 @@ running package com.example.notes 1.2.1 (build 13), shipped build 12
    cp next.nshpkg ~/Library/Application\ Support/com.example.notes/updates/
    ```
 
-   The app runs it on trial; after 10 seconds it is `current.nshpkg`. A package whose `App.tsx` throws at the top level
+   The app runs it on trial. After 10 seconds it is `current.nshpkg`. A package whose `App.tsx` throws at the top level
    tries the rollback: the app reports the error, and the next start runs the code before it.
 
 To try the whole flow, serve `latest.json` and the package from your machine (`"url": "http://127.0.0.1:8000/latest.json"`

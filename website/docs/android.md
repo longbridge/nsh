@@ -7,9 +7,9 @@ group: platforms
 
 # Android
 
-NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 8 (API 26), on `arm64-v8a`,
-`armeabi-v7a` and `x86_64`. Whole apps written in TSX and in Rust run and package as on the other platforms, and an existing app
-can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
+NSH apps run on Android with ordinary Android views and `StaticLayout` text. They need Android 8 (API 26) or later, on
+`arm64-v8a`, `armeabi-v7a` or `x86_64`. TSX and Rust apps run and package the same way as on other platforms. An existing
+app can also embed modules in an `NshView` and load signed packages it downloads, with limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 
 ## Requirements
@@ -29,13 +29,13 @@ nsh run App.tsx --target android       # a TSX app
 
 Start an emulator or connect a device first (`adb devices` lists them). NSH uses the one `--device <serial>` or
 `ANDROID_SERIAL` names, else the first one, and names the one it uses when several are connected. For a Rust app, `nsh`
-builds the app's `libnsh.so` with your crate, installs the APK and starts it; a change to the crate's Rust code builds
+builds the app's `libnsh.so` with your crate, installs the APK and starts it. A change to the crate's Rust code builds
 and installs it again. For a TSX app, it installs a development host APK (rebuilt only when the runtime changes) and
-forwards the dev server's port with `adb reverse`, so it works over USB without a shared network; the app updates as
+forwards the dev server's port with `adb reverse`, so it works over USB without a shared network. The app updates as
 you save, with logs in the terminal.
 
 These development builds carry `libnsh.so` without its debug info, which keeps their APKs small enough to update on an
-emulator; the complete library is in `symbols/<abi>/` next to it, for `ndk-stack` and debuggers. When the device has no
+emulator. The complete library is in `symbols/<abi>/` next to it, for `ndk-stack` and debuggers. When the device has no
 room to update the development host, NSH uninstalls it and installs it again: it holds only what the apps it runs
 wrote. An app's own APK is never uninstalled for you: the error says how to make room.
 
@@ -79,7 +79,7 @@ create a `com.longbridge.nsh.NshView` (a `FrameLayout`), add it to any layout an
 into it. An app written in Rust ships on Android as the APK `nsh package --target android` builds. The NSH app
 renders with ordinary Android views next to your own.
 
-Each `NshView` is one independent engine with its own JS VM; there are no global singletons, so several can run at
+Each `NshView` is one independent engine with its own JS VM. There are no global singletons, so several can run at
 once.
 
 <div class="diagram-scroll">
@@ -102,7 +102,7 @@ From a checkout of NSH you can build just the libraries:
 cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 ```
 
-`--no-dev` leaves out `nsh-dev.aar`. The default build has `arm64-v8a`, `armeabi-v7a` and `x86_64`; repeat `--abi` to build fewer.
+`--no-dev` leaves out `nsh-dev.aar`. The default build has `arm64-v8a`, `armeabi-v7a` and `x86_64`. Repeat `--abi` to build fewer.
 
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
@@ -274,7 +274,7 @@ nsh.handle("user.profile") { data, reply ->
 }
 ```
 
-Handlers run on the UI thread; a call waits for its answer in the app without blocking either side. A reply that is
+Handlers run on the UI thread. A call waits for its answer in the app without blocking either side. A reply that is
 never given fails the call once it is collected, and a call of a name with no handler fails at once. Events of names
 the app does not listen to yet are kept until it does, and events sent while no app runs (before `loadAssetBundle`,
 during a reload) go to the next one.
@@ -327,7 +327,7 @@ so they have no such API.
 
 One app embedded in several branded host apps takes each host's brand: the host gives the tokens its brand changes,
 as a theme file in the format of `nsh.json`'s `"theme"` (shadcn/ui's `cssVars`, values as CSS writes them). They win
-over the app's tokens of the same names; the app's other tokens stay. Give a token its dark-mode value under `dark`
+over the app's tokens of the same names. The app's other tokens stay. Give a token its dark-mode value under `dark`
 (one set only under `light` or `theme` is that color in both modes):
 
 ```java
@@ -458,7 +458,7 @@ which notification opened an activity, so NSH takes an intent for such a press w
 meaning: links (`ACTION_VIEW`, which reach `onLink`), shares and the system's other actions are not presses, nor is the
 task opened again from Recents. Each intent is handed over once, so an activity recreated with it does not report it
 again. The handler runs on the UI thread, and `set_foreign_handler` panics elsewhere. There is one handler, so the
-app's crate owns it and passes presses on to the modules it uses; a later call replaces it. An app that embeds
+app's crate owns it and passes presses on to the modules it uses. A later call replaces it. An app that embeds
 `NshView` passes its activity's intents to `NshView.handleNotificationIntent` in `onCreate` and `onNewIntent`, which
 hands these presses over too.
 
@@ -538,7 +538,7 @@ config of the app may override it). The release `nsh.aar` does not.
 
 - **Back button.** `NshView` gets back presses by itself while the app wants them (an open dialog, a pushed page, a
   `BackHandler` listener), and leaves them to the activity otherwise. With `android:enableOnBackInvokedCallback="true"`
-  on Android 13 and newer it registers an `OnBackInvokedCallback`; elsewhere (Android 9 to 12, or the attribute
+  on Android 13 and newer it registers an `OnBackInvokedCallback`. Elsewhere (Android 9 to 12, or the attribute
   off) it takes the back key before the activity's `onBackPressed`, so before AndroidX's `OnBackPressedDispatcher`
   and the fragments' callbacks. No forwarding is needed there, in an activity or a fragment. On Android 8 the activity
   hands its back presses to the view: `if (!nshView.handleBack()) super.onBackPressed();` in `onBackPressed`. A host
@@ -547,12 +547,12 @@ config of the app may override it). The release `nsh.aar` does not.
   For predictive back on Android 13+, set `android:enableOnBackInvokedCallback="true"` on the `<application>`, as
   packaged NSH apps do.
 - **Keyboard.** `NshView` scrolls focused inputs clear of the keyboard itself. Leave `android:windowSoftInputMode` unset
-  or use `adjustResize`; with `adjustPan` the system moves the whole window instead.
+  or use `adjustResize`. With `adjustPan` the system moves the whole window instead.
 - **Safe area.** The view reports as insets only the parts of the system bars and the keyboard that overlap it, so an
   `NshView` below a toolbar gets no top inset. For edge-to-edge content, draw behind the system bars and let the app use
   `env(safe-area-inset-*)` padding / `safeAreaInsets()` (`safe_area()` in Rust).
 - **Configuration changes.** An activity recreated on rotation or a theme change destroys the view, and the app starts
-  again from scratch. To keep it running, declare the changes the activity handles itself; packaged NSH apps use:
+  again from scratch. To keep it running, declare the changes the activity handles itself. Packaged NSH apps use:
 
   ```xml
   <activity android:name=".MainActivity"
@@ -560,7 +560,7 @@ config of the app may override it). The release `nsh.aar` does not.
       android:windowSoftInputMode="adjustResize" />
   ```
 
-  `NshView` follows the new size, color scheme, font scale, display density and layout direction itself; the app keeps
+  `NshView` follows the new size, color scheme, font scale, display density and layout direction itself. The app keeps
   its state. Scroll positions are restored in logical coordinates within the new content bounds. Sticky views and
   open modal windows follow the new density too.
 - **Lifecycle.** Call `destroy()` when the hosting activity or fragment goes away.

@@ -7,13 +7,15 @@ demo: el-hover-card
 
 # HoverCard
 
-A hover card previews what its trigger points at without leaving the page: the profile behind a mention, the page
-behind a link, the quote behind a ticker. On the desktops and in desktop browsers it opens once the pointer has rested
-on the trigger for `openDelay` (600 ms). It stays open while the pointer moves from the trigger onto the card and back,
-and closes `closeDelay` (300 ms) after the pointer has left both. Like Radix's hover card, it follows the pointer only:
-the keyboard focus neither opens nor holds it. Escape and a press outside close it
-at once. On phones and
-tablets a press on the trigger opens and closes it, and a press outside closes it.
+A hover card shows a preview of what its trigger points at, without leaving the page. Examples are the profile behind
+a mention, the page behind a link and the quote behind a ticker.
+
+On the desktops and in desktop browsers, the card opens after the pointer rests on the trigger for `openDelay`
+(600 ms). It stays open while the pointer moves between the trigger and the card. It closes `closeDelay` (300 ms) after
+the pointer leaves both. Like Radix's hover card, it follows the pointer only: keyboard focus neither opens nor holds
+it. Escape and a press outside close it at once. On phones and tablets, a press on the trigger opens and closes it, and
+a press outside closes it.
+
 
 `HoverCard` from [`nsh/base`](../modules/nsh-base.md) draws nothing of its own: the trigger is your element, the
 popup and its content are yours.

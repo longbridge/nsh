@@ -7,18 +7,20 @@ group: platforms
 
 # GPUI
 
-The GPUI backend draws NSH apps with [GPUI](https://gpui-kit.com) (GPUI Fast), the GPU-accelerated UI framework that
-GPUI Kit is built on, on macOS, Windows and Linux alike. It is the backend for embedding in GPUI and GPUI Kit apps: an
-`AppView` is a GPUI view, so a GPUI or GPUI Kit app shows NSH apps, a Rust root of its own or TSX it loads, anywhere
-in its own element tree. Standalone apps
-run and are packaged with each desktop's own backend: [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32)
-and [Linux](./linux.md) (GTK). The core, the reactive graph, the renderer,
-Taffy layout and the native modules are the same as on every other platform, so one app runs
-everywhere. `os()` (`platform.os` in TSX) is the OS it runs on (macOS, Windows or Linux) and TSX's `desktop={{…}}`
-props apply.
+The GPUI backend draws NSH apps with [GPUI](https://gpui-kit.com) (GPUI Fast) on macOS, Windows and Linux. GPUI is
+the GPU-accelerated UI framework that GPUI Kit is built on.
+
+Use this backend to embed NSH in a GPUI or GPUI Kit app. An `AppView` is a GPUI view, so the app can place it anywhere
+in its element tree. The view runs a Rust root of the app's own or TSX that it loads.
+
+Standalone apps don't use this backend. They run and package with each desktop's own backend:
+[macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32) and [Linux](./linux.md) (GTK). The core, the reactive
+graph, the renderer, Taffy layout and the native modules are the same on every platform, so one app runs everywhere.
+`os()` (`platform.os` in TSX) is the OS the app runs on (macOS, Windows or Linux), and TSX's `desktop={{…}}` props
+apply.
 
 Every element and module of the [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32) and
-[Linux](./linux.md) (GTK) backends is there; where GPUI draws something its own way, [Differences](#differences)
+[Linux](./linux.md) (GTK) backends is there. Where GPUI draws something its own way, [Differences](#differences)
 says how.
 
 ## How it works
@@ -28,9 +30,9 @@ says how.
   node, as on Windows, and redraws only when a commit changed something.
 - **Text is shaped on the engine thread** with GPUI's text system (the app's own fonts), broken into lines by NSH;
   the main thread only paints the glyphs.
-- **One hop per commit.** The engine runs on its own thread; each commit is one closure sent to GPUI's main thread,
+- **One hop per commit.** The engine runs on its own thread. Each commit is one closure sent to GPUI's main thread,
   which notifies the view.
-- **Input** comes from GPUI's mouse, scroll, key and input method events; hit testing, presses, the responder system,
+- **Input** comes from GPUI's mouse, scroll, key and input method events. Hit testing, presses, the responder system,
   scrolling and text editing are the same logic as the Windows backend's. A zoomable scroll view zooms with a touchpad
   pinch around the pointer, and scrolls both ways while zoomed.
 
@@ -44,7 +46,7 @@ says how.
 - On Linux: a Vulkan driver, Wayland or X11 with `libxkbcommon`, GTK 3 and WebKitGTK 4.1 (web views) and GStreamer
   1.20 or later with its base and good plug-ins (videos). Web views need X11: on a Wayland desktop run the app under
   Xwayland (`WAYLAND_DISPLAY=` empty), else they show a placeholder. Building the runtime from a checkout also needs
-  the development packages; on Debian and Ubuntu:
+  the development packages. On Debian and Ubuntu:
 
   ```sh
   sudo apt-get install clang libclang-dev pkg-config libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev \
@@ -55,7 +57,7 @@ says how.
 ## Running an app
 
 A Rust app runs inside your GPUI app: embed its root with `AppView` ([Embedding in a GPUI app](#embedding-in-a-gpui-app))
-and `cargo run` the GPUI app; your crate and the app are one Cargo build. On its own, a Rust app runs on this OS's own
+and `cargo run` the GPUI app. Your crate and the app are one Cargo build. On its own, a Rust app runs on this OS's own
 backend (`nsh run --target macos`, `windows` or `linux`).
 
 A TSX app runs in the GPUI development host:
@@ -66,7 +68,7 @@ nsh run App.tsx --target gpui
 
 It opens the app in a GPUI window (1200×800 by default), as a GPUI app that embeds it shows it, with hot reload, logs in
 the terminal and the error overlay as on the other targets. The development host (`nsh-gpui-host`) runs in place on
-every OS, with no app bundle around it. In a checkout, `nsh run` builds it first; the distribution ships it in `runtime/gpui/`. The host also runs a built
+every OS, with no app bundle around it. In a checkout, `nsh run` builds it first. The distribution ships it in `runtime/gpui/`. The host also runs a built
 bundle on its own:
 
 ```sh
@@ -91,8 +93,8 @@ on need them installed, with GTK 3 and GStreamer's base and good plug-ins (Debia
 ## Embedding in a GPUI app
 
 The `nsh-platform-gpui` crate (from the NSH repository) gives a Rust GPUI app `AppView`: one NSH engine as a GPUI
-view (`Entity<AppView>`), which fills the space its parent element gives it. Each `AppView` is independent; several
-can run at once. Like the other platform crates it has every optional part of the runtime on by default; a GPUI app
+view (`Entity<AppView>`), which fills the space its parent element gives it. Each `AppView` is independent. Several
+can run at once. Like the other platform crates it has every optional part of the runtime on by default. A GPUI app
 that embeds only some apps can [leave parts out of its binary](./project-structure.md#leaving-parts-out-of-the-binary).
 It runs a Rust root, the root component of your crate:
 
@@ -183,7 +185,7 @@ the view owns its host window (`AppView::own_window`), regardless of whether you
   follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 - `AppView::set_theme_overrides(Some(json), cx)` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens):
   a theme file in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light
-  and dark mode while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start
+  and dark mode while the app's others stay. Classes such as `bg-primary` restyle at once, and apps loaded later start
   with it (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing). With
   a whole theme from `set_theme` / `set_theme_json`, the overrides win over that one's tokens, and each stays when the
   other changes.
@@ -208,17 +210,17 @@ What draws or behaves differently from the native desktop backends:
 
 - **Transforms**: rotated, skewed and projected views turn their backgrounds, borders, shadows and images (a turning
   photo is redrawn at each new angle, a one-color SVG icon is turned by the GPU), and canvases follow rotations and
-  skews; text stays upright and videos draw at their bounds.
+  skews. Text stays upright and videos draw at their bounds.
 - **Opacity** applies to each color rather than to a group, so overlapping children of a translucent view show
-  through each other; an image's opacity (a fade-in, a translucent view) changes in sixteenths.
+  through each other. An image's opacity (a fade-in, a translucent view) changes in sixteenths.
 - **Rounded clips** (`overflow: "hidden"` with a radius) round the backgrounds and images of the children, but text,
   borders, videos and native components are cut by the rectangle.
-- **Not drawn**: `filter: blur()`, `backdropFilter` and `mixBlendMode`; shadows show through translucent fills;
-  `borderCurve: "continuous"` draws circular corners.
+- **Not drawn**: `filter: blur()`, `backdropFilter` and `mixBlendMode`. Shadows show through translucent fills.
+  A `borderCurve: "continuous"` corner draws as a circular corner.
 - **Canvas text** is approximated: upright under rotations, made smaller rather than narrower for `maxWidth`,
   gradients paint it in one color, `strokeText` fills, its shadows are not blurred, and composite operations and
   `clearRect` do not apply to it.
-- **Video** plays on Linux (GStreamer); on macOS and Windows a video shows a placeholder and reports `onError`.
+- **Video** plays on Linux (GStreamer). On macOS and Windows a video shows a placeholder and reports `onError`.
 - **Web views** are native views above everything NSH draws at their place. On Linux they need X11 (see
   [Requirements](#requirements)); where pages stay black under Xwayland ("Failed to create GBM buffer" in the log),
   run the app with `WEBKIT_DISABLE_DMABUF_RENDERER=1`. On macOS and Windows clipping ancestors do not cut them and
@@ -226,7 +228,7 @@ What draws or behaves differently from the native desktop backends:
   not supported. An `incognito` web view keeps its pages' data as the OS's own backend does
   ([website data](./web-view-and-video.md#website-data)).
 - **Accessibility** goes through AccessKit: screen readers can activate, focus, set values and scroll elements into
-  view everywhere; custom actions and the context-menu action are not passed on yet.
+  view everywhere. Custom actions and the context-menu action are not passed on yet.
 
 For comparison, each native backend's own list: [macOS](./macos.md#what-differs-on-macos),
 [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux).
