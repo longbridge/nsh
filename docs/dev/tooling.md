@@ -1086,7 +1086,10 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
   `#[native_module]` at its root; an `nsh.json` beside it (or alone, for a TSX nshm) adds `"exports"` (specifier →
   TSX entry inside the nshm, the specifier being the package name or `name/...`), `"dependencies"`, `"nsh"` (a
   requirement on this CLI's version, as is the crate's `nsh-core` requirement) and `"platform"` (Rust only). An
-  `nsh.json` counts as a manifest only with `"exports"` or `"platform"`, or without a `Cargo.toml`.
+  `nsh.json` counts as a manifest only with `"exports"` or `"platform"`, or without a `Cargo.toml`. A version or an
+  `nsh-core` requirement inherited from the workspace (`version.workspace = true`, `nsh-core.workspace = true`) is read
+  from `workspace_manifest`, the nearest manifest from the crate's directory up with a `[workspace]`, so a root package
+  reads its own.
 - `fetch.rs`: versions and installation in `~/.nsh/nshms` (`nsh_bundler::nshm::installed_dir`, `NSH_HOME`). crates.io
   through its sparse index and `static.crates.io` downloads, checked against the index's sha256; Git through one bare
   clone per repository (`.git/<host>/<path>`), versions from semver tags, installed with `git archive`. Each version
