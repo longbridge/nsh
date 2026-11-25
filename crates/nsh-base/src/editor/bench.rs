@@ -2,6 +2,8 @@
 //!
 //! `cargo test --release -p nsh-base --lib bench_highlight_200k -- --ignored --nocapture`
 //!
+//! And what soft-wrapping one costs (`bench_wrap_200k`, the same way).
+//!
 //! The text is this repository's own code, Rust and TSX, repeated to
 //! 200 000 lines. The controller's task is played as it runs: each pass's
 //! job one after another (on a blocking thread there), the lines in view
@@ -16,7 +18,9 @@ use std::{
 use nsh_core::prelude::*;
 
 use super::{
+    buffer::Buffer,
     commands::{EditOptions, Outcome},
+    display::DisplayMap,
     highlight::{GUESS_CONTEXT, LOOKAHEAD, SLICE},
     state::{Font, State},
     types::{Selection, Selections},
@@ -291,4 +295,48 @@ fn bench_highlight_200k() {
     bench("Rust", "rust", &rust);
     let tsx = corpus("tsx", &["examples", "website/demos"], LINES);
     bench("TSX", "tsx", &tsx);
+}
+
+/// What laying `text` out in rows wrapped at 600 points costs, the median
+/// of five runs.
+fn bench_wrap(name: &str, text: &str) {
+    // 8 points a char, 16 a CJK one (wide), as a 13 point monospace font.
+    let measure: std::rc::Rc<dyn Fn(&str) -> Points> = std::rc::Rc::new(|s: &str| {
+        px(s.chars()
+            .map(|c| {
+                if unicode_width::UnicodeWidthChar::width(c) == Some(2) {
+                    16.0
+                } else {
+                    8.0
+                }
+            })
+            .sum())
+    });
+    let buffer = Buffer::new(text);
+    let mut map = DisplayMap::new(measure, 4);
+    map.set_wrap_width(Some(px(600.0)));
+    // The first run measures every char into the cache.
+    map.rebuild(&buffer);
+    let mut times: Vec<Duration> = (0..5)
+        .map(|_| {
+            let t = Instant::now();
+            map.rebuild(&buffer);
+            t.elapsed()
+        })
+        .collect();
+    println!(
+        "{name}: wrap {:>9.2?} ({} lines, {} rows)",
+        median(&mut times),
+        buffer.line_count(),
+        map.row_count()
+    );
+}
+
+#[test]
+#[ignore]
+fn bench_wrap_200k() {
+    let rust = corpus("rs", &["crates"], LINES);
+    bench_wrap("Rust", &rust);
+    let markdown = corpus("md", &["website/zh-CN"], LINES);
+    bench_wrap("Markdown (zh-CN)", &markdown);
 }
