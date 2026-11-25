@@ -9,8 +9,8 @@
 //! The logic is [`nsh_core::selection::SelectionModel`]'s; this module
 //! lists an area's texts for it ([`Texts`]: content, content boxes in the
 //! area's coordinates, CoreText hit tests), feeds it the mouse ([`down`],
-//! [`drag`], [`up`] from [`crate::input`]; Cmd+A, Cmd+C and Escape through
-//! [`crate::text`]) and sets each text's part of it, which
+//! [`drag`], [`up`] from [`crate::input`]; Cmd+A, Cmd+C, Escape and the
+//! keys that extend it ([`extend_by_key`]) through [`crate::text`]) and sets each text's part of it, which
 //! [`crate::text::draw`] highlights as a single text's selection. The
 //! surface keeps the selection of the area last pressed
 //! ([`AreaSelection`], in [`crate::text::Selected`]); a press anywhere else
@@ -28,10 +28,11 @@ use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Point, Points, ViewKind,
     geometry::{bounds, point, size},
     selection::{
-        KeptRows, SelectionModel, SelectionTexts, TextPosition, autoscroll_step, reading_order,
-        reorder,
+        Direction, KeptRows, Movement, SelectionModel, SelectionTexts, TextPosition,
+        autoscroll_step, reading_order, reorder,
     },
 };
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -499,6 +500,57 @@ pub(crate) fn down(
     active.show(surface, &texts);
     drop(selection_slot);
     report(surface);
+}
+
+/// A key extends the selection of the area last pressed (Shift with an
+/// arrow key, Home or End): its focus moves by `movement` towards
+/// `direction`, and the scroll views around the area show where it went.
+/// False when nothing was pressed in an area: the key scrolls instead.
+pub(crate) fn extend_by_key(
+    surface: &Rc<Surface>,
+    movement: Movement,
+    direction: Direction,
+) -> bool {
+    let caret = {
+        let mut slot = surface.selection.area.active.borrow_mut();
+        let Some(active) = slot.as_mut() else {
+            return false;
+        };
+        let Some(area) = active.area() else {
+            return false;
+        };
+        let texts = collect(&area);
+        // Content may have changed since the last batch looked.
+        active.model.texts_changed(&texts);
+        if active.model.focus().is_none() {
+            return false;
+        }
+        if active.model.extend(&texts, movement, direction) {
+            active.show(surface, &texts);
+        }
+        // In the focus's text view: the scroll views around it reveal it.
+        let focus = active.model.focus().map(|f| f.text);
+        active
+            .model
+            .focus_caret(&texts)
+            .zip(focus)
+            .map(|(caret, i)| {
+                let ((x, y), z) = texts.origins[i];
+                let rect = CGRect::new(
+                    CGPoint::new(
+                        f64::from((caret.left().0 - x) / z),
+                        f64::from((caret.top().0 - y) / z),
+                    ),
+                    CGSize::new(0.0, f64::from(caret.size.height.0 / z)),
+                );
+                (texts.views[i].clone(), rect)
+            })
+    };
+    report(surface);
+    if let Some((view, rect)) = caret {
+        crate::scroll::reveal_rect(surface, &view, rect);
+    }
+    true
 }
 
 /// The primary button, pressed in `area`, moved by `(dx, dy)` from where it
