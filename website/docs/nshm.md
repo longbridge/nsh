@@ -675,7 +675,7 @@ pub fn Gauge(props: GaugeProps) -> impl IntoElement {
 }
 ```
 
-The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-core = "0.6"`), which `nsh add` checks against the running `nsh` before anything compiles. Its TypeScript declarations are generated from its Rust types, so apps check their TSX against it as they do against their own crate.
+The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-core = "0.6"`, or its workspace's with `nsh-core.workspace = true`), which `nsh add` checks against the running `nsh` before anything compiles. An nshm developed in a Cargo workspace takes its version and this requirement from the workspace as Cargo does, its own manifest's when it is the workspace's root package. Its TypeScript declarations are generated from its Rust types, so apps check their TSX against it as they do against their own crate.
 
 [nsh-omarchy's `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) is a complete one: its components, exported to TSX by `#[native_module("nsh-omarchy")]`, with the `Omarchy` theme module.
 
