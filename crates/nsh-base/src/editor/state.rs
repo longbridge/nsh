@@ -169,6 +169,38 @@ pub(crate) struct RulerMark {
 /// A rectangle to draw, in the coordinates of the rows' box.
 pub(crate) type Rect = Bounds<Points>;
 
+/// What an input method is composing and where it shows: in the primary
+/// caret's display row, at the caret, before the commit puts it in the
+/// text.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Composing {
+    /// The composed text, tabs as spaces.
+    pub(crate) text: String,
+    /// Where it goes in (the primary caret).
+    pub(crate) at: usize,
+    /// The display row it shows in.
+    pub(crate) row: usize,
+    /// Its width in the editor's font.
+    pub(crate) width: Points,
+}
+
+impl Composing {
+    /// `rect`, drawn over bytes `span` of display row `row`, where it shows
+    /// while this composes: what follows the caret moves aside by the
+    /// composed text's width, what spans the caret widens by as much.
+    pub(crate) fn shift(&self, row: usize, span: Range<usize>, mut rect: Rect) -> Rect {
+        if row != self.row {
+            return rect;
+        }
+        if span.start >= self.at {
+            rect.origin.x = rect.origin.x + self.width;
+        } else if span.end > self.at {
+            rect.size.width = rect.size.width + self.width;
+        }
+        rect
+    }
+}
+
 /// The editor's state.
 pub(crate) struct State {
     pub(crate) buffer: Buffer,
@@ -727,8 +759,27 @@ impl State {
 
     // What the view draws.
 
-    /// The content of display row `row`.
-    pub(crate) fn row_content(&self, row: usize) -> RowContent {
+    /// What an input method is composing ([`Composing`]), when it is.
+    pub(crate) fn composing(&self) -> Option<Composing> {
+        let text = self.composition.as_deref()?;
+        let at = self.primary_head();
+        let before = self.buffer.snapshot();
+        let (row, _) = self.display.layout(&before).locate(at);
+        let tab = " ".repeat(self.display.tab_size().max(1) as usize);
+        let text = text.replace('\t', &tab);
+        let width = self.display.text_width(&text);
+        Some(Composing {
+            text,
+            at,
+            row,
+            width,
+        })
+    }
+
+    /// The content of display row `row`, with what an input method is
+    /// composing when it shows there (`composing`, from
+    /// [`Self::composing`]).
+    pub(crate) fn row_content(&self, row: usize, composing: Option<&Composing>) -> RowContent {
         if row >= self.display.row_count() {
             return RowContent::default();
         }
@@ -779,7 +830,9 @@ impl State {
             cuts.push(r.start);
             cuts.push(r.end);
         }
-        let mut composed = self.composed_span(row, &info.range, &decorations, tokens, line_start);
+        let mut composed = composing
+            .filter(|c| c.row == row)
+            .map(|c| self.composed_span(c, &info.range, &decorations, tokens, line_start));
         if let Some((at, _)) = &composed {
             cuts.push(*at);
         }
@@ -872,28 +925,21 @@ impl State {
         }
     }
 
-    /// What an input method is composing, as a span of display row `row`
-    /// (whose bytes are `range`), with where it goes in: at the primary
-    /// caret, when the caret is drawn on this row. It is styled as the
-    /// commit will be: the edit puts it inside the decorations and tokens
-    /// around the caret (`decorations`, `tokens`), not in those that start
-    /// or end there (`diagnostics::adjust`). The rest of the row keeps its
-    /// own spans, so what follows the caret moves aside as it is.
+    /// What an input method is composing, as a span of the row whose
+    /// bytes are `range`, with where it goes in. It is styled as the commit
+    /// will be: the edit puts it inside the decorations and tokens around
+    /// the caret (`decorations`, `tokens`), not in those that start or end
+    /// there (`diagnostics::adjust`). The rest of the row keeps its own
+    /// spans, so what follows the caret moves aside as it is.
     fn composed_span(
         &self,
-        row: usize,
+        composing: &Composing,
         range: &Range<usize>,
         decorations: &[(usize, Range<usize>)],
         tokens: &[(Range<usize>, Token)],
         line_start: usize,
-    ) -> Option<(usize, Span)> {
-        let text = self.composition.as_deref()?;
-        let head = self.primary_head();
-        let before = self.buffer.snapshot();
-        if self.display.layout(&before).locate(head).0 != row {
-            return None;
-        }
-        let at = head.clamp(range.start, range.end);
+    ) -> (usize, Span) {
+        let at = composing.at.clamp(range.start, range.end);
         let inside = |r: &Range<usize>| r.start < at && at < r.end;
         let over: Vec<(usize, Range<usize>)> = decorations
             .iter()
@@ -907,9 +953,8 @@ impl State {
                     .find(|(r, _)| inside(&(line_start + r.start..line_start + r.end)))
                     .map(|(_, t)| *t)
             });
-        let tab = " ".repeat(self.display.tab_size().max(1) as usize);
         let span = Span {
-            text: text.replace('\t', &tab),
+            text: composing.text.clone(),
             token,
             decorations: over
                 .iter()
@@ -918,7 +963,7 @@ impl State {
             tags: SpanTags::default(),
             composition: true,
         };
-        Some((at, span))
+        (at, span)
     }
 
     /// The diagnostics that can overlap bytes `low..=high`, by start: those
@@ -1124,6 +1169,7 @@ impl State {
         let (first_row, _) = layout.locate(range.start);
         let (last_row, _) = layout.locate(range.end);
         let space = self.display.space_width();
+        let composing = self.composing();
         for row in first_row.max(rows.start)..=last_row.min(rows.end.saturating_sub(1)) {
             let info = self.display.row(row);
             let start = range.start.max(info.range.start);
@@ -1140,10 +1186,11 @@ impl State {
                 x1 += space;
             }
             if x1 > x0 {
-                out.push(Bounds::new(
-                    Pt::new(x0, lh * row as f32),
-                    Size::new(x1 - x0, lh),
-                ));
+                let rect = Bounds::new(Pt::new(x0, lh * row as f32), Size::new(x1 - x0, lh));
+                out.push(match &composing {
+                    Some(c) => c.shift(row, start..end, rect),
+                    None => rect,
+                });
             }
         }
         out
@@ -1238,6 +1285,7 @@ impl State {
         rows: Range<usize>,
     ) -> Vec<(Rect, EditorDiagnosticSeverity)> {
         let (start, end) = self.rows_offsets(rows.clone());
+        let composing = self.composing();
         let mut out = Vec::new();
         for mark in self.diagnostics_near(start, end) {
             if mark.range.end < start {
@@ -1256,7 +1304,11 @@ impl State {
                 continue;
             }
             let size = Size::new(self.display.space_width(), self.line_height());
-            out.push((Bounds::new(at, size), mark.item.severity));
+            let mut rect = Bounds::new(at, size);
+            if let Some(c) = &composing {
+                rect = c.shift(row, range.clone(), rect);
+            }
+            out.push((rect, mark.item.severity));
         }
         out
     }
@@ -1403,6 +1455,7 @@ impl State {
     pub(crate) fn whitespace_marks(&self, rows: Range<usize>) -> Vec<(Rect, String)> {
         let lh = self.line_height();
         let count = self.display.row_count();
+        let composing = self.composing();
         let mut out = Vec::new();
         for row in rows.start.min(count)..rows.end.min(count) {
             for ws in self.display.whitespace(&self.buffer, row) {
@@ -1411,8 +1464,29 @@ impl State {
                 } else {
                     "·".repeat(ws.count)
                 };
-                let at = Pt::new(ws.x, lh * row as f32);
-                out.push((Bounds::new(at, Size::new(ws.width, lh)), mark));
+                let span = ws.start..ws.start + if ws.tab { 1 } else { ws.count };
+                let rect = Bounds::new(Pt::new(ws.x, lh * row as f32), Size::new(ws.width, lh));
+                match &composing {
+                    // A composition inside a run of spaces splits it: the
+                    // spaces after it move aside.
+                    Some(c) if c.row == row && span.start < c.at && c.at < span.end => {
+                        let before = c.at - span.start;
+                        let width = ws.width * (before as f32 / ws.count as f32);
+                        out.push((
+                            Bounds::new(rect.origin, Size::new(width, lh)),
+                            "·".repeat(before),
+                        ));
+                        out.push((
+                            Bounds::new(
+                                Pt::new(rect.origin.x + width + c.width, rect.origin.y),
+                                Size::new(ws.width - width, lh),
+                            ),
+                            "·".repeat(ws.count - before),
+                        ));
+                    }
+                    Some(c) => out.push((c.shift(row, span, rect), mark)),
+                    None => out.push((rect, mark)),
+                }
             }
         }
         out
@@ -1784,7 +1858,7 @@ mod tests {
     }
 
     fn spans(st: &State, line: usize) -> Vec<(String, Option<Token>, usize)> {
-        st.row_content(st.display.line_row(line))
+        st.row_content(st.display.line_row(line), st.composing().as_ref())
             .spans
             .into_iter()
             .map(|span| (span.text, span.token, span.decorations.len()))
@@ -1852,7 +1926,7 @@ mod tests {
             st.composition = Some("ni".to_owned());
             let row = st.display.line_row(st.buffer.line_of(at));
             let spans = st
-                .row_content(row)
+                .row_content(row, st.composing().as_ref())
                 .spans
                 .into_iter()
                 .map(|s| (s.text, s.token, s.decorations.len(), s.composition))
@@ -1901,13 +1975,82 @@ mod tests {
         st.selections = Selections::single(Selection::caret(11));
         st.composition = Some("ni".to_owned());
         assert_eq!(
-            st.row_content(st.display.line_row(0)).line_decorations,
+            st.row_content(st.display.line_row(0), st.composing().as_ref())
+                .line_decorations,
             vec![0]
         );
         assert_eq!(
             spans(&st, 1),
             vec![("next".to_owned(), Some(Token::Keyword), 1)]
         );
+    }
+
+    #[test]
+    fn a_composition_moves_the_marks_after_it_aside() {
+        // Every char is 8 points wide: "ni" is 16.
+        let mut st = state("ab cd ef\na  b\n");
+        let compose = |st: &mut State, anchor: usize, head: usize| {
+            st.selections = Selections::single(Selection {
+                anchor,
+                head,
+                ..Selection::caret(head)
+            });
+            st.composition = Some("ni".to_owned());
+        };
+        let xs = |rects: Vec<Rect>| -> Vec<(f32, f32)> {
+            rects
+                .into_iter()
+                .map(|r| (r.origin.x.0, r.size.width.0))
+                .collect()
+        };
+        compose(&mut st, 3, 3);
+        assert_eq!(
+            st.composing().map(|c| (c.row, c.at, c.width)),
+            Some((0, 3, px(16.0)))
+        );
+        // Before the caret: as it is; after it: aside; across it: wider.
+        assert_eq!(xs(st.range_rects(0..2, 0..2, false)), vec![(0.0, 16.0)]);
+        assert_eq!(xs(st.range_rects(3..5, 0..2, false)), vec![(40.0, 16.0)]);
+        assert_eq!(xs(st.range_rects(0..8, 0..2, false)), vec![(0.0, 80.0)]);
+        // Other rows stay.
+        assert_eq!(xs(st.range_rects(9..10, 0..2, false)), vec![(0.0, 8.0)]);
+        // A selection ending at the caret stays, one starting there (a
+        // reversed one) moves aside.
+        compose(&mut st, 1, 3);
+        assert_eq!(xs(st.selection_rects(0..2)), vec![(8.0, 16.0)]);
+        compose(&mut st, 5, 3);
+        assert_eq!(xs(st.selection_rects(0..2)), vec![(40.0, 16.0)]);
+        // The space before the caret stays, the one after it moves aside.
+        compose(&mut st, 3, 3);
+        let marks = |st: &State| -> Vec<(f32, f32, String)> {
+            st.whitespace_marks(0..2)
+                .into_iter()
+                .map(|(r, mark)| (r.origin.x.0, r.size.width.0, mark))
+                .collect()
+        };
+        let dot = |x: f32, width: f32, mark: &str| (x, width, mark.to_owned());
+        assert_eq!(
+            marks(&st),
+            vec![
+                dot(16.0, 8.0, "·"),
+                dot(56.0, 8.0, "·"),
+                dot(8.0, 16.0, "··")
+            ]
+        );
+        // Inside a run of spaces, the run splits around the composition.
+        compose(&mut st, 11, 11);
+        assert_eq!(
+            marks(&st),
+            vec![
+                dot(16.0, 8.0, "·"),
+                dot(40.0, 8.0, "·"),
+                dot(8.0, 8.0, "·"),
+                dot(32.0, 8.0, "·"),
+            ]
+        );
+        // Without a composition, nothing moves.
+        st.composition = None;
+        assert_eq!(xs(st.range_rects(3..5, 0..2, false)), vec![(24.0, 16.0)]);
     }
 
     #[test]
@@ -1935,9 +2078,9 @@ mod tests {
             vec![("line".to_owned(), None, 1), (" 1200".to_owned(), None, 0)]
         );
         let row = st.display.line_row(1200);
-        assert_eq!(st.row_content(row).line_decorations, vec![2000]);
+        assert_eq!(st.row_content(row, None).line_decorations, vec![2000]);
         let row = st.display.line_row(1600);
-        assert!(st.row_content(row).line_decorations.is_empty());
+        assert!(st.row_content(row, None).line_decorations.is_empty());
         // Edits keep the window right: a line inserted above shifts all.
         insert(&mut st, 0, "\n");
         assert_eq!(spans(&st, 1201)[0], ("line".to_owned(), None, 1));
@@ -2076,7 +2219,7 @@ mod tests {
     }
 
     fn tag_spans(st: &State, line: usize) -> Vec<(String, bool, bool)> {
-        st.row_content(st.display.line_row(line))
+        st.row_content(st.display.line_row(line), None)
             .spans
             .into_iter()
             .map(|span| (span.text, span.tags.unnecessary, span.tags.deprecated))
@@ -2127,7 +2270,7 @@ mod tests {
         // Tagged hints draw no underline under their text; the others
         // underline it in their severity's color, the most serious on top.
         let severities = |st: &State, line: usize| -> Vec<_> {
-            st.row_content(st.display.line_row(line))
+            st.row_content(st.display.line_row(line), None)
                 .spans
                 .into_iter()
                 .map(|span| span.tags.severity)

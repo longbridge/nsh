@@ -1053,6 +1053,7 @@ fn match_rects(ed: Ed) -> impl IntoElement {
         ed.text_rev.get();
         ed.marks_rev.get();
         ed.sel_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let rects = ed.st.borrow().match_rects(rows);
         rects
@@ -1079,6 +1080,7 @@ fn selection_rects(ed: Ed) -> impl IntoElement {
     dynamic(move || {
         ed.text_rev.get();
         ed.sel_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let rects = ed.st.borrow().selection_rects(rows);
         rects
@@ -1100,6 +1102,7 @@ fn bracket_rects(ed: Ed) -> impl IntoElement {
     dynamic(move || {
         ed.text_rev.get();
         ed.sel_rev.get();
+        ed.composing.with(|_| ());
         if !ed.focused.get() {
             return Vec::new();
         }
@@ -1138,20 +1141,22 @@ fn row_view(
 ) -> impl IntoElement {
     let props = ed.props;
     let row = move || slot.get().1;
+    // What an input method composes in this row: only the row it shows in
+    // (and the one it leaves) changes with it.
+    let composing = {
+        let composing = ed.composing;
+        computed(move || {
+            let row = row();
+            composing.with(|c| c.as_ref().filter(|c| c.row == row).cloned())
+        })
+    };
     let content = {
         let ed = ed.clone();
         computed(move || {
             ed.text_rev.get();
             ed.hl_rev.get();
             ed.marks_rev.get();
-            ed.composition_rev.get();
-            let st = ed.st.borrow();
-            // While an input method composes, its text goes along with the
-            // primary caret to whichever row the caret is on.
-            if st.composition.is_some() {
-                ed.sel_rev.get();
-            }
-            st.row_content(row())
+            composing.with(|c| ed.st.borrow().row_content(row(), c.as_ref()))
         })
     };
     let indent = {
@@ -1373,6 +1378,7 @@ fn diagnostic_marks(ed: Ed) -> impl IntoElement {
     dynamic(move || {
         ed.text_rev.get();
         ed.marks_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let marks = ed.st.borrow().diagnostic_rects(rows);
         marks
@@ -1389,12 +1395,13 @@ fn diagnostic_marks(ed: Ed) -> impl IntoElement {
     })
 }
 
-/// The placeholder, while the text is empty.
+/// The placeholder, while the text is empty and no input method composes
+/// (the composition shows where it would).
 fn placeholder(ed: Ed) -> impl IntoElement {
     let props = ed.props;
     dynamic(move || {
         ed.text_rev.get();
-        let empty = ed.st.borrow().buffer.is_empty();
+        let empty = ed.st.borrow().buffer.is_empty() && ed.composing.with(|c| c.is_none());
         let text_ = props.placeholder.get()?;
         if !empty {
             return None;
@@ -1585,6 +1592,7 @@ fn whitespace_marks(ed: Ed) -> impl IntoElement {
             return Vec::new();
         }
         ed.text_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let marks = ed.st.borrow().whitespace_marks(rows);
         marks

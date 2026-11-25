@@ -20,7 +20,7 @@ use super::{
     layout::{self, AutoScroll},
     search,
     select::{ExpandStack, SelectionHistory},
-    state::{Font, State},
+    state::{Composing, Font, State},
     types::{Selection, Selections},
 };
 use crate::sink_text::{sink_edit, utf16_to_byte};
@@ -95,8 +95,10 @@ pub(crate) struct Ed {
     pub(crate) sel_rev: Signal<u64>,
     /// Diagnostics, decorations or search matches changed.
     pub(crate) marks_rev: Signal<u64>,
-    /// What an input method composes changed (the composing row's content).
+    /// What an input method composes changed.
     pub(crate) composition_rev: Signal<u64>,
+    /// What an input method is composing and where it shows (`follow_composition`).
+    pub(crate) composing: Signal<Option<Composing>>,
     /// The vertical scroll view's offset.
     pub(crate) scroll_y: Signal<Points>,
     /// The horizontal scroll view's offset.
@@ -183,6 +185,7 @@ impl Ed {
             sel_rev: signal(0),
             marks_rev: signal(0),
             composition_rev: signal(0),
+            composing: signal(None),
             scroll_y: signal(px(0.0)),
             scroll_x: signal(px(0.0)),
             viewport: signal(Size::default()),
@@ -212,6 +215,7 @@ impl Ed {
             definition: super::definition::Definition::new(),
         };
         ed.follow_props();
+        ed.follow_composition();
         ed.follow_hooks();
         ed.follow_completion();
         ed.follow_definition();
@@ -378,6 +382,26 @@ impl Ed {
             }
             ed.marks_rev.update(|r| *r += 1);
             ed.bump_text();
+        });
+    }
+
+    /// Keeps `composing` up to date. Without a composition only its start
+    /// is followed: carets and edits then cost nothing here. The rows and
+    /// marks read `composing`, so a keystroke of an input method redraws
+    /// the composing row alone (and the marks over the rows).
+    fn follow_composition(&self) {
+        let ed = self.clone();
+        effect(move || {
+            ed.composition_rev.get();
+            if ed.st.borrow().composition.is_some() {
+                // The caret, the text or its layout move it.
+                ed.sel_rev.get();
+                ed.text_rev.get();
+            }
+            let composing = ed.st.borrow().composing();
+            if ed.composing.with_untracked(|c| *c != composing) {
+                ed.composing.set(composing);
+            }
         });
     }
 

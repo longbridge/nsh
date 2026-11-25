@@ -116,7 +116,8 @@ extends the selection to the pointer again; it stops when the pointer comes back
 
 Revisions (`Signal<u64>` in `Ed`) keep a change to the parts that depend on it: `text_rev` (the text or its layout),
 `hl_rev` (highlighting progressed), `sel_rev` (selections), `marks_rev` (diagnostics, decorations, matches),
-`composition_rev` (what an input method composes). The state
+`composition_rev` (what an input method composes). `composing` holds where a composition shows; each row and mark
+painter reads that, so a composing keystroke recomputes only the composing row's content. The state
 itself lives in an `Rc<RefCell<State>>` outside the reactive graph.
 
 ### Typed text and input methods
@@ -135,7 +136,9 @@ own caret without a key (an input method that types a pair of brackets and puts 
 caret then follows it (`sink_selection`), over text the editor holds the same way. While an input method composes, its text
 is a span of the primary caret's row (the `composition` part, underlined) and the carets hide; the commit arrives as
 typed text. The row keeps its tokens and decorations, and the composed span takes those its commit will fall inside
-(the ones around the caret, not those starting or ending there, as edits map them). The sink is emptied when the caret moves (unless a composition is under way) and once it holds 256 bytes.
+(the ones around the caret, not those starting or ending there, as edits map them). Marks drawn over the row after the
+caret (selections, matches, brackets, whitespace, diagnostics, links) move aside by the composed text's width, and the
+placeholder hides while a composition shows in an empty editor. The sink is emptied when the caret moves (unless a composition is under way) and once it holds 256 bytes.
 A paste reaches the sink as a paste event (`PasteBehavior::Report`) and goes through `Editing::paste`; text copied
 from carets (whole lines) pastes back as whole lines.
 
