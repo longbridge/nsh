@@ -279,9 +279,12 @@ impl JsValue for PartStyle {
     }
 }
 
-/// `styles` merged in order, later ones winning, as a component merges the
-/// styles of an element's parts: their declarations and their typed styles
-/// ([`Style::then`]). Without typed styles (a TSX app's) the declarations
+/// `styles` merged in order, as a component merges the styles of an
+/// element's parts: their declarations and their typed styles
+/// ([`Style::then`]). Later ones win among declarations and among typed
+/// styles of one kind; an element still applies declarations after typed
+/// styles, and bound typed styles after static ones. Without typed styles
+/// (a TSX app's) the declarations
 /// are gathered in one pass, as [`Style::from_decls`] does, since `then`
 /// would copy those gathered so far at each step; one style is kept as it is.
 pub(crate) fn merge_styles<'a, I>(styles: I) -> Style

@@ -177,10 +177,11 @@ reasons: `reactive-components.md`.
   Partial<Edges>`, as the host prop `hitSlop` takes it), `Option`, `Vec`, `JsonValue`, `element::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`; a component merges its parts' styles with
-  `text_view::merge_styles`, which keeps their typed styles where `from_decls` over `decls()` drops them: later ones
-  win among declarations and among typed styles of one kind, static or bound, while an element applies its
-  declarations after its typed styles and its bound typed styles after its static ones, so a component applies an
-  app's part style after its own bound styles), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
+  `Style::then`, which keeps their typed styles where `from_decls` over `decls()` drops them (in `nsh-base`,
+  `text_view::merge_styles`, which gathers declarations alone in one pass): later ones win among declarations and,
+  at equal variant rank, among typed styles of one kind, static or bound, while an element applies its declarations
+  after its typed styles and its bound typed styles after its static ones, so a component applies an app's part
+  style after its own bound styles), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
   instance each is a memo of its own, so a new value from JS or from a parent reaches only what read it
   (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. The JS face
   decodes a prop when JS sets it and sends the typed value (`Prop::RustProp`, an `AnyValue`); one of the wrong type
