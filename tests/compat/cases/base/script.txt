@@ -4773,6 +4773,20 @@ expect Observed: true 1 日Seed
 # that emits its own payload under that name.
 covers [events] onCompositionChange
 
+# base-rich-editor-readonly-input
+tap id:case-base-rich-editor-readonly-input
+expect Doc: Notes
+# Drive the editor's native input as a soft keyboard does: a typed
+# character, then an input method's commit.
+event label:ReadonlyNotes onChange text=x
+expect Heard: x:false
+event label:ReadonlyNotes onCompositionChange composing=true text=ni
+event label:ReadonlyNotes onChange text=x你
+event label:ReadonlyNotes onCompositionChange composing=false text=""
+expect Heard: x:false 你:true
+expect Doc: Notes
+covers [events] RichEditor.onReadonlyInput
+
 # base-rich-editor-accessory
 tap id:case-base-rich-editor-accessory
 # The input the editor types with names the bar, which is mounted.

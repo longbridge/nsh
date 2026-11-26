@@ -61,6 +61,17 @@ observes the session's updated `composing` value and any committed text, so an a
 while composition is active and release it when it ends. Starting or canceling composition can keep the document
 and its revision unchanged; `onChange` reports document edits.
 
+`onReadonlyInput({ text, composed })` reports text typed into an editor that cannot be edited (`editable={false}`,
+the editor's `editable: false` / `setEditable(false)`, or a plugin's `editable`), which stays out of the document: a hardware keyboard's characters, a software keyboard's
+typing and an input method's commit (`composed: true`), once per change. An app can use it to offer editing, as a
+reading view that turns to editing when someone starts typing. Text the app inserts itself, deleting and pasting are not reported. A keyboard that replaces a word it typed
+(autocorrect, a picked suggestion) reports the new word again, so treat the reports as a sign of typing, not as the
+text to keep.
+
+```tsx
+<RichEditor editor={editor} editable={false} onReadonlyInput={() => showEditHint()} />
+```
+
 ## Styling
 
 The editor draws the document with the app's look: `classes` and `styles` style its parts (`root`, `content`, `caret`,
