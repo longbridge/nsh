@@ -11,7 +11,7 @@
 //! UAX #14, enough for app text.
 
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     ops::Range,
     rc::Rc,
     sync::{Arc, OnceLock},
@@ -48,9 +48,6 @@ pub(crate) struct WebTextEngine {
     /// How much wider the DOM draws an emoji cluster in a font than canvas
     /// measures it.
     emoji: RefCell<FxHashMap<(Arc<str>, String), f32>>,
-    /// Whether a width since the caches were cleared has an emoji's excess:
-    /// those are stale once the pixel ratio changes.
-    emoji_measured: Cell<bool>,
     /// Ascent and descent of a font.
     metrics: RefCell<FxHashMap<Arc<str>, (f32, f32)>>,
     /// The x height of a font (attachments in the middle of a line).
@@ -62,11 +59,10 @@ pub(crate) struct WebTextEngine {
 
 impl WebTextEngine {
     /// Forgets the measurements: a font finished loading, so what was
-    /// measured with a fallback font is stale.
+    /// measured with a fallback font is stale, or the pixel ratio changed.
     pub(crate) fn clear_caches(&self) {
         self.widths.borrow_mut().clear();
         self.emoji.borrow_mut().clear();
-        self.emoji_measured.set(false);
         self.metrics.borrow_mut().clear();
         self.x_heights.borrow_mut().clear();
         // Their pieces' widths are stale too.
@@ -124,17 +120,10 @@ impl WebTextEngine {
         w
     }
 
-    /// Whether a width measured since the caches were cleared has an
-    /// emoji's excess ([`emoji_excess`]).
-    pub(crate) fn emoji_measured(&self) -> bool {
-        self.emoji_measured.get()
-    }
-
     /// How much wider the DOM draws emoji `cluster` than canvas measures
     /// it: measured in the DOM once per font, so a line being typed is
     /// still measured on canvas.
     fn cluster_excess(&self, font: &Arc<str>, cluster: &str) -> f32 {
-        self.emoji_measured.set(true);
         let key = (font.clone(), cluster.to_owned());
         if let Some(&e) = self.emoji.borrow().get(&key) {
             return e;

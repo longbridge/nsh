@@ -240,7 +240,10 @@ fn content(rv: Rv) -> impl IntoElement {
         false => up.end_sweep(),
     })
     .on_responder_terminate(move |_: &ResponderEvent| match desktop {
-        true => end.release(),
+        true => {
+            end.cancel_table_press();
+            end.release()
+        }
         false => end.end_sweep(),
     })
     // Keep the intrinsic extent separate from the content box, whose

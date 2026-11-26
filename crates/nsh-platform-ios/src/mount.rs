@@ -621,6 +621,8 @@ struct Slot {
     image_options: nsh_core::ImageOptions,
     /// The placeholder's load in flight.
     placeholder_key: Option<String>,
+    /// The video poster's load in flight.
+    poster_key: Option<String>,
     /// The image (not its placeholder) is shown.
     image_shown: bool,
     /// Interaction states the core wants reported (`tailwind::state`).
@@ -686,6 +688,7 @@ impl Slot {
             image_key: None,
             image_options: nsh_core::ImageOptions::default(),
             placeholder_key: None,
+            poster_key: None,
             image_shown: false,
             tracked: 0,
             states: 0,
@@ -3733,6 +3736,30 @@ impl Mounter {
                 }
                 continue;
             }
+            let video_poster = match self.slot(id) {
+                Some(s)
+                    if s.poster_key.as_deref() == Some(key)
+                        && matches!(&s.native, Native::Video(_)) =>
+                {
+                    match &s.native {
+                        Native::Video(v) => Some(v.poster_mode()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some(mode) = video_poster {
+                if let Some(s) = self.slot_mut(id) {
+                    s.poster_key = None;
+                    if let (Native::Video(v), Ok(decoded)) = (&mut s.native, &result) {
+                        v.show_poster(decoded.image.clone(), mode);
+                    }
+                }
+                if let Err(message) = &result {
+                    log::warn!("video poster failed: {message}");
+                }
+                continue;
+            }
             if self.shaders.pictured()
                 && let Some(s) = self.views.get(id as usize).and_then(Option::as_ref)
             {
@@ -5394,11 +5421,49 @@ impl Mounter {
     /// Properties of a web view or video.
     fn set_native_props(&mut self, id: NodeId, props: nsh_core::NativeProps) {
         use nsh_core::NativeProps as P;
-        let Some(s) = self.slot_mut(id) else { return };
-        match (&mut s.native, props) {
-            (Native::Web(v), P::WebView(p)) => v.configure(*p),
-            (Native::Video(v), P::Video(p)) => v.configure(*p),
-            _ => {}
+        let mut poster = None;
+        {
+            let Some(s) = self.slot_mut(id) else { return };
+            match (&mut s.native, props) {
+                (Native::Web(v), P::WebView(p)) => v.configure(*p),
+                (Native::Video(v), P::Video(p)) => {
+                    v.configure(*p);
+                    poster = v.take_poster_request();
+                }
+                _ => {}
+            }
+        }
+        if let Some(uri) = poster {
+            self.load_video_poster(id, &uri);
+        }
+    }
+
+    /// Loads video `id`'s poster at the video's display size.
+    fn load_video_poster(&mut self, id: NodeId, uri: &str) {
+        let (size, mode) = {
+            let Some(s) = self.slot(id) else { return };
+            let Native::Video(v) = &s.native else { return };
+            (v.view.bounds().size, v.poster_mode())
+        };
+        let scale = self.display_scale();
+        let max_pixels = (size.width.max(size.height) * scale).ceil() as u32;
+        let key = crate::image::ImageLoader::key(uri, max_pixels, Default::default());
+        match self
+            .images
+            .request(id, uri, None, max_pixels, scale, Default::default())
+        {
+            crate::image::Request::Ready(decoded) => {
+                if let Some(s) = self.slot_mut(id)
+                    && let Native::Video(v) = &mut s.native
+                {
+                    v.show_poster(decoded.image, mode);
+                }
+            }
+            crate::image::Request::Pending => {
+                if let Some(s) = self.slot_mut(id) {
+                    s.poster_key = Some(key);
+                }
+            }
         }
     }
 

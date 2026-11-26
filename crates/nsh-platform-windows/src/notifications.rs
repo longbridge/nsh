@@ -150,6 +150,12 @@ pub(crate) fn start(id: &str, name: &str, icon: Option<&Path>) {
 
 /// Applies `command`, reporting to `surface`. On the UI thread.
 pub(crate) fn command(surface: &Rc<Surface>, command: &NotificationCommand) {
+    #[cfg(test)]
+    ON_COMMAND.with(|hook| {
+        if let Some(f) = &*hook.borrow() {
+            f();
+        }
+    });
     match command {
         NotificationCommand::SetBadge(count) => {
             BADGE.set(*count);
@@ -183,6 +189,12 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &NotificationCommand) {
         }
         _ => {}
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Called as a notification command runs, for tests.
+    pub(crate) static ON_COMMAND: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
 }
 
 /// The message the shell sends a window when its taskbar button is made: the
