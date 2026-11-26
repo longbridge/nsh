@@ -178,6 +178,7 @@ struct Sink {
     /// The sink's own caret as the platform last reported it (UTF-16), to
     /// be read against the text it belongs to (`follow_sink_caret`).
     reported: Option<u32>,
+    /// The text the platform last reported, once the sink was set since.
     emptied: Option<String>,
     composing: bool,
     /// The composition whose commit is still to come (its id).
@@ -978,20 +979,21 @@ impl Rv {
             // text before the caret.
             let set = std::mem::take(&mut sink.text);
             let (base, caret) = match sink.emptied.take() {
-                // The text edits the text set for the caret: the platform
-                // took it.
-                Some(old) if common_prefix(&set, text) > common_prefix(&old, text) => {
-                    let len = set.len();
-                    (set, len)
-                }
                 // The platform dropped the value set: the text still extends
-                // what it held. A text equal to what it held was typed again
-                // into the emptied sink: platforms report each edit, so an
-                // edit to the text the platform kept would show. Linux reports
-                // the edits made before it is idle as one: there, the text
-                // deleted and typed again before the empty value arrives reads
-                // the same, and is inserted a second time.
-                Some(old) if text != old && text.starts_with(old.as_str()) => {
+                // what it last reported, at least as far as it extends the
+                // value set (read against the value set, the edit would have
+                // typed again the text the platform held). A text equal to
+                // what it held was typed again into the emptied sink:
+                // platforms report each edit, so an edit to the text the
+                // platform kept would show. Linux reports the edits made
+                // before it is idle as one: there, the text deleted and typed
+                // again before the empty value arrives reads the same, and is
+                // inserted a second time.
+                Some(old)
+                    if text != old
+                        && text.starts_with(old.as_str())
+                        && old.len() >= common_prefix(&set, text) =>
+                {
                     let len = old.len();
                     (old, len)
                 }
@@ -1163,7 +1165,11 @@ impl Rv {
         }
         sink.caret = None;
         sink.reported = None;
-        sink.emptied = Some(std::mem::replace(&mut sink.text, context.clone()));
+        let held = std::mem::replace(&mut sink.text, context.clone());
+        // Kept until the platform's next report: the text it last reported,
+        // which it still holds if it drops the values set since (an edit
+        // made before they arrived), not a value set and replaced since.
+        sink.emptied.get_or_insert(held);
         drop(sink);
         self.sink_value.set(context);
     }

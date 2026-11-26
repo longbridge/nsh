@@ -552,6 +552,30 @@ fn on_ios_a_deletion_in_the_sink_takes_whole_graphemes() {
     see(&mut app, "Sel 2-2");
 }
 
+/// On iOS each caret move sets the sink to the text before the caret. A
+/// commit after two of them goes in whole: had the platform dropped the
+/// second value, it would hold the text it last reported, not the first
+/// value set.
+#[test]
+fn on_ios_a_commit_after_two_caret_moves_goes_in_whole() {
+    let mut app = start_on(paragraphs(&["你"]), Os::Ios, true);
+    focus(&mut app);
+    keys(&mut app, &["right"]);
+    see(&mut app, "Sel 2-2");
+    assert_eq!(sink(&app).as_deref(), Some("你"));
+    keys(&mut app, &["left"]);
+    see(&mut app, "Sel 1-1");
+    assert_eq!(sink(&app).as_deref(), Some(""));
+    compose(&mut app, true, "ni");
+    sink_text(&mut app, "ni");
+    compose(&mut app, true, "nihao");
+    sink_text(&mut app, "nihao");
+    sink_text(&mut app, "你好");
+    compose(&mut app, false, "");
+    see(&mut app, &doc("你好你"));
+    see(&mut app, "Sel 3-3");
+}
+
 // Placeholder and read-only.
 
 #[test]
