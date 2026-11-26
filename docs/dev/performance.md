@@ -901,6 +901,52 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
 
+## Keyed children reordered (all platforms)
+
+Measured on an Apple silicon Mac (jason-macmini-lb) on 2026-11-26, debug, `main` at `d04027d7c` against the change.
+Reordering n keyed rows was O(n²) in the engine, in two places:
+
+- `Core::match_children` looked up each kept row (`NewChild::Kept`) and each keyed element in the old elements with
+  `Iterator::position`, comparing keys (`SharedString`). Rows still in order were found where the last one was, but
+  a reversed list searched them all for each row. The old elements are now indexed by key the first time one is not
+  where it was (`OldKeys`; up to 16 old elements are still searched in order).
+- `LayoutTree::remove_child` ran `Vec::retain` over the parent's layout children for each child moved or removed.
+  It now stops at the child and removes it.
+
+`cargo test -p nsh-core --lib bench_each_reverse -- --ignored --nocapture` (`FakeEngine`, no content culling): n
+rows of an `each` set to their reverse, then to the first row moved last, from the signal write to the finished
+`MountBatch`. Milliseconds a commit, median of 5; the mount items are the same before and after:
+
+| Rows | Row | Update | Before | After | Mount items |
+|---:|---|---|---:|---:|---:|
+| 1,000 | text | reverse | 16.61 | 6.50 | 2,999 |
+| 4,000 | text | reverse | 201.34 | 34.16 | 11,999 |
+| 8,000 | text | reverse | 772.06 | 92.25 | 23,999 |
+| 1,000 | text + view | reverse | 43.54 | 10.50 | 4,998 |
+| 4,000 | text + view | reverse | 610.30 | 79.42 | 19,998 |
+| 8,000 | text + view | reverse | 2,425.50 | 272.95 | 39,998 |
+| 8,000 | text | control: first row moved last | 37.05 | 38.68 | 16,001 |
+| 8,000 | text + view | control: first row moved last | 53.18 | 55.96 | 24,002 |
+
+The control builds the index once (its last row is not where it was), about 4% more in debug.
+
+On macOS, with the leaf list change (#3377) applied, `NSH_LEAF_BENCH_ONLY=1` (`tests/native/mount.rs`,
+`leaf_bench`: n keyed texts in one plain view, each step timed until the leaf layers show it), three runs per size,
+medians, run at normal priority. Wall time in milliseconds, main thread CPU in brackets:
+
+| Leaves | Step | Before | After |
+|---:|---|---:|---:|
+| 1,000 | reverse | 51.3 (37.5) | 41.3 (37.4) |
+| 4,000 | reverse | 338.0 (158.2) | 171.5 (149.6) |
+| 8,000 | reverse | 1,056.5 (373.3) | 375.1 (311.1) |
+| 4,000 | clear | 83.1 (29.7) | 33.6 (26.9) |
+| 8,000 | clear | 270.1 (75.2) | 71.5 (57.1) |
+| 8,000 | mount (control) | 765.5 (621.3) | 765.6 (622.5) |
+| 8,000 | prepend (control) | 96.7 (79.7) | 99.6 (80.6) |
+
+Reverse now grows linearly. Clear is faster too: each removed leaf no longer ran `retain` over its parent's layout
+children.
+
 ## End-to-end jank: startup and frame gaps (all desktops)
 
 The micro-benchmarks above time the work of a commit. They cannot see a frame that waits without working, as in

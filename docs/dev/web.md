@@ -647,7 +647,8 @@ chunk's fonts before importing it.
 
 Text (`src/text.rs`) is broken into lines here, with widths and font metrics from the browser (canvas `measureText`
 through imports, cached), and runs are drawn at the positions computed here so the baseline lands where layout put
-it. Text with numeric variants (`tabular-nums`, ...) and color emoji are measured against what the DOM draws, since
+it. Canvas measures at the font size times the pixel ratio and scales back (`measureWidth` in `nsh.js`), as a hinted
+font's advances depend on the ratio; the caches are cleared when the ratio changes. Text with numeric variants (`tabular-nums`, ...) and color emoji are measured against what the DOM draws, since
 canvas measures them differently. The CSS of runs (`src/text/css.rs`) and line breaking (`src/text/wrap.rs`, with
 CJK punctuation's line start and end rules) depend on nothing of the browser and are tested on the host
 (`tests/text`); `web/text-browser.test.mjs` checks measurements against what Chrome draws. The last line a line

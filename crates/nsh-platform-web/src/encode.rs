@@ -1514,6 +1514,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 out.item("video")
                     .num(*id)
                     .opt_str(v.source.as_deref())
+                    .opt_str(v.poster.as_deref())
                     .bool(v.paused)
                     .bool(v.muted)
                     .num(v.volume)
@@ -2101,5 +2102,26 @@ mod tests {
         );
         // Restarting is the browser's (the user reloads).
         assert_eq!(commands(nsh_core::ROOT_ID, DesktopCommand::Restart), "[]");
+    }
+
+    #[test]
+    fn a_videos_poster_reaches_the_browser() {
+        let props = nsh_core::VideoProps {
+            source: Some("https://example.com/clip.mp4".into()),
+            poster: Some("https://example.com/poster.png".into()),
+            ..Default::default()
+        };
+        let mut out = Out::new();
+        encode(
+            &mut out,
+            &MountItem::NativeProps {
+                id: 7,
+                props: NativeProps::Video(Box::new(props)),
+            },
+        );
+        assert_eq!(
+            out.finish(),
+            r#"[["video",7,"https://example.com/clip.mp4","https://example.com/poster.png",false,false,1,1,false,"contain",false,250]]"#
+        );
     }
 }

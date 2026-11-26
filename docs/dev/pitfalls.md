@@ -1053,6 +1053,11 @@ Things that were found the hard way. Read the section of the area you change bef
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of
   22 emoji was laid out 88 px too wide. Emoji clusters are measured in the DOM (`text.rs`, `emoji_excess`).
+- **Canvas `measureText` hints a font at a pixel ratio of 1, the DOM at the screen's**: a hinted font rounds its
+  advances to device pixels, so at 1.25 or 1.5 the DOM draws it narrower or wider than canvas measures it. NSimSun,
+  Chrome's `monospace` and its fallback for Han on Chinese Windows, measures 7 px per character at 13px and draws 6.5
+  at DPR 1.5 (Chrome 158 on Windows, `--force-device-scale-factor`), so runs of code stood up to 9 px apart. Canvas measures at
+  the font size times the ratio and scales back (`measureWidth` in `nsh.js`), which gives the DOM's width.
 - **A field paints an input method's marks on its composing text whatever its colors**: an editor's sink (transparent
   text, no caret, 1 px wide) showed a bar at the caret while composing (Chrome 156, `Input.imeSetComposition`). A
   field that shows nothing is `opacity: 0` (`encode/input.rs`, `shows_nothing`); it keeps the focus and the input
