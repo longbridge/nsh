@@ -816,7 +816,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // (`content:` URI) as a `data:` URI and its size, read
                     // off the main thread.
                     Command::ReadClipboardImage { id, has_only } => {
-                        e.int(65);
+                        e.int(67);
                         e.int(id as i32);
                         e.bool(has_only);
                     }
@@ -877,10 +877,11 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
-                    // `InputBox.insertText`: the text in place of the
-                    // selection, reported as the user's edit.
+                    // `InputBox.insertText`: the text, in place of the
+                    // selection as the user's edit (the input's line rules,
+                    // `maxLength` and undo history apply there).
                     Command::InsertText(text) => {
-                        e.int(67);
+                        e.int(65);
                         e.string(text);
                     }
                     // `SystemUi.openPath`: the file at the path, a `content:`

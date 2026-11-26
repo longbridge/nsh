@@ -53,6 +53,8 @@ final class InputBox extends FrameLayout implements Node {
     /** The text as last reported or set. */
     private String known = "";
     private boolean multiline;
+    /** Not `readOnly`: the user (and `insertText`) can edit it. */
+    private boolean editable = true;
     /** What return does (`submitBehavior`, resolved by the core; encode.rs's codes). */
     private static final int SUBMIT_AND_BLUR = 1, NEWLINE = 2;
     private int submit = SUBMIT_AND_BLUR;
@@ -393,6 +395,7 @@ final class InputBox extends FrameLayout implements Node {
                    int submit, boolean rtl, int fontVariant) {
         boolean restart = this.submit != submit && multiline && configured;
         this.multiline = multiline;
+        this.editable = editable;
         this.submit = submit;
         edit.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizeDp * mounter.density);
         edit.setTextColor(color);
@@ -826,35 +829,43 @@ final class InputBox extends FrameLayout implements Node {
         if (m != null) m.finish();
     }
 
+    /**
+     * `insertText`: {@code text} in place of the selection, as the user's edit. The change goes through the
+     * EditText's filters, so `maxLength` clips it and TextView's undo history records it as a step of its own (an
+     * edit from outside the keyboard is never merged into the typing before it); the text watcher reports it
+     * (`onChangeText`) and no key is reported. A composition in progress is committed first, as the text the
+     * keyboard composed stays. A single-line input gets the line breaks as spaces, as a paste does there.
+     */
+    void insertText(String text) {
+        if (!editable) {
+            android.util.Log.w("nsh", "insertText: the input is read-only");
+            return;
+        }
+        Editable content = edit.getText();
+        if (content == null) return;
+        if (BaseInputConnection.getComposingSpanStart(content) >= 0) {
+            BaseInputConnection.removeComposingSpans(content);
+            syncComposition();
+            // The keyboard drops the word it was composing rather than editing it on.
+            InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.restartInput(edit);
+        }
+        text = text.replace("\r\n", "\n").replace('\r', '\n');
+        if (!multiline) {
+            int end = text.length();
+            while (end > 0 && text.charAt(end - 1) == '\n') end--;
+            text = text.substring(0, end).replace('\n', ' ');
+        }
+        int a = Math.max(0, edit.getSelectionStart()), b = Math.max(0, edit.getSelectionEnd());
+        content.replace(Math.min(a, b), Math.max(a, b), text);
+        // An edit ends the EditText's toolbar, as its own paste does.
+        finishTextActions();
+    }
+
     /** Selects {@code start..end} (clamped to the text). */
     void select(int start, int end) {
         int length = edit.length();
         edit.setSelection(Math.min(start, length), Math.min(Math.max(start, end), length));
-    }
-
-    /**
-     * `ref.insertText`: {@code text} in place of the selection (at the caret
-     * when there is none), caret after it. Filters (`maxLength`) apply, and the
-     * change is reported as the user's own.
-     */
-    void insertText(String text) {
-        Editable editable = edit.getText();
-        if (editable == null || inComposition || edit.getKeyListener() == null) return;
-        // `text_edit::pasted`: Windows line breaks become `\n`, a
-        // single-line input gets spaces instead.
-        text = text.replace("\r\n", "\n").replace('\r', '\n');
-        if (!multiline) {
-            int n = text.length();
-            while (n > 0 && text.charAt(n - 1) == '\n') n--;
-            text = text.substring(0, n).replace('\n', ' ');
-        }
-        int a = edit.getSelectionStart(), z = edit.getSelectionEnd();
-        if (a < 0 || z < 0) a = z = editable.length();
-        int start = Math.min(a, z), end = Math.max(a, z);
-        int before = editable.length();
-        editable.replace(start, end, text);
-        int inserted = editable.length() - before + (end - start);
-        edit.setSelection(Math.min(Math.max(start + inserted, 0), editable.length()));
     }
 
     /** Autofill: a hint ("" for none, null for the default). */

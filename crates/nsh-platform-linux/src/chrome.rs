@@ -509,12 +509,23 @@ pub(crate) fn begin_move(surface: &Surface, event: &gdk::Event) {
 
 // --- Menus ------------------------------------------------------------------------------
 
-/// The roles Linux has no use for.
+/// The roles Linux has no counterpart for: hiding the other apps and
+/// showing them again are macOS's. Their items are left out, with a warning
+/// so the app knows why. `About` stays (the app hears it, and shows its own
+/// panel) and `Hide` minimizes the window.
 fn unsupported(role: Option<MenuRole>) -> bool {
-    matches!(
-        role,
-        Some(MenuRole::About | MenuRole::Hide | MenuRole::HideOthers | MenuRole::ShowAll)
-    )
+    let skip = matches!(role, Some(MenuRole::HideOthers | MenuRole::ShowAll));
+    // Once per role: menus are rebuilt and searched for shortcuts often.
+    static WARNED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+    let bit = if role == Some(MenuRole::ShowAll) {
+        2
+    } else {
+        1
+    };
+    if skip && WARNED.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0 {
+        log::warn!("nsh: menu role {role:?} has no Linux equivalent; the item is left out");
+    }
+    skip
 }
 
 /// The shortcut as a GTK accelerator (`<Control><Shift>n`).
@@ -907,7 +918,7 @@ pub(crate) fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
                 });
             }
         }
-        Some(MenuRole::Minimize) => {
+        Some(MenuRole::Minimize | MenuRole::Hide) => {
             if let Some(window) = window(surface) {
                 window.minimize();
             }

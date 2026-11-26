@@ -3079,7 +3079,7 @@ final class Mounter {
                 eventMap(1, Native.OPEN_URL, new String[] {"id", "opened"}, new Object[] {(double) request, opened});
                 break;
             }
-            case 65: {
+            case 67: {
                 // `encode.rs` `Command::ReadClipboardImage`: the request and
                 // whether only `has` is asked. Providers are read off the main
                 // thread; the answer comes back on it.
@@ -3137,13 +3137,6 @@ final class Mounter {
                 }
                 break;
             }
-            case 67: {
-                // `encode.rs` `Command::InsertText`: the text, in place of the
-                // input's selection, as the user's edit.
-                String text = (String) objects[b.getInt()];
-                if (v instanceof InputBox) ((InputBox) v).insertText(text);
-                break;
-            }
             case 63: {
                 // `encode.rs` `Command::OpenAppSettings`: the request.
                 int request = b.getInt();
@@ -3181,6 +3174,12 @@ final class Mounter {
             case 17: {
                 String text = (String) objects[b.getInt()];
                 (v != null ? v : host).announceForAccessibility(text);
+                break;
+            }
+            case 65: {
+                // ref.insertText(text): in place of the input's selection.
+                String text = (String) objects[b.getInt()];
+                if (v instanceof InputBox) ((InputBox) v).insertText(text);
                 break;
             }
             case 64: {
