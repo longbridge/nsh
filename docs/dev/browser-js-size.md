@@ -68,7 +68,7 @@ node crates/nsh-platform-web/web/browser/package-size.mjs /tmp/nsh-gallery/Galle
 
 The baseline does not have the measurement script; use this PR's script against its output, omitting
 `--require-browser`. To separate initial/optional code, pass `--requests=requests.json`, an array of URLs
-recorded during cold navigation. The CI reports the total against a 5 MB ceiling without failing the build (the site is published either way); it is not the 1 MB design target.
+recorded during cold navigation. The website CI fails when the total passes the 5 MB ceiling; it is not the 1 MB design target.
 
 Validated locally:
 

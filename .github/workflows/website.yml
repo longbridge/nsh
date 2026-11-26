@@ -278,10 +278,9 @@ jobs:
           path: website/.versions
           key: website-versions-${{ github.run_id }}
 
-      # A report, not a gate: a Gallery over its budget never stops the
-      # site from being published.
+      # A gate: a Gallery whose code grows past its Brotli budget fails the
+      # build. Raise the budget in the same PR that explains the growth.
       - name: Check standalone Gallery code size
-        continue-on-error: true
         run: node crates/nsh-platform-web/web/browser/package-size.mjs website/public/play/gallery --require-browser --brotli-budget=5000000
 
       - uses: actions/configure-pages@v5

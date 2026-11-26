@@ -1,0 +1,9 @@
+{
+  "_comment": "Byte budgets for the release build's native binaries (cargo xtask dist), per release matrix entry. Set about 10% above the nightly of 2026-11-25; raise one in the same PR that explains the growth.",
+  "linux-x86_64":   { "bin/nsh": 95000000,  "runtime/linux/nsh-linux-host": 72000000,  "runtime/linux/nsh-linux-app": 70000000 },
+  "linux-arm64":    { "bin/nsh": 86000000,  "runtime/linux/nsh-linux-host": 65000000,  "runtime/linux/nsh-linux-app": 63000000 },
+  "macos-arm64":    { "bin/nsh": 84000000,  "runtime/macos/nsh-macos-host": 61000000,  "runtime/macos/nsh-macos-app": 59000000 },
+  "macos-x86_64":   { "bin/nsh": 89000000,  "runtime/macos/nsh-macos-host": 65000000,  "runtime/macos/nsh-macos-app": 63000000 },
+  "windows-arm64":  { "bin/nsh.exe": 92000000,  "runtime/windows/nsh-windows-host.exe": 70000000, "runtime/windows/nsh-windows-app.exe": 68000000 },
+  "windows-x86_64": { "bin/nsh.exe": 107000000, "runtime/windows/nsh-windows-host.exe": 80000000, "runtime/windows/nsh-windows-app.exe": 78000000 }
+}

@@ -330,6 +330,11 @@ jobs:
         if: matrix.embed == 'ios'
         run: python3 .github/ci/ios-build-versions.py dist/nsh/runtime/ios
 
+      # Records the native CLI, host and app sizes in the job summary and
+      # fails when one grows past its budget (.github/ci/native-size.json).
+      - name: Check native binary sizes
+        run: python3 .github/ci/native-size.py dist/nsh ${{ matrix.name }}
+
       # The packaged CLI makes and bundles a new app.
       - name: Smoke test
         run: |

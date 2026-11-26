@@ -133,9 +133,11 @@ Measure the supported CLI package with `node crates/nsh-platform-web/web/browser
 --require-browser`. It reports raw bytes, gzip level 9 and Brotli quality 11 independently for every Wasm,
 JavaScript and bytecode file, including all optional chunks. `--requests=FILE` accepts a JSON array of URLs
 observed during a cold navigation and separates initial code from optional code. Fonts, media and HTTP headers
-are excluded and must be accounted for separately when discussing total page transfer. The website CI guards
-Gallery's total compressed code at 4,000,000 Brotli bytes; this is a regression ceiling, not the original
-1,000,000-byte product goal.
+are excluded and must be accounted for separately when discussing total page transfer. The website CI fails
+when Gallery's total compressed code passes 5,000,000 Brotli bytes, and the Rust app CI when the Rust Exports
+example passes 2,000,000; these are regression ceilings, not the original 1,000,000-byte product goal. The
+release build records the native CLI, host and app sizes in each job's summary and fails when one passes its
+budget in `.github/ci/native-size.json`. Raise a budget only in the PR that explains the growth.
 
 `browser-check.py` also gives a view a `tooltip` by a function, as a development bundle gives an app's component, and
 checks under real hover that the element the function gives shows and follows it.
