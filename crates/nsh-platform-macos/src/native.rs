@@ -71,8 +71,8 @@ use objc2::{
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSView, NSWindow};
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint,
-    NSRect, NSString, NSURL,
+    NSArray, NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSOperationQueue,
+    NSPoint, NSRect, NSString, NSURL,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -1927,6 +1927,30 @@ define_class!(
             }
             // WKPermissionDecisionGrant = 1, Deny = 2.
             decide.call((if granted { 1 } else { 2 },));
+        }
+
+        /// `<input type="file">`: the open panel, the files the user chose
+        /// to the page. Without this method WebKit shows nothing.
+        #[unsafe(method(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:))]
+        fn run_open_panel(
+            &self,
+            _web: &AnyObject,
+            parameters: &AnyObject,
+            _frame: &AnyObject,
+            complete: &block2::Block<dyn Fn(*mut NSArray<NSURL>)>,
+        ) {
+            // SAFETY: WebKit's documented WKOpenPanelParameters.
+            let (multiple, folders) = unsafe {
+                let multiple: bool = msg_send![parameters, allowsMultipleSelection];
+                let folders: bool = msg_send![parameters, allowsDirectories];
+                (multiple, folders)
+            };
+            crate::file_requests::web_open_panel(
+                self.ivars().emitter.surface.upgrade(),
+                multiple,
+                folders,
+                complete.copy(),
+            );
         }
 
         /// What the page cannot show, or the server sends as an attachment,
