@@ -58,9 +58,11 @@
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
+    ptr::NonNull,
     rc::{Rc, Weak},
 };
 
+use block2::RcBlock;
 use nsh_core::{
     Bounds, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points, SubmitBehavior,
     TextAlign, ViewKind,
@@ -87,8 +89,9 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGPath;
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint,
-    NSRange, NSRect, NSString, NSUndoManager,
+    NSArray, NSAttributedString, NSDictionary, NSNotification, NSNotificationCenter, NSObject,
+    NSObjectProtocol, NSPoint, NSRange, NSRect, NSString, NSUndoManager,
+    NSUndoManagerDidRedoChangeNotification, NSUndoManagerDidUndoChangeNotification,
 };
 use objc2_quartz_core::{CALayer, CAShapeLayer};
 
@@ -120,13 +123,28 @@ impl Editor {
         &self,
         fallback: Option<&Retained<NSUndoManager>>,
     ) -> Option<Retained<NSUndoManager>> {
-        let Editor::Area { view, storage, .. } = self else {
-            return None;
-        };
-        let manager = view.undoManager().or_else(|| fallback.cloned())?;
-        // SAFETY: AppKit registers text undo operations with the text storage as target.
-        unsafe { manager.removeAllActionsWithTarget(storage) };
-        Some(manager)
+        match self {
+            Editor::Area { view, storage, .. } => {
+                let manager = view.undoManager().or_else(|| fallback.cloned())?;
+                // SAFETY: AppKit registers text undo operations with the text storage as target.
+                unsafe { manager.removeAllActionsWithTarget(storage) };
+                Some(manager)
+            }
+            // A field has undo records only while the window's field editor
+            // edits it; they target that editor's text storage.
+            Editor::Line { field, .. } => {
+                let view = field.currentEditor()?.downcast::<NSTextView>().ok()?;
+                let manager = view.undoManager()?;
+                // SAFETY: the field editor's own text storage (an assign
+                // property, retained here while used), which AppKit
+                // registers its text undo operations with as target.
+                unsafe {
+                    let storage = view.textStorage()?;
+                    manager.removeAllActionsWithTarget(&storage);
+                }
+                None
+            }
+        }
     }
 
     /// The view hosted in the input's view.
@@ -1823,6 +1841,62 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
+/// Reports the text an undo or redo changed in an input. AppKit's text
+/// views change their text without `textDidChange:` (nor a field's
+/// `controlTextDidChange:`) when the undo manager replays an edit, so JS
+/// would keep the text from before Command+Z. Observed once per process.
+fn observe_undo() {
+    thread_local! {
+        static OBSERVING: Cell<bool> = const { Cell::new(false) };
+    }
+    if OBSERVING.replace(true) {
+        return;
+    }
+    let block = RcBlock::new(|_: NonNull<NSNotification>| undo_replayed());
+    // SAFETY: immutable constants; undo managers post on the thread that
+    // undoes (here, the main one) and the observers are kept for the
+    // process (as the field editors and text views they report for).
+    unsafe {
+        let center = NSNotificationCenter::defaultCenter();
+        for name in [
+            NSUndoManagerDidUndoChangeNotification,
+            NSUndoManagerDidRedoChangeNotification,
+        ] {
+            let observer =
+                center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block);
+            std::mem::forget(observer);
+        }
+    }
+}
+
+/// After an undo or redo: the inputs being edited (the first responders of
+/// the windows) report their text if it is not what they reported last.
+fn undo_replayed() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    for window in NSApplication::sharedApplication(mtm).windows() {
+        let Some(responder) = window.firstResponder() else {
+            continue;
+        };
+        let cx = if let Some(editor) = responder.downcast_ref::<FieldEditor>() {
+            field_ctx(editor)
+        } else if let Some(area) = responder.downcast_ref::<TextArea>() {
+            area.ivars().get().cloned()
+        } else {
+            None
+        };
+        let Some(cx) = cx else { continue };
+        let Some(input) = cx.user_edit() else {
+            continue;
+        };
+        let text = input.editor.borrow().text();
+        if text != *input.known.borrow() {
+            cx.changed();
+        }
+    }
+}
+
 /// `window`'s field editor for inputs (made the first time).
 fn field_editor(mtm: MainThreadMarker, window: &objc2_app_kit::NSWindow) -> Retained<NSTextView> {
     FIELD_EDITORS.with_borrow_mut(|editors| {
@@ -1841,6 +1915,7 @@ fn field_editor(mtm: MainThreadMarker, window: &objc2_app_kit::NSWindow) -> Reta
         // SAFETY: the class is a subclass of NSTextView.
         let editor: Retained<NSTextView> = unsafe { Retained::cast_unchecked(editor) };
         editor.setFieldEditor(true);
+        observe_undo();
         editors.push((objc2::rc::Weak::from(window), editor.clone()));
         editor
     })
@@ -2574,6 +2649,7 @@ fn new_editor(
         view.setRichText(false);
         view.setImportsGraphics(false);
         view.setAllowsUndo(true);
+        observe_undo();
         view.setTextContainerInset(CGSize::new(0.0, 0.0));
         // SAFETY: the text view's own container.
         if let Some(container) = unsafe { view.textContainer() } {
