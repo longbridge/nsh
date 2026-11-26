@@ -1294,6 +1294,16 @@ them. The scheduled runs save the dependencies' caches the pull requests restore
 macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome; the Website workflow builds the site on pull
 requests only when `website/`, the skills, the tasks examples or `nsh-platform-web` change.
 
+### Benchmarks
+
+The Benchmarks workflow runs nsh-engine's `bench_calls`, `bench_components` and `bench_handles` (ignored tests in
+`crates/nsh-engine/tests/engine`) for a pull request and for its merge base on `main`, on one self-hosted runner. It
+alternates the two builds for five rounds, keeps each metric's fastest value, and updates one comment on the pull request
+with the table. A metric more than 10% slower (and more than 2ns) fails the check. Running one build against itself on
+that runner moves every metric by 3% at most. Run the same comparison locally with
+`scripts/bench-compare.py run BASE_BIN HEAD_BIN --json out.json` and `scripts/bench-compare.py table out.json`, from
+`crates/nsh-engine`. `bench_gallery_scroll` stays out: it sleeps between frames and takes seconds.
+
 ### Homebrew publishing setup and recovery
 
 A maintainer must configure the existing `HOMEBREW_TAP_TOKEN` Actions secret in `longbridge/nsh` (or an organization

@@ -2014,12 +2014,23 @@ fn item_text(action: &MenuAction, labels: &MenuLabels) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
 }
 
-/// The roles Windows has no use for.
+/// The roles Windows has no counterpart for: hiding the other apps and
+/// showing them again are macOS's. Their items are left out, with a warning
+/// so the app knows why. `About` stays (the app hears it, and shows its own
+/// panel) and `Hide` minimizes the window.
 fn unsupported(role: Option<MenuRole>) -> bool {
-    matches!(
-        role,
-        Some(MenuRole::About | MenuRole::Hide | MenuRole::HideOthers | MenuRole::ShowAll)
-    )
+    let skip = matches!(role, Some(MenuRole::HideOthers | MenuRole::ShowAll));
+    // Once per role: menus are rebuilt and searched for shortcuts often.
+    static WARNED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+    let bit = if role == Some(MenuRole::ShowAll) {
+        2
+    } else {
+        1
+    };
+    if skip && WARNED.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0 {
+        log::warn!("nsh: menu role {role:?} has no Windows equivalent; the item is left out");
+    }
+    skip
 }
 
 /// How long a context menu waits for its icons before it opens without the
@@ -2338,7 +2349,7 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>, area: Option<&
             // SAFETY: posting to a live window.
             let _ = unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
         }
-        Some(MenuRole::Minimize) => {
+        Some(MenuRole::Minimize | MenuRole::Hide) => {
             // SAFETY: a plain call.
             let _ = unsafe { ShowWindow(hwnd, SW_MINIMIZE) };
         }

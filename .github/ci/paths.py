@@ -24,6 +24,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # What each workflow builds and tests (its `-p` packages), and the files
 # outside those crates it reads (tests' fixtures, `include_bytes!`).
 WORKFLOWS = {
+    # The engine benchmarks (scripts/bench-compare.py).
+    "bench.yml": {"packages": ["nsh-engine"], "files": ["scripts/bench-compare.py"]},
     "website.yml": {
         "packages": ["nsh-platform-web", "nsh-bundler", "nsh-cli", "xtask"],
         "files": [
@@ -80,6 +82,20 @@ WORKFLOWS = {
         ],
         # `nsh test --target` runs the examples' tests.
         "files": ["examples/counter/**", "examples/gallery/**"],
+    },
+    "package.yml": {
+        # `nsh package --target linux|windows` builds the release runners.
+        "packages": ["nsh-cli", "nsh-linux-app", "nsh-windows-app"],
+        "files": ["examples/counter/**"],
+        # Pull requests run it only when packaging or the runners change.
+        "pull_request": [
+            "crates/nsh-cli/src/package.rs", "crates/nsh-cli/src/msix.rs",
+            "crates/nsh-cli/src/windows.rs", "crates/nsh-cli/src/linux_store.rs",
+            "crates/nsh-cli/src/runtime.rs", "crates/nsh-cli/src/rust_app.rs",
+            "crates/nsh-cli/src/native_features.rs", "crates/nsh-package/**",
+            "crates/nsh-linux-app/**", "crates/nsh-windows-app/**", "examples/counter/**",
+            "examples/gallery/icon.png",
+        ],
     },
     "rust-app.yml": {
         # The macOS check also tests nsh-platform-apple; every check tests
