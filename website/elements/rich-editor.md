@@ -71,6 +71,10 @@ The editor draws the document with the app's look: `classes` and `styles` style 
 lists whose node spec sets `extra.listMarker` to `"bullet"` or `"ordered"` (the starter schema's lists) show a marker
 in the `listMarker` part: `•`, `◦`, `▪` by depth, or numbers from the list's `start`, placed before the item, in the list's indent (`pl-6` on the list, as a browser indents `ul`).
 
+For task lists, `taskCheckbox` styles the outer box. Set `taskCheckboxIndicator` in `classes` or
+`styles` to style the inner box. The indicator supports `checked:` classes and applies
+`styles.taskCheckboxChecked` over its base style while the task is checked.
+
 ```tsx
 <RichEditor
   editor={editor}

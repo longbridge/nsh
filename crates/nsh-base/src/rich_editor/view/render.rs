@@ -833,25 +833,43 @@ fn task_checkbox(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
             .unwrap_or(false)
     };
     let press_rv = rv.clone();
+    let classes = props.classes;
+    let styles = props.styles;
     // The part is the checkbox's box; the checkbox fills it. The box
     // follows the item's state, so the app's `checked:` classes show it.
     view()
         .project_checked(checked)
-        .app_class(move || props.classes.with(|c| c.part(Part::TaskCheckbox).cloned()))
+        .app_class(move || classes.with(|c| c.part(Part::TaskCheckbox).cloned()))
         .inline_style(move || {
-            props
-                .styles
-                .with(|s| s.part(Part::TaskCheckbox).cloned().unwrap_or_default())
+            styles.with(|s| s.part(Part::TaskCheckbox).cloned().unwrap_or_default())
         })
         .child(
-            crate::checkbox()
-                .checked(checked)
-                .disabled(move || !props.editable.get())
-                .on_change(move |next: &bool| {
-                    if let Some(pos) = press_rv.block_pos(item.get_untracked().id) {
-                        press_rv.set_checked(pos, *next);
-                    }
+            view()
+                .project_checked(checked)
+                .app_class(move || classes.with(|c| c.part(Part::TaskCheckboxIndicator).cloned()))
+                .inline_style(move || {
+                    let checked = checked();
+                    styles.with(|s| {
+                        let base = s.part(Part::TaskCheckboxIndicator);
+                        let active = s.part(Part::TaskCheckboxChecked).filter(|_| checked);
+                        Style::from_decls(
+                            base.into_iter()
+                                .chain(active)
+                                .flat_map(|style| style.decls().iter().cloned()),
+                        )
+                    })
                 })
+                .child(
+                    crate::checkbox()
+                        .checked(checked)
+                        .disabled(move || !props.editable.get())
+                        .on_change(move |next: &bool| {
+                            if let Some(pos) = press_rv.block_pos(item.get_untracked().id) {
+                                press_rv.set_checked(pos, *next);
+                            }
+                        })
+                        .size_full(),
+                )
                 .size_full(),
         )
 }

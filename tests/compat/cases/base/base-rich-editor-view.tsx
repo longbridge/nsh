@@ -26,6 +26,11 @@ function App() {
     content: "CapOne\n\nCapTwo\n\nCapThree\n\nCapFour",
     format: "markdown",
   });
+  const tasks = createRichEditor({
+    extensions: [StarterKit],
+    content: "- [ ] OpenTask\n- [x] DoneTask",
+    format: "markdown",
+  });
   return (
     <View style={{ flex: 1, paddingTop: 60, paddingLeft: 20, gap: 4 }}>
       <View onPress={() => open.set(!open())}>
@@ -63,8 +68,18 @@ function App() {
       />
       <RichEditor testID="rich-auto" editor={auto} />
       <RichEditor testID="rich-capped" editor={capped} style={{ maxHeight: 40 }} />
-      {/* Last, so it moves none of the frames the script checks. */}
       <Text>{`RichDrop: ${drop()}`}</Text>
+      <RichEditor
+        editor={tasks}
+        classes={{
+          taskCheckbox: "size-4",
+          taskCheckboxIndicator: "rounded border checked:border-blue-500",
+        }}
+        styles={{
+          taskCheckboxIndicator: { width: 16, height: 16 },
+          taskCheckboxChecked: { backgroundColor: "#3b82f6" },
+        }}
+      />
     </View>
   );
 }
