@@ -82,6 +82,7 @@ pub use crate::element::{
     HttpRequest,
     HttpResponse,
     ImageAsset,
+    InContext,
     Input,
     InputAccessoryView,
     Instance,

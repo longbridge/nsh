@@ -88,7 +88,7 @@ fn release_notes() -> impl IntoElement {
 ```
 
 In Rust, `text_view()` makes one as `view()` makes a view: a setter per prop (`.markdown(..)`, `.options(..)`,
-`.selectable(..)`), a closure per render function (`.render_image(|image| ..)`), a listener per event
+`.selectable(..)`), a closure per render function (`.render_code_block(|code| ..)`), a listener per event
 (`.on_link_press(..)`) and the typed style methods for its root (`.p_5()`, `.text_color(..)`), whose text styles pass
 to every part.
 
@@ -416,7 +416,7 @@ rendered again.
 | `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `TextViewCodeAction` | The icon of a code block action of the app's (`codeBlockActions`); the button around it is `TextView`'s. |
 | `renderTableActions` | `.render_table_actions(\|table\| ..)` | `TextViewTable` (`Table`) | Adds content above a table (copy, export). |
 | `renderMath` | `.render_math(\|math\| ..)` | `TextViewMath` | Replaces a formula: `{ tex, display }`, `display` for a `$$…$$` block. |
-| `renderImage` | `.render_image(\|image\| ..)` | `TextViewImage` (`Image`) | Replaces an image (`{ src, alt, title }`): your own loading, sizing, a viewer on press. |
+| `renderImage` | `.render_image(\|InContext(image, context)\| ..)` | `TextViewImage` (`Image`), then `TextViewImageContext` | Replaces an image (`{ src, alt, title }`): your own loading, sizing, a viewer on press. The second argument says what surrounds the image: `context.link` (`{ url, title }`) is the link it is in. |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `TextViewCustomNode` (`CustomNode`) | Shows a custom node, by its `name` ([Markdown extensions](#markdown-extensions)). |
 
 Code blocks carry actions over their top right corner, all drawn alike: ghost buttons whose background shows while
@@ -483,14 +483,14 @@ import { Image, View } from "nsh";
 ```rust tabs
 use nsh_base::text_view;
 use nsh_base::text_view::{CodeBlock, Image};
-use nsh_base::TextViewMath;
+use nsh_base::{TextViewImageContext, TextViewMath};
 use nsh_core::prelude::*;
 
 fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
     text_view()
         .markdown(move || markdown.get())
         .render_code_block(|code: &CodeBlock| highlighted(code.language.clone(), code.code.clone()))
-        .render_image(|img: &Image| {
+        .render_image(|InContext(img, _): &InContext<Image, TextViewImageContext>| {
             image(img.src.clone())
                 .label(img.alt.clone())
                 .aspect_ratio(16.0 / 9.0)
@@ -858,7 +858,7 @@ has each text parsed in one go.
 | `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `(action: TextViewCodeAction) => JSX.Element` | | The icon of an action of the app's. |
 | `renderTableActions` | `.render_table_actions(\|table\| ..)` | `(table: TextViewTable) => JSX.Element` | | Content above each table. |
 | `renderMath` | `.render_math(\|math\| ..)` | `(math: TextViewMath) => JSX.Element` | | Shows formulas. |
-| `renderImage` | `.render_image(\|image\| ..)` | `(image: TextViewImage) => JSX.Element` | | Shows images. |
+| `renderImage` | `.render_image(\|InContext(image, context)\| ..)` | `(image: TextViewImage, context: TextViewImageContext) => JSX.Element` | | Shows images; `context.link` is the link around the image, if any. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The root, a column of the blocks; its text styles pass to every part (typed text styles: `styles.root`). |
 
 In Rust the classes and styles by part are `TextViewClasses` and `TextViewStyles`; a Rust view usually styles the

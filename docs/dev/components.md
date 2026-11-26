@@ -207,7 +207,9 @@ reasons: `reactive-components.md`.
     `is_first()`, `is_last()`, signals read in bindings).
   - `render_code: Prop<Option<Renderer<CodeBlock>>>`: a render function, `renderCode?: (value: CodeBlock) =>
     JSX.Element` in TS (optional; `T`'s TS type, its named types declared), for content the app draws for values the
-    view has (a code block of a document, a mention). In a binding or region the view calls
+    view has (a code block of a document, a mention). A renderer of `InContext<A, B>` (a value and what surrounds it) is `(value: A, context:
+    B) => JSX.Element`: JS spreads it into two arguments (`JsValue::RENDER_SPREAD`), for a value and what
+    surrounds it (`TextView`'s `renderImage(image, { link })`); a Rust closure takes `|InContext(value, context)| ..`. In a binding or region the view calls
     `props.render_code.get().map(|r| r.render(key, value))`: a `Rendered`, a view to style and place as any (in a
     `text(..)` an inline view), whose child is the content. A Rust parent passes `Renderer::new(|v| el)`, a closure
     called on the spot. The app's JS function is called by JS: the element is a placeholder (a view of the core's,
@@ -396,7 +398,7 @@ reasons: `reactive-components.md`.
     app's `color` or `fontSize` check (the part's texts inherit them), and a part that edits text an `InputPartStyle`
     (`NumberInput`'s `input_style`, `Select`'s `search_style`), typed `StyleProp<InputStyle>` for `placeholderColor`,
     `caretColor` and `selectionColor` too; both are applied with `.inline_style(move || props.input_style.get())`; a render prop's (`Option<Renderer<T>>`: `TextView`'s
-    `render_image`) the closure rendering a `&T` (`.render_image(|image| ..)`, made a `Renderer`); the children are
+    `render_image`) the closure rendering a `&T` (`.render_code_block(|code| ..)`, made a `Renderer`); the children are
     the element's `.child(..)`ren;
   - a **listener method per event**, named as its TSX handler in snake case (`onPressDown` is
     `.on_press_down(..)`): a unit variant's takes `move || ..` (or `move |_: &()| ..`), a one-field variant's

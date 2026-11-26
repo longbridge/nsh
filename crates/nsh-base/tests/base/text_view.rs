@@ -576,20 +576,64 @@ fn WideCustomImages() -> impl IntoElement {
                  Text ![Inline](https://example.com/c.png) after\n\n\
                  | A | B |\n|---|---|\n| ![Cell](https://example.com/f.png) | x |",
             )
-            .render_image(|image: &nsh_base::text_view::Image| {
-                if image.alt == "Inline" {
-                    view().test_id("card:Inline").w(px(20.0)).h(px(10.0))
-                } else if image.alt == "Full" {
-                    view().test_id("card:Full").w_full().h(px(40.0))
-                } else if image.alt == "Cell" {
-                    view().test_id("card:Cell").w(px(60.0)).h(px(20.0))
-                } else if image.alt == "Small" {
-                    view().test_id("card:Small").w(px(100.0)).h(px(40.0))
-                } else {
-                    wide_card(image)
-                }
-            }),
+            .render_image(
+                |InContext(image, _): &InContext<
+                    nsh_base::text_view::Image,
+                    nsh_base::TextViewImageContext,
+                >| {
+                    if image.alt == "Inline" {
+                        view().test_id("card:Inline").w(px(20.0)).h(px(10.0))
+                    } else if image.alt == "Full" {
+                        view().test_id("card:Full").w_full().h(px(40.0))
+                    } else if image.alt == "Cell" {
+                        view().test_id("card:Cell").w(px(60.0)).h(px(20.0))
+                    } else if image.alt == "Small" {
+                        view().test_id("card:Small").w(px(100.0)).h(px(40.0))
+                    } else {
+                        wide_card(image)
+                    }
+                },
+            ),
     )
+}
+
+/// The same image alone and in a link: the app's `renderImage` tells
+/// them apart by the link beside the image.
+#[component]
+fn LinkedCustomImages() -> impl IntoElement {
+    text_view()
+        .markdown(
+            "Alone: ![badge](https://example.com/badge.svg)\n\n\
+             In a link: [![badge](https://example.com/badge.svg)](https://example.com/run \"Run\")",
+        )
+        .render_image(
+            |InContext(image, context): &InContext<
+                nsh_base::text_view::Image,
+                nsh_base::TextViewImageContext,
+            >| {
+                let id = match &context.link {
+                    Some(link) => format!(
+                        "image:{} in {} ({})",
+                        image.alt,
+                        link.url,
+                        link.title.as_deref().unwrap_or("")
+                    ),
+                    None => format!("image:{}", image.alt),
+                };
+                view().test_id(&id).w(px(20.0)).h(px(20.0))
+            },
+        )
+}
+
+#[test]
+fn an_apps_image_in_a_link_gets_the_link() {
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        LinkedCustomImages,
+    >()))
+    .unwrap();
+    app.wait_for("id:image:badge").unwrap();
+    app.wait_for("id:image:badge in https://example.com/run (Run)")
+        .unwrap();
 }
 
 /// A wide image of the document's own, on its own.
