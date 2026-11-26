@@ -2687,6 +2687,9 @@ impl NshView {
             .borrow()
             .as_ref()
             .map(|(l, _)| l.clone());
+        // A view asked to draw while its box was empty made no content layer
+        // and drew nothing.
+        let had_layer = content.is_some();
         let resized = match content {
             Some(layer) => {
                 let changed = layer.frame() != bounds;
@@ -2704,8 +2707,11 @@ impl NshView {
             return;
         }
         // A text's box changes with its own `MountItem::Text`, which says
-        // whether it draws again, unless its picture was cut.
-        let keeps = self.state().text.as_ref().is_some_and(|t| !t.cut.get());
+        // whether it draws again, unless its picture was cut, or it has no
+        // picture at all: a text that got its content while its box was still
+        // empty (a new view whose frame a live resize holds back, `unplaced`)
+        // drew nothing then, and its `MountItem::Text` will not come again.
+        let keeps = had_layer && self.state().text.as_ref().is_some_and(|t| !t.cut.get());
         if !keeps {
             self.content_resized();
         }
