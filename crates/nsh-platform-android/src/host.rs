@@ -418,34 +418,6 @@ impl Host {
     }
 }
 
-/// Answers the clipboard's image and file reads, which Android's
-/// clipboard holds as content URIs NSH does not read yet: no image, no
-/// files.
-fn answer_clipboard_reads(host: &Host, batch: &MountBatch) {
-    use nsh_core::{Command, platform::clipboard};
-    let reads = batch.items.iter().filter_map(|item| match item {
-        MountItem::Command {
-            command: Command::ReadClipboardImage { id, .. },
-            ..
-        } => Some(clipboard::image_answer(*id, false, None)),
-        MountItem::Command {
-            command: Command::ReadClipboardFiles { id },
-            ..
-        } => Some(clipboard::files_answer(*id, &[])),
-        _ => None,
-    });
-    let mut reads = reads.peekable();
-    if reads.peek().is_none() {
-        return;
-    }
-    let Some(control) = host.answers.lock().ok().and_then(|c| c.clone()) else {
-        return;
-    };
-    for payload in reads {
-        control.dispatch_event(nsh_core::ROOT_ID, EventKind::Clipboard, payload);
-    }
-}
-
 /// Makes the bytes of the in-memory images `batch` shows (`data:` URIs,
 /// blobs) reachable by their URI for `Images.java`, and forgets those no
 /// view's source holds any more.
@@ -482,7 +454,6 @@ impl MountSink for Sink {
         if let Some(model) = &*host.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
             model.apply(&batch);
         }
-        answer_clipboard_reads(host, &batch);
         register_inline_images(host, &batch);
         let seq = host.seq.fetch_add(1, Ordering::Relaxed) + 1;
         crate::component::extract_batch_steps(host, seq, &mut batch);

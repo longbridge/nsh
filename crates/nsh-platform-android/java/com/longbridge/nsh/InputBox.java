@@ -832,6 +832,31 @@ final class InputBox extends FrameLayout implements Node {
         edit.setSelection(Math.min(start, length), Math.min(Math.max(start, end), length));
     }
 
+    /**
+     * `ref.insertText`: {@code text} in place of the selection (at the caret
+     * when there is none), caret after it. Filters (`maxLength`) apply, and the
+     * change is reported as the user's own.
+     */
+    void insertText(String text) {
+        Editable editable = edit.getText();
+        if (editable == null || inComposition || edit.getKeyListener() == null) return;
+        // `text_edit::pasted`: Windows line breaks become `\n`, a
+        // single-line input gets spaces instead.
+        text = text.replace("\r\n", "\n").replace('\r', '\n');
+        if (!multiline) {
+            int n = text.length();
+            while (n > 0 && text.charAt(n - 1) == '\n') n--;
+            text = text.substring(0, n).replace('\n', ' ');
+        }
+        int a = edit.getSelectionStart(), z = edit.getSelectionEnd();
+        if (a < 0 || z < 0) a = z = editable.length();
+        int start = Math.min(a, z), end = Math.max(a, z);
+        int before = editable.length();
+        editable.replace(start, end, text);
+        int inserted = editable.length() - before + (end - start);
+        edit.setSelection(Math.min(Math.max(start + inserted, 0), editable.length()));
+    }
+
     /** Autofill: a hint ("" for none, null for the default). */
     void setAutofill(String hint) {
         if (Build.VERSION.SDK_INT < 26) return;
