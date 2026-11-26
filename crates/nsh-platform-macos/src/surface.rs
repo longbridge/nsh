@@ -1314,7 +1314,8 @@ impl Surface {
         self.keeper.set(Some(at));
         let key = self.key;
         let late = if testing { TEST_FRAME } else { LATE };
-        let ms = ((at + late - now).max(0.0) * 1000.0).ceil() as u64;
+        let scheduled = self.last_tick.get();
+        let ms = keeper_wait(at, scheduled, now, late);
         after(ms, move || {
             let Some(surface) = find(key) else { return };
             // An earlier deadline took its place and schedules on.
@@ -1322,7 +1323,7 @@ impl Surface {
                 return;
             }
             surface.keeper.set(None);
-            if surface.last_tick.get() < at {
+            if keeper_runs_frame(at, scheduled, surface.last_tick.get()) {
                 let now = objc2_quartz_core::CACurrentMediaTime();
                 let period = now - surface.last_tick.get();
                 surface.frame(now, period, false);
@@ -1572,9 +1573,48 @@ pub(crate) fn quiet<R>(f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// How many milliseconds the timer that keeps deadline `at` waits
+/// ([`Surface::keep_deadline`]): until `late` after it. A deadline the last
+/// frame (at `last_tick`) did not move past is due already, and the frame
+/// that ran then did not end it: the timer waits `late` after that frame,
+/// not 0 ms, so a deadline left in the past (its window closed, nothing
+/// steps it) cannot reschedule itself in a busy loop (#3392).
+fn keeper_wait(at: f64, last_tick: f64, now: f64, late: f64) -> u64 {
+    let due = at.max(last_tick);
+    ((due + late - now).max(0.0) * 1000.0).ceil() as u64
+}
+
+/// Whether the timer that kept deadline `at`, scheduled when the last frame
+/// had run at `scheduled`, runs a frame when it fires and the last frame ran
+/// at `last_tick`: when no frame ran since the deadline came due, or none
+/// ran since it was scheduled. A deadline already past when it was
+/// scheduled still gets a frame, which steps what set it, instead of the
+/// timer skipping and rescheduling it forever while no window draws
+/// (#3392).
+fn keeper_runs_frame(at: f64, scheduled: f64, last_tick: f64) -> bool {
+    last_tick < at || last_tick <= scheduled
+}
+
 #[cfg(test)]
 mod tests {
-    use super::frame_rate_range;
+    use super::{frame_rate_range, keeper_runs_frame, keeper_wait};
+
+    #[test]
+    fn a_deadline_left_in_the_past_does_not_spin_its_timer() {
+        // A deadline ahead: wait until `late` after it.
+        assert!((550..=551).contains(&keeper_wait(10.0, 9.0, 9.5, 0.05)));
+        assert!(keeper_runs_frame(10.0, 9.0, 9.0));
+        // The display link drew a frame after the deadline came due: the
+        // timer leaves it to that frame.
+        assert!(!keeper_runs_frame(10.0, 9.0, 10.01));
+        // A deadline long past that the last frame did not end (#3392):
+        // the timer waits `late` after that frame instead of 0 ms...
+        assert!((49..=50).contains(&keeper_wait(5.0, 10.0, 10.001, 0.05)));
+        // ...and runs a frame when it fires, if none ran since.
+        assert!(keeper_runs_frame(5.0, 10.0, 10.0));
+        // Each round then waits again: never a 0 ms loop.
+        assert!(keeper_wait(5.0, 10.05, 10.051, 0.05) > 0);
+    }
 
     fn range(rate: Option<f32>, max: f32) -> [f32; 3] {
         let r = frame_rate_range(rate, max);
