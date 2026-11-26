@@ -294,8 +294,8 @@ on its left border (bars of the `tableGrip` part, the theme's `muted-foreground`
 over the selection. In a scrolling table the viewport clips the column grip and its left edge anchors the row grip. A press selects the column or row (a cell selection). A drag on desktops shows the drop line
 (`tableDropIndicator`, `primary`) and moves the column or row with `moveTableColumn` / `moveTableRow` on release.
 A grip let go before the pointer moved `DRAG_SLOP` (4 points, in any direction) is a press, reported after its
-selection as `RichEditorEvent::TableGripPress` (`onTableGripPress`, `RichEditorTableGripPress`: the table's
-position, the `row` or the `column`, the press and the grip's box in the root view, where an app's menu is placed);
+selection as `RichEditorEvent::TableMenu` (`onTableMenu`, `RichEditorTableMenu`: the table's position, the `row`
+or the `column`, and the grip's box in the root view as `bounds`, where an app's menu is placed);
 a drag, a gesture the platform takes away (`cancel_table_press` on the responder's termination) and a grip the
 document lost before the release (its table or line gone) report none.
 On touch screens a tap on a grip reports at once (a finger never drags a grip). As in common web editors, the

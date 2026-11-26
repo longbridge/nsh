@@ -55,7 +55,6 @@ import BaseRichEditorReadonlyInput from "./base-rich-editor-readonly-input";
 import BaseRichEditorNodeView from "./base-rich-editor-node-view";
 import BaseRichEditorSession from "./base-rich-editor-session";
 import BaseRichEditorTables from "./base-rich-editor-tables";
-import BaseRichEditorTableGrip from "./base-rich-editor-table-grip";
 import BaseRichEditorView from "./base-rich-editor-view";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseCombobox from "./base-combobox";
@@ -131,7 +130,6 @@ const cases: Record<string, () => JSX.Element> = {
   "base-rich-editor-session": BaseRichEditorSession,
   "base-rich-editor-view": BaseRichEditorView,
   "base-rich-editor-tables": BaseRichEditorTables,
-  "base-rich-editor-table-grip": BaseRichEditorTableGrip,
   "base-tabs": BaseTabs,
   "base-tabs-orientation": BaseTabsOrientation,
   "base-toggle": BaseToggle,

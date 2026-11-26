@@ -5,7 +5,7 @@
 
 use nsh_base::rich_editor::{
     extensions::{ExtensionManager, kit},
-    view::RichEditorTableGripPress,
+    view::RichEditorTableMenu,
 };
 use nsh_testing::{DragOptions, Screen};
 
@@ -430,33 +430,25 @@ fn a_header_cells_typed_part_style_wins_over_its_theme_background() {
 /// column, grip box in the root and whether the press is in that box), and
 /// how many.
 #[component]
-fn GripPresses(props: HarnessProps) -> impl IntoElement {
+fn TableMenus(props: HarnessProps) -> impl IntoElement {
     let session = props.session.clone().expect("a session");
     let last = signal(String::from("Grip none"));
     let count = signal(0_u32);
     view()
-        .child(
-            view().test_id("editor").w(px(600.0)).h(px(600.0)).child(
-                rich_editor()
-                    .editor(session)
-                    .size_full()
-                    .on_table_grip_press(move |e: &RichEditorTableGripPress| {
-                        let (b, p) = (e.page_bounds, e.page_position);
-                        let inside = p.x >= b.origin.x
-                            && p.x <= b.origin.x + b.size.width
-                            && p.y >= b.origin.y
-                            && p.y <= b.origin.y + b.size.height;
-                        last.set(format!(
-                            "Grip {} {:?} {:?} at {} {inside}",
-                            e.table,
-                            e.row,
-                            e.column,
-                            boxed(b)
-                        ));
-                        count.update(|c| *c += 1);
-                    }),
+        .child(view().test_id("editor").w(px(600.0)).h(px(600.0)).child(
+            rich_editor().editor(session).size_full().on_table_menu(
+                move |e: &RichEditorTableMenu| {
+                    last.set(format!(
+                        "Grip {} {:?} {:?} at {}",
+                        e.table,
+                        e.row,
+                        e.column,
+                        boxed(e.bounds)
+                    ));
+                    count.update(|c| *c += 1);
+                },
             ),
-        )
+        ))
         .child(text(move || last.get()))
         .child(text(move || format!("Presses {}", count.get())))
         .child(text("Ready"))
@@ -476,7 +468,7 @@ fn start_grips(session: EditorSession) -> Headless {
 fn start_grips_on(session: EditorSession, os: Os, idiom: Idiom) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(nsh_testing::windowed_root_with::<GripPresses>(move || {
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<TableMenus>(move || {
             HarnessProps {
                 session: Some(session.clone()),
             }
@@ -542,10 +534,7 @@ fn a_grip_pressed_without_dragging_reports_its_row_or_column() {
     let (id, b) = grip(app.screen(), true).unwrap();
     let center = Point::new(b.size.width * 0.5, b.size.height * 0.5);
     app.press_at(&format!("view:{id}"), center).unwrap();
-    see(
-        &mut app,
-        &format!("Grip 7 None Some(0) at {} true", boxed(b)),
-    );
+    see(&mut app, &format!("Grip 7 None Some(0) at {}", boxed(b)));
     see(&mut app, "Presses 1");
     // The press still selects the column, as before it was reported.
     assert_eq!(held.state().selection().json_id(), "cell");
@@ -554,10 +543,7 @@ fn a_grip_pressed_without_dragging_reports_its_row_or_column() {
     let (id, b) = grip(app.screen(), false).unwrap();
     let center = Point::new(b.size.width * 0.5, b.size.height * 0.5);
     app.press_at(&format!("view:{id}"), center).unwrap();
-    see(
-        &mut app,
-        &format!("Grip 7 Some(0) None at {} true", boxed(b)),
-    );
+    see(&mut app, &format!("Grip 7 Some(0) None at {}", boxed(b)));
     see(&mut app, "Presses 2");
     assert_eq!(held.state().selection().json_id(), "cell");
 }
@@ -632,23 +618,19 @@ fn a_tap_on_a_grip_reports_it_on_touch_screens() {
     let (id, b) = grip(app.screen(), true).unwrap();
     let center = Point::new(b.size.width * 0.5, b.size.height * 0.5);
     app.press_at(&format!("view:{id}"), center).unwrap();
-    see(
-        &mut app,
-        &format!("Grip 7 None Some(0) at {} true", boxed(b)),
-    );
+    see(&mut app, &format!("Grip 7 None Some(0) at {}", boxed(b)));
     see(&mut app, "Presses 1");
 }
 
 #[test]
-fn the_generated_js_event_passes_the_grip_press() {
+fn the_generated_js_event_passes_the_table_menu() {
     let mut registry = nsh_core::element::Registry::new();
     registry.register::<nsh_base::rich_editor::view::RichEditor>();
     let declarations = nsh_core::element::declarations(&registry, &[]);
     for wanted in [
-        "onTableGripPress?: (event: RichEditorTableGripPress)",
-        "export interface RichEditorTableGripPress",
-        "pagePosition",
-        "pageBounds",
+        "onTableMenu?: (event: RichEditorTableMenu)",
+        "export interface RichEditorTableMenu",
+        "bounds: Bounds",
     ] {
         assert!(declarations.contains(wanted), "{wanted}\n{declarations}");
     }

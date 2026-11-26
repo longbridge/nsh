@@ -14,7 +14,7 @@ use nsh_core::prelude::*;
 use serde_json::Value;
 
 use super::{
-    RichEditorEvent, RichEditorTableGripPress,
+    RichEditorEvent, RichEditorTableMenu,
     controller::{BlockItem, Rv, Tree},
     geometry::{Geometry, Hit},
     parts::Part,
@@ -111,7 +111,7 @@ pub(crate) struct TableGesture {
     /// The scroll offset at the press.
     pub(crate) scroll: Points,
     /// A grip's press that has not dragged past `DRAG_SLOP` and was not
-    /// taken away: its release reports `onTableGripPress`.
+    /// taken away: its release reports `onTableMenu`.
     pub(crate) grip_press: bool,
 }
 
@@ -861,7 +861,7 @@ impl Rv {
                 grip_press: matches!(drag, TableDrag::MoveCol { .. } | TableDrag::MoveRow { .. }),
             });
         } else {
-            self.report_grip_press(drag, shift, px(0.0));
+            self.report_table_menu(drag, shift, px(0.0));
         }
     }
 
@@ -873,17 +873,13 @@ impl Rv {
         }
     }
 
-    /// Reports `onTableGripPress` for the grip `drag` pressed: `shift` is
+    /// Reports `onTableMenu` for the grip `drag` pressed: `shift` is
     /// the press in the content less the press in the root, `scrolled` the
     /// scroll since the press.
-    fn report_grip_press(&self, drag: TableDrag, shift: Point<Points>, scrolled: Points) {
-        let (table, row, column, press) = match drag {
-            TableDrag::MoveCol {
-                table, from, press, ..
-            } => (table, None, Some(from), press),
-            TableDrag::MoveRow {
-                table, from, press, ..
-            } => (table, Some(from), None, press),
+    fn report_table_menu(&self, drag: TableDrag, shift: Point<Points>, scrolled: Points) {
+        let (table, row, column) = match drag {
+            TableDrag::MoveCol { table, from, .. } => (table, None, Some(from)),
+            TableDrag::MoveRow { table, from, .. } => (table, Some(from), None),
             _ => return,
         };
         // A grip the document lost while it was held (its table or line
@@ -900,18 +896,16 @@ impl Rv {
         else {
             return;
         };
-        let page_position = Point::new(press.x - shift.x, press.y - shift.y);
-        let page_bounds = Bounds::new(
+        let bounds = Bounds::new(
             Point::new(grip.origin.x - shift.x, grip.origin.y - shift.y - scrolled),
             grip.size,
         );
         self.cx
-            .emit(RichEditorEvent::TableGripPress(RichEditorTableGripPress {
+            .emit(RichEditorEvent::TableMenu(RichEditorTableMenu {
                 table: table as u32,
                 row: row.map(|r| r as u32),
                 column: column.map(|c| c as u32),
-                page_position,
-                page_bounds,
+                bounds,
             }));
     }
 
@@ -1034,7 +1028,7 @@ impl Rv {
         }
         if gesture.grip_press {
             let scrolled = self.scroll_y.get_untracked() - gesture.scroll;
-            self.report_grip_press(gesture.drag, gesture.shift, scrolled);
+            self.report_table_menu(gesture.drag, gesture.shift, scrolled);
             return;
         }
         let command: Option<BoxCommand> = match (gesture.drag, preview) {
