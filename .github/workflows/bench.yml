@@ -11,14 +11,28 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
+      - "crates/nsh-base/**"
+      - "crates/nsh-bundler/**"
       - "crates/nsh-core/**"
+      - "crates/nsh-dev/**"
       - "crates/nsh-engine/**"
+      - "crates/nsh-i18n/**"
       - "crates/nsh-js/**"
       - "crates/nsh-macros/**"
-      - "crates/nsh-base/**"
-      - "Cargo.lock"
+      - "crates/nsh-package/**"
+      - "crates/nsh-testing/**"
+      - "crates/nsh-updater/**"
       - "scripts/bench-compare.py"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
+      - ".github/actions/cargo/**"
       - ".github/workflows/bench.yml"
+  # Required of every pull request workflow (.github/ci/paths.py); the job
+  # skips it.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
@@ -34,9 +48,9 @@ env:
 
 jobs:
   compare:
-    # Not for drafts, closed pull requests or forks (the comment needs a
+    # Not for the merge queue, drafts, closed pull requests or forks (the comment needs a
     # write token, and forks run on GitHub's runners, too noisy to compare).
-    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action != 'closed' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository) }}
     environment:
       name: ci-debounce
       deployment: false
