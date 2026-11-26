@@ -393,6 +393,8 @@ pub(crate) fn create_app_window(
     if ex & WS_EX_LAYERED.0 != 0 {
         crate::shell::opaque_layer(hwnd);
     }
+    // Before it first shows, so its taskbar button has the app's icon.
+    set_icon(hwnd, surface.icon.borrow().as_deref());
     Ok(hwnd)
 }
 
@@ -921,6 +923,11 @@ impl UiThread {
     pub(crate) fn current() -> UiThread {
         register_classes();
         UiThread(DISPATCHER.with(Cell::get))
+    }
+
+    /// Whether the calling thread is this UI thread.
+    pub(crate) fn is_current(self) -> bool {
+        self.0 != 0 && DISPATCHER.with(Cell::get) == self.0
     }
 
     /// Runs `f` on that thread (from any thread), in its message loop.
@@ -1819,6 +1826,9 @@ fn window_api(
         WM_WINDOWPOSCHANGED => {
             if let Some(id) = data.window {
                 crate::app_window::state_changed(surface, id);
+                // Shown, hidden, minimized or restored: the app's state
+                // follows its own windows (the host never shows).
+                crate::system::lifecycle_changed(surface);
             }
             None
         }
@@ -2313,6 +2323,18 @@ impl Ticker {
     /// The posted tick was handled.
     pub(crate) fn ticked(&self) {
         self.shared.pending.store(false, Ordering::Release);
+    }
+
+    /// A tick is posted and not handled yet, for tests.
+    #[cfg(test)]
+    pub(crate) fn posted_for_test(&self) {
+        self.shared.pending.store(true, Ordering::Release);
+    }
+
+    /// Whether the posted tick is not handled yet, for tests.
+    #[cfg(test)]
+    pub(crate) fn pending_for_test(&self) -> bool {
+        self.shared.pending.load(Ordering::Acquire)
     }
 
     /// No frames are wanted until [`Ticker::resume`].

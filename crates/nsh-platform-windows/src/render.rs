@@ -1828,7 +1828,7 @@ fn device_lost(surface: &Rc<Surface>) {
 }
 
 /// What a pass drew besides pixels.
-struct Drawn {
+pub(crate) struct Drawn {
     /// The hosted items drawn and their window rectangles.
     items: Vec<(Rc<dyn Hosted>, RECT)>,
     /// The composed items (web views) and where they go.
@@ -1970,7 +1970,7 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
 /// Draws the tree into `target` (its DPI set for `scale`), and into the
 /// layers of `composition` above its web views.
 #[allow(clippy::too_many_arguments)]
-fn draw_into(
+pub(crate) fn draw_into(
     surface: &Rc<Surface>,
     gfx: &Gfx,
     target: &ID2D1Bitmap1,

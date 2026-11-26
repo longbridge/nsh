@@ -52,7 +52,10 @@ use nsh_core::{
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT},
-    UI::{Input::KeyboardAndMouse::EnableWindow, WindowsAndMessaging::*},
+    UI::{
+        Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled},
+        WindowsAndMessaging::*,
+    },
 };
 
 use crate::{
@@ -168,6 +171,54 @@ pub(crate) fn dialog_window(surface: &Surface) -> NodeId {
         .find(|w| w.state.get().is_some_and(|state| state.focused))
         .or_else(|| windows.first())
         .map_or(ROOT_ID, |w| w.id)
+}
+
+/// Candidate window state used to pick which window a notification press
+/// activates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ActivationCandidate {
+    hwnd: HWND,
+    visible: bool,
+    enabled: bool,
+    focusable: bool,
+    minimized: bool,
+}
+
+fn select_activation_target(
+    candidates: impl IntoIterator<Item = ActivationCandidate>,
+    foreground: HWND,
+) -> Option<HWND> {
+    candidates
+        .into_iter()
+        .filter(|c| c.visible && c.enabled && c.focusable)
+        .min_by_key(|c| (c.hwnd != foreground, c.minimized))
+        .map(|c| c.hwnd)
+}
+
+/// The focused window, else the oldest shown and focusable window (preferring
+/// unminimized windows before minimized ones), with the embedding host as a
+/// fallback.
+pub(crate) fn activation_target(surface: &Surface, host: HWND) -> Option<HWND> {
+    let foreground = crate::window::foreground();
+    let windows = surface.windows.borrow();
+    let candidates = windows.iter().map(|w| w.hwnd).chain([host]).map(|hwnd| {
+        // SAFETY: plain queries; a missing window is not visible.
+        let (visible, enabled, minimized) = unsafe {
+            (
+                IsWindowVisible(hwnd).as_bool(),
+                IsWindowEnabled(hwnd).as_bool(),
+                IsIconic(hwnd).as_bool(),
+            )
+        };
+        ActivationCandidate {
+            hwnd,
+            visible,
+            enabled,
+            focusable: crate::window::shell(hwnd).is_none_or(|s| s.attrs().focusable),
+            minimized,
+        }
+    });
+    select_activation_target(candidates, foreground)
 }
 
 /// The root view of the window showing dialog root `id`: what its
@@ -542,7 +593,7 @@ fn fill_background(surface: &Surface, id: NodeId, hwnd: HWND) {
 
 /// The window's client area was resized or moved to another scale: the
 /// root view takes its size, which the core lays the root out at.
-fn resized(surface: &Surface, window: &AppWindow) {
+fn resized(surface: &Rc<Surface>, window: &AppWindow) {
     // Made at the system's default size (`CW_USEDEFAULT`, most of the
     // screen), which its styles report before it is placed: the app would
     // lay itself out for a window nobody sees.
@@ -573,6 +624,9 @@ fn resized(surface: &Surface, window: &AppWindow) {
     }
     if window.reported.replace(Some(size)) != Some(size) {
         surface.control(|c| c.set_root_size(window.id, size, EdgeInsets::default()));
+        // Drawn at the new size rather than the last layout clipped or
+        // short of the edge, as the main window's.
+        surface.await_layout(window.id, size);
         // The dialogs presented in it follow its size.
         crate::navigation::surface_resized(surface, size.width.0, size.height.0);
         crate::system::window_resized(surface, window.id, size.width.0, size.height.0);
@@ -928,6 +982,8 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
     destroy(surface, &window);
     // Another window may be the primary one now.
     surface.window_environment();
+    // It no longer counts as shown.
+    crate::system::lifecycle_changed(surface);
     true
 }
 
@@ -949,6 +1005,7 @@ pub(crate) fn close_all(surface: &Surface) {
         destroy(surface, window);
     }
     surface.window_environment();
+    crate::system::lifecycle_changed(surface);
 }
 
 fn destroy(surface: &Surface, window: &AppWindow) {
@@ -1172,5 +1229,216 @@ mod tests {
             let _ = DestroyWindow(hwnd_c);
         }
         surface.windows.borrow_mut().clear();
+    }
+
+    #[test]
+    fn activation_target_ranks_focused_unminimized_and_minimized_windows() {
+        let hwnd = |id: isize| HWND(id as *mut _);
+        let window = |id: isize| ActivationCandidate {
+            hwnd: hwnd(id),
+            visible: true,
+            enabled: true,
+            focusable: true,
+            minimized: false,
+        };
+
+        // Focused window wins over an older visible window.
+        assert_eq!(
+            select_activation_target([window(1), window(2)], hwnd(2)),
+            Some(hwnd(2))
+        );
+
+        // Skips hidden, disabled (modal owner), and non-focusable (overlay) windows.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(1)
+                    },
+                    ActivationCandidate {
+                        enabled: false,
+                        ..window(2)
+                    },
+                    ActivationCandidate {
+                        focusable: false,
+                        ..window(3)
+                    },
+                    window(4),
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(4))
+        );
+
+        // Prefers an unminimized visible window over an older minimized window.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        minimized: true,
+                        ..window(1)
+                    },
+                    window(2),
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(2))
+        );
+
+        // Falls back to the oldest minimized window when none is open on screen.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        minimized: true,
+                        ..window(1)
+                    },
+                    ActivationCandidate {
+                        minimized: true,
+                        ..window(2)
+                    },
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(1))
+        );
+
+        // Falls back to the embedding host when app windows are unavailable, and
+        // returns None when all windows (including the hidden host) are hidden.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(1)
+                    },
+                    window(10),
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(10))
+        );
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(1)
+                    },
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(10)
+                    },
+                ],
+                hwnd(99),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn activation_target_skips_hidden_host_and_hidden_app_windows() {
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let id: NodeId = 7;
+        let view = NshView::new(id, ViewKind::Modal);
+        let hwnd = crate::window::create_app_window(
+            surface,
+            id,
+            WindowKind::Normal,
+            &WindowAttributes::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        surface.windows.borrow_mut().push(Rc::new(AppWindow {
+            id,
+            hwnd,
+            view,
+            owner: None,
+            modal: false,
+            composition: None,
+            web: RefCell::default(),
+            placed: RefCell::default(),
+            composed: RefCell::default(),
+            swap: RefCell::new(None),
+            target_scale: Cell::new(0.0),
+            pixels: Cell::new((0, 0)),
+            scale: Cell::new(1.0),
+            invalid: Cell::new(false),
+            positioned: Cell::new(true),
+            reported: Cell::new(None),
+            opened: Cell::new(false),
+            closed: Cell::new(false),
+            hidden: Cell::new(false),
+            state: Cell::new(None),
+        }));
+        assert_eq!(activation_target(surface, surface.hwnd()), None);
+        // SAFETY: the test's own window.
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+        surface.windows.borrow_mut().clear();
+    }
+
+    /// A window of the app's own shows the app's icon (`nsh.json`'s, which
+    /// `nsh run` hands over as an `.ico` file) before it first shows, as the
+    /// hidden host window does: in a `mount(App)` or `<Window>` app it is the
+    /// window with the taskbar button (#3280).
+    #[test]
+    fn an_app_window_has_the_apps_icon() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            ICON_BIG, ICON_SMALL, SendMessageW, WM_GETICON,
+        };
+        if crate::window::has_own_icon() {
+            // The executable's icon is the class's; nothing is set.
+            return;
+        }
+        // A 16×16 32-bit icon, opaque blue: header, one entry, the bitmap
+        // (twice the height for the AND mask), its pixels and its mask.
+        let mut ico = vec![0, 0, 1, 0, 1, 0];
+        let image = 40 + 16 * 16 * 4 + 16 * 4;
+        ico.extend([16, 16, 0, 0, 1, 0, 32, 0]);
+        ico.extend((image as u32).to_le_bytes());
+        ico.extend(22u32.to_le_bytes());
+        ico.extend(40u32.to_le_bytes());
+        ico.extend(16i32.to_le_bytes());
+        ico.extend(32i32.to_le_bytes());
+        ico.extend([1, 0, 32, 0]);
+        ico.extend([0; 24]);
+        for _ in 0..16 * 16 {
+            ico.extend([0xff, 0, 0, 0xff]);
+        }
+        ico.extend([0; 16 * 4]);
+        let path = std::env::temp_dir().join(format!("nsh-test-icon-{}.ico", std::process::id()));
+        std::fs::write(&path, &ico).unwrap();
+
+        let options = crate::AppOptions {
+            icon: Some(path.clone()),
+            ..Default::default()
+        };
+        let app = crate::app::AppView::new(None, options).unwrap();
+        let surface = app.surface();
+        let hwnd = crate::window::create_app_window(
+            surface,
+            7,
+            WindowKind::Normal,
+            &WindowAttributes::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        let icon = |which: u32| {
+            // SAFETY: a plain query of the test's own window.
+            unsafe { SendMessageW(hwnd, WM_GETICON, Some(WPARAM(which as usize)), None) }.0
+        };
+        assert_ne!(icon(ICON_BIG), 0, "the taskbar's icon");
+        assert_ne!(icon(ICON_SMALL), 0, "the title bar's icon");
+        // SAFETY: the test's own window.
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+        let _ = std::fs::remove_file(path);
     }
 }

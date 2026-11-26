@@ -17,3 +17,17 @@ test("off the desktops the same view is the one surface", async () => {
   const app = await open("./App.tsx", { platform: "ios" });
   expect(app.shows("No window")).toBe(true);
 });
+
+test("titleBar() and windowState() read main outside a render", async () => {
+  const app = await open("./App.tsx", { platform: "macos", width: 800, height: 600 });
+  await app.press("Read outside");
+  await app.waitFor("Outside: sync 0 800, async 0 800");
+});
+
+test("closing a window does not throw in an effect reading windowState() and titleBar()", async () => {
+  const app = await open("./CloseEffect.tsx", { platform: "macos", width: 640, height: 480 });
+  await app.waitUntil(async () => (await app.storage())["close.state"] === "640 0");
+  await app.window("main").pressClose();
+  await app.waitUntil(() => app.window("main").state() === null);
+  await app.waitUntil(async () => (await app.storage())["close.state"] === "null 0");
+});

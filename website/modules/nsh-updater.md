@@ -59,7 +59,7 @@ never rejects.
 
 ```tsx
 promptForUpdate({ quiet: true }); // at startup
-<Button onPress={() => promptForUpdate()}>Check for Updates…</Button>;
+<Button onPress={() => promptForUpdate()}><Text>Check for Updates…</Text></Button>;
 ```
 
 The prompt's text is English. The app's name comes from `nsh.json`'s `"name"`.
