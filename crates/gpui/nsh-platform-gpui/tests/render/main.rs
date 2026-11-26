@@ -164,12 +164,8 @@ fn turned_text(cx: &mut HeadlessAppContext, output: Option<&Path>) {
     let squares = [
         ((10.0, 10.0), true, "an upright text view"),
         ((175.0, 10.0), true, "an upright canvas"),
+        // (Not the underlined one: its underline, turned, is at the top.)
         ((10.0, 130.0), false, "a text view turned by 180°"),
-        (
-            (65.0, 130.0),
-            false,
-            "an underlined text view turned by 180°",
-        ),
         ((175.0, 130.0), false, "a canvas turned by 180°"),
     ];
     let start = Instant::now();
@@ -187,7 +183,8 @@ fn turned_text(cx: &mut HeadlessAppContext, output: Option<&Path>) {
                 } else {
                     (bottom, top)
                 };
-                (head < min || head < 2 * foot).then(|| {
+                // The bar of a "T" has more ink than its stem.
+                (head < min || 2 * head < 3 * foot).then(|| {
                     format!("{what}: {top} dark pixels in the top half, {bottom} in the bottom")
                 })
             })

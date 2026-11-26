@@ -161,6 +161,14 @@ impl<'a> DrawCx<'a> {
         self.transform.is_affine() && b.abs() < 1e-6 && c.abs() < 1e-6
     }
 
+    /// True when the transform keeps glyphs as GPUI draws them: axis-
+    /// aligned, and neither axis flipped (a turn by 180° or a negative
+    /// scale is axis-aligned, but turns them over).
+    pub(crate) fn unflipped(&self) -> bool {
+        let [a, _, _, d, _, _] = self.transform.affine();
+        self.axis_aligned() && a > 0.0 && d > 0.0
+    }
+
     /// The scale of the transform (the larger of its axes'): sizes that
     /// do not follow rectangles (radii, font sizes, line widths) scale by
     /// it.

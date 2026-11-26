@@ -2415,12 +2415,15 @@ fn find_font_file(
         FontStyle::Italic => fontdb::Style::Italic,
         FontStyle::Oblique => fontdb::Style::Oblique,
     };
+    // (face, found by its file): fontdb's faces to check against GPUI's.
     let mut faces = Vec::new();
     #[cfg(target_os = "macos")]
     if name.starts_with('.') || name == "system-ui" {
         // CoreText's UI font, which GPUI's is: San Francisco, a variable
         // font fontdb knows by its file (CoreText's own name for it is
-        // hidden).
+        // hidden). GPUI measures it with CoreText at 16 points, which
+        // sets its optical size to that and tracks it: its advances are
+        // the file's there, all less by the same amount.
         let file = match style {
             fontdb::Style::Normal => "SFNS.ttf",
             _ => "SFNSItalic.ttf",
@@ -2433,7 +2436,7 @@ fn find_font_file(
                     }
                     fontdb::Source::Binary(_) => false,
                 })
-                .map(|f| f.id),
+                .map(|f| (f.id, true)),
         );
     }
     for family in families {
@@ -2443,20 +2446,22 @@ fn find_font_file(
             stretch: fontdb::Stretch::Normal,
             style,
         };
-        faces.extend(db.query(&query));
+        faces.extend(db.query(&query).map(|f| (f, false)));
     }
-    for face in faces {
+    for (face, by_file) in faces {
         let Some(file) = db.with_face_data(face, |data, index| {
             let mut face = ttf_parser::Face::parse(data, index).ok()?;
             // A variable font at GPUI's font's weight, at the optical size
-            // GPUI measured with (its largest: GPUI's advances are of a
-            // font as large as its units per em) or at none.
-            let variations = variations(&face, font.weight.0);
+            // GPUI measured with: San Francisco's at CoreText's 16 points,
+            // another's at its largest (GPUI's advances are of a font as
+            // large as its units per em) or at none.
+            let optical_size = by_file.then_some(16.0);
+            let variations = variations(&face, font.weight.0, optical_size);
             variations.into_iter().find_map(|variations| {
                 for &(axis, value) in &variations {
                     face.set_variation(axis, value);
                 }
-                same_font(system, id, &face).then(|| FontFile {
+                same_font(system, id, &face, by_file).then(|| FontFile {
                     data: Arc::from(data),
                     index,
                     units_per_em: face.units_per_em(),
@@ -2476,8 +2481,13 @@ fn find_font_file(
 
 /// The variations to try a font at, for GPUI's font of `weight`: none for
 /// a font that is not variable; else its weight axis at `weight`, its
-/// optical size axis at its largest, then at its default.
-fn variations(face: &ttf_parser::Face<'_>, weight: f32) -> Vec<Vec<(ttf_parser::Tag, f32)>> {
+/// optical size axis at `optical_size`, or else at its largest, then at its
+/// default.
+fn variations(
+    face: &ttf_parser::Face<'_>,
+    weight: f32,
+    optical_size: Option<f32>,
+) -> Vec<Vec<(ttf_parser::Tag, f32)>> {
     let axes: Vec<_> = face.variation_axes().into_iter().collect();
     if axes.is_empty() {
         return vec![Vec::new()];
@@ -2489,26 +2499,37 @@ fn variations(face: &ttf_parser::Face<'_>, weight: f32) -> Vec<Vec<(ttf_parser::
         base.push((wght, weight.clamp(a.min_value, a.max_value)));
     }
     match axes.iter().find(|a| a.tag == opsz) {
-        Some(a) => [a.max_value, a.def_value]
-            .into_iter()
-            .map(|v| {
-                let mut with = base.clone();
-                with.push((opsz, v));
-                with
-            })
-            .collect(),
+        Some(a) => match optical_size {
+            Some(size) => vec![size.clamp(a.min_value, a.max_value)],
+            None => vec![a.max_value, a.def_value],
+        }
+        .into_iter()
+        .map(|v| {
+            let mut with = base.clone();
+            with.push((opsz, v));
+            with
+        })
+        .collect(),
         None => vec![base],
     }
 }
 
 /// True when `face` measures as GPUI's font `id` does: the same units per
-/// em and the same advances of a few letters and figures.
-fn same_font(system: &gpui::TextSystem, id: gpui::FontId, face: &ttf_parser::Face<'_>) -> bool {
+/// em and the same advances of a few letters and figures; or, `tracked`,
+/// advances all less (or more) by the same small amount, which tracking
+/// adds to each.
+fn same_font(
+    system: &gpui::TextSystem,
+    id: gpui::FontId,
+    face: &ttf_parser::Face<'_>,
+    tracked: bool,
+) -> bool {
     let upem = face.units_per_em();
     if upem == 0 || system.units_per_em(id) != upem as u32 {
         return false;
     }
     let mut compared = 0;
+    let mut tracking = None;
     for ch in ['0', '4', 'a', 'e', 'm', 'H', 'W'] {
         let Some(glyph) = face.glyph_index(ch) else {
             continue;
@@ -2519,7 +2540,15 @@ fn same_font(system: &gpui::TextSystem, id: gpui::FontId, face: &ttf_parser::Fac
         let Ok(gpui) = system.advance(id, px(upem as f32), ch) else {
             return false;
         };
-        if (f32::from(gpui.width) - advance as f32).abs() > (upem as f32 / 200.0).max(1.0) {
+        let off = f32::from(gpui.width) - advance as f32;
+        let expected = if tracked {
+            *tracking.get_or_insert(off)
+        } else {
+            0.0
+        };
+        if (off - expected).abs() > (upem as f32 / 200.0).max(1.0)
+            || expected.abs() > upem as f32 / 20.0
+        {
             return false;
         }
         compared += 1;

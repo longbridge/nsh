@@ -2324,10 +2324,10 @@ type Painted = (
 type Placed = (f32, f32, FontId, GlyphId, f32, Option<gpui::Hsla>);
 
 /// Paints `glyphs`: as GPUI's glyph sprites, which stay upright, unless the
-/// transform turns, skews or projects them, which fills the outlines of
+/// transform turns, flips, skews or projects them, which fills the outlines of
 /// those whose font's file gives them as paths ([`fill_outlines`]).
 fn paint_glyphs(cx: &mut DrawCx<'_>, glyphs: Vec<Placed>) {
-    let glyphs = if cx.axis_aligned() {
+    let glyphs = if cx.unflipped() {
         glyphs
     } else {
         fill_outlines(cx, glyphs)
