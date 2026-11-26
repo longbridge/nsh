@@ -181,6 +181,11 @@ pub(crate) struct Surface {
     launch_links: RefCell<Vec<String>>,
     rx: RefCell<Option<Receiver<Message>>>,
     pending: RefCell<Arc<AtomicBool>>,
+    /// The queue is being drained ([`Surface::drain`]).
+    draining: Cell<bool>,
+    /// A wake-up came while the queue was drained or a batch applied
+    /// ([`Surface::drain`]): the queue is drained again once it is done.
+    drain_deferred: Cell<bool>,
     /// The window drawn into (shared with the engine's sink).
     hwnd: Arc<std::sync::atomic::AtomicIsize>,
     /// Pixels per point.
@@ -318,6 +323,8 @@ impl Surface {
             launch_links: RefCell::new(Vec::new()),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
+            draining: Cell::new(false),
+            drain_deferred: Cell::new(false),
             hwnd: Arc::new(std::sync::atomic::AtomicIsize::new(0)),
             scale: Cell::new(1.0),
             pixels: Cell::new((0, 0)),
@@ -599,6 +606,21 @@ impl Surface {
             return;
         }
         self.control(|c| c.dispatch_event(id, kind, payload));
+    }
+
+    /// A queue as an engine's ([`Surface::start`]'s sink) for a test
+    /// without one: what it is sent wakes the window and is drained there.
+    #[cfg(test)]
+    fn queue_for_test(&self) -> Sink {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let pending = Arc::new(AtomicBool::new(false));
+        *self.rx.borrow_mut() = Some(rx);
+        *self.pending.borrow_mut() = pending.clone();
+        Sink {
+            hwnd: self.hwnd.clone(),
+            tx,
+            pending,
+        }
     }
 
     /// Records events passed to [`Surface::event`] instead of forwarding them
@@ -943,7 +965,28 @@ impl Surface {
     }
 
     /// Applies what the engine sent (`WM_NSH_WAKE`).
+    ///
+    /// Not inside a drain or a batch being applied: a call made there may
+    /// pump the thread's messages (a COM call to another process, a shell
+    /// handler) and dispatch the wake-up here, with the mounter borrowed
+    /// and the batches before it not all applied. The queue then waits:
+    /// the next wake-up comes when the engine sends more, and the drain
+    /// under way drains it again when it is done.
     pub(crate) fn drain(self: &Rc<Self>) {
+        if self.draining.get() || self.mounter.try_borrow_mut().is_err() {
+            self.drain_deferred.set(true);
+            self.pending.borrow().store(false, Ordering::Release);
+            return;
+        }
+        self.draining.set(true);
+        self.drain_queued();
+        self.draining.set(false);
+        if self.drain_deferred.take() {
+            self.wake();
+        }
+    }
+
+    fn drain_queued(self: &Rc<Self>) {
         let started = self
             .fps
             .borrow()
@@ -964,6 +1007,14 @@ impl Surface {
         self.ensure_ticking();
         if let (Some(started), Some(fps)) = (started, self.fps()) {
             fps.drained(started.elapsed(), applied);
+        }
+    }
+
+    /// Asks the message loop to drain the queue ([`Surface::drain`]), as
+    /// the engine's sink does.
+    fn wake(&self) {
+        if !self.pending.borrow().swap(true, Ordering::AcqRel) {
+            crate::window::wake(self.hwnd.load(Ordering::Acquire));
         }
     }
 
@@ -1345,6 +1396,99 @@ mod tests {
     };
 
     use super::*;
+
+    /// Dispatches what this thread's queue holds, as a modal loop does
+    /// (`ShellExecuteW`'s, a COM call's to another process).
+    fn pump() {
+        let mut msg = MSG::default();
+        // SAFETY: dispatching messages taken from this thread's queue.
+        unsafe {
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
+    fn cursor_batch(surface: &Surface, cursor: Cursor) -> MountBatch {
+        let mut style = surface.root.state().style.clone();
+        style.cursor = cursor;
+        MountBatch {
+            items: vec![MountItem::ViewStyle { id: ROOT_ID, style }],
+        }
+    }
+
+    /// The test's window, destroyed when the test ends.
+    struct TestWindow(HWND);
+
+    impl Drop for TestWindow {
+        fn drop(&mut self) {
+            // SAFETY: the test's own window.
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    /// A call a batch makes may pump the thread's messages: opening a link
+    /// (`ShellExecuteW`) did, and the engine's wake-up dispatched there
+    /// applied its next batch inside this one, the mounter borrowed
+    /// ("RefCell already borrowed", which aborts in a window procedure).
+    /// The wake-up waits; the engine's next one applies what was sent.
+    #[test]
+    fn a_wake_up_while_a_batch_is_applied_waits_for_it() {
+        let surface = Surface::new(Environment::default());
+        let _window = TestWindow(
+            crate::window::create(&surface, "NSH drain re-entry", (320, 240), None, false).unwrap(),
+        );
+        pump();
+        let sink = surface.queue_for_test();
+        sink.submit(cursor_batch(&surface, Cursor::Crosshair));
+        {
+            // What `Surface::apply` holds while a command runs.
+            let _applying = surface.mounter.borrow_mut();
+            pump();
+        }
+        assert_ne!(
+            surface.root.state().style.cursor,
+            Cursor::Crosshair,
+            "applied inside the batch"
+        );
+        sink.resized(Size::default());
+        pump();
+        assert_eq!(surface.root.state().style.cursor, Cursor::Crosshair);
+    }
+
+    /// What a drain runs (an error's handler, a function run on the main
+    /// thread) may pump the thread's messages too: the batches sent
+    /// meanwhile are applied after the ones the drain took, in order.
+    #[test]
+    fn a_wake_up_during_a_drain_keeps_the_batches_in_order() {
+        let surface = Surface::new(Environment::default());
+        let _window = TestWindow(
+            crate::window::create(&surface, "NSH drain order", (320, 240), None, false).unwrap(),
+        );
+        pump();
+        let sink = surface.queue_for_test();
+        let late = Sink {
+            hwnd: sink.hwnd.clone(),
+            tx: sink.tx.clone(),
+            pending: sink.pending.clone(),
+        };
+        let later = Cell::new(Some(cursor_batch(&surface, Cursor::Pointer)));
+        *surface.on_error.borrow_mut() = Some(Box::new(move |_| {
+            if let Some(batch) = later.take() {
+                late.submit(batch);
+                pump();
+            }
+        }));
+        sink.report_error("pumps the messages");
+        sink.submit(cursor_batch(&surface, Cursor::Crosshair));
+        pump();
+        assert_eq!(
+            surface.root.state().style.cursor,
+            Cursor::Pointer,
+            "the batch sent last is applied last"
+        );
+    }
 
     /// A minimized window's client area is empty: the app keeps the size it
     /// had, and nothing is drawn meanwhile.
