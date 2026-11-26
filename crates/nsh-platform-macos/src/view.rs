@@ -165,6 +165,10 @@ pub(crate) struct ViewState {
     pub(crate) fade: f32,
     /// A modal retained only for its exit animation, outside keyboard navigation.
     pub(crate) modal_exiting: bool,
+    /// Hidden by navigation (a screen under the top one, a header item
+    /// other than the `header`), whatever its style says
+    /// ([`NshView::sync_hidden`]).
+    pub(crate) nav_hidden: bool,
     /// Scroll state (scroll views). Boxed, as the image, canvas and
     /// shader states: few views have one, and every view's state is
     /// allocated with its AppKit view.
@@ -199,6 +203,7 @@ impl ViewState {
     pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         ViewState {
             modal_exiting: false,
+            nav_hidden: false,
             id,
             kind,
             frame: Bounds::default(),
@@ -3435,11 +3440,35 @@ impl NshView {
             && !self.ns().isHidden()
     }
 
+    /// Hides or shows the `NSView` as its style and navigation say: hidden
+    /// while it is `visibility: hidden` or navigation hides it, as the iOS
+    /// backend hides its `UIView`. A view whose layer alone is hidden stays
+    /// live to AppKit (the responder chain, hosted views, tracking areas)
+    /// and to [`crate::sight`], which would draw what changes in it. The
+    /// subtree keeps its frames (a scroll view its offset) and draws what
+    /// changed once it shows. AppKit shows the layer with the view, so it
+    /// is placed again ([`Self::set_layer_geometry`] hides the layer of a
+    /// view whose style still hides it).
+    pub(crate) fn sync_hidden(&self) {
+        let hidden = {
+            let s = self.state();
+            s.style.hidden || s.nav_hidden
+        };
+        if self.ns().isHidden() == hidden {
+            return;
+        }
+        // `viewDidHide` / `viewDidUnhide` tell `sight` it moved.
+        self.ns().setHidden(hidden);
+        if !hidden {
+            self.place();
+        }
+    }
+
     /// Whether the keyboard may reach it, as the headless driver's Tab
     /// stops are views it shows: it has an area, and neither it nor a view
-    /// around it is `visibility: hidden`. Neither `display: none` (an empty
-    /// frame on each view it holds) nor `visibility: hidden` (hidden
-    /// layers) hides an NSView, so AppKit's key view loop still holds them.
+    /// around it is `visibility: hidden`. `display: none` (an empty frame
+    /// on each view it holds) hides no NSView, so AppKit's key view loop
+    /// still holds them.
     pub(crate) fn seen_by_keys(&self) -> bool {
         let size = self.state().frame.size;
         if size.width <= Points(0.0) || size.height <= Points(0.0) {
