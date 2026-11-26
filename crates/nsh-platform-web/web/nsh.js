@@ -973,6 +973,26 @@ function measureContext() {
   return canvas.getContext("2d");
 }
 
+/**
+ * The width of `text` in CSS `font` as the DOM draws it, measured in `cx`.
+ * Canvas text places glyphs as at a pixel ratio of 1, the DOM at the page's:
+ * a hinted font rounds its advances to device pixels, so at 1.25 or 1.5 the
+ * DOM draws it narrower or wider than canvas measures it (NSimSun, Chrome's
+ * `monospace` on Chinese Windows, at 13px: 6.5 against 7 per character).
+ * Laid out at canvas widths, its runs then stand apart or overlap. At the
+ * ratio's font size, and scaled back, canvas measures the DOM's width.
+ */
+function measureWidth(cx, font, text) {
+  const ratio = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  if (ratio === 1) {
+    cx.font = font;
+    return cx.measureText(text).width;
+  }
+  // `css_font` puts the size first: `[italic ]<weight> <size>px <family>`.
+  cx.font = font.replace(/(\d*\.?\d+)px/, (_, size) => `${size * ratio}px`);
+  return cx.measureText(text).width / ratio;
+}
+
 /** The span `measureNumericText` measures in (one for the page's players). */
 let numericSpan = null;
 
@@ -1331,15 +1351,13 @@ class Player {
             this.measureUses = 0;
             this.measure = measureContext();
           }
-          this.measure.font = this.str(fp, fl);
-          return this.measure.measureText(this.str(tp, tl)).width;
+          return measureWidth(this.measure, this.str(fp, fl), this.str(tp, tl));
         },
         measure_numeric_text: (fp, fl, np, nl, tp, tl) => {
           const font = this.str(fp, fl), text = this.str(tp, tl);
           const width = measureNumericText(font, this.str(np, nl), text);
           if (width != null) return width;
-          this.measure.font = font;
-          return this.measure.measureText(text).width;
+          return measureWidth(this.measure, font, text);
         },
         text_cluster_boxes: (fp, fl, np, nl, spacing, tp, tl, rp, op, count) => {
           const input = new Uint32Array(this.wasm.memory.buffer, rp, count * 2);
@@ -7498,11 +7516,19 @@ class Player {
     this.webNavigation(el, "onLoad", false);
   }
 
-  op_video([, id, src, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
+  op_video([, id, src, poster, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
     const el = this.view(id);
     const video = el?._video;
     if (!video) return;
     const url = src ? this.asset(src) : "";
+    // The poster shows until the first frame is ready (`loadeddata`), as
+    // on the other platforms, not until playback starts as `<video>`'s own.
+    const posterUrl = poster ? this.asset(poster) : "";
+    if (posterUrl !== el._poster || url !== el._src) {
+      el._poster = posterUrl;
+      if (posterUrl && (url !== el._src || video.readyState < 2)) video.poster = posterUrl;
+      else video.removeAttribute("poster");
+    }
     // `paused` is acted on when it changes (or for a new source): `play()`
     // on a video that ended starts it over, and one its controls paused
     // would play on, whenever another prop (the volume, say) changed.
@@ -7559,6 +7585,7 @@ class Player {
     });
     video.addEventListener("loadedmetadata", () =>
       emit("onLoad", { duration: video.duration || 0, width: video.videoWidth, height: video.videoHeight }));
+    video.addEventListener("loadeddata", () => video.removeAttribute("poster"));
     video.addEventListener("playing", () => {
       buffer(false);
       stopProgress();

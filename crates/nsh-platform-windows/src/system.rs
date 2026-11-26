@@ -733,6 +733,42 @@ pub(crate) fn open_url(url: &str) -> bool {
     instance.0 as isize > 32
 }
 
+/// `Linking.openURL`: opens `url` on a thread of its own (a
+/// single-threaded COM apartment, as `ShellExecuteW` asks) and answers
+/// request `id` as a root `OpenUrl` event, as the file requests do
+/// ([`crate::file_requests`]). `ShellExecuteW` runs the shell's handlers,
+/// which pump the calling thread's messages: on the UI thread it ran in the
+/// middle of a batch, and a wake-up dispatched there applied the engine's
+/// next batch inside this one.
+fn open_url_later(surface: &Rc<Surface>, id: u32, url: &str) {
+    let mut control = None;
+    surface.control(|c| control = Some(c.clone()));
+    let url = url.to_owned();
+    let spawned = std::thread::Builder::new()
+        .name("nsh-open-url".into())
+        .spawn(move || {
+            let opened = crate::file_requests::with_com(|| open_url(&url)).unwrap_or_else(|e| {
+                log::debug!("windows: no COM for opening a URL: {e}");
+                open_url(&url)
+            });
+            if let Some(control) = control {
+                control.dispatch_event(ROOT_ID, EventKind::OpenUrl, open_url_answer(id, opened));
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!("cannot open a URL: {e}");
+        surface.event(ROOT_ID, EventKind::OpenUrl, open_url_answer(id, false));
+    }
+}
+
+/// The answer to `Linking.openURL` request `id`.
+fn open_url_answer(id: u32, opened: bool) -> EventPayload {
+    EventPayload::Map(vec![
+        ("id", PayloadValue::Number(id as f64)),
+        ("opened", PayloadValue::Bool(opened)),
+    ])
+}
+
 /// Reports a clipboard write's result (`clipboard_write_result`).
 fn clipboard_written(surface: &Rc<Surface>, written: bool) {
     surface.event(
@@ -818,17 +854,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             *scale,
             *format,
         ),
-        Command::OpenUrl { id, url } => {
-            let opened = open_url(url);
-            surface.event(
-                ROOT_ID,
-                EventKind::OpenUrl,
-                EventPayload::Map(vec![
-                    ("id", PayloadValue::Number(*id as f64)),
-                    ("opened", PayloadValue::Bool(opened)),
-                ]),
-            );
-        }
+        Command::OpenUrl { id, url } => open_url_later(surface, *id, url),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:

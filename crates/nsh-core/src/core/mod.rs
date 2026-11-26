@@ -5567,6 +5567,15 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::Native(NativeProp::Poster(Some(url))) if kind == Kind::Video => {
+                match self.media_source(&url) {
+                    Some(granted) => Prop::Native(NativeProp::Poster(Some(granted.unwrap_or(url)))),
+                    None => {
+                        refuse_media(self, "the poster", &url);
+                        Prop::Native(NativeProp::Poster(None))
+                    }
+                }
+            }
             Prop::Native(NativeProp::Src(Some(url)))
                 if kind == Kind::WebView
                     && !self.access.allows_webview_with(&url, self.web_origin(key)) =>
@@ -12857,6 +12866,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
             }
         }
         (NativeProps::Video(p), P::Src(v)) => p.source = v,
+        (NativeProps::Video(p), P::Poster(v)) => p.poster = v,
         (NativeProps::Video(p), P::Paused(v)) => p.paused = v,
         (NativeProps::Video(p), P::Muted(v)) => p.muted = v,
         (NativeProps::Video(p), P::Volume(v)) => p.volume = v.clamp(0.0, 1.0),

@@ -230,7 +230,8 @@ build without syntect. Without the feature, code blocks the app does not highlig
   `:::`, as `remark-directive`).
 - **Rust plugins** (`MarkdownPlugin`) read mdast nodes themselves: `configure` turns on markdown-rs constructs,
   `block` / `inline` read a node (the first plugin returning `Some` wins; `ParseContext` reads children as the parser
-  does), `render` shows a custom node in Rust. A view provides them to every `TextView` below it with
+  does; `ParseContext::conversion_id` is the same in every callback of one conversion, a `Parser::markdown` call or a
+  text a view reads, and new for each), `render` shows a custom node in Rust. A view provides them to every `TextView` below it with
   `provide_context(MarkdownPlugins::new().with(..))`. A plugin's `render` comes before `renderCustom`, which comes
   before the node's content.
 - **`MarkdownOptions`**: `math`, `html`, `alerts`, `links`, `images` (default on), `frontmatter`, `mdx`, `streaming` (default off).

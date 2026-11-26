@@ -100,6 +100,27 @@ impl BundleError {
             plain: message,
         }
     }
+
+    /// The imports nothing resolved, from a build's warnings: rolldown
+    /// keeps a bare one as an external import, which no host serves, so the
+    /// app would build and then fail to load. They fail the build instead.
+    fn unresolved(warnings: Vec<rolldown_error::BuildDiagnostic>) -> Result<(), Self> {
+        let unresolved: Vec<_> = warnings
+            .into_iter()
+            .filter(|w| matches!(w.kind(), rolldown_error::EventKind::UnresolvedImport))
+            .map(|w| w.with_severity(rolldown_error::Severity::Error))
+            .collect();
+        if unresolved.is_empty() {
+            return Ok(());
+        }
+        let mut error = Self::new(unresolved);
+        let hint = "\nA package resolves from a node_modules directory above the importing file; \
+                    nsh.json \"resolve\" \"alias\" maps an import to a file.";
+        for text in [&mut error.colored, &mut error.plain] {
+            *text = text.replace(", treating it as an external dependency", "") + hint;
+        }
+        Err(error)
+    }
 }
 
 /// A bundled app.
@@ -727,6 +748,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
             None => BundleError::new(e.into_vec()),
         }
     })?;
+    BundleError::unresolved(output.warnings)?;
     let mut entry_chunk = None;
     let mut chunks = Vec::new();
     for asset in output.assets {
@@ -1127,6 +1149,7 @@ pub async fn bundle_hot_async(
             None => BundleError::new(e.into_vec()),
         }
     })?;
+    BundleError::unresolved(output.warnings)?;
     let mut modules = Vec::new();
     let mut entry_id = None;
     for asset in output.assets {
@@ -1621,6 +1644,85 @@ mod tests {
             hot.modules
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A TSX nshm installed outside the app (`~/.nsh/nshms`) importing a
+    /// package: the walk up from it finds no `node_modules`, so the import
+    /// fails the build rather than staying an import the app cannot load;
+    /// `"resolve"` `"alias"` to the file of the app's installed package
+    /// resolves it, and the package's own imports, from the app.
+    #[test]
+    fn an_import_nothing_resolves_fails_the_build() {
+        let root = std::env::temp_dir().join(format!("nsh-unresolved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let app = root.join("app");
+        let nshm = root.join("nshms/acme-ui/1.0.0");
+        for dir in [
+            app.join("node_modules/dates/dist"),
+            app.join("node_modules/helper"),
+            nshm.clone(),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let files = [
+            (
+                app.join("App.tsx"),
+                "import { label } from \"acme-ui\";\nconsole.log(label());\n",
+            ),
+            (
+                app.join("node_modules/dates/package.json"),
+                r#"{ "name": "dates", "exports": { ".": "./dist/index.js" } }"#,
+            ),
+            (
+                app.join("node_modules/dates/dist/index.js"),
+                "import { h } from \"helper\";\nexport const fmt = () => \"dates build \" + h;\n",
+            ),
+            (
+                app.join("node_modules/helper/package.json"),
+                r#"{ "name": "helper", "main": "./index.js" }"#,
+            ),
+            (
+                app.join("node_modules/helper/index.js"),
+                "export const h = \"helper build\";\n",
+            ),
+            (
+                nshm.join("index.ts"),
+                "import { fmt } from \"dates\";\nexport const label = () => fmt();\n",
+            ),
+        ];
+        for (file, code) in files {
+            std::fs::write(file, code).unwrap();
+        }
+        let ui = nshm.join("index.ts");
+        let config = |aliases: &str| {
+            std::fs::write(
+                app.join("nsh.json"),
+                format!(r#"{{ "resolve": {{ "alias": {{ "acme-ui": {ui:?}{aliases} }} }} }}"#),
+            )
+            .unwrap();
+        };
+        let build = || {
+            bundle(&BundleOptions {
+                entry: app.join("App.tsx"),
+                ..Default::default()
+            })
+        };
+        config("");
+        let error = build().unwrap_err().plain;
+        assert!(
+            error.contains("dates") && error.contains("\"resolve\" \"alias\""),
+            "{error}"
+        );
+        assert!(!error.contains("external dependency"), "{error}");
+        let hot = bundle_hot(&app.join("App.tsx"), &[]).unwrap_err().plain;
+        assert!(hot.contains("dates"), "{hot}");
+        config(r#", "dates": "./node_modules/dates/dist/index.js""#);
+        let code = build().unwrap().code;
+        assert!(
+            code.contains("dates build") && code.contains("helper build"),
+            "{code}"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// An nshm's Rust module, which `nsh.lock` names: imported natively

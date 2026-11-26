@@ -4712,12 +4712,13 @@ expect Named: text threw
 expect Editable: false
 expect Both: threw
 expect Duplicate: threw
-expect Classes: starterKit,doc,paragraph,heading,blockquote,bulletList,orderedList,listItem,taskList,taskItem,codeBlock,hardBreak,horizontalRule,image,bold,italic,strike,code,underline,link,highlight,subscript,superscript,textStyle,textAlign,history,trailingNode,typography,listKeymap
+expect Classes: starterKit,doc,paragraph,heading,blockquote,bulletList,orderedList,listItem,taskList,taskItem,codeBlock,codeBlockHighlight,hardBreak,horizontalRule,image,bold,italic,strike,code,underline,link,highlight,subscript,superscript,textStyle,textAlign,history,trailingNode,typography,listKeymap
 covers [nsh/base] Blockquote
 covers [nsh/base] Bold
 covers [nsh/base] BulletList
 covers [nsh/base] Code
 covers [nsh/base] CodeBlock
+covers [nsh/base] CodeBlockHighlight
 covers [nsh/base] Document
 covers [nsh/base] HardBreak
 covers [nsh/base] Heading
