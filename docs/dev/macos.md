@@ -121,9 +121,14 @@ before each redirect and cancels one the grant does not allow, reporting it to t
 
 - **One view per node.** Each node is an `NshView` (`view.rs`, a flipped, layer-backed `NSView` subclass holding the
   node's `ViewState`). The core lays everything out: a view sits at its frame (`place()`: the origin, a sticky shift,
-  mirrored lists), and its transform, opacity and visibility are its layer's. AppKit resets a layer-backed view's
+  mirrored lists), and its transform and opacity are its layer's. AppKit resets a layer-backed view's
   anchor, position and transform when it moves the view, so `place()` sets them again every time, with the anchor at
   the top left (transforms are conjugated around the transform origin).
+- **`visibility: hidden` hides the `NSView`** (`NshView::sync_hidden`), as the iOS backend hides its `UIView`, not only
+  its layer: a view whose layer alone is hidden stays in AppKit's responder chain, key view loop and tracking areas,
+  and counts as seen (`sight.rs`), so what changes in it is drawn. The subtree keeps its frames (a scroll view its
+  offset) and draws what changed once it shows; the focus inside it goes to the root. Navigation hides views too (a
+  screen under the top one, a header item other than the `header`): the `NSView` is hidden while either hides it.
 - **Children live in a container** when the view needs one: scroll views always (a moving offset is the
   container layer's `sublayerTransform`, so a scroll frame is one layer write; the container's bounds origin takes
   it, as `NSClipView` scrolls, once the view and the display link rest, as `setBoundsOrigin:` walks the subtree;
@@ -808,9 +813,9 @@ card). Disabled accessibility state, removed press listeners (of a view not
 hidden views and views leaving the tree exclude a stop (a focused one gives
 the focus to the root). Hidden includes what the core hides without hiding an
 NSView, which AppKit's key view loop would still stop at: a view with no area
-(each view of a `display: none` subtree gets an empty frame) or inside a
-`visibility: hidden` one (`NshView::seen_by_keys`, as the headless driver's
-stops are shown views). Inputs' fields and hosted views follow the view of
+(each view of a `display: none` subtree gets an empty frame;
+`NshView::seen_by_keys`, as the headless driver's stops are shown views). A
+`visibility: hidden` view's NSView is hidden. Inputs' fields and hosted views follow the view of
 ours holding them; an input's field is no stop either when the input is
 disabled or `focusable={false}` (`text_input::held_stop`), and the focus
 leaves one a batch hid for the root (`input::release_hidden_focus`), so no

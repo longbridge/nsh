@@ -511,6 +511,14 @@ impl Mounter {
             MountItem::ViewStyle { id, style } => {
                 let Some(view) = self.get(*id) else { return };
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
+                if old.hidden != style.hidden {
+                    // The focus inside goes to the root, as when a batch
+                    // hides it otherwise, not to AppKit's next key view.
+                    if style.hidden {
+                        crate::navigation::drop_focus(surface, view.ns());
+                    }
+                    view.sync_hidden();
+                }
                 crate::input::style_changed(surface, view, &old);
                 crate::transition::style_changed(surface, view, &old);
                 view.moved();
