@@ -4091,6 +4091,71 @@ impl ScrollingPlatform {
     }
 }
 
+/// A `scrollToIndex` clamped to the list's start, in the commit where rows
+/// above the viewport changed size: the platform applies the anchoring
+/// `ScrollBy` (a mount item) before the `ScrollTo` (a command after them)
+/// and may report in between. The core counts its scrolls in that order,
+/// so the report does not make it think the list is still away from the
+/// start, and it sends no `ScrollBy` that would push the view past it
+/// (#3235).
+#[test]
+fn a_report_between_the_anchoring_scroll_and_a_clamped_scroll_to_index_keeps_the_start() {
+    let mut c = core();
+    thousand_rows(&mut c);
+    let (mut next_id, mut cells) = (100, Vec::new());
+    let mut platform = ScrollingPlatform::default();
+    let short = |_: u32| 50.0;
+    platform.settle(&mut c, &mut next_id, &mut cells, &short);
+    // Far down, then back up over rows not measured yet.
+    platform.y = 2000.0;
+    c.set_scroll_offset(2, point(px(0.0), px(platform.y)), platform.applied);
+    platform.settle(&mut c, &mut next_id, &mut cells, &short);
+    platform.y = 1200.0;
+    c.set_scroll_offset(2, point(px(0.0), px(platform.y)), platform.applied);
+    c.commit();
+    // Rows above the viewport turn out taller, and the app scrolls to a
+    // row whose bottom would sit above the start: clamped to 0.
+    render_sized_binds(&mut c, &mut next_id, &mut cells, &|_| 80.0, usize::MAX);
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToIndex {
+            index: 1,
+            animated: false,
+            view_position: crate::geometry::Percentage(1.0),
+            view_offset: px(-36.0),
+        },
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    let scrolls = page_scrolls(&batch);
+    let by = match scrolls.as_slice() {
+        [(false, by), (true, to)] => {
+            assert_eq!(*to, 0.0);
+            *by
+        }
+        other => panic!("an anchoring ScrollBy, then the ScrollTo: {other:?}"),
+    };
+    // The platform applied the `ScrollBy` and reports before the
+    // `ScrollTo`.
+    platform.y += by;
+    platform.applied += 1;
+    c.set_scroll_offset(2, point(px(0.0), px(platform.y)), platform.applied);
+    let list = c.nodes[c.key(2).unwrap() as usize].list.as_ref().unwrap();
+    assert_eq!(list.offset, 0.0, "the ScrollTo is still on its way");
+    // The next commit does not chase the start with a relative scroll.
+    let batch = c.commit();
+    let scrolls = batch.as_ref().map(page_scrolls).unwrap_or_default();
+    assert!(scrolls.is_empty(), "{scrolls:?}");
+    // The `ScrollTo` lands at the start.
+    platform.y = 0.0;
+    platform.applied += 1;
+    c.set_scroll_offset(2, point(px(0.0), px(platform.y)), platform.applied);
+    platform.settle(&mut c, &mut next_id, &mut cells, &|_| 80.0);
+    assert_eq!(platform.y, 0.0);
+    let list = c.nodes[c.key(2).unwrap() as usize].list.as_ref().unwrap();
+    assert_eq!(list.offset, 0.0);
+}
+
 /// What `ref.measureScrollPosition()` of node `id` answers.
 fn scroll_position(c: &mut Core<FakeEngine>, id: NodeId) -> crate::JsonValue {
     c.apply(Op::Command {
