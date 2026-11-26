@@ -290,7 +290,13 @@ Things that were found the hard way. Read the section of the area you change bef
   safe area (the bottom of whatever bar UIKit shows) as their header (`Core::set_screen_header`), and the stack's bar gets
   the screen's appearance as well as its navigation item.
 - **Catalyst's Mac idiom presents page / form sheets as macOS sheets** at a default size wider than a 390pt window: they get
-  the window's size as `preferredContentSize`. Standalone apps have a white root view (UIKit windows are black).
+  the window's size as `preferredContentSize`.
+- **UIKit resizes the standalone window before the surface commits its new layout**: the window and root controller's
+  view keep the previous backdrop until that layout is ready, then use the first mounted child's opaque background
+  if it covers the surface without rounded corners, a clip path, or a mask. Animated color and coverage changes
+  follow the same rule; native keyframes and active opacity or transform animations do not supply a backdrop.
+  A finite native animation that blocks the current backdrop is rechecked on display frames until it settles.
+  The fallback is white in either appearance, since default text is black.
 - **iOS clamps shared corner radii itself** (`rounded-full` is 9999): Core Animation does not reliably clamp a `cornerRadius`
   over half the short side, so `decor.rs` clamps it and clamps again when the size changes.
 - **iOS, a side bar's safe area reaches past the bar**: a strip the device keeps along one side of the screen (a
