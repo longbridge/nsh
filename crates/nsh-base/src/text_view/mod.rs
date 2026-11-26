@@ -29,8 +29,8 @@ pub use self::{
         Inline, ListItem, Table, TableCell,
     },
     extension::{
-        MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins, ParseContext, Parser,
-        mdast,
+        ConversionId, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
+        ParseContext, Parser, mdast,
     },
     parts::{PartStyle, TextViewClasses, TextViewPart, TextViewParts, TextViewStyles},
     selection::{TextSelectionFormat, TextSelectionOptions},
