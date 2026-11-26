@@ -496,7 +496,7 @@ fn a_selection_across_a_lists_rows_names_the_items_of_its_ends() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 6);
+    assert_eq!(results.len(), 12);
 }
 
 #[test]

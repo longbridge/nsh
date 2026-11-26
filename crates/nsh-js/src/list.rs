@@ -1402,23 +1402,23 @@ unsafe fn named_key(cx: *mut JsContext, key_of: JsValue, item: JsValue, index: i
     }
 }
 
-/// The key of the item list `list`'s cell in `slot` shows ([`named_key`]):
-/// where a selection across the list's items starts and ends
-/// (`onSelectionChange`'s `anchor` and `focus`). `None` without such a
-/// cell, past the items, or when `keyExtractor` throws (the error is
-/// dropped: the event goes on without the end).
-pub(crate) fn cell_key(cx: *mut JsContext, list: NodeId, slot: u32) -> Option<String> {
-    let (props, items, index) = {
+/// The key of row `index` of list `list` ([`named_key`]): where a
+/// selection across the list's items starts and ends
+/// (`onSelectionChange`'s `anchor` and `focus`). `None` for a list that is
+/// not the runtime's, a row past the items, or when `keyExtractor` throws
+/// (the error is dropped: the engine names the row by its index).
+pub(crate) fn row_key(cx: *mut JsContext, list: NodeId, index: u32) -> Option<String> {
+    let (props, items) = {
         let map = lists(cx).map.borrow();
         let d = map.get(&list)?;
-        let cell = d.cells.get(slot as usize)?.as_ref()?;
-        (d.props, d.items, cell.index)
+        (d.props, d.items)
     };
-    let index = reactive::peek_number(cx, index).filter(|i| *i >= 0.0)? as i64;
-    // SAFETY: the list's values stay alive through the calls (no JS runs
-    // between that could drop the list); values got are freed.
+    let index = i64::from(index);
+    // SAFETY: the list's values are duplicated before the calls, which may
+    // run JS that drops the list; values got are freed.
     unsafe {
         let props = qjs::JS_DupValue(cx, props);
+        let items = qjs::JS_DupValue(cx, items);
         let each = reactive::untracked_with(cx, || {
             qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut())
         });
@@ -1440,7 +1440,7 @@ pub(crate) fn cell_key(cx: *mut JsContext, list: NodeId, slot: u32) -> Option<St
         } else {
             None
         };
-        for v in [key, each, props] {
+        for v in [key, each, items, props] {
             qjs::JS_FreeValue(cx, v);
         }
         named

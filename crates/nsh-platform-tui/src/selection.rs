@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use nsh_core::{
     Bounds, EventKind, NodeId, Point, Points,
-    selection::{SelectionModel, SelectionTexts, marker_of},
+    selection::{KeptRows, SelectionModel, SelectionTexts, marker_of},
 };
 use ratatui_core::{
     buffer::Buffer,
@@ -49,6 +49,9 @@ pub(crate) struct Selection {
     /// The selectable view, selected text and ends last reported to its
     /// `onSelectionChange` (kept when the selection clears).
     reported: Option<(NodeId, String, Option<Ends>)>,
+    /// The texts of the ends' virtual list rows, kept rendered while
+    /// scrolled away (kept when the selection clears, to release them).
+    kept: KeptRows,
 }
 
 /// A selection's ends as `SelectionModel::ends` gives them: each text's
@@ -209,6 +212,7 @@ impl Selection {
     pub(crate) fn clear(&mut self) {
         *self = Self {
             reported: self.reported.take(),
+            kept: std::mem::take(&mut self.kept),
             ..Self::default()
         };
     }
@@ -253,6 +257,14 @@ impl Selection {
             self.reported = Some((root, text, ends));
         }
         out
+    }
+
+    /// The nodes whose virtual list rows to keep rendered
+    /// (`EngineControl::keep_rendered`) when they changed since the last
+    /// call; none once the selection clears.
+    pub(crate) fn kept_rows(&mut self) -> Option<Vec<NodeId>> {
+        let nodes = self.kept.changed(&self.model)?;
+        Some(nodes.into_iter().map(|n| n as NodeId).collect())
     }
 
     pub(crate) fn handle(&mut self, mouse: MouseInput, scene: Scene<'_>, clicks: u32) -> bool {

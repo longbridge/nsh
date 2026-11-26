@@ -2091,12 +2091,16 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "action" => "action",
                 "target" => "target",
                 "value" => "value",
-                // `SelectableView.report`'s ends (`selection::END_FIELDS`).
-                "anchorNode" => "anchorNode",
-                "anchorNodeOffset" => "anchorNodeOffset",
-                "focusNode" => "focusNode",
-                "focusNodeOffset" => "focusNodeOffset",
-                _ => continue,
+                // `SelectableView.report`'s ends, under the keys the core
+                // reads them by.
+                other => match nsh_core::selection::END_FIELDS
+                    .iter()
+                    .flat_map(|&(node, offset)| [node, offset])
+                    .find(|&field| field == other)
+                {
+                    Some(field) => field,
+                    None => continue,
+                },
             };
             if let Some(v) = read(&mut env, i) {
                 fields.push((key, v));

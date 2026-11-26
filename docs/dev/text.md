@@ -135,12 +135,14 @@
   (`selectable_view.rs`, `SelectableView.java`): the shared Rust model runs on the UI thread over JNI, hit-testing
   through a Java callback; a long press selects a word (the long press haptic), then handles (the text handles' tick
   as an end moves) and a floating `ActionMode` (Copy, Select all, Share).
-- **Ends in list items**: `onSelectionChange`'s `anchor` and `focus` name the `List` item each end of a selectable
+- **Ends in list items**: `onSelectionChange`'s `anchor` and `focus` name the list item each end of a selectable
   view's selection is in (`{ key, offset }`). Backends report each end as its text's node and the offset in it
-  (`SelectionModel::ends`, `selection::end_fields`); the core places them in the list cell around that text and the
-  copy of its item (`core/selection_ends.rs`, from `Core::locate_selection`), and the engine asks the runtime for the
-  item's key (`selection::name_items`, `nsh-js` `list::cell_key`, the same naming as `onViewableItemsChange`). An end
-  outside a list item, and a list the runtime does not know, leave the field out. The web does not report them yet.
+  (`SelectionModel::ends`, `selection::end_fields`) and keep the rows of the ends rendered (`KeptRows`). The core
+  places each end in the innermost list cell around its text, as the row that cell shows and the offset in the copy
+  of its item; it lists the cell's texts with the walker the backends share (`selection::list_texts`), in
+  `core/selection_ends.rs` from `Core::locate_selection`. The engine then names the row (`selection::name_items`):
+  the runtime's lists by the item's key (`nsh-js` `list::row_key`, the same naming as `onViewableItemsChange`), any
+  other list by the row's index. An end outside a list item leaves its field out. The web does not report them yet.
 - **Selection menu**: `selectionMenu` on a selectable view (Rust `Element::selection_menu`, the host prop
   `Prop::SelectionMenu`, `ViewProps::selection_menu`) takes `nsh/desktop`'s `MenuItem`s, each running its `onSelect`;
   they go after the system's items, which always stay. The core keeps plain items and separators

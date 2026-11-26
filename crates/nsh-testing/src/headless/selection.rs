@@ -12,7 +12,7 @@ use std::{ops::Range, sync::Arc};
 use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Point, Points,
     geometry::{point, px, size},
-    selection::{SelectionModel, SelectionTexts},
+    selection::{KeptRows, SelectionModel, SelectionTexts},
 };
 
 use super::Headless;
@@ -33,6 +33,9 @@ pub(super) struct AreaSelection {
     over_press: bool,
     /// What its `onSelectionChange` last heard.
     reported: Selected,
+    /// The virtual list rows its ends are in, kept rendered as the
+    /// backends keep them (`EngineControl::keep_rendered`).
+    kept: KeptRows,
 }
 
 /// What `onSelectionChange` reports: the selected text, where it starts and
@@ -214,6 +217,7 @@ impl Headless {
             dragging: false,
             over_press: false,
             reported: Selected::default(),
+            kept: KeptRows::default(),
         });
         selection.over_press = over_press;
         selection.dragging = shift;
@@ -266,6 +270,28 @@ impl Headless {
         }
     }
 
+    /// A batch was applied: as on the platforms, the selection's ends
+    /// follow their texts (rows that came or went before them), a text
+    /// that is gone clears it, and its view hears what changed.
+    pub(super) fn selection_batch_applied(&mut self) {
+        let Some(area) = self.selection.as_ref().map(|s| s.area) else {
+            return;
+        };
+        if self.screen.bounds_in_root(area).is_none() {
+            // Its view is gone: nothing hears of it any more.
+            if let Some(nodes) = self.selection.take().and_then(|mut s| s.kept.release()) {
+                self.keep_rendered(nodes);
+            }
+            return;
+        }
+        let texts = self.area_texts(area);
+        let Some(selection) = self.selection.as_mut() else {
+            return;
+        };
+        selection.model.texts_changed(&texts);
+        self.report_area_selection(&texts);
+    }
+
     /// `ref.clearSelection()` on view `id`: clears the selection when its
     /// selectable view is `id`, inside it or around it.
     pub(super) fn clear_selection_in(&mut self, id: NodeId) {
@@ -279,9 +305,12 @@ impl Headless {
 
     /// Clears the selection; its view hears it if it heard of one.
     fn clear_selection(&mut self) {
-        let Some(selection) = self.selection.take() else {
+        let Some(mut selection) = self.selection.take() else {
             return;
         };
+        if let Some(nodes) = selection.kept.release() {
+            self.keep_rendered(nodes);
+        }
         if selection.reported != Selected::default() {
             self.send_selection(selection.area, Selected::default());
         }
@@ -296,6 +325,13 @@ impl Headless {
     /// Reports the selection to its view's `onSelectionChange` when it
     /// changed.
     fn report_area_selection(&mut self, texts: &Texts) {
+        let Some(selection) = &mut self.selection else {
+            return;
+        };
+        // Scrolled away, the ends' rows must not be recycled.
+        if let Some(nodes) = selection.kept.changed(&selection.model) {
+            self.keep_rendered(nodes);
+        }
         let Some(selection) = &mut self.selection else {
             return;
         };
@@ -315,6 +351,14 @@ impl Headless {
         selection.reported.clone_from(&selected);
         let area = selection.area;
         self.send_selection(area, selected);
+    }
+
+    /// Keeps the virtual list rows holding `nodes` rendered
+    /// (`KeptRows`), as the backends do.
+    fn keep_rendered(&self, nodes: Vec<u64>) {
+        self.engine
+            .control()
+            .keep_rendered(nodes.into_iter().map(|n| n as NodeId).collect());
     }
 
     fn send_selection(&self, area: NodeId, selected: Selected) {

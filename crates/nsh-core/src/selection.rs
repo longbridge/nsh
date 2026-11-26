@@ -39,7 +39,7 @@
 //! (`foo.`) is still the word alone. A double click selects the word alone, as
 //! desktops and browsers do.
 
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use crate::{
     AttributedText,
@@ -825,7 +825,9 @@ pub fn copy_offset(texts: &impl SelectionTexts, pos: TextPosition) -> u32 {
 /// The payload keys of a selectable view's `onSelectionChange` that carry
 /// [`SelectionModel::ends`] from a platform to the core: the anchor's and
 /// the focus's text node and the UTF-16 offset in it. The core replaces
-/// them with the list items they are in (`Core::locate_selection`).
+/// them with the list items they are in (`Core::locate_selection`). Hidden:
+/// a backend's wire to the core, which [`end_fields`] writes.
+#[doc(hidden)]
 pub const END_FIELDS: [(&str, &str); 2] = [
     ("anchorNode", "anchorNodeOffset"),
     ("focusNode", "focusNodeOffset"),
@@ -833,39 +835,43 @@ pub const END_FIELDS: [(&str, &str); 2] = [
 
 /// [`SelectionModel::ends`] as the fields of a platform's
 /// `onSelectionChange` payload ([`END_FIELDS`]).
+#[doc(hidden)]
 pub fn end_fields(ends: [(u64, u32); 2]) -> [(&'static str, crate::PayloadValue); 4] {
-    let [(anchor, anchor_offset), (focus, focus_offset)] = ends;
     let number = |n: u64| crate::PayloadValue::Number(n as f64);
-    [
-        (END_FIELDS[0].0, number(anchor)),
-        (END_FIELDS[0].1, number(u64::from(anchor_offset))),
-        (END_FIELDS[1].0, number(focus)),
-        (END_FIELDS[1].1, number(u64::from(focus_offset))),
-    ]
+    let mut fields = END_FIELDS
+        .into_iter()
+        .zip(ends)
+        .flat_map(|((node, offset), (key, at))| {
+            [(node, number(key)), (offset, number(u64::from(at)))]
+        });
+    std::array::from_fn(|_| fields.next().expect("two ends of two fields"))
 }
 
 /// The payload keys of an end once the core placed it in a list item
-/// (`Core::locate_selection`): the list, the slot of the item's cell and
-/// the offset in the copy of the item. [`name_items`] puts the item's key
-/// in their place.
+/// (`Core::locate_selection`): the list, the row its cell shows and the
+/// offset in the copy of the row's item. [`name_items`] puts the item's
+/// key in place of the list and the row.
 #[doc(hidden)]
 pub const CELL_FIELDS: [(&str, &str, &str); 2] = [
-    ("anchorList", "anchorSlot", "anchorOffset"),
-    ("focusList", "focusSlot", "focusOffset"),
+    ("anchorList", "anchorIndex", "anchorOffset"),
+    ("focusList", "focusIndex", "focusOffset"),
 ];
 
-/// The payload keys of an end as listeners take it: the item's key (its
-/// list's `keyExtractor`) and the offset in the copy of the item
-/// ([`crate::element::TextSelectionEvent::anchor`]).
+/// The payload keys of an end as listeners take it: the item's key and the
+/// offset in the copy of the item
+/// ([`crate::element::TextSelectionEvent::anchor`]). `tests/compat/`
+/// reports events with these keys, so the compatibility record freezes
+/// them as it freezes the keys of the other events.
 #[doc(hidden)]
 pub const ITEM_FIELDS: [(&str, &str); 2] =
     [("anchorKey", "anchorOffset"), ("focusKey", "focusOffset")];
 
 /// Names the list items of a selectable view's `onSelectionChange`
-/// payload ([`CELL_FIELDS`]) by their keys: `key_of` gives the key of the
-/// item a list's cell (its slot) shows, `None` for a list without a
-/// `keyExtractor`; an end without one is left out. The engine calls it
-/// with the runtime's lists.
+/// payload ([`CELL_FIELDS`]) by their keys: `key_of` gives the key a
+/// list names its row by (the runtime's lists: `keyExtractor`, else the
+/// item's `key` or `id`, else its index), `None` when the list does not name it (no
+/// runtime, a Rust component's list), and then the row's index, as a
+/// string, is its key. The engine calls it with the runtime's lists.
 #[doc(hidden)]
 pub fn name_items(
     payload: &mut crate::EventPayload,
@@ -874,27 +880,136 @@ pub fn name_items(
     let crate::EventPayload::Map(fields) = payload else {
         return;
     };
-    for ((list, slot, offset), (key, _)) in CELL_FIELDS.into_iter().zip(ITEM_FIELDS) {
+    for ((list, index, _), (key, _)) in CELL_FIELDS.into_iter().zip(ITEM_FIELDS) {
         let number = |k: &str| {
             fields.iter().find_map(|(name, v)| match v {
                 crate::PayloadValue::Number(n) if *name == k => Some(*n),
                 _ => None,
             })
         };
-        let (Some(l), Some(s)) = (number(list), number(slot)) else {
+        let (Some(l), Some(i)) = (number(list), number(index)) else {
             continue;
         };
-        let named = key_of(l as crate::NodeId, s as u32);
-        fields.retain(|(name, _)| *name != list && *name != slot);
-        match named {
-            Some(named) => fields.push((key, crate::PayloadValue::Str(named))),
-            None => fields.retain(|(name, _)| *name != offset),
-        }
+        let (l, i) = (l as crate::NodeId, i as u32);
+        let named = key_of(l, i).unwrap_or_else(|| i.to_string());
+        fields.retain(|(name, _)| *name != list && *name != index);
+        fields.push((key, crate::PayloadValue::Str(named)));
     }
 }
 
 /// U+FFFC, which stands for an attachment in a text's content.
 const OBJECT_REPLACEMENT: char = '\u{FFFC}';
+
+/// A tree of views a backend lists a selectable view's texts from
+/// ([`list_texts`]): the views the platform shows, or the core's nodes
+/// (the texts of a list item, for `onSelectionChange`'s ends), so both
+/// list them alike.
+pub trait TextTree {
+    /// A view.
+    type View: Clone;
+
+    /// Whether `view` is hidden: it and its subtree take no part.
+    fn hidden(&self, view: &Self::View) -> bool;
+
+    /// `view`'s text, when it draws one: its content and its content box
+    /// in `view`'s coordinates.
+    fn text(&self, view: &Self::View) -> Option<(Arc<AttributedText>, Bounds<Points>)>;
+
+    /// `view`'s children in mount order, each with its frame in `view`'s
+    /// content (before `view` scrolls it).
+    fn children(&self, view: &Self::View, out: &mut Vec<(Self::View, Bounds<Points>)>);
+
+    /// How `view` moves its content: its scroll offset (in the content's
+    /// points) and zoom. None and 1 by default.
+    fn content_offset(&self, view: &Self::View) -> (Point<Points>, f32) {
+        let _ = view;
+        (Point::default(), 1.0)
+    }
+}
+
+/// A text [`list_texts`] listed.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ListedText<V> {
+    /// Its view.
+    pub view: V,
+    /// Its content.
+    pub text: Arc<AttributedText>,
+    /// Where its view's top left is in the root.
+    pub origin: Point<Points>,
+    /// The zoom it shows at there (of the scroll views around it).
+    pub zoom: f32,
+    /// Its content box in the root's coordinates ([`SelectionTexts::frame`]).
+    pub frame: Bounds<Points>,
+    /// The list marker beside it ([`marker_of`], [`SelectionTexts::marker`]).
+    pub marker: Option<String>,
+}
+
+/// The texts of `root`'s subtree that take part in a selection, in document
+/// order: the subtree depth first, each view's children in reading order
+/// ([`reading_order`]: a virtual list's recycled cells by their tops);
+/// hidden views with their subtrees and texts kept out (`selectable={false}`)
+/// left out, the latter maybe the marker of the next. Frames are in
+/// `root`'s coordinates, the scroll offsets and zooms of the views between
+/// applied.
+pub fn list_texts<T: TextTree>(tree: &T, root: &T::View) -> Vec<ListedText<T::View>> {
+    fn walk<T: TextTree>(
+        tree: &T,
+        view: &T::View,
+        origin: Point<Points>,
+        zoom: f32,
+        out: &mut Vec<ListedText<T::View>>,
+        chrome: &mut Option<(String, Bounds<Points>)>,
+    ) {
+        if tree.hidden(view) {
+            return;
+        }
+        if let Some((text, content)) = tree.text(view) {
+            let frame = Bounds::new(
+                point(
+                    origin.x + content.origin.x * zoom,
+                    origin.y + content.origin.y * zoom,
+                ),
+                size(content.size.width * zoom, content.size.height * zoom),
+            );
+            if text.selectable == Some(false) {
+                // A list marker, maybe: the next text's copy starts with it.
+                *chrome = Some((text.text.clone(), frame));
+            } else {
+                let marker = marker_of(chrome.take().as_ref(), frame);
+                out.push(ListedText {
+                    view: view.clone(),
+                    text,
+                    origin,
+                    zoom,
+                    frame,
+                    marker,
+                });
+            }
+        }
+        let (offset, own_zoom) = tree.content_offset(view);
+        let inner = zoom * own_zoom;
+        let mut children = Vec::new();
+        tree.children(view, &mut children);
+        let start = out.len();
+        let mut runs = Vec::with_capacity(children.len());
+        for (child, frame) in children {
+            let at = point(
+                origin.x + (frame.origin.x - offset.x) * inner,
+                origin.y + (frame.origin.y - offset.y) * inner,
+            );
+            let from = out.len();
+            walk(tree, &child, at, inner, out, chrome);
+            runs.push((frame, from..out.len()));
+        }
+        if let Some(order) = reading_order(&runs) {
+            reorder(out, start, &order);
+        }
+    }
+    let mut out = Vec::new();
+    walk(tree, root, Point::default(), 1.0, &mut out, &mut None);
+    out
+}
 
 /// The order of the texts a backend listed child by child, in mount order:
 /// `runs` are the children's frames (in their parent) and the ranges of
@@ -2641,26 +2756,28 @@ mod tests {
     }
 
     #[test]
-    fn named_items_replace_the_cells_and_ends_without_a_key_are_left_out() {
+    fn named_items_replace_the_rows_and_unnamed_rows_go_by_their_index() {
         let number = |n: f64| PayloadValue::Number(n);
         let mut payload = crate::EventPayload::Map(vec![
             ("text", PayloadValue::Str("x".into())),
             ("anchorList", number(4.0)),
-            ("anchorSlot", number(1.0)),
+            ("anchorIndex", number(1.0)),
             ("anchorOffset", number(7.0)),
-            ("focusList", number(4.0)),
-            ("focusSlot", number(2.0)),
+            ("focusList", number(5.0)),
+            ("focusIndex", number(2.0)),
             ("focusOffset", number(3.0)),
         ]);
-        name_items(&mut payload, |list, slot| {
-            (list == 4 && slot == 1).then(|| "b".to_owned())
+        name_items(&mut payload, |list, index| {
+            (list == 4 && index == 1).then(|| "b".to_owned())
         });
         assert_eq!(
             payload,
             crate::EventPayload::Map(vec![
                 ("text", PayloadValue::Str("x".into())),
                 ("anchorOffset", number(7.0)),
+                ("focusOffset", number(3.0)),
                 ("anchorKey", PayloadValue::Str("b".into())),
+                ("focusKey", PayloadValue::Str("2".into())),
             ])
         );
     }

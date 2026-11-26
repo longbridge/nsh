@@ -274,6 +274,8 @@ scroll::wheel_glide::Glide::end ->                               # time
 scroll::wheel_glide::Glide::new(now)                             # time
 scroll::wheel_glide::Glide::retargeted(now)                      # time
 scroll::wheel_glide::Glide::value(now)                           # time
+selection::ListedText.zoom                                       # a zoom scale factor
+selection::TextTree::content_offset ->                           # a zoom scale factor (the offset it gives is typed)
 shader::UniformValue::Number.0                                  # a uniform's value, whatever the app's program makes of it
 shader::TransitionKey::number(n)                                 # a transition's value: a key compared for equality, no quantity
 ops::Prop::TransitionDuration.0                                  # time (milliseconds, as JS gives it)

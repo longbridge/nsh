@@ -1,4 +1,4 @@
-import { List, mount, signal, Text, View, type TextSelectionEndpoint } from "nsh";
+import { computed, List, mount, signal, Text, View, type TextSelectionEndpoint } from "nsh";
 import { TextView } from "nsh/base";
 
 type Item = { id: string; text?: string; markdown?: string };
@@ -12,6 +12,7 @@ function App() {
     { id: "c", markdown: "First para.\n\nSecond para." },
   ]);
   const ends = signal("none");
+  const start = signal(-1);
   const end = (e?: TextSelectionEndpoint) => (e ? `${e.key}@${e.offset}` : "-");
   // A change the buttons arm, made once the next selection is reported:
   // the rows change under the selection.
@@ -29,21 +30,27 @@ function App() {
         style={{ height: 400 }}
         onSelectionChange={(e) => {
           ends.set(e.text ? `${end(e.anchor)} ${end(e.focus)} ${JSON.stringify(e.text)}` : "none");
+          start.set(e.start ?? -1);
           if (e.text) change();
         }}
       >
         <List each={items()} keyExtractor={(item) => item.id} style={{ flex: 1 }}>
-          {(item) => (
-            <View testID={`row-${item().id}`} style={{ paddingVertical: 8, alignItems: "flex-start" }}>
-              {item().markdown ? (
-                <TextView markdown={item().markdown!} style={{ width: 300 }} />
-              ) : (
-                <Text testID={`text-${item().id}`} style={{ width: 154 }}>
-                  {item().text}
-                </Text>
-              )}
-            </View>
-          )}
+          {(item) => {
+            // A row given another item of its kind keeps its text, as a
+            // list's recycled cells do.
+            const markdown = computed(() => item().markdown);
+            return (
+              <View testID={`row-${item().id}`} style={{ paddingVertical: 8, alignItems: "flex-start" }}>
+                {markdown() ? (
+                  <TextView markdown={markdown()!} style={{ width: 300 }} />
+                ) : (
+                  <Text testID={`text-${item().id}`} style={{ width: 154 }}>
+                    {item().text}
+                  </Text>
+                )}
+              </View>
+            );
+          }}
         </List>
       </View>
       <View testID="insert" onPress={() => (armed = () => items.set([{ id: "z", text: "Inserted above." }, ...items()]))}>
@@ -56,6 +63,7 @@ function App() {
         <Text>Replace</Text>
       </View>
       <Text>{`Ends: ${ends()}`}</Text>
+      <Text>{`Start: ${start()}`}</Text>
     </View>
   );
 }

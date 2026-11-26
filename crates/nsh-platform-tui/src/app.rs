@@ -1807,8 +1807,14 @@ impl AppView {
             };
             self.selection.draw(scene, buffer);
             let changes = self.selection.changes(&self.tree, &self.geometry);
+            let kept = self.selection.kept_rows();
             if let Some(engine) = &self.surface.engine {
                 let control = engine.control();
+                // Scrolled away, the ends' rows stay rendered: recycled,
+                // their texts would show other items.
+                if let Some(nodes) = kept {
+                    control.keep_rendered(nodes);
+                }
                 for (id, text, start, ends) in changes {
                     let mut fields = vec![
                         ("text", nsh_core::PayloadValue::Str(text)),

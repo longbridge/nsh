@@ -268,8 +268,8 @@ mod imp {
             self.host.bind_list(list, binds);
         }
 
-        pub(crate) fn list_item_key(&self, list: NodeId, slot: u32) -> Option<String> {
-            self.host.list_item_key(list, slot)
+        pub(crate) fn list_item_key(&self, list: NodeId, index: u32) -> Option<String> {
+            self.host.list_item_key(list, index)
         }
 
         pub(crate) fn set_lazy_rows(&self, lazy: bool) {

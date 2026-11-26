@@ -4452,12 +4452,13 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if event == EventKind::CaretMove {
                 state.core.locate_caret(id, &mut payload);
             }
-            // The core knows the list items the selection's ends are in,
-            // the runtime their keys (the lists' `keyExtractor`).
+            // The core knows the list rows the selection's ends are in,
+            // the runtime the keys of its lists' items; other rows go by
+            // their index.
             if event == EventKind::SelectionChange {
                 state.core.locate_selection(id, &mut payload);
-                nsh_core::selection::name_items(&mut payload, |list, slot| {
-                    script.and_then(|s| s.list_item_key(list, slot))
+                nsh_core::selection::name_items(&mut payload, |list, index| {
+                    script.and_then(|s| s.list_item_key(list, index))
                 });
             }
             if event == EventKind::Paste {

@@ -688,15 +688,15 @@ impl Host {
         });
     }
 
-    /// The key of the item a `List`'s cell (its slot) shows, as the list
-    /// names items (`keyExtractor`, else the item's `key` or `id`, else
-    /// its index): where a selection across the list starts and ends
-    /// (`onSelectionChange`'s `anchor` and `focus`). `None` for no such
-    /// cell, or when `keyExtractor` throws.
-    pub fn list_item_key(&self, list: NodeId, slot: u32) -> Option<String> {
+    /// The key row `index` of a `List` goes by (`keyExtractor`, else the
+    /// item's `key` or `id`, else its index): where a selection across the
+    /// list starts and ends (`onSelectionChange`'s `anchor` and `focus`).
+    /// `None` for a list that is not the runtime's, or when `keyExtractor`
+    /// throws.
+    pub fn list_item_key(&self, list: NodeId, index: u32) -> Option<String> {
         self.guarded(Phase::Call, || {
             self.cx
-                .with(|cx| crate::list::cell_key(cx.as_raw().as_ptr(), list, slot))
+                .with(|cx| crate::list::row_key(cx.as_raw().as_ptr(), list, index))
         })
         .flatten()
     }

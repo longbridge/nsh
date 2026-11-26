@@ -51,3 +51,57 @@ test("a row replaced under the selection names the item now there", async () => 
   await app.drag("id:text-a", { x: -45, y: 0 });
   await app.waitFor('Ends: d@10 a@4 "tests passed.\\n\\nAll tests "');
 });
+
+test("a selection's start counts the blank line before a paragraph", async () => {
+  const app = await open("./App.tsx", { platform: "macos" });
+  // From past the end of "Second para." back to its start: the copy of
+  // the whole view has the two rows and "First para." with a blank line
+  // after each before it (17 + 2 + 17 + 2 + 11 + 2).
+  await app.drag("text:Second para.", { x: -200, y: 0 });
+  await app.waitFor('Ends: c@25 c@13 "Second para."');
+  await app.waitFor("Start: 51");
+});
+
+test("an anchor scrolled out of view keeps its item when the selection extends", async () => {
+  const app = await open("./Long.tsx", { platform: "macos" });
+  await app.drag("id:text-r1", { x: -45, y: 0 });
+  await app.waitFor("Ends: r1@10 r1@4");
+  // Far enough that the anchor's row would be recycled for a row below.
+  await app.scroll("id:list", 1500);
+  await app.waitFor("id:text-r48");
+  await app.keyboard.down("shift");
+  await app.drag("id:text-r48", { x: -45, y: 0 });
+  await app.waitFor("Ends: r1@10 r48@4");
+});
+
+test("a list without a keyExtractor names its items by key, id or index", async () => {
+  const app = await open("./Kinds.tsx", { platform: "macos" });
+  await app.drag("text:Row with an id.", { x: -45, y: 0 });
+  await app.waitFor('Ends: x@10 x@4 "with a"');
+  await app.drag("text:Row with a key.", { x: -45, y: 0 });
+  await app.waitFor('Ends: k@10 k@4 "with a"');
+  await app.drag("text:Row by its index.", { x: -45, y: 0 });
+  await app.waitFor('Ends: 2@10 2@4 "by its"');
+});
+
+test("an end outside the list leaves its item out", async () => {
+  const app = await open("./Kinds.tsx", { platform: "macos" });
+  // From the title down into the first row.
+  await app.drag("text:Transcript title", { x: 0, y: 25 });
+  await app.waitFor('Ends: - x@10 " title\\n\\nRow with a"');
+});
+
+test("an end in an item with a list marker counts the marker as a copy does", async () => {
+  const app = await open("./Kinds.tsx", { platform: "macos" });
+  // The item copies as "• First item\n• Second item": "Second item"
+  // starts at 13 with its marker, and a selection from its start takes
+  // the marker along.
+  await app.drag("text:Second item", { x: -200, y: 0 });
+  await app.waitFor('Ends: m@26 m@13 "• Second item"');
+});
+
+test("an end in a nested list names the innermost item", async () => {
+  const app = await open("./Kinds.tsx", { platform: "macos" });
+  await app.drag("text:Inner two.", { x: -45, y: 0 });
+  await app.waitFor('Ends: i2@10 i2@4 "r two."');
+});
