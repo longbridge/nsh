@@ -2912,25 +2912,50 @@ impl NshView {
         self.insert_view(parent, before);
     }
 
-    fn insert_view(&self, parent: &NshView, before: Option<&NshView>) {
-        let container = parent.container();
-        let above = match before {
+    /// The view a child inserted into `parent` below `before` goes below
+    /// (none: on top).
+    fn stacked_under(
+        parent: &NshView,
+        container: &NSView,
+        before: Option<&NshView>,
+    ) -> Option<Retained<NSView>> {
+        match before {
             Some(b) => Some(Retained::from(b.ns())),
             // A lifted input's pad is not what children stack under: it
             // rides directly above its own anchor, out of their way.
-            None => first_foreign(&container).filter(|v| !parent.is_raised(v)),
-        };
-        if holds_focus(&container, self.ns()) {
-            restack_around(&container, self.ns(), above.as_deref());
-        } else {
-            match above {
-                Some(above) => container.addSubview_positioned_relativeTo(
-                    self.ns(),
-                    NSWindowOrderingMode::Below,
-                    Some(&above),
-                ),
-                None => container.addSubview(self.ns()),
-            }
+            None => first_foreign(container).filter(|v| !parent.is_raised(v)),
+        }
+    }
+
+    /// Moves it, already a view in `parent`, below `before` without taking
+    /// it out of `parent` when it holds the keyboard focus: AppKit drops
+    /// the focus of a view removed from its superview, so a press that
+    /// raises (zIndex) the panel it focused would lose it (#3244). Whether
+    /// it did: otherwise the caller takes it out and inserts it again.
+    pub(crate) fn restack_focused(&self, parent: &NshView, before: Option<&NshView>) -> bool {
+        if self.is_leaf_layer() || parent.is_leaf_layer() {
+            return false;
+        }
+        let container = parent.container();
+        if !holds_focus(&container, self.ns()) {
+            return false;
+        }
+        let above = Self::stacked_under(parent, &container, before);
+        restack_around(&container, self.ns(), above.as_deref());
+        parent.raise_natives();
+        self.place();
+        true
+    }
+
+    fn insert_view(&self, parent: &NshView, before: Option<&NshView>) {
+        let container = parent.container();
+        match Self::stacked_under(parent, &container, before) {
+            Some(above) => container.addSubview_positioned_relativeTo(
+                self.ns(),
+                NSWindowOrderingMode::Below,
+                Some(&above),
+            ),
+            None => container.addSubview(self.ns()),
         }
         parent.raise_natives();
         let inputs = self.state().input_count;

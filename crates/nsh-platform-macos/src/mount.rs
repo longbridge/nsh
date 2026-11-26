@@ -377,6 +377,12 @@ impl Mounter {
                 let before = before
                     .and_then(|b| self.views.get(&b))
                     .filter(|b| b.parent_view().as_ref() == Some(parent));
+                // A move within the parent keeps the focus it holds.
+                if child.parent_view().as_ref() == Some(parent)
+                    && child.restack_focused(parent, before)
+                {
+                    return;
+                }
                 if child.has_parent() {
                     child.unparent();
                 }

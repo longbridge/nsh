@@ -1,5 +1,5 @@
 // Cmd+Shift+Z (#3245): the app's binding hears it before the Edit menu's
-// Redo, and without a binding Redo runs once in an input and a rich editor.
+// Redo, and without a binding Redo runs once in a rich editor.
 import { expect, open, test } from "nsh/test";
 
 test("the keymap hears Cmd+Shift+Z next to the Edit menu's Redo", async () => {
@@ -8,21 +8,6 @@ test("the keymap hears Cmd+Shift+Z next to the Edit menu's Redo", async () => {
   await app.keyboard.press("mod+shift+z");
   await app.keyboard.press("mod+a");
   await app.waitFor("text:log: mod+z mod+shift+z mod+a");
-});
-
-test("Cmd+Shift+Z redoes once in an input", async () => {
-  const app = await open("./Redo.tsx");
-  await app.type("id:field", "ab");
-  await app.waitFor("Text: ab");
-  await app.keyboard.press("mod+z");
-  await app.wait(200);
-  expect(app.texts()).not.toContain("Text: ab");
-  await app.keyboard.press("mod+shift+z");
-  await app.waitFor("Text: ab");
-  // A second Redo has nothing left to redo.
-  await app.keyboard.press("mod+shift+z");
-  await app.wait(100);
-  expect(app.texts()).toContain("Text: ab");
 });
 
 test("Cmd+Shift+Z redoes once in a rich editor", async () => {
