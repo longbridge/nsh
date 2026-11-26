@@ -401,6 +401,11 @@ jobs:
           name: nsh-${{ matrix.name }}
           path: target/release-assets/*
           if-no-files-found: error
+          # Only the release and nightly jobs of this run read it, and the
+          # published copies live on the release. Each build is about 1.5 GB
+          # across platforms, and the organization's artifact storage is
+          # shared, so keep it only long enough to re-run a failed job.
+          retention-days: 3
 
   release:
     name: Release
