@@ -14,6 +14,7 @@ use std::{
 
 use nsh_core::{
     keymap::{Modifiers, When},
+    platform::Os,
     prelude::*,
 };
 use serde_json::Value;
@@ -45,12 +46,16 @@ use crate::{
         tables::{CellSelection, cell_around, is_table, table_role},
         transform::drop_point,
     },
-    sink_text::{sink_edit, utf16_to_byte},
+    sink_text::{common_prefix, sink_edit, utf16_to_byte},
 };
 
 /// The sink is emptied once it holds this many bytes (and no composition
 /// is in progress).
 const SINK_LIMIT: usize = 256;
+
+/// How much of the text before the caret the sink holds on iOS, at most
+/// (bytes, [`Rv::sink_context`]).
+const SINK_CONTEXT: usize = 128;
 
 /// How long a forward move of the sink's own caret waits for the text it
 /// may belong to (`sink_selection`).
@@ -173,6 +178,7 @@ struct Sink {
     /// The sink's own caret as the platform last reported it (UTF-16), to
     /// be read against the text it belongs to (`follow_sink_caret`).
     reported: Option<u32>,
+    /// The text the platform last reported, once the sink was set since.
     emptied: Option<String>,
     composing: bool,
     /// The composition whose commit is still to come (its id).
@@ -180,6 +186,26 @@ struct Sink {
     /// The sink's text last reported while composing, taken when the
     /// composition ends.
     held: Option<String>,
+    /// The sink's edit is being applied on iOS: the keys it makes leave the
+    /// sink as the platform holds it, checked once they ran.
+    editing: bool,
+}
+
+impl Sink {
+    /// Whether the text before the place the editor's caret stands for ends
+    /// with `context`, and is empty when that is.
+    fn holds(&self, context: &str) -> bool {
+        let before = &self.text[..self.caret.unwrap_or(self.text.len())];
+        before.ends_with(context) && (before.is_empty() || !context.is_empty())
+    }
+}
+
+/// Whether the sink holds the text before the caret ([`Rv::sink_context`])
+/// rather than nothing: UIKit's keyboard repeats a held Delete (and speeds
+/// up to words) only over text it sees before the input's caret; in an
+/// empty input it deletes once.
+fn sink_holds_context() -> bool {
+    os() == Os::Ios
 }
 
 /// The view's controller. Cloned into the closures that need it.
@@ -946,32 +972,45 @@ impl Rv {
     /// Applies the sink's `text`: what was deleted and typed since, at the
     /// place in it the editor's caret stands for.
     fn sink_edited(&self, text: &str) {
+        let holds_context = sink_holds_context();
         let (edit, composed) = {
             let mut sink = self.sink.borrow_mut();
+            // What the sink was set to when emptied: nothing, or on iOS the
+            // text before the caret.
+            let set = std::mem::take(&mut sink.text);
             let (base, caret) = match sink.emptied.take() {
-                // The platform dropped the empty value: the text still extends
-                // what it held. A text equal to what it held was typed again
-                // into the emptied sink: platforms report each edit, so an
-                // edit to the text the platform kept would show. Linux reports
-                // the edits made before it is idle as one: there, the text
-                // deleted and typed again before the empty value arrives reads
-                // the same, and is inserted a second time.
-                Some(old) if text != old && text.starts_with(old.as_str()) => {
+                // The platform dropped the value set: the text still extends
+                // what it last reported, at least as far as it extends the
+                // value set (read against the value set, the edit would have
+                // typed again the text the platform held). A text equal to
+                // what it held was typed again into the emptied sink:
+                // platforms report each edit, so an edit to the text the
+                // platform kept would show. Linux reports the edits made
+                // before it is idle as one: there, the text deleted and typed
+                // again before the empty value arrives reads the same, and is
+                // inserted a second time.
+                Some(old)
+                    if text != old
+                        && text.starts_with(old.as_str())
+                        && old.len() >= common_prefix(&set, text) =>
+                {
                     let len = old.len();
                     (old, len)
                 }
-                Some(_) => (String::new(), 0),
+                Some(_) => {
+                    let len = set.len();
+                    (set, len)
+                }
                 None => {
-                    let caret = sink.caret.take();
-                    let old = std::mem::take(&mut sink.text);
-                    let caret = caret.unwrap_or(old.len());
-                    (old, caret)
+                    let caret = sink.caret.take().unwrap_or(set.len());
+                    (set, caret)
                 }
             };
             let edit = sink_edit(&base, caret, text);
             sink.reported = None;
             sink.text = text.to_owned();
             sink.caret = (edit.caret < text.len()).then_some(edit.caret);
+            sink.editing = holds_context;
             (edit, sink.composition.is_some())
         };
         self.sink_value.set(text.to_owned());
@@ -990,13 +1029,19 @@ impl Rv {
                 self.key(&KeyEvent::new("Enter"));
             }
         }
-        {
+        let context = self.sink_context();
+        let refill = {
             let mut sink = self.sink.borrow_mut();
+            sink.editing = false;
             if !sink.composing {
                 sink.composition = None;
             }
-        }
-        if self.sink.borrow().text.len() > SINK_LIMIT {
+            // On iOS the platform's text stays while it still ends with the
+            // caret's (setting it again would stop a held Delete), unless the
+            // edit went elsewhere (an input rule, a new block).
+            sink.text.len() > SINK_LIMIT || holds_context && !sink.holds(&context)
+        };
+        if refill {
             self.empty_sink();
         }
     }
@@ -1109,17 +1154,52 @@ impl Rv {
         sink.caret = (to < sink.text.len()).then_some(to);
     }
 
-    /// Empties the sink, unless an input method is composing there.
+    /// Empties the sink, unless an input method is composing there or its
+    /// edit is being applied; on iOS, sets it to the text before the caret
+    /// ([`Self::sink_context`]).
     fn empty_sink(&self) {
+        let context = self.sink_context();
         let mut sink = self.sink.borrow_mut();
-        if sink.composing || sink.text.is_empty() {
+        if sink.composing || sink.editing || sink.text == context {
             return;
         }
         sink.caret = None;
         sink.reported = None;
-        sink.emptied = Some(std::mem::take(&mut sink.text));
+        let held = std::mem::replace(&mut sink.text, context.clone());
+        // Kept until the platform's next report: the text it last reported,
+        // which it still holds if it drops the values set since (an edit
+        // made before they arrived), not a value set and replaced since.
+        sink.emptied.get_or_insert(held);
         drop(sink);
-        self.sink_value.set(String::new());
+        self.sink_value.set(context);
+    }
+
+    /// The text the sink holds for the caret on iOS ([`sink_holds_context`]):
+    /// its textblock's before it, the last [`SINK_CONTEXT`] bytes. Empty for
+    /// a range, a node selection or a gap cursor, and on other platforms.
+    fn sink_context(&self) -> String {
+        if !sink_holds_context() {
+            return String::new();
+        }
+        let state = self.session.state();
+        let selection = state.selection();
+        if selection.as_text().is_none() || !selection.empty() {
+            return String::new();
+        }
+        let head = selection.head();
+        let Ok(at) = state.doc().resolve(head) else {
+            return String::new();
+        };
+        if !at.parent().inline_content() {
+            return String::new();
+        }
+        let line = inline_text(at.parent());
+        let before = utf16_slice(&line, 0, head - at.start(at.depth));
+        let mut cut = before.len().saturating_sub(SINK_CONTEXT);
+        while !before.is_char_boundary(cut) {
+            cut += 1;
+        }
+        before[cut..].to_owned()
     }
 
     /// An input method's composition started, changed or ended: its text

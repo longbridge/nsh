@@ -151,6 +151,9 @@ Things that were found the hard way. Read the section of the area you change bef
   become the first responder and take typed text. Without it a hidden input (the `Editor`'s sink at its caret) takes
   the touches of whatever lies under it. A JS responder that blocks also cancels the `PressRecognizer`s of the views
   around it (`set_js_responder`): they keep tracking a finger a descendant took, and its lift was a press on them.
+- **UIKit repeats a held Delete only while the input has text** (`hasText`) before its caret: in an empty input the
+  keyboard deletes once. A sink (no caret and transparent text, `is_sink`: an editor's, which holds the text itself)
+  answers `hasText` YES whatever it holds, and the `RichEditor` keeps the text before its caret in its sink.
 
 - **Retained navigation tabs hide the stack's container or an ancestor, not the navigation controller's view**:
   check the entire ancestor chain before a stack updates a shared system tab bar, including from transition

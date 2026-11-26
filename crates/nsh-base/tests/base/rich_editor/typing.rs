@@ -29,6 +29,14 @@ fn focus(app: &mut Headless) {
     app.type_text("id:editor", "").unwrap();
 }
 
+/// What the editor's sink holds.
+fn sink(app: &Headless) -> Option<String> {
+    app.screen()
+        .input_text("id:editor")
+        .unwrap()
+        .map(str::to_owned)
+}
+
 // Inserting.
 
 #[test]
@@ -482,6 +490,89 @@ fn a_cancelled_composition_in_the_sink_leaves_the_document() {
     sink_text(&mut app, "");
     compose(&mut app, false, "");
     see(&mut app, &tree(r#"doc(paragraph("ab"))"#));
+    see(&mut app, "Sel 3-3");
+}
+
+/// On iOS the sink holds the text before the caret, as UIKit's keyboard
+/// repeats a held Delete only over text it sees there: each deletion it
+/// makes there, a character or a word, is replayed as Backspaces, and the
+/// sink keeps what the platform holds.
+#[test]
+fn on_ios_the_sink_holds_the_text_before_the_caret() {
+    let mut app = start_on(paragraphs(&["one", "hi you"]), Os::Ios, true);
+    focus(&mut app);
+    keys(&mut app, &["right", "right", "right"]);
+    see(&mut app, "Sel 4-4");
+    assert_eq!(sink(&app).as_deref(), Some("one"));
+    // At a block's start there is nothing before the caret.
+    keys(&mut app, &["right"]);
+    see(&mut app, "Sel 6-6");
+    assert_eq!(sink(&app).as_deref(), Some(""));
+    keys(&mut app, &["right"; 6]);
+    see(&mut app, "Sel 12-12");
+    assert_eq!(sink(&app).as_deref(), Some("hi you"));
+    // A held Delete: a character, then a word at a time. The sink is not
+    // set meanwhile (setting its text would end the repeat): it keeps what
+    // the platform holds, while the screen still shows what the editor
+    // last set.
+    sink_text(&mut app, "hi yo");
+    see(&mut app, &doc("one|hi yo"));
+    see(&mut app, "Sel 11-11");
+    assert_eq!(sink(&app).as_deref(), Some("hi you"));
+    sink_text(&mut app, "hi ");
+    see(&mut app, &doc("one|hi "));
+    assert_eq!(sink(&app).as_deref(), Some("hi you"));
+    sink_text(&mut app, "");
+    see(&mut app, &doc("one|"));
+    assert_eq!(sink(&app).as_deref(), Some("hi you"));
+    // Backspace at the block's start joins the blocks: the sink holds the
+    // text before the caret there.
+    keys(&mut app, &["backspace"]);
+    see(&mut app, &doc("one"));
+    see(&mut app, "Sel 4-4");
+    assert_eq!(sink(&app).as_deref(), Some("one"));
+}
+
+/// A deletion the platform makes in the sink is replayed as one Backspace
+/// per grapheme it took, as each deletes one: on iOS the sink holds the
+/// text before the caret, where UIKit deletes a skin-toned emoji or a
+/// letter with its combining mark whole.
+#[test]
+fn on_ios_a_deletion_in_the_sink_takes_whole_graphemes() {
+    let mut app = start_on(paragraphs(&["ae\u{301}👍🏽"]), Os::Ios, true);
+    focus(&mut app);
+    keys(&mut app, &["right", "right", "right"]);
+    see(&mut app, "Sel 8-8");
+    assert_eq!(sink(&app).as_deref(), Some("ae\u{301}👍🏽"));
+    sink_text(&mut app, "ae\u{301}");
+    see(&mut app, &doc("ae\u{301}"));
+    see(&mut app, "Sel 4-4");
+    sink_text(&mut app, "a");
+    see(&mut app, &doc("a"));
+    see(&mut app, "Sel 2-2");
+}
+
+/// On iOS each caret move sets the sink to the text before the caret. A
+/// commit after two of them goes in whole: had the platform dropped the
+/// second value, it would hold the text it last reported, not the first
+/// value set.
+#[test]
+fn on_ios_a_commit_after_two_caret_moves_goes_in_whole() {
+    let mut app = start_on(paragraphs(&["你"]), Os::Ios, true);
+    focus(&mut app);
+    keys(&mut app, &["right"]);
+    see(&mut app, "Sel 2-2");
+    assert_eq!(sink(&app).as_deref(), Some("你"));
+    keys(&mut app, &["left"]);
+    see(&mut app, "Sel 1-1");
+    assert_eq!(sink(&app).as_deref(), Some(""));
+    compose(&mut app, true, "ni");
+    sink_text(&mut app, "ni");
+    compose(&mut app, true, "nihao");
+    sink_text(&mut app, "nihao");
+    sink_text(&mut app, "你好");
+    compose(&mut app, false, "");
+    see(&mut app, &doc("你好你"));
     see(&mut app, "Sel 3-3");
 }
 
