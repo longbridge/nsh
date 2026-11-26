@@ -2491,8 +2491,9 @@ tap id:case-base-scrollbar
 # puts the thumb's middle there (the thumb 48 long, `minThumbLength`'s
 # default, over the 40 of 200 of 1000 shown on 200), half its travel: 400
 # of 800; a drag 38 down goes on from there, 38 of the thumb's 152 of
-# travel: 200 more.
-style label:Pages pointerEvents auto
+# travel: 200 more. On a phone the track lets touches through to the
+# content (`box-none`); the steps below drive its responder directly.
+style label:Pages pointerEvents box-none
 frame label:Pages 290 0 10 200
 touch start label:Pages 5 100
 prop id:pages contentOffset y=400
@@ -2505,7 +2506,7 @@ touch end
 # of travel, a tenth: 90 of 900.
 style label:Feed pointerEvents none
 scroll id:feed 0 100
-style label:Feed pointerEvents auto
+style label:Feed pointerEvents box-none
 touch start label:Feed 5 22
 touch end
 prop id:feed contentOffset y=90
