@@ -806,11 +806,6 @@ fn a_bottom_sheet_above_the_keyboard_stays_below_the_status_bar() {
 /// rows under it; tall (more rows than fit above the keyboard) with the
 /// app's `maxHeight: "92%"`, or padded by `env(keyboard-inset-height)`.
 fn form_sheet(tall: bool) -> impl IntoElement {
-    use nsh_core::{StyleKey, StyleValue, element::Style};
-
-    let max_height = StyleKey::MaxHeight
-        .parse_value(StyleValue::Str("92%"))
-        .unwrap();
     let rows = if tall { 14 } else { 2 };
     sheet()
         .default_open(true)
@@ -819,7 +814,7 @@ fn form_sheet(tall: bool) -> impl IntoElement {
         } else {
             "pb-[env(keyboard-inset-height)]"
         })
-        .popup_style(Style::default().with(StyleKey::MaxHeight, max_height))
+        .popup_style(|s| s.max_h(relative(0.92)))
         .child(
             view()
                 .max_h(relative(1.0))
@@ -829,13 +824,50 @@ fn form_sheet(tall: bool) -> impl IntoElement {
                     scroll().flex_shrink(1.0).child(
                         view()
                             .child(view().h(px(48.0)).child(text("Title")))
-                            .children((0..rows).map(|i| {
-                                view().h(px(48.0)).child(text(format!("Row {i}")))
-                            }))
+                            .children(
+                                (0..rows)
+                                    .map(|i| view().h(px(48.0)).child(text(format!("Row {i}")))),
+                            )
                             .child(view().test_id("submit").h(px(48.0)).child(text("Submit"))),
                     ),
                 ),
         )
+}
+
+#[test]
+fn a_declared_max_height_gives_way_to_the_room_above_the_keyboard() {
+    // What JS's `popupStyle={{ maxHeight: … }}` gives a sheet.
+    use nsh_core::{PropertyValue, StyleDecl, StyleKey, StyleValue, element::Style};
+
+    let declared = |value: StyleValue<'_>| {
+        Style::default().with(
+            StyleKey::MaxHeight,
+            StyleKey::MaxHeight.parse_value(value).unwrap(),
+        )
+    };
+    let max_height = |style: &Style| {
+        style.decls().iter().rev().find_map(|decl| match decl {
+            StyleDecl::Set(StyleKey::MaxHeight, PropertyValue::Lpa(v)) => Some(*v),
+            _ => None,
+        })
+    };
+    let room = px(495.0);
+    let screen = px(844.0);
+    let length = |points: f32| max_height(&declared(StyleValue::Number(points)));
+    // 92% of the screen is taller than the room: the room.
+    let tall = declared(StyleValue::Str("92%")).max_height_at_most(room, screen);
+    assert_eq!(max_height(&tall), length(495.0));
+    // A shorter one stays.
+    let short = declared(StyleValue::Number(300.0));
+    assert_eq!(
+        max_height(&short.max_height_at_most(room, screen)),
+        length(300.0)
+    );
+    // None: the room.
+    assert_eq!(
+        max_height(&Style::default().max_height_at_most(room, screen)),
+        length(495.0)
+    );
 }
 
 #[component]
