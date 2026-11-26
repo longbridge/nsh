@@ -211,6 +211,10 @@ mod player {
         }
     }
 
+    /// A loaded poster and its natural size, shared with the load that
+    /// fills it in.
+    type Poster = Rc<RefCell<Option<(Rc<crate::image::Texture>, (f32, f32))>>>;
+
     /// A video: its pipeline and the picture its view shows.
     pub(crate) struct VideoItem {
         emitter: Emitter,
@@ -226,7 +230,7 @@ mod player {
         /// sprite atlas).
         frame: RefCell<Option<(Frame, bool)>>,
         /// The poster shown until the first frame, and its natural size.
-        poster: Rc<RefCell<Option<(Rc<crate::image::Texture>, (f32, f32))>>>,
+        poster: Poster,
         /// Bumped with every poster (an older load is stale).
         poster_serial: Rc<Cell<u64>>,
         /// Painted frames replaced since, to remove from the atlas.
