@@ -142,7 +142,8 @@ pub(crate) fn selected(
 /// (`view.rs` puts the marker first in the item).
 fn without_list_markers(text: &str) -> std::borrow::Cow<'_, str> {
     fn marker(line: &str) -> Option<usize> {
-        let (cell, _) = line.split_once('\t')?;
+        // `•\tItem` (a marker cell) or `• Item` (a copy's marker, #3284).
+        let (cell, _) = line.split_once('\t').or_else(|| line.split_once(' '))?;
         let cell_trimmed = cell.trim_end();
         let is_marker = matches!(cell_trimmed, "•" | "◦" | "▪" | "☐" | "☑")
             || cell_trimmed

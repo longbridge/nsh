@@ -1572,8 +1572,13 @@ fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
         .find_map(|t| t.strip_prefix("Selected: "))
         .unwrap_or_default()
         .to_owned();
+    // Whole list items copy with their markers (#3284); markers never
+    // leak as tabs or mid-line fragments.
+    assert!(!sel.contains('\t'), "got {sel:?}");
     assert!(
-        !sel.contains('•') && !sel.contains('◦') && !sel.contains('\t'),
+        sel.lines().all(|l| !(l.contains('•') || l.contains('◦'))
+            || l.starts_with('•')
+            || l.starts_with('◦')),
         "got {sel:?}"
     );
     let md = app
