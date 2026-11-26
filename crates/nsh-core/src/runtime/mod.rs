@@ -18,6 +18,7 @@ mod accessibility;
 mod android;
 mod app_settings;
 mod audio;
+mod auth_session;
 mod clipboard;
 mod desktop;
 mod device;
@@ -69,6 +70,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
             .module::<share::Share>()
+            .module::<auth_session::AuthSession>()
             .class::<audio::Sound>()
             .class::<audio::AudioPlayer>()
             .module::<notifications::Notifications>()

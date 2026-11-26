@@ -12,6 +12,7 @@ use nsh_core::MountBatch;
 use nsh_engine::MountSink;
 
 mod assets;
+mod auth_session;
 mod canvas;
 mod class_bench;
 mod clock;

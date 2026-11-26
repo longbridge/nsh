@@ -142,6 +142,15 @@ pub(crate) trait Driver: Send {
         let _ = outcome;
         Err(headless_only("onShare"))
     }
+    /// The platform shows web sign-in sessions in the app, and the user
+    /// ends every one with `outcome` (`onAuthSession`).
+    fn on_auth_session(
+        &mut self,
+        outcome: nsh_core::auth_session::AuthSessionOutcome,
+    ) -> Result<(), String> {
+        let _ = outcome;
+        Err(headless_only("onAuthSession"))
+    }
     /// What the app shared, in order (`shares()`).
     fn shares(&mut self) -> Result<Vec<nsh_core::share::ShareSheet>, String> {
         Err(headless_only("`shares()`"))
@@ -365,6 +374,12 @@ impl Driver for Headless {
     }
     fn on_share(&mut self, outcome: nsh_core::share::ShareOutcome) -> Result<(), String> {
         Headless::on_share(self, outcome)
+    }
+    fn on_auth_session(
+        &mut self,
+        outcome: nsh_core::auth_session::AuthSessionOutcome,
+    ) -> Result<(), String> {
+        Headless::on_auth_session(self, outcome)
     }
     fn shares(&mut self) -> Result<Vec<nsh_core::share::ShareSheet>, String> {
         self.catch_up();

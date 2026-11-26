@@ -1346,6 +1346,29 @@ button()
 - 各平台用自己的方式打开：iOS 用 `UIApplication.open`（嵌入时是宿主应用的 application），Android 用 `ACTION_VIEW` Intent，macOS 用 `NSWorkspace`，Windows 用 `ShellExecuteW`，Linux 用 `GtkUriLauncher`，GPUI 用它的 `open_url`，Web 在新标签页中打开。`nsh test` 记录这些 URL，而不真正打开。
 - [`TextView`](../elements/text-view.md) 设置 `links="open"` 后，以同样的方式打开其中的链接。
 
+### openAuthSession
+
+```ts
+function openAuthSession(url: string, options: AuthSessionOptions): Promise<string | null>;
+function closeAuthSession(): Promise<void>;
+
+interface AuthSessionOptions {
+  callbackScheme: string;
+  ephemeral?: boolean;
+}
+```
+
+打开服务方的登录页（OAuth 授权地址），结果是登录页跳回的回调地址；用户关掉页面、没登录就回到应用，或被后来的会话、`closeAuthSession()` 结束时为 `null`。iOS 用 `ASWebAuthenticationSession` 弹出页面（`ephemeral: true` 不与用户的 Safari 数据共享），Android 用 Custom Tab，macOS、Windows 和 Linux 用系统浏览器。iOS 以外，回调以应用声明的 scheme（`nsh.json` 的 `schemes`）链接的形式回来。同一时间只有一个会话。
+
+登录页不是 `https:` 或 `http:` 地址、回调 scheme 不可用（`https`、`javascript` 等）时以 `TypeError` 拒绝；`openUrl` 权限不允许该页面时以 `ERR_ACCESS_DENIED` 拒绝；回调回不来时（网页上，以及 iOS 以外应用没声明的 scheme）以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。`closeAuthSession()` 关闭正在等待的会话，比如用户用别的方式登录了；桌面浏览器里的页面不会关。测试里用 `app.onAuthSession(url)` 回应会话（`null` 表示关闭）。Rust：`nsh_core::prelude` 的 `open_auth_session` 和 `close_auth_session`（见 [网页登录](../docs/rust.md)）。
+
+```tsx
+const callback = await openAuthSession(authorizeUrl, { callbackScheme: "myapp" });
+if (callback) {
+  const code = new URL(callback).searchParams.get("code");
+}
+```
+
 ### 布局方向
 
 布局方向跟随用户的语言：在从右到左书写的语言（阿拉伯语、希伯来语等）中，应用从右到左布局，行从右侧开始排列，`left` / `right` 样式属性（`marginLeft`、`paddingRight` 等）表示起始端和结束端。修改即时生效，无需重启。

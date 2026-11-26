@@ -1389,6 +1389,47 @@ button()
 - Each platform opens it with its own opener: `UIApplication.open` on iOS (the host app's application when embedded), an `ACTION_VIEW` intent on Android, `NSWorkspace` on macOS, `ShellExecuteW` on Windows, `GtkUriLauncher` on Linux, GPUI's `open_url`, a new tab on the web. `nsh test` records the URLs instead of opening them.
 - A [`TextView`](../elements/text-view.md) opens its links this way with `links="open"`.
 
+### openAuthSession
+
+```ts
+function openAuthSession(url: string, options: AuthSessionOptions): Promise<string | null>;
+function closeAuthSession(): Promise<void>;
+
+interface AuthSessionOptions {
+  callbackScheme: string;
+  ephemeral?: boolean;
+}
+```
+
+Opens a provider's sign-in page (an OAuth authorization URL) and resolves with the callback URL it redirects to, or `null` when the user closed the page, came back to the app without signing in, or a later session or `closeAuthSession()` ended it. iOS shows the page in an `ASWebAuthenticationSession` sheet (`ephemeral: true` keeps it apart from the user's Safari data), Android in a Custom Tab, macOS, Windows and Linux in the system browser. Outside iOS the callback comes back as a link of a scheme the app claims (`nsh.json` `schemes`). One session runs at a time.
+
+It rejects with a `TypeError` for a page that is not an `https:` or `http:` URL or a callback scheme it never takes (`https`, `javascript`, ...), with `ERR_ACCESS_DENIED` when the `openUrl` capability does not grant the page, and with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where nothing can bring the callback back: on the web, and outside iOS for a scheme the app does not claim. `closeAuthSession()` closes the waiting session, as when the user signed in some other way; a page in a desktop browser stays open. Tests answer sessions with `app.onAuthSession(url)` (`null` closes them). Rust: `open_auth_session` and `close_auth_session` of `nsh_core::prelude` (see [Signing in on the web](../docs/rust.md#signing-in-on-the-web)).
+
+```tsx tabs
+<Button
+  onPress={async () => {
+    const callback = await openAuthSession(authorizeUrl, { callbackScheme: "myapp" });
+    if (callback) {
+      const code = new URL(callback).searchParams.get("code");
+      // Exchange the code for a token.
+    }
+  }}
+>
+  <Text>Sign in</Text>
+</Button>
+```
+
+```rust tabs
+button().child(text("Sign in")).on_press(move || {
+    let session = open_auth_session(AuthSessionRequest::new(authorize_url.clone(), "myapp"));
+    spawn(async move {
+        if let Ok(AuthSessionOutcome::Completed(callback)) = session.await {
+            // Exchange the code for a token.
+        }
+    });
+})
+```
+
 ### Layout direction
 
 The layout direction follows the user's language: in a right-to-left language (Arabic, Hebrew, ...) the app lays out right to left, rows run from the right, and `left` / `right` style properties (`marginLeft`, `paddingRight`, ...) mean start and end. Changes apply at once, with no restart.

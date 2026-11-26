@@ -421,6 +421,7 @@ fn autosaves() {
 | `app.onPick(handler)` | 回答应用之后发起的选取（`Picker.pickImages`、`Picker.pickFiles`）：`handler` 接收这次选取的要求（`kind`：`"images"` 或 `"files"`，`multiple`、`limit`、`maxDimension`、`quality`、`format`、`filters`、`maxSize`），返回用户选中的文件（`{ name, type?, data: Uint8Array }`，原样交给应用；超过 `maxSize` 的文件到应用时不带内容，`status` 为 `"tooLarge"`），返回 `null` 则取消。没有 handler 时选取都会被取消。仅限无界面运行。 |
 | `app.picks()` | 应用发起过的选取，按顺序排列。 |
 | `app.onShare({ action, target })` | 给这次运行一个分享面板，并回答应用之后显示的分享（`Share.show`）：`action` 为 `"shared"`（分享到 `target`）或 `"dismissed"`。仅限无界面运行。 |
+| `app.onAuthSession(url)` | 让平台在应用内显示网页登录会话，并以 `url` 作为回调结束之后打开的每个会话（`openAuthSession`），`null` 表示用户关闭。仅限无界面运行。 |
 | `app.shares()` | 应用分享过的内容，按顺序排列（`{ title, text, url, files }`）。 |
 | `await app.fake(name, method, args?)` | 按名称调用原生模块在无界面运行中代替设备的模拟实现，`args` 是一个数组，应用静止后 resolve 为它的 JSON 回答。模拟实现有哪些方法由模块自己的文档说明：`nsh-extra` 的语音识别器是 `"nsh-extra/speech"`（[`Speech`](./nshm.md#speech)：`app.fake("nsh-extra/speech", "hear", ["hello"])` 代替用户说话）。仅限无界面运行。 |
 | `app.audio()` | 应用对扬声器发出的请求（`Sound`、`AudioPlayer`），按顺序：`command`（`"load"`、`"play"`、`"stop"`、`"unload"`、`"open"`、`"preload"`、`"resume"`、`"pause"`、`"seek"`、`"set"`、`"close"`）、`src`，以及适用时的 `volume`、`rate`、`position`。仅限无界面运行。 |

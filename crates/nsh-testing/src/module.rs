@@ -2783,6 +2783,20 @@ impl App {
         step(&this, move |app| app.on_share(outcome)).await
     }
 
+    /// The platform shows web sign-in sessions in the app (as iOS does),
+    /// and the user ends every one the app opens (`openAuthSession`) with
+    /// `url`: the page redirects to that callback URL, or with `null` the
+    /// user closes it, and `openAuthSession` resolves with it. Then waits
+    /// until the app is quiet. Headless only: a real platform shows its own
+    /// page.
+    pub async fn on_auth_session(this: Instance<Self>, url: Option<String>) -> Result<(), JsError> {
+        let outcome = match url {
+            Some(url) => nsh_core::auth_session::AuthSessionOutcome::Completed(url),
+            None => nsh_core::auth_session::AuthSessionOutcome::Cancelled,
+        };
+        step(&this, move |app| app.on_auth_session(outcome)).await
+    }
+
     /// What the app shared (`Share.show`), in order: recorded, never
     /// shared, and answered as `onShare` says. Headless only.
     pub fn shares(&self) -> Result<Vec<SharedContent>, JsError> {
