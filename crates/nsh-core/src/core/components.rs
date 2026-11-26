@@ -8342,9 +8342,27 @@ impl<M: TextEngine> Core<M> {
         safe
     }
 
+    /// Whether `key` or a view around it already stands clear of the
+    /// software keyboard (`Prop::ClearsKeyboard`, a bottom sheet the
+    /// keyboard lifts): the keyboard takes nothing more from it.
+    fn clears_keyboard(&self, key: super::Key) -> bool {
+        let mut key = key;
+        loop {
+            let node = &self.nodes[key as usize];
+            if node.clears_keyboard {
+                return true;
+            }
+            if node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
+    }
+
     /// What `env` (a node's `env()` terms) comes to for `key` now: the
     /// insets of the root view it renders in ([`Self::insets_of`]) and the
-    /// software keyboard's height.
+    /// software keyboard's height, 0 where a view around it stands clear
+    /// of the keyboard already ([`Self::clears_keyboard`]).
     pub(super) fn env_insets(
         &self,
         key: super::Key,
@@ -8357,6 +8375,9 @@ impl<M: TextEngine> Core<M> {
                 return Points::ZERO;
             };
             if var == EnvVar::KeyboardInsetHeight {
+                if self.clears_keyboard(key) {
+                    return Points::ZERO;
+                }
                 return self
                     .components
                     .environment
