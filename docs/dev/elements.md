@@ -871,6 +871,14 @@ next `reload()`, `load()` or new source shows a page again. Android's `WebBox` h
 `onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
 same web view.
 
+`scrollable={false}` stops only the user scrolling the page's viewport: the page still
+gets every touch (its own drag handlers, sliders and sortable lists work) and its scripts
+still scroll it, as a `UIScrollView` with `scrollEnabled` off on iOS. Android and Windows
+put `html { overflow: hidden !important; }` in each document (Android from `WebBox.java`
+as the document starts and when the prop changes, never by keeping moves from the
+WebView), Linux a user style sheet hiding the top document's overflow; macOS keeps wheel
+and trackpad scrolls from the page.
+
 
 
 ### Size classes

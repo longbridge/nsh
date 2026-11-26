@@ -87,7 +87,7 @@ In Rust each prop is a builder method in snake case (`injected_java_script`, `ja
 | `injectedJavaScript` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | Runs before each page's own scripts. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
-| `scrollable` | `boolean` | `true` | The user can scroll the page. |
+| `scrollable` | `boolean` | `true` | The user can scroll the page. Off, the page still receives its touches, so its own drag handlers (sliders, sortable lists) work, and its scripts still scroll it. |
 | `userAgent` | `string` | | The browser's user agent string. |
 | `incognito` | `boolean` | `false` | The pages' website data lives only as long as the web view, as each platform keeps it ([below](#website-data)). Read when the web view is made. |
 | `zoomable` | `boolean` | `false` | The person can pinch to zoom the page, also past its viewport's scale limits: built-in zoom without on-screen buttons on Android, the viewport's limits ignored on iOS, magnification on macOS. Off keeps each platform's own behavior (Android and macOS do not zoom, iOS zooms as far as the viewport allows, Windows zooms). Read when the web view is made. |
