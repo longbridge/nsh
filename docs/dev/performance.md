@@ -901,6 +901,59 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
 
+## End-to-end jank: startup and frame gaps (all desktops)
+
+The micro-benchmarks above time the work of a commit. They cannot see a frame that waits without working, as in
+#3365 (a new window waited out a 250 ms timeout on every launch), or a long frame in the middle of a scroll.
+`examples/bench/jank/` measures those from the outside, on the platform's development host:
+
+```sh
+python3 examples/bench/jank/jank.py              # against baseline.json; exits 1 over budget
+python3 examples/bench/jank/jank.py --stall 150  # the app blocks 150 ms before it mounts: must fail
+python3 examples/bench/jank/jank.py --runs 5 --write  # record this platform's baseline
+```
+
+What it measures, and when it fails:
+
+| Metric | What | Fails when |
+|---|---|---|
+| `startup_ms` | `open()` of a TSX app to its window on screen with the first rows (median of the runs) | baseline + 100 ms |
+| `frame_p95_ms` / `frame_max_ms` | main-thread time per drawn frame, the worst second's p95 and the max | p95 > 8.3 ms |
+| `gap_p50_ms` / `gap_p95_ms` / `gap_max_ms` | time between drawn frames while three loops animate, then while a 10,000-row List scrolls | p50 > one refresh + 1 ms, max > 50 ms |
+
+The frame cost budget is 8.3 ms, one refresh at 120 Hz, whatever the display's rate. Gaps follow the display: they
+are one refresh when nothing is dropped. Run it from a terminal (or `tools/interactive.sh` on an agent host): at
+background priority macOS stretches the main thread's timers, and the gaps measured are the scheduler's, not NSH's.
+
+Baseline, macOS (2026-11-26, Apple M6, `nsh 0.6.0` nightly 2026-11-24, debug development host, 800×600 window, 5
+runs; the screen was locked, so the display link ran at about 45 Hz, not the display's 60):
+
+| Scenario | Startup | Frame p95 / max | Gap p50 / p95 / max | Over one refresh |
+|---|---:|---:|---:|---:|
+| Launch | 576 ms (564–596) | | | |
+| Animation (3 loops) | | 0.60 / 0.65 ms | 22.3 / 26.0 / 28.4 ms | 0% |
+| List scroll (10,000 rows) | | 3.37 / 4.01 ms | 21.4 / 27.5 / 29.5 ms | 0% |
+
+The gate, checked: with `--stall 150` startup is 744 ms (730–779) and the run fails with
+`FAIL startup 744 ms > baseline 576 ms + 100 ms`; without it, 584 ms passes.
+
+Baseline, Linux (2026-11-26, Intel Core Ultra 7 270K Plus, Hyprland on Wayland, 60 Hz display, `nsh 0.7.1` (f78eace),
+5 runs at nice 0 on an idle machine):
+
+| Scenario | Startup | Frame p95 / max | Gap p50 / p95 / max | Over one refresh |
+|---|---:|---:|---:|---:|
+| Launch | 575 ms (563–595) | | | |
+| Animation (3 loops) | | 1.62 / 2.57 ms | 16.7 / 17.1 / 19.2 ms | 0% |
+| List scroll (10,000 rows) | | 2.24 / 3.71 ms | 16.7 / 17.4 / 18.4 ms | 0% |
+
+The gate, checked: with `--stall 150` startup is 732 ms and the run fails with `FAIL startup ... > baseline + 100 ms`.
+Run it on an idle machine: a first Linux run taken while parallel cargo builds kept the load at 18–20 measured the
+scroll's p95 frame cost at about 10 ms and failed the 8.3 ms budget, against 2.24 ms idle.
+
+Not covered yet: the Rust app's startup (the #3365 probe, a Rust app whose window content is in the commit that
+opens it, timed 783 ms median after the fix against 962 ms before it on the same host, debug), and p99: the monitor's
+line gives each second's p50 / p95 / max, so the worst p95 and the max stand in for it.
+
 ## Views made over frames (all platforms)
 
 A list row bound in the overscan, or a long reply staged into a chat, used to make its whole subtree in one batch:
