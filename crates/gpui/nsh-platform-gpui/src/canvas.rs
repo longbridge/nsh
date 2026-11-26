@@ -49,7 +49,9 @@
 //! with (so drawn widths match `measureText`), and its glyphs become paths
 //! like any other shape: GPUI gives no outlines, so the font's file is
 //! found by family, weight and style with fontdb (the system's fonts and
-//! those the app registers, [`font_registered`]) and checked against
+//! those the app registers, [`font_registered`]; on macOS the UI font is
+//! San Francisco's file, and a variable font is set to the weight) and
+//! checked against
 //! GPUI's metrics before its outlines (ttf-parser) are used with GPUI's
 //! glyph ids (the system's fonts are found by a worker, which takes
 //! hundreds of milliseconds: canvases that drew text before are drawn
@@ -2179,6 +2181,8 @@ struct FontFile {
     data: Arc<[u8]>,
     index: u32,
     units_per_em: u16,
+    /// The variable font's axes, at GPUI's font's weight.
+    variations: Vec<(ttf_parser::Tag, f32)>,
     /// Outlines by glyph, in font units (y up), once read.
     glyphs: std::sync::Mutex<FxHashMap<u16, Option<sk::Path>>>,
 }
@@ -2188,9 +2192,28 @@ impl FontFile {
     /// `path`; false if the font has no outline for it (bitmap and color
     /// glyphs). An empty glyph (a space) counts as outlined.
     fn push_glyph(&self, glyph: u16, to: &Affine, path: &mut sk::PathBuilder) -> bool {
+        let Some(outline) = self.outline(glyph) else {
+            return false;
+        };
+        if outline.bounds().width() == 0.0 && outline.bounds().height() == 0.0 {
+            return true;
+        }
+        if let Some(placed) = outline.transform(to.skia()) {
+            path.push_path(&placed);
+        }
+        true
+    }
+
+    /// The outline of `glyph` in font units (y up), read once; `None` if
+    /// the font has no outline for it (bitmap and color glyphs). An empty
+    /// glyph (a space) is an empty rectangle.
+    fn outline(&self, glyph: u16) -> Option<sk::Path> {
         let mut glyphs = self.glyphs.lock().unwrap_or_else(|e| e.into_inner());
         let outline = glyphs.entry(glyph).or_insert_with(|| {
-            let face = ttf_parser::Face::parse(&self.data, self.index).ok()?;
+            let mut face = ttf_parser::Face::parse(&self.data, self.index).ok()?;
+            for &(axis, value) in &self.variations {
+                face.set_variation(axis, value);
+            }
             let id = ttf_parser::GlyphId(glyph);
             let mut sink = Outline(sk::PathBuilder::new());
             match face.outline_glyph(id, &mut sink) {
@@ -2207,17 +2230,22 @@ impl FontFile {
                 )?)),
             }
         });
-        let Some(outline) = outline else {
-            return false;
-        };
-        if outline.bounds().width() == 0.0 && outline.bounds().height() == 0.0 {
-            return true;
-        }
-        if let Some(placed) = outline.clone().transform(to.skia()) {
-            path.push_path(&placed);
-        }
-        true
+        outline.clone()
     }
+}
+
+/// The outline of `glyph` of GPUI's font `id` in font units (y up), and
+/// the font's units per em: for glyphs drawn turned, which GPUI's glyph
+/// sprites cannot be. `None` when the font's file is not found (or not
+/// yet: the system's fonts are being found, and windows are drawn again
+/// once they are) or has no outline for it.
+pub(crate) fn glyph_outline(
+    system: &gpui::TextSystem,
+    id: gpui::FontId,
+    glyph: u16,
+) -> Option<(sk::Path, u16)> {
+    let file = font_file(system, id)?;
+    Some((file.outline(glyph)?, file.units_per_em))
 }
 
 /// tiny-skia's path builder as ttf-parser's outline sink.
@@ -2322,6 +2350,8 @@ fn load_fonts(fonts: &mut Fonts) {
 /// The system's fonts were found (main thread): canvases that drew text
 /// without them draw again.
 fn fonts_loaded() {
+    // Turned text drew upright glyphs until now ([`glyph_outline`]).
+    crate::rt::on_app(|cx| cx.refresh_windows());
     let waiting = WAITING.with_borrow_mut(std::mem::take);
     for (surface, id) in waiting {
         let Some(view) = surface.upgrade().and_then(|s| s.view(id)) else {
@@ -2385,6 +2415,27 @@ fn find_font_file(
         FontStyle::Italic => fontdb::Style::Italic,
         FontStyle::Oblique => fontdb::Style::Oblique,
     };
+    let mut faces = Vec::new();
+    #[cfg(target_os = "macos")]
+    if name.starts_with('.') || name == "system-ui" {
+        // CoreText's UI font, which GPUI's is: San Francisco, a variable
+        // font fontdb knows by its file (CoreText's own name for it is
+        // hidden).
+        let file = match style {
+            fontdb::Style::Normal => "SFNS.ttf",
+            _ => "SFNSItalic.ttf",
+        };
+        faces.extend(
+            db.faces()
+                .filter(|f| match &f.source {
+                    fontdb::Source::File(path) | fontdb::Source::SharedFile(path, _) => {
+                        path.file_name().is_some_and(|n| n == file)
+                    }
+                    fontdb::Source::Binary(_) => false,
+                })
+                .map(|f| f.id),
+        );
+    }
     for family in families {
         let query = fontdb::Query {
             families: &[family],
@@ -2392,16 +2443,26 @@ fn find_font_file(
             stretch: fontdb::Stretch::Normal,
             style,
         };
-        let Some(face) = db.query(&query) else {
-            continue;
-        };
+        faces.extend(db.query(&query));
+    }
+    for face in faces {
         let Some(file) = db.with_face_data(face, |data, index| {
-            let face = ttf_parser::Face::parse(data, index).ok()?;
-            same_font(system, id, &face).then(|| FontFile {
-                data: Arc::from(data),
-                index,
-                units_per_em: face.units_per_em(),
-                glyphs: Default::default(),
+            let mut face = ttf_parser::Face::parse(data, index).ok()?;
+            // A variable font at GPUI's font's weight, at the optical size
+            // GPUI measured with (its largest: GPUI's advances are of a
+            // font as large as its units per em) or at none.
+            let variations = variations(&face, font.weight.0);
+            variations.into_iter().find_map(|variations| {
+                for &(axis, value) in &variations {
+                    face.set_variation(axis, value);
+                }
+                same_font(system, id, &face).then(|| FontFile {
+                    data: Arc::from(data),
+                    index,
+                    units_per_em: face.units_per_em(),
+                    variations,
+                    glyphs: Default::default(),
+                })
             })
         }) else {
             continue;
@@ -2411,6 +2472,33 @@ fn find_font_file(
         }
     }
     None
+}
+
+/// The variations to try a font at, for GPUI's font of `weight`: none for
+/// a font that is not variable; else its weight axis at `weight`, its
+/// optical size axis at its largest, then at its default.
+fn variations(face: &ttf_parser::Face<'_>, weight: f32) -> Vec<Vec<(ttf_parser::Tag, f32)>> {
+    let axes: Vec<_> = face.variation_axes().into_iter().collect();
+    if axes.is_empty() {
+        return vec![Vec::new()];
+    }
+    let wght = ttf_parser::Tag::from_bytes(b"wght");
+    let opsz = ttf_parser::Tag::from_bytes(b"opsz");
+    let mut base = Vec::new();
+    if let Some(a) = axes.iter().find(|a| a.tag == wght) {
+        base.push((wght, weight.clamp(a.min_value, a.max_value)));
+    }
+    match axes.iter().find(|a| a.tag == opsz) {
+        Some(a) => [a.max_value, a.def_value]
+            .into_iter()
+            .map(|v| {
+                let mut with = base.clone();
+                with.push((opsz, v));
+                with
+            })
+            .collect(),
+        None => vec![base],
+    }
 }
 
 /// True when `face` measures as GPUI's font `id` does: the same units per
@@ -4305,6 +4393,7 @@ mod tests {
             units_per_em: face.units_per_em(),
             data: data.clone(),
             index: 0,
+            variations: Vec::new(),
             glyphs: Default::default(),
         };
         let a = face.glyph_index('a').unwrap().0;
