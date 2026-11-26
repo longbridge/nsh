@@ -52,7 +52,10 @@ use nsh_core::{
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT},
-    UI::{Input::KeyboardAndMouse::EnableWindow, WindowsAndMessaging::*},
+    UI::{
+        Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled},
+        WindowsAndMessaging::*,
+    },
 };
 
 use crate::{
@@ -168,6 +171,54 @@ pub(crate) fn dialog_window(surface: &Surface) -> NodeId {
         .find(|w| w.state.get().is_some_and(|state| state.focused))
         .or_else(|| windows.first())
         .map_or(ROOT_ID, |w| w.id)
+}
+
+/// Candidate window state used to pick which window a notification press
+/// activates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ActivationCandidate {
+    hwnd: HWND,
+    visible: bool,
+    enabled: bool,
+    focusable: bool,
+    minimized: bool,
+}
+
+fn select_activation_target(
+    candidates: impl IntoIterator<Item = ActivationCandidate>,
+    foreground: HWND,
+) -> Option<HWND> {
+    candidates
+        .into_iter()
+        .filter(|c| c.visible && c.enabled && c.focusable)
+        .min_by_key(|c| (c.hwnd != foreground, c.minimized))
+        .map(|c| c.hwnd)
+}
+
+/// The focused window, else the oldest shown and focusable window (preferring
+/// unminimized windows before minimized ones), with the embedding host as a
+/// fallback.
+pub(crate) fn activation_target(surface: &Surface, host: HWND) -> Option<HWND> {
+    let foreground = crate::window::foreground();
+    let windows = surface.windows.borrow();
+    let candidates = windows.iter().map(|w| w.hwnd).chain([host]).map(|hwnd| {
+        // SAFETY: plain queries; a missing window is not visible.
+        let (visible, enabled, minimized) = unsafe {
+            (
+                IsWindowVisible(hwnd).as_bool(),
+                IsWindowEnabled(hwnd).as_bool(),
+                IsIconic(hwnd).as_bool(),
+            )
+        };
+        ActivationCandidate {
+            hwnd,
+            visible,
+            enabled,
+            focusable: crate::window::shell(hwnd).is_none_or(|s| s.attrs().focusable),
+            minimized,
+        }
+    });
+    select_activation_target(candidates, foreground)
 }
 
 /// The root view of the window showing dialog root `id`: what its
@@ -1173,6 +1224,157 @@ mod tests {
             let _ = DestroyWindow(hwnd_a);
             let _ = DestroyWindow(hwnd_b);
             let _ = DestroyWindow(hwnd_c);
+        }
+        surface.windows.borrow_mut().clear();
+    }
+
+    #[test]
+    fn activation_target_ranks_focused_unminimized_and_minimized_windows() {
+        let hwnd = |id: isize| HWND(id as *mut _);
+        let window = |id: isize| ActivationCandidate {
+            hwnd: hwnd(id),
+            visible: true,
+            enabled: true,
+            focusable: true,
+            minimized: false,
+        };
+
+        // Focused window wins over an older visible window.
+        assert_eq!(
+            select_activation_target([window(1), window(2)], hwnd(2)),
+            Some(hwnd(2))
+        );
+
+        // Skips hidden, disabled (modal owner), and non-focusable (overlay) windows.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(1)
+                    },
+                    ActivationCandidate {
+                        enabled: false,
+                        ..window(2)
+                    },
+                    ActivationCandidate {
+                        focusable: false,
+                        ..window(3)
+                    },
+                    window(4),
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(4))
+        );
+
+        // Prefers an unminimized visible window over an older minimized window.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        minimized: true,
+                        ..window(1)
+                    },
+                    window(2),
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(2))
+        );
+
+        // Falls back to the oldest minimized window when none is open on screen.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        minimized: true,
+                        ..window(1)
+                    },
+                    ActivationCandidate {
+                        minimized: true,
+                        ..window(2)
+                    },
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(1))
+        );
+
+        // Falls back to the embedding host when app windows are unavailable, and
+        // returns None when all windows (including the hidden host) are hidden.
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(1)
+                    },
+                    window(10),
+                ],
+                hwnd(99),
+            ),
+            Some(hwnd(10))
+        );
+        assert_eq!(
+            select_activation_target(
+                [
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(1)
+                    },
+                    ActivationCandidate {
+                        visible: false,
+                        ..window(10)
+                    },
+                ],
+                hwnd(99),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn activation_target_skips_hidden_host_and_hidden_app_windows() {
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let id: NodeId = 7;
+        let view = NshView::new(id, ViewKind::Modal);
+        let hwnd = crate::window::create_app_window(
+            surface,
+            id,
+            WindowKind::Normal,
+            &WindowAttributes::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        surface.windows.borrow_mut().push(Rc::new(AppWindow {
+            id,
+            hwnd,
+            view,
+            owner: None,
+            modal: false,
+            composition: None,
+            web: RefCell::default(),
+            placed: RefCell::default(),
+            composed: RefCell::default(),
+            swap: RefCell::new(None),
+            target_scale: Cell::new(0.0),
+            pixels: Cell::new((0, 0)),
+            scale: Cell::new(1.0),
+            invalid: Cell::new(false),
+            positioned: Cell::new(true),
+            reported: Cell::new(None),
+            opened: Cell::new(false),
+            closed: Cell::new(false),
+            hidden: Cell::new(false),
+            state: Cell::new(None),
+        }));
+        assert_eq!(activation_target(surface, surface.hwnd()), None);
+        // SAFETY: the test's own window.
+        unsafe {
+            let _ = DestroyWindow(hwnd);
         }
         surface.windows.borrow_mut().clear();
     }
