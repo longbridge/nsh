@@ -193,9 +193,12 @@ the document and transaction revision unchanged; a text commit remains a normal 
 the view while composing and release it on the end notification. Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
 and offers each as a `KeyEvent` to the selected node's view, the plugins' `handle_key_down`, the base keymap, then
 copy / cut / select all and the caret movement (graphemes, words, line ends, lines and pages by geometry, keeping the
-goal x, the document's ends). An Escape none of them takes collapses a selection to its head; with nothing selected,
-in a terminal, it blurs the editor, so the focus can leave it (Escape stays bound for the plugins' own, a
-suggestion's).
+goal x, the document's ends). Left or Right onto a selectable inline atom a node view draws selects it as a node
+first and the next press moves past it (`inline_node_beside`, prosemirror-view's `selectHorizontally`): the node view
+shows it as `selected`, the caret being hidden. An atom drawn without a node view (a built-in image), or whose spec
+turns `selectable` off (a mention, a hard break), is stepped over as one character. An Escape none of them takes collapses
+a selection to its head; with nothing selected, in a terminal, it blurs the editor, so the focus can leave it (Escape
+stays bound for the plugins' own, a suggestion's).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection (a press inside an inline node view's box
 selects its node without Shift or Mod: `inline_view_at`, after prosemirror-view's `selectClickedLeaf`; an inline

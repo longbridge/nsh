@@ -373,8 +373,10 @@ to other types; `addProseMirrorPlugins` returns plugins, `RichEditorPlugin`s inc
 ### Node views
 
 `addNodeView` returns the component that renders every node of the extension's node type: a stock tag in the text, a
-card between paragraphs, a mention, an embed. The node type must be an atom (`atom: true`, or a leaf): the caret steps
-over it as one character or one block and Backspace deletes it. A node with content is refused.
+card between paragraphs, a mention, an embed. The node type must be an atom (`atom: true`, or a leaf): an arrow key
+that reaches it selects it as a node and the next one moves past it, as in ProseMirror and Tiptap (a node with
+`selectable: false`, such as a mention, is stepped over as one character), and Backspace deletes it. A node with
+content is refused.
 
 ```tsx
 import { RichEditor, StarterKit, createRichEditor, defineExtension, type RichNodeViewProps } from "nsh/base";
