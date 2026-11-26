@@ -91,9 +91,10 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGPath;
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSDictionary, NSMutableDictionary, NSNotification,
-    NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect, NSString,
-    NSUndoManager, NSUndoManagerDidRedoChangeNotification, NSUndoManagerDidUndoChangeNotification,
+    NSAlignmentOptions, NSArray, NSAttributedString, NSDictionary, NSMutableDictionary,
+    NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect,
+    NSString, NSUndoManager, NSUndoManagerDidRedoChangeNotification,
+    NSUndoManagerDidUndoChangeNotification,
 };
 use objc2_quartz_core::{CALayer, CAShapeLayer};
 
@@ -2049,6 +2050,29 @@ macro_rules! define_field_cell {
             impl $name {
                 $($extra)*
 
+                /// The idle cell's line is as tall as the font's ascent and
+                /// descent: the field is that tall. AppKit sets up the field
+                /// editor to add the font's leading to its line, so for a
+                /// font with leading (Arial) the editor is taller than the
+                /// field, and its clip view scrolls it up to the line's
+                /// bottom: the text would move up on focus. Laid out without
+                /// the leading, the editor's line is the cell's, its text at
+                /// the same baseline. Here, before AppKit sizes and places
+                /// the editor, which it sets up again for every edit.
+                #[unsafe(method_id(setUpFieldEditorAttributes:))]
+                fn set_up_field_editor_attributes(&self, text: &NSText) -> Retained<NSText> {
+                    // SAFETY: NSCell's own setup of the editor it returns.
+                    let text: Retained<NSText> =
+                        unsafe { msg_send![super(self), setUpFieldEditorAttributes: text] };
+                    if let Some(view) = text.downcast_ref::<NSTextView>()
+                        // SAFETY: AppKit's getter on the main thread.
+                        && let Some(layout) = unsafe { view.layoutManager() }
+                    {
+                        layout.setUsesFontLeading(false);
+                    }
+                    text
+                }
+
                 #[unsafe(method_id(accessibilityActionNames))]
                 fn accessibility_action_names(&self) -> Retained<NSArray<NSString>> {
                     // SAFETY: NSTextFieldCell's own accessibility action names.
@@ -3689,19 +3713,34 @@ fn place(view: &NshView, input: &InputState) {
             // insets its text by the field editor's line padding: the
             // field reaches past the box by as much, so the text starts at
             // the content box.
-            let pad = FIELD_PADDING;
+            let inset = FIELD_PADDING;
             let height = field.intrinsicContentSize().height as f32;
-            let rect = Bounds {
-                origin: Point {
-                    x: Points(content.origin.x.0 - pad),
-                    y: Points(content.origin.y.0 + (content.size.height.0 - height) / 2.0),
+            let rect = ns_rect(
+                content.origin.x.0 - inset,
+                content.origin.y.0 + (content.size.height.0 - height) / 2.0,
+                content.size.width.0 + 2.0 * inset,
+                height,
+            );
+            // On the backing store's pixels, as the core lays the box out:
+            // AppKit edits in a clip view it aligns to them, so for a field
+            // between pixels (centering leaves half a point) it sizes the
+            // field editor past the line and scrolls it up, and the text
+            // moved on focus.
+            let rect = pad.backingAlignedRect_options(
+                rect,
+                NSAlignmentOptions::AlignMinXNearest
+                    | NSAlignmentOptions::AlignWidthNearest
+                    | NSAlignmentOptions::AlignMinYNearest
+                    | NSAlignmentOptions::AlignHeightNearest
+                    | NSAlignmentOptions::AlignRectFlipped,
+            );
+            host(
+                field,
+                Bounds {
+                    origin: Point::new(px(rect.origin.x as f32), px(rect.origin.y as f32)),
+                    size: Size::new(px(rect.size.width as f32), px(rect.size.height as f32)),
                 },
-                size: Size {
-                    width: Points(content.size.width.0 + 2.0 * pad),
-                    height: Points(height),
-                },
-            };
-            host(field, rect);
+            );
         }
         Editor::Area { scroller, view, .. } => {
             // The placeholder goes first: hosted views stack in order. A
