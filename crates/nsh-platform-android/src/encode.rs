@@ -1461,6 +1461,7 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
         NativeProps::Video(v) => {
             e.int(4);
             e.opt_string(v.source.as_deref());
+            e.opt_string(v.poster.as_deref());
             e.bool(v.paused);
             e.bool(v.muted);
             e.float(v.volume);

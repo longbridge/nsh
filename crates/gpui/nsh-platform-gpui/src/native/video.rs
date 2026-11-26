@@ -211,6 +211,10 @@ mod player {
         }
     }
 
+    /// A loaded poster and its natural size, shared with the load that
+    /// fills it in.
+    type Poster = Rc<RefCell<Option<(Rc<crate::image::Texture>, (f32, f32))>>>;
+
     /// A video: its pipeline and the picture its view shows.
     pub(crate) struct VideoItem {
         emitter: Emitter,
@@ -225,6 +229,10 @@ mod player {
         /// The frame shown, and whether it was painted (so it is in the
         /// sprite atlas).
         frame: RefCell<Option<(Frame, bool)>>,
+        /// The poster shown until the first frame, and its natural size.
+        poster: Poster,
+        /// Bumped with every poster (an older load is stale).
+        poster_serial: Rc<Cell<u64>>,
         /// Painted frames replaced since, to remove from the atlas.
         retired: RefCell<Vec<Arc<RenderImage>>>,
         /// Playing (not paused by the prop or the control bar).
@@ -257,6 +265,8 @@ mod player {
                 serial: Cell::new(0),
                 props: RefCell::new(None),
                 frame: RefCell::new(None),
+                poster: Rc::default(),
+                poster_serial: Rc::default(),
                 retired: RefCell::default(),
                 playing: Cell::new(false),
                 ended: Cell::new(false),
@@ -273,7 +283,8 @@ mod player {
         /// New props.
         pub(crate) fn set(&self, surface: &Rc<Surface>, p: &VideoProps, base: Option<&AssetBase>) {
             let old = self.props.borrow_mut().replace(p.clone());
-            if old.as_ref().is_none_or(|o| o.source != p.source) {
+            let reopened = old.as_ref().is_none_or(|o| o.source != p.source);
+            if reopened {
                 self.open(surface, p, base);
             } else if let Some(old) = &old {
                 if old.paused != p.paused {
@@ -286,7 +297,44 @@ mod player {
                     self.apply_rate();
                 }
             }
+            if reopened || old.as_ref().is_none_or(|o| o.poster != p.poster) {
+                self.load_poster(surface, p.poster.as_deref());
+            }
             surface.invalidate();
+        }
+
+        /// Shows `source` (an image) until the first frame.
+        fn load_poster(&self, surface: &Rc<Surface>, source: Option<&str>) {
+            *self.poster.borrow_mut() = None;
+            self.poster_serial.set(self.poster_serial.get() + 1);
+            let Some(source) = source else { return };
+            let poster = self.poster.clone();
+            let serial = self.poster_serial.clone();
+            let generation = serial.get();
+            let key = surface.key();
+            let name = source.to_owned();
+            crate::image::load_bitmap(
+                surface,
+                source,
+                surface.scale(),
+                move |result| match result {
+                    Ok((texture, scale)) => {
+                        if serial.get() != generation {
+                            return;
+                        }
+                        let size = texture.image().size(0);
+                        let natural = (
+                            size.width.0 as f32 / scale as f32,
+                            size.height.0 as f32 / scale as f32,
+                        );
+                        *poster.borrow_mut() = Some((texture, natural));
+                        if let Some(surface) = Surface::by_key(key) {
+                            surface.invalidate();
+                        }
+                    }
+                    Err(message) => log::warn!("video poster {name}: {message}"),
+                },
+            );
         }
 
         /// Opens `p.source`, replacing the pipeline.
@@ -484,6 +532,7 @@ mod player {
             if let Some(frame) = frame {
                 self.retire_frame();
                 *self.frame.borrow_mut() = Some((frame, false));
+                *self.poster.borrow_mut() = None;
                 surface.invalidate();
                 self.try_load();
             }
@@ -782,6 +831,17 @@ mod player {
             cx.push_clip_rect(0.0, 0.0, w, h);
             if !cx.culled() {
                 let mode = self.resize_mode();
+                if let Some((texture, natural)) = &*self.poster.borrow() {
+                    let (x, y, fw, fh) = fit(mode, *natural, size);
+                    let boxed = cx.rect(0.0, 0.0, w, h);
+                    let picture = cx.rect(x, y, fw, fh);
+                    let (bounds, corners) =
+                        cx.clip_rounded(boxed.intersect(&picture), gpui::Corners::default());
+                    let image = texture.image().clone();
+                    cx.paint(|window, _| {
+                        let _ = window.paint_image(bounds, picture, corners, image, 0, false);
+                    });
+                }
                 let mut slot = self.frame.borrow_mut();
                 if let Some((frame, painted)) = &mut *slot {
                     let natural = (frame.size.0 as f32, frame.size.1 as f32);
