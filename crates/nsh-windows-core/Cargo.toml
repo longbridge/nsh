@@ -1,0 +1,18 @@
+[package]
+name = "nsh-windows-core"
+description = "Prototype (#1644): the shared core of the Windows release runner as one DLL."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["dylib"]
+
+[target.'cfg(windows)'.dependencies]
+nsh-base = { workspace = true, default-features = false }
+nsh-platform-windows.workspace = true
+nsh-windows-app = { path = "../nsh-windows-app", default-features = false, features = ["js", "net", "svg"] }

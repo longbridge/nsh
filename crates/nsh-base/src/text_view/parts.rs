@@ -287,7 +287,7 @@ impl JsValue for PartStyle {
 /// (a TSX app's) the declarations
 /// are gathered in one pass, as [`Style::from_decls`] does, since `then`
 /// would copy those gathered so far at each step; one style is kept as it is.
-pub(crate) fn merge_styles<'a, I>(styles: I) -> Style
+pub fn merge_styles<'a, I>(styles: I) -> Style
 where
     I: IntoIterator<Item = &'a Style>,
     I::IntoIter: Clone,

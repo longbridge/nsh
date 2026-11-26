@@ -4269,6 +4269,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-windows-core"
+version = "0.7.1"
+dependencies = [
+ "nsh-base",
+ "nsh-platform-windows",
+ "nsh-windows-app",
+]
+
+[[package]]
+name = "nsh-windows-editor"
+version = "0.7.1"
+dependencies = [
+ "imara-diff",
+ "log",
+ "nsh-base",
+ "nsh-core",
+ "nsh-windows-core",
+ "regex",
+ "ropey",
+ "rustc-hash 2.1.3",
+ "unicode-linebreak",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "nsh-windows-host"
 version = "0.7.1"
 dependencies = [
@@ -4277,6 +4303,25 @@ dependencies = [
  "nsh-dev",
  "nsh-engine",
  "nsh-platform-windows",
+]
+
+[[package]]
+name = "nsh-windows-plot"
+version = "0.7.1"
+dependencies = [
+ "log",
+ "nsh-base",
+ "nsh-core",
+ "nsh-windows-core",
+]
+
+[[package]]
+name = "nsh-windows-split"
+version = "0.7.1"
+dependencies = [
+ "log",
+ "nsh-core",
+ "nsh-windows-core",
 ]
 
 [[package]]

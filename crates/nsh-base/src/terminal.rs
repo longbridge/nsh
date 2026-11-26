@@ -40,7 +40,8 @@ pub(crate) fn cell_width() -> Points {
 /// `line_height`, or one Cell in a terminal, where a row is one line of
 /// the grid (a height of another step would land rows on Cells unevenly,
 /// leaving blank rows between).
-pub(crate) fn row_height(line_height: Points) -> Points {
+#[doc(hidden)]
+pub fn row_height(line_height: Points) -> Points {
     match is_terminal() {
         true => cell_height(),
         false => line_height,

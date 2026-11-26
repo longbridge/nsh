@@ -39,7 +39,8 @@ pub mod editor;
 #[cfg(feature = "emoji-picker")]
 mod emoji_picker;
 mod hover_card;
-mod keys;
+#[doc(hidden)]
+pub mod keys;
 mod link;
 mod link_hint;
 mod listbox;

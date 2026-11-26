@@ -1,0 +1,15 @@
+[package]
+name = "nsh-windows-split"
+description = "Prototype (#1644): the Windows release runner on nsh-core.dll."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[target.'cfg(windows)'.dependencies]
+nsh-windows-core = { path = "../nsh-windows-core" }
+nsh-core.workspace = true
+log.workspace = true

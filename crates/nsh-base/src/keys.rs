@@ -20,7 +20,7 @@ use nsh_core::{element::layout_rtl, keymap::When, prelude::*};
 /// whether it fires again on a held key's repeats, and the action `run`
 /// gets. The keys fire only while no text input edits
 /// ([`When::NotEditing`]).
-pub(crate) fn bind_while<A: Copy + 'static>(
+pub fn bind_while<A: Copy + 'static>(
     active: impl Fn() -> bool + 'static,
     keys: &'static [(&'static str, bool, A)],
     run: impl Fn(A) + 'static,

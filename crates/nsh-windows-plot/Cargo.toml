@@ -1,0 +1,19 @@
+[package]
+name = "nsh-windows-plot"
+description = "Prototype (#1644): the charts (`nsh/base/plot`) as a module DLL on nsh-core.dll."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["dylib"]
+
+[target.'cfg(windows)'.dependencies]
+nsh-windows-core = { path = "../nsh-windows-core" }
+nsh-core.workspace = true
+nsh-base = { workspace = true, default-features = false }
+log.workspace = true
