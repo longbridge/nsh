@@ -992,6 +992,29 @@ fn apply_scheme(surface: &Surface, id: NodeId) {
     };
     root.remove_css_class(remove);
     root.add_css_class(add);
+    let controls = surface
+        .windows
+        .borrow()
+        .get(&id)
+        .and_then(|w| w.controls.clone());
+    if let Some((start, end)) = controls {
+        controls_scheme(&start, main_dark(surface));
+        controls_scheme(&end, main_dark(surface));
+    }
+}
+
+/// The window buttons over a hidden title bar take the color of the app's
+/// surface under them: they are not in a header bar, so the theme gives
+/// them no title bar colors of their own (white icons on a light surface
+/// with Yaru).
+pub(crate) fn controls_scheme(controls: &gtk::WindowControls, dark: bool) {
+    let (add, remove) = if dark {
+        ("nsh-on-dark", "nsh-on-light")
+    } else {
+        ("nsh-on-light", "nsh-on-dark")
+    };
+    controls.remove_css_class(remove);
+    controls.add_css_class(add);
 }
 
 /// Whether the app's content is dark (its appearance).
@@ -1133,6 +1156,7 @@ fn update_header(surface: &Rc<Surface>, id: NodeId) {
                 controls.set_valign(gtk::Align::Start);
                 controls.set_margin_start(MARGIN);
                 controls.set_margin_end(MARGIN);
+                controls_scheme(&controls, main_dark(surface));
                 overlay.add_overlay(&controls);
                 controls
             };
