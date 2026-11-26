@@ -42,8 +42,9 @@ enum Message {
     Error(String),
     Frame,
     HotUpdateFailed,
-    /// The engine laid the app out at this size ([`MountSink::resized`]).
-    Resized(Size<Points>),
+    /// The engine laid a root out at this size ([`MountSink::resized`],
+    /// [`MountSink::root_resized`]).
+    Resized(NodeId, Size<Points>),
     /// A function the app runs on the main thread
     /// ([`MountSink::run_on_main_thread`]), after the batches before it.
     Run(MainThreadTask),
@@ -106,7 +107,11 @@ impl MountSink for Sink {
     }
 
     fn resized(&self, size: Size<Points>) {
-        self.send(Message::Resized(size));
+        self.send(Message::Resized(ROOT_ID, size));
+    }
+
+    fn root_resized(&self, id: NodeId, size: Size<Points>) {
+        self.send(Message::Resized(id, size));
     }
 
     fn run_on_main_thread(&self, task: MainThreadTask) {
@@ -717,17 +722,17 @@ impl Surface {
         for f in self.on_resized.borrow().iter() {
             f(width, height);
         }
-        self.await_layout(Size::new(Points(width), Points(height)));
+        self.await_layout(ROOT_ID, Size::new(Points(width), Points(height)));
         self.invalidate();
     }
 
-    /// Waits for the engine's layout at `size` and applies what it sent
-    /// meanwhile, so the frame `WM_SIZE` draws shows the app at the window's
+    /// Waits for the engine's layout of root `id` at `size` and applies what
+    /// it sent meanwhile, so the frame `WM_SIZE` draws shows the window at its
     /// new size rather than growing around stale content. The one place the
     /// main thread waits for the engine: at most [`RESIZE_WAIT`], and an
     /// engine that misses it (JS busy) is not waited for again until it
     /// reports a resize done, so a busy app resizes as before.
-    fn await_layout(self: &Rc<Self>, size: Size<Points>) {
+    pub(crate) fn await_layout(self: &Rc<Self>, id: NodeId, size: Size<Points>) {
         if self.resize_late.get()
             || size.width.0 <= 0.0
             || size.height.0 <= 0.0
@@ -740,12 +745,17 @@ impl Surface {
         let Some(rx) = self.rx.borrow().clone() else {
             return;
         };
-        self.as_the_drain(|| self.apply_until_resized(&rx, size));
+        self.as_the_drain(|| self.apply_until_resized(&rx, id, size));
     }
 
-    /// Applies what the engine sends until it laid the app out at `size`,
+    /// Applies what the engine sends until it laid root `id` out at `size`,
     /// for at most [`RESIZE_WAIT`] ([`Surface::await_layout`]).
-    fn apply_until_resized(self: &Rc<Self>, rx: &Receiver<Message>, size: Size<Points>) {
+    fn apply_until_resized(
+        self: &Rc<Self>,
+        rx: &Receiver<Message>,
+        id: NodeId,
+        size: Size<Points>,
+    ) {
         let deadline = std::time::Instant::now() + RESIZE_WAIT;
         let mut applied = false;
         loop {
@@ -753,7 +763,7 @@ impl Surface {
                 self.resize_late.set(true);
                 break;
             };
-            let done = matches!(message, Message::Resized(s) if s == size);
+            let done = matches!(message, Message::Resized(i, s) if i == id && s == size);
             applied |= self.handle(message);
             if done {
                 break;
@@ -1009,7 +1019,7 @@ impl Surface {
                     f();
                 }
             }
-            Message::Resized(_) => self.resize_late.set(false),
+            Message::Resized(..) => self.resize_late.set(false),
             Message::Run(task) => task.run(),
         }
         false
