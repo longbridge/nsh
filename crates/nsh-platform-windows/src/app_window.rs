@@ -928,6 +928,8 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
     destroy(surface, &window);
     // Another window may be the primary one now.
     surface.window_environment();
+    // It no longer counts as shown.
+    crate::system::lifecycle_changed(surface);
     true
 }
 
@@ -949,6 +951,7 @@ pub(crate) fn close_all(surface: &Surface) {
         destroy(surface, window);
     }
     surface.window_environment();
+    crate::system::lifecycle_changed(surface);
 }
 
 fn destroy(surface: &Surface, window: &AppWindow) {
