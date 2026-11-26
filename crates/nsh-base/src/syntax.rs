@@ -216,25 +216,18 @@ mod syntect_syntaxes {
     /// set (two-face's), whose syntaxes expect each line with its line
     /// break (`LinesWithEndings`).
     ///
-    /// The native runtimes carry them: the first call loads them (about a
-    /// millisecond; [`load_syntax_set`] does it off the engine thread) and
-    /// every call returns them. The web runtime fetches them from its page
-    /// when something first needs them: `None` until then, so code shows
-    /// plain and is highlighted again once [`load_syntax_set`] has them.
+    /// `None` until they are loaded, on every platform: never loads them
+    /// itself, so it costs nothing on the engine thread. Something loads
+    /// them first ([`load_syntax_set`], or the built-in highlighting of a
+    /// code block); until then an app shows its code plain.
     pub fn syntax_set() -> Option<&'static SyntaxSet> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Some(syntaxes())
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            SYNTAXES.get()
-        }
+        SYNTAXES.get()
     }
 
     /// Loads the syntaxes of [`syntax_set`] without holding up the engine
-    /// thread: on a blocking thread, or on the web from its page, after
-    /// the frame that shows the code plain. Every caller shares one load
+    /// thread: on a blocking thread where there are threads (the native
+    /// runtimes carry them), on the web from its page, after the frame
+    /// that shows the code plain. Every caller shares one load
     /// with `TextView`, the `Editor` and `DiffView`; at once when they are
     /// loaded already. `None` when the page has no syntaxes or cannot
     /// read them (code stays plain).

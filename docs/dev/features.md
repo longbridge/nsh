@@ -10,7 +10,7 @@ The large optional parts of a native runtime are Cargo features of the platform 
 | `rich-editor` | `RichEditor` and its classes | Importing them fails |
 | `plot` | `nsh/base/plot` | Importing it fails |
 | `term` | `Terminal`, vte | Importing it fails |
-| `highlight` | syntect and its syntaxes (`syntax_set`, `load_syntax_set` for apps) | Code shows plain; a warning naming the feature is logged once |
+| `highlight` | syntect and its syntaxes, and the apps' entry to them (`syntax_set`, `load_syntax_set`) | Code shows plain; a warning naming the feature is logged once; the two functions do not exist |
 | `math` | RaTeX, the KaTeX fonts | A formula shows as its TeX (a warning naming the feature is logged once), or as the app's `renderMath` |
 | `zlib` | the JS module `zlib` (implies `js`) | Importing it fails |
 | `crypto` | the JS module `crypto`, Web Crypto's globals (implies `js`) | Importing it fails |

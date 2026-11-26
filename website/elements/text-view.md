@@ -774,11 +774,23 @@ fn chat() -> impl IntoElement {
 `renderCodeBlock`, when given, shows the code block in place of all of this.
 
 An app that highlights code of its own with syntect (an editor of its own, a file preview) can use the syntaxes
-`TextView` uses instead of carrying another copy: `syntax_set()` returns them, and `load_syntax_set()` loads them
-without holding up the app. The native runtimes have them at once; the web fetches them from the page the first
-time something needs them, so until then `syntax_set()` is `None` and the app shows its code plain, then highlights
-it again when `load_syntax_set()` answers, as `TextView`'s code blocks do. `syntect` is the app's own dependency, in
-the version `nsh-base` uses.
+`TextView` uses instead of carrying another copy (`nsh-base`'s feature `highlight`). `syntax_set()` returns them once
+they are loaded and `None` before; `load_syntax_set()` loads them without holding up the app (on a background
+thread, or on the web from the page, which fetches them once for the app and `TextView` alike) and answers with
+them. So the app shows its code plain until `load_syntax_set()` answers, then highlights it, as `TextView`'s code
+blocks do; the same code runs on every platform.
+
+`syntect` is the app's own dependency, in the version `nsh-base` uses, with its default features off and only
+`parsing` on:
+
+```toml
+syntect = { version = "5", default-features = false, features = ["parsing"] }
+```
+
+`nsh-base` picks syntect's regular expression engine for each platform: Oniguruma on the native runtimes,
+fancy-regex on the web, where the page's syntaxes are made for it. Cargo merges the features of every dependent, so
+`regex-onig` or a `default-*` feature in the app would put Oniguruma (C code) into the web build and have syntect
+match the page's syntaxes with the wrong engine.
 
 ```rust
 use nsh_core::prelude::*;
@@ -789,14 +801,16 @@ fn colored(code: Signal<String>) -> impl IntoElement {
         spawn(async move { loaded.set(nsh_base::load_syntax_set().await.is_some()) });
     }
     // Plain until the syntaxes are there.
-    dynamic(move || match (loaded.get(), nsh_base::syntax_set()) {
-        (true, Some(set)) => my_syntect::spans(set, &code.get()),
-        _ => text(code.get()).into_element(),
+    dynamic(move || -> AnyElement {
+        match (loaded.get(), nsh_base::syntax_set()) {
+            (true, Some(set)) => my_syntect::spans(set, &code.get()),
+            _ => text(code.get()).into_element(),
+        }
     })
 }
 ```
 
-`my_syntect::spans` stands for the app's glue again: its code in spans colored by the syntaxes.
+`my_syntect::spans` stands for the app's glue again: the code as one `AnyElement` of spans colored by the syntaxes.
 
 ### Typed part styles
 

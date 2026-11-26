@@ -1,6 +1,6 @@
 //! The syntaxes the built-in highlighting uses, as an app gets them for
-//! highlighting of its own: loaded from a task, the same set every call
-//! answers with.
+//! highlighting of its own: loaded from a task, then the same set every
+//! call answers with.
 
 use nsh_core::prelude::*;
 use nsh_engine::EngineConfig;
@@ -30,9 +30,9 @@ fn an_app_loads_the_built_in_syntaxes_from_a_task() {
     ))
     .unwrap();
     app.wait_for("Syntax Rust true").unwrap();
-    // Loaded, the native runtimes answer at once, with the same set.
+    // Loaded, every call answers at once, with the same set.
     let set = nsh_base::syntax_set().unwrap();
     assert!(std::ptr::eq(set, nsh_base::syntax_set().unwrap()));
-    // Bat's syntaxes expect each line with its line break.
+    // Bat's set (two-face's): TSX too, which syntect's own set lacks.
     assert!(set.find_syntax_by_token("tsx").is_some());
 }

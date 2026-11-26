@@ -685,7 +685,15 @@ fn chat() -> impl IntoElement {
 
 `my_syntect::ranges` 代表应用与其高亮器之间的胶水代码，`messages` 代表应用的聊天视图。如果提供了 `renderCodeBlock`，它会代替以上这些显示代码块。
 
-应用自己用 syntect 高亮代码时（例如它自己的编辑器、文件预览），可以直接使用 `TextView` 所用的语法库，不必再带一份：`syntax_set()` 返回它，`load_syntax_set()` 在不阻塞应用的情况下加载它。原生运行时立即可用；Web 在第一次需要时才从页面下载，所以在此之前 `syntax_set()` 为 `None`，应用先按原样显示代码，等 `load_syntax_set()` 返回后再重新高亮，与 `TextView` 的代码块相同。`syntect` 由应用自己依赖，版本与 `nsh-base` 所用的一致。
+应用自己用 syntect 高亮代码时（例如它自己的编辑器、文件预览），可以直接使用 `TextView` 所用的语法库，不必再带一份（`nsh-base` 的 feature `highlight`）。`syntax_set()` 在语法库加载后返回它，加载前为 `None`；`load_syntax_set()` 在不阻塞应用的情况下加载它（在后台线程上；Web 上从页面下载，应用和 `TextView` 共用同一次下载）并返回它。所以应用先按原样显示代码，等 `load_syntax_set()` 返回后再高亮，与 `TextView` 的代码块相同；同一份代码在各平台上都适用。
+
+`syntect` 由应用自己依赖，版本与 `nsh-base` 所用的一致，关掉默认 features，只开 `parsing`：
+
+```toml
+syntect = { version = "5", default-features = false, features = ["parsing"] }
+```
+
+`nsh-base` 按平台选择 syntect 的正则引擎：原生运行时用 Oniguruma，Web 上用 fancy-regex，页面提供的语法库就是为它生成的。Cargo 会合并所有依赖方的 features，应用若开了 `regex-onig` 或任何 `default-*` feature，Web 构建就会带上 Oniguruma（C 代码），syntect 也会用错的引擎去匹配页面的语法库。
 
 ```rust
 use nsh_core::prelude::*;
@@ -696,14 +704,16 @@ fn colored(code: Signal<String>) -> impl IntoElement {
         spawn(async move { loaded.set(nsh_base::load_syntax_set().await.is_some()) });
     }
     // Plain until the syntaxes are there.
-    dynamic(move || match (loaded.get(), nsh_base::syntax_set()) {
-        (true, Some(set)) => my_syntect::spans(set, &code.get()),
-        _ => text(code.get()).into_element(),
+    dynamic(move || -> AnyElement {
+        match (loaded.get(), nsh_base::syntax_set()) {
+            (true, Some(set)) => my_syntect::spans(set, &code.get()),
+            _ => text(code.get()).into_element(),
+        }
     })
 }
 ```
 
-`my_syntect::spans` 同样代表应用的胶水代码：用这份语法库把代码变成着色的片段。
+`my_syntect::spans` 同样代表应用的胶水代码：用这份语法库把代码变成一个由着色片段组成的 `AnyElement`。
 
 <a id="typed-part-styles"></a>
 
