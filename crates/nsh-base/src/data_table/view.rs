@@ -1165,25 +1165,36 @@ fn cell(
                     .map_or(0.0, |def| width_dt.st.borrow().columns.width(def));
                 Length::from(px(width))
             })
-            .flex_row()
-            .items_center()
             .overflow_hidden()
-            .style_when(
-                move || align.get() == DataTableAlign::Center,
-                |s| s.justify_center(),
-            )
-            .style_when(
-                move || align.get() == DataTableAlign::End,
-                |s| s.justify_end(),
-            ),
+            // The content the app draws fills the cell's width, centred
+            // across the row, whatever the column's alignment; a text
+            // aligns in its cell.
+            .map(move |v| {
+                if custom {
+                    v.flex_col().justify_center()
+                } else {
+                    v.flex_row()
+                        .items_center()
+                        .style_when(
+                            move || align.get() == DataTableAlign::Center,
+                            |s| s.justify_center(),
+                        )
+                        .style_when(
+                            move || align.get() == DataTableAlign::End,
+                            |s| s.justify_end(),
+                        )
+                }
+            }),
         &col_dt,
         def,
         Some(row),
         list,
     );
     if custom {
+        // The cell holds what the app draws itself: no view of the
+        // render's own between them.
         let render_dt = dt.clone();
-        el.child(dynamic(move || {
+        Renderer::render_into(el, move || {
             let render = props.render_cell.get()?;
             let (row, def) = (row.get()?, def.get()?);
             let value = {
@@ -1202,13 +1213,9 @@ fn cell(
                 text: render_dt.cell_text(row, def),
                 ..value
             };
-            Some(
-                render
-                    .render(format!("cell:{row}:{def}"), value)
-                    .flex_1()
-                    .min_w(px(0.0)),
-            )
-        }))
+            Some((render, format!("cell:{row}:{def}").into(), value))
+        })
+        .into_element()
     } else {
         let text_dt = dt;
         let line_dt = text_dt.clone();
@@ -1232,7 +1239,7 @@ fn cell(
             move || align.get() == DataTableAlign::End,
             |s| s.text_right(),
         );
-        el.child(label)
+        el.child(label).into_element()
     }
 }
 
