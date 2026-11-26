@@ -220,7 +220,7 @@ Different, or not supported:
 - **`WebView`**: a page inside a view with a 3D transform (perspective) is not shown, and a `backdropFilter` over a
   page does not blur it. `baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
   stays above everything NSH draws.
-- **Video**: the formats the installed codecs decode; no poster; the control bar always shows with `controls`.
+- **Video**: the formats the installed codecs decode; the control bar always shows with `controls`.
 - **`mixBlendMode` and `backdropFilter`** are drawn, but not inside a view that has a `filter` or a 3D transform;
   `borderCurve: "continuous"` draws circular corners.
 - **Text**: head and middle ellipses on a single line only (more lines get a tail ellipsis); color emoji from COLR
