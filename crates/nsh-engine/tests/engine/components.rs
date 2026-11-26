@@ -5975,6 +5975,9 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
                 pressure: 0.5,
                 tilt_x: 0.0,
                 tilt_y: 0.0,
+                coalesced: Vec::new(),
+                eraser: false,
+                barrel: false,
             }],
         }))
     };
@@ -6098,6 +6101,9 @@ fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
                 pressure: 0.5,
                 tilt_x: 0.0,
                 tilt_y: 0.0,
+                coalesced: Vec::new(),
+                eraser: false,
+                barrel: false,
             }],
         }))
     };

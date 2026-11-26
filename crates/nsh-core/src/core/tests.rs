@@ -22091,6 +22091,9 @@ mod touch {
                 pressure: 0.5,
                 tilt_x: 0.0,
                 tilt_y: 0.0,
+                coalesced: Vec::new(),
+                eraser: false,
+                barrel: false,
             }],
         }))
     }
@@ -35772,6 +35775,9 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             pressure: 0.5,
             tilt_x: 0.0,
             tilt_y: 0.0,
+            coalesced: Vec::new(),
+            eraser: false,
+            barrel: false,
         }],
         modifiers: Default::default(),
         activated: None,

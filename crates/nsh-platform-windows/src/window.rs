@@ -1596,7 +1596,8 @@ fn handle(
                 WM_POINTERCAPTURECHANGED => PointerKind::Cancel,
                 _ => PointerKind::Move,
             };
-            let sample = pen_sample(id, info.pointerType.0 == 3);
+            let time = surface.clock();
+            let sample = pen_sample(id, info.pointerType.0 == 3, hwnd, scale, time);
             crate::input::set_pen_sample(id + 2, Some(sample));
             crate::input::pointer(
                 surface,
@@ -1609,7 +1610,7 @@ fn handle(
                     pointer: id + 2,
                     touch: info.pointerType.0 == 2,
                     pen: info.pointerType.0 == 3,
-                    time: surface.clock(),
+                    time,
                     modifiers: modifiers(),
                     clicks: 1,
                 },
@@ -1896,37 +1897,38 @@ fn sys_close(hwnd: HWND, lparam: LPARAM) -> crate::shell::SysClose {
 }
 
 /// The pressure and tilt contact `id` reports (`pen`: a pen, else a
-/// finger), from `GetPointerPenInfo` / `GetPointerTouchInfo`.
-fn pen_sample(id: u32, pen: bool) -> crate::input::PenSample {
+/// finger), from `GetPointerPenInfo` / `GetPointerTouchInfo`; for a pen,
+/// also its eraser and barrel button and the samples merged into the
+/// message (`hwnd`'s points at `scale`, `time` being the message's
+/// [`crate::input::PointerEvent::time`]).
+fn pen_sample(id: u32, pen: bool, hwnd: HWND, scale: f32, time: f64) -> crate::input::PenSample {
     use windows::Win32::UI::Input::Pointer::{
         GetPointerPenInfo, GetPointerTouchInfo, POINTER_PEN_INFO, POINTER_TOUCH_INFO,
     };
-    // PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y; TOUCH_MASK_PRESSURE.
-    const PRESSURE: u32 = 0x1;
-    const TILT_X: u32 = 0x4;
-    const TILT_Y: u32 = 0x8;
-    const TOUCH_PRESSURE: u32 = 0x4;
+    // PEN_FLAG_BARREL, PEN_FLAG_INVERTED, PEN_FLAG_ERASER.
+    const BARREL: u32 = 0x1;
+    const INVERTED: u32 = 0x2;
+    const ERASER: u32 = 0x4;
     let mut sample = crate::input::PenSample {
         pen,
         pressure: None,
         tilt: (0.0, 0.0),
+        eraser: false,
+        barrel: false,
+        merged: Vec::new(),
     };
     if pen {
         let mut info = POINTER_PEN_INFO::default();
         // SAFETY: a local out value.
         if unsafe { GetPointerPenInfo(id, &mut info) }.is_ok() {
-            let mask = info.penMask;
-            if mask & PRESSURE != 0 {
-                sample.pressure = Some((info.pressure as f32 / 1024.0).clamp(0.0, 1.0));
-            }
-            if mask & TILT_X != 0 {
-                sample.tilt.0 = info.tiltX as f32;
-            }
-            if mask & TILT_Y != 0 {
-                sample.tilt.1 = info.tiltY as f32;
-            }
+            (sample.pressure, sample.tilt) = pen_values(&info);
+            sample.eraser = info.penFlags & (ERASER | INVERTED) != 0;
+            sample.barrel = info.penFlags & BARREL != 0;
+            sample.merged = pen_history(id, &info, hwnd, scale, time);
         }
     } else {
+        // TOUCH_MASK_PRESSURE.
+        const TOUCH_PRESSURE: u32 = 0x4;
         let mut info = POINTER_TOUCH_INFO::default();
         // SAFETY: a local out value.
         if unsafe { GetPointerTouchInfo(id, &mut info) }.is_ok()
@@ -1936,6 +1938,87 @@ fn pen_sample(id: u32, pen: bool) -> crate::input::PenSample {
         }
     }
     sample
+}
+
+/// The pressure (0 to 1, when sensed) and tilt (degrees) of a pen sample.
+fn pen_values(
+    info: &windows::Win32::UI::Input::Pointer::POINTER_PEN_INFO,
+) -> (Option<f32>, (f32, f32)) {
+    // PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y.
+    const PRESSURE: u32 = 0x1;
+    const TILT_X: u32 = 0x4;
+    const TILT_Y: u32 = 0x8;
+    let mask = info.penMask;
+    let pressure = (mask & PRESSURE != 0).then(|| (info.pressure as f32 / 1024.0).clamp(0.0, 1.0));
+    let tilt_x = if mask & TILT_X != 0 {
+        info.tiltX as f32
+    } else {
+        0.0
+    };
+    let tilt_y = if mask & TILT_Y != 0 {
+        info.tiltY as f32
+    } else {
+        0.0
+    };
+    (pressure, (tilt_x, tilt_y))
+}
+
+/// The pen samples the system merged into the message of pen `id` whose
+/// own sample is `current` (`GetPointerPenInfoHistory`), oldest first and
+/// without `current`, in `hwnd`'s points at `scale`. Their times count back
+/// from `time` (the message's) by the performance counter, or by `dwTime`
+/// when there is none.
+fn pen_history(
+    id: u32,
+    current: &windows::Win32::UI::Input::Pointer::POINTER_PEN_INFO,
+    hwnd: HWND,
+    scale: f32,
+    time: f64,
+) -> Vec<crate::input::MergedSample> {
+    use windows::Win32::{
+        System::Performance::QueryPerformanceFrequency,
+        UI::Input::Pointer::{GetPointerPenInfoHistory, POINTER_PEN_INFO},
+    };
+    let count = current.pointerInfo.historyCount;
+    if count < 2 {
+        return Vec::new();
+    }
+    let mut entries = vec![POINTER_PEN_INFO::default(); count as usize];
+    let mut n = count;
+    // SAFETY: `entries` holds `n` values.
+    if unsafe { GetPointerPenInfoHistory(id, &mut n, Some(entries.as_mut_ptr())) }.is_err() {
+        return Vec::new();
+    }
+    entries.truncate(n.min(count) as usize);
+    let mut frequency = 0i64;
+    // SAFETY: a local out value.
+    let _ = unsafe { QueryPerformanceFrequency(&mut frequency) };
+    let now = &current.pointerInfo;
+    // Newest first, the first being the message's own sample.
+    entries
+        .iter()
+        .skip(1)
+        .rev()
+        .map(|entry| {
+            let at = &entry.pointerInfo;
+            let ago = if frequency > 0 && now.PerformanceCount != 0 && at.PerformanceCount != 0 {
+                now.PerformanceCount.saturating_sub(at.PerformanceCount) as f64 / frequency as f64
+            } else {
+                now.dwTime.wrapping_sub(at.dwTime) as f64 / 1000.0
+            };
+            let mut p = at.ptPixelLocation;
+            // SAFETY: plain call.
+            let _ = unsafe { ScreenToClient(hwnd, &mut p) };
+            let (pressure, tilt) = pen_values(entry);
+            crate::input::MergedSample {
+                x: p.x as f32 / scale,
+                y: p.y as f32 / scale,
+                pressure,
+                tilt,
+                time: time - ago,
+            }
+        })
+        .collect()
 }
 
 /// True when a mouse message was synthesized from touch or pen input,

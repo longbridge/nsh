@@ -3874,8 +3874,9 @@ final class Mounter {
     }
 
     /** See {@link Native#touch}. */
-    void touches(int phase, int[] ids, int[] targets, int[] pathLengths, int[] paths, float[] coords, boolean[] changed, long time, int activated) {
-        Native.touch(handle(), phase, ids, targets, pathLengths, paths, coords, changed, time, activated);
+    void touches(int phase, int[] ids, int[] targets, int[] pathLengths, int[] paths, float[] coords, double[] samples,
+            boolean[] changed, long time, int activated) {
+        Native.touch(handle(), phase, ids, targets, pathLengths, paths, coords, samples, changed, time, activated);
     }
 
     /**

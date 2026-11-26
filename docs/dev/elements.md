@@ -392,7 +392,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   Each touch carries `pointerType`, `pressure` and `tiltX` / `tiltY` as the DOM's `PointerEvent` (`TouchPoint`): iOS
   reads `UITouch` force and the Pencil's angles, Android `MotionEvent` pressure, tool type and tilt, Windows
   `GetPointerPenInfo` / `GetPointerTouchInfo`, macOS and GTK a tablet's pen events, and the web `PointerEvent`. A device
-  without pressure reports 0.5 while down and 0 once lifted. On web, `browser/events.rs` sends these fields in each point
+  without pressure reports 0.5 while down and 0 once lifted. A pen also carries `eraser` and `barrel`, and a moved
+  point carries `coalesced`: the samples merged into it, oldest first, without its own (the DOM's
+  `getCoalescedEvents()`): iOS `coalescedTouchesForTouch`, Android `MotionEvent` history, Windows
+  `GetPointerPenInfoHistory`, the web `getCoalescedEvents()`; `TouchEvent::merge_move` adds the positions of the moves
+  it folds, so no platform loses them to the per-turn merge. On web, `browser/events.rs` sends these fields in each point
   from Wasm. `web/browser/gesture.js`, bundled into the realm's `bootstrap.js`, copies them to the event and the points
   in `touches` and `changedTouches`. The negotiation asks the app's handlers as in React Native (`nsh-js` `touch.rs`
   on native targets, `gesture.js` on web). A grant returning true

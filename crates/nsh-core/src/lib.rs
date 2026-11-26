@@ -136,7 +136,7 @@ pub use crate::{
         VideoProps, ViewKind, WebProps,
     },
     ops::{
-        AutoCapitalize, AutoFill, BackPhase, BackProgressEvent, CellSlot, Command,
+        AutoCapitalize, AutoFill, BackPhase, BackProgressEvent, CellSlot, CoalescedSample, Command,
         ContextMenuEvent, Dialog, DialogButton, DialogButtonStyle, DialogInput, EditAction,
         EventKind, EventMask, EventPayload, FileContents, FpsMode, Haptic, HapticImpact,
         HapticNotification, HeaderItem, HeaderItemContent, HeaderSlot, HeaderSystemItem,
