@@ -89,6 +89,9 @@ struct Area {
 /// The mouse pressed in an area.
 struct Drag {
     area: NodeId,
+    /// The root view of the window it went down in: the drag's points are
+    /// in its coordinates (an app window's root is not the surface's).
+    root: NshView,
     /// Where it went down (root coordinates).
     start: (f32, f32),
     /// How far it moves before it selects.
@@ -234,9 +237,8 @@ pub(crate) fn takes_part(view: &NshView) -> bool {
 }
 
 /// A point in root coordinates in `area`'s.
-fn to_area(surface: &Surface, area: &NshView, (x, y): (f32, f32)) -> Point<Points> {
-    let (x, y) = surface
-        .root
+fn to_area(root: &NshView, area: &NshView, (x, y): (f32, f32)) -> Point<Points> {
+    let (x, y) = root
         .compute_point(area, &graphene::Point::new(x, y))
         .map_or((x, y), |p| (p.x(), p.y()));
     Point::new(Points(x), Points(y))
@@ -461,6 +463,7 @@ pub(crate) fn begin(
 ) {
     let state = &surface.selection;
     let id = area.id();
+    let root = crate::input::event_root(surface);
     let count = click_count(state, id, x, y, time);
     let extend = count == 1 && modifiers.contains(gdk::ModifierType::SHIFT_MASK);
     if let Some(mut old) = state.drag.take()
@@ -470,6 +473,7 @@ pub(crate) fn begin(
     }
     state.drag.replace(Some(Drag {
         area: id,
+        root: root.clone(),
         start: (x, y),
         slop: if over_press {
             SELECT_SLOP_PRESS
@@ -481,7 +485,7 @@ pub(crate) fn begin(
         autoscroll: None,
     }));
     let texts = collect(area);
-    let point = to_area(surface, area, (x, y));
+    let point = to_area(&root, area, (x, y));
     let changed = state
         .areas
         .borrow_mut()
@@ -546,12 +550,12 @@ pub(crate) fn dragged(surface: &Rc<Surface>, x: f32, y: f32) -> bool {
 
 /// The selection follows the dragging mouse.
 fn follow(surface: &Surface) {
-    let Some((id, last)) = surface
+    let Some((id, root, last)) = surface
         .selection
         .drag
         .borrow()
         .as_ref()
-        .map(|d| (d.area, d.last))
+        .map(|d| (d.area, d.root.clone(), d.last))
     else {
         return;
     };
@@ -559,7 +563,7 @@ fn follow(surface: &Surface) {
         return;
     };
     let texts = collect(&area);
-    let point = to_area(surface, &area, last);
+    let point = to_area(&root, &area, last);
     let changed = surface
         .selection
         .areas
@@ -598,13 +602,13 @@ const AUTOSCROLL_INTERVAL: u64 = 16;
 /// those around it) that the mouse is near or past an edge of, and by how
 /// much to scroll it (wheel deltas, [`autoscroll_step`]).
 fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
-    let (id, last) = surface
+    let (id, root, last) = surface
         .selection
         .drag
         .borrow()
         .as_ref()
         .filter(|d| d.selecting)
-        .map(|d| (d.area, d.last))?;
+        .map(|d| (d.area, d.root.clone(), d.last))?;
     let mut current = focus_view(surface, id).or_else(|| view_of(surface, id));
     while let Some(view) = current {
         current = view.parent_view();
@@ -617,8 +621,7 @@ fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
                 s.frame.size.height.0,
             )
         };
-        let (x, y) = surface
-            .root
+        let (x, y) = root
             .compute_point(&view, &graphene::Point::new(last.0, last.1))
             .map_or(last, |p| (p.x(), p.y()));
         let (dx, dy) = if horizontal {
@@ -998,6 +1001,156 @@ mod tests {
                 .collect();
             lit.sort();
             assert_eq!(lit, ["delta", "eps", "four tail", "gamma", "three", "two"]);
+        });
+    }
+
+    /// A card's text: a short first paragraph with a link, then a long
+    /// one that wraps over several lines, in a padded card in a scroll view.
+    const CARD: &str = "\
+Merge [noop#393](https://example.com/393) now?
+
+The allow list is saved with one click. The Worker checks every address before it saves the list, and the change reaches every machine after the next deploy, so nothing breaks while it rolls out.
+";
+
+    #[component]
+    fn Card() -> impl IntoElement {
+        scroll().w(px(320.0)).h(px(380.0)).child(
+            view().p(px(24.0)).child(
+                view().p(px(16.0)).child(
+                    text_view()
+                        .selectable(true)
+                        .line_height(px(30.0))
+                        .markdown(CARD),
+                ),
+            ),
+        )
+    }
+
+    /// A press on a character of the second paragraph, where it is drawn,
+    /// starts the selection at that character.
+    #[test]
+    fn a_press_in_a_later_paragraph_selects_from_the_character_under_it() {
+        run(|| {
+            let surface = surface();
+            surface.start(nsh_engine::EngineConfig::new(nsh_engine::Root::of::<Card>()));
+            let window = show(&surface);
+            window.set_default_size(400, 400);
+            let views =
+                || -> Vec<NshView> { surface.mounter.borrow().views.values().cloned().collect() };
+            let find = |prefix: &str| {
+                views().into_iter().find(|v| {
+                    v.is_mapped()
+                        && v.state()
+                            .text
+                            .as_ref()
+                            .is_some_and(|t| t.text.text.starts_with(prefix))
+                })
+            };
+            assert!(wait_until(|| find("The allow").is_some()));
+            wait_until(|| false);
+            let para = find("The allow").unwrap();
+            let area = area_of(&para).expect("the TextView is a selectable view");
+            let text = para.state().text.as_ref().unwrap().text.text.to_string();
+            let start = text.find("Worker").unwrap() as u32;
+            // Where the characters are drawn, in the root's coordinates.
+            let at = |offset: u32| {
+                let s = para.state();
+                let drawn = s.text.as_ref().unwrap();
+                let layout = drawn.layout.downcast::<LinuxLayout>().unwrap();
+                let mut rects = Vec::new();
+                layout.range_rects(offset..offset + 1, &mut rects);
+                let r = rects[0];
+                let c = drawn.content.origin;
+                let p = para
+                    .compute_point(
+                        &surface.root,
+                        &graphene::Point::new(
+                            c.x.0 + r.origin.x.0 + 1.0,
+                            c.y.0 + r.origin.y.0 + r.size.height.0 / 2.0,
+                        ),
+                    )
+                    .unwrap();
+                (p.x(), p.y())
+            };
+            let (from, to) = (at(start), at(start + 5));
+            begin(
+                &surface,
+                &area,
+                from,
+                0.0,
+                gdk::ModifierType::empty(),
+                false,
+            );
+            assert!(dragged(&surface, to.0, to.1));
+            released(&surface);
+            let (_, selected) = selected_text(&surface, area.id()).expect("a selection");
+            assert_eq!(selected, "Worke");
+        });
+    }
+
+    /// In a window of the app's own the pointer's points are in that
+    /// window's root view, not the surface's: a press still selects the
+    /// character under it. The card's padded view stands in for the
+    /// window's root, offset from the surface's.
+    #[test]
+    fn a_press_in_a_window_of_the_apps_own_selects_under_it() {
+        run(|| {
+            let surface = surface();
+            surface.start(nsh_engine::EngineConfig::new(nsh_engine::Root::of::<Card>()));
+            let window = show(&surface);
+            window.set_default_size(400, 400);
+            let views =
+                || -> Vec<NshView> { surface.mounter.borrow().views.values().cloned().collect() };
+            let find = |prefix: &str| {
+                views().into_iter().find(|v| {
+                    v.is_mapped()
+                        && v.state()
+                            .text
+                            .as_ref()
+                            .is_some_and(|t| t.text.text.starts_with(prefix))
+                })
+            };
+            assert!(wait_until(|| find("The allow").is_some()));
+            wait_until(|| false);
+            let para = find("The allow").unwrap();
+            let area = area_of(&para).expect("the TextView is a selectable view");
+            let text = para.state().text.as_ref().unwrap().text.text.to_string();
+            let start = text.find("Worker").unwrap() as u32;
+            let window_root = area.parent_view().expect("the card");
+            crate::input::set_event_root(&surface, Some(window_root.clone()));
+            // Where the characters are drawn, in the root's coordinates.
+            let at = |offset: u32| {
+                let s = para.state();
+                let drawn = s.text.as_ref().unwrap();
+                let layout = drawn.layout.downcast::<LinuxLayout>().unwrap();
+                let mut rects = Vec::new();
+                layout.range_rects(offset..offset + 1, &mut rects);
+                let r = rects[0];
+                let c = drawn.content.origin;
+                let p = para
+                    .compute_point(
+                        &window_root,
+                        &graphene::Point::new(
+                            c.x.0 + r.origin.x.0 + 1.0,
+                            c.y.0 + r.origin.y.0 + r.size.height.0 / 2.0,
+                        ),
+                    )
+                    .unwrap();
+                (p.x(), p.y())
+            };
+            let (from, to) = (at(start), at(start + 5));
+            begin(
+                &surface,
+                &area,
+                from,
+                0.0,
+                gdk::ModifierType::empty(),
+                false,
+            );
+            assert!(dragged(&surface, to.0, to.1));
+            released(&surface);
+            let (_, selected) = selected_text(&surface, area.id()).expect("a selection");
+            assert_eq!(selected, "Worke");
         });
     }
 }
