@@ -856,7 +856,6 @@ impl InputState {
         let config = self.config.borrow();
         let style = &config.style;
         let color = self.anim_color.get().unwrap_or(style.color);
-        let pitch = line_pitch(style);
         let bits = self.bits();
         let limit = self.limit_of(e);
         e.update(
@@ -890,18 +889,22 @@ impl InputState {
                     },
                 };
                 pf.Base.Anonymous.wEffects = if config.rtl { 0x0001 } else { 0 };
-                if config.multiline {
-                    // Exactly the line height the core measures the field
-                    // with ([`line_pitch`]): RichEdit would make a line as
-                    // tall as the tallest font in it (a fallback for Chinese
-                    // is taller than the UI font), and the text would no
-                    // longer fit the height the field was measured at.
-                    pf.bLineSpacingRule = 4;
-                    pf.dyLineSpacing = (pitch * s * twips).round() as i32;
+                // Exactly one line height. Several lines: the one the core
+                // measures the field with ([`line_pitch`]). RichEdit would
+                // make a line as tall as the tallest font in it (a fallback
+                // for Chinese is taller than the UI font), and the text
+                // would no longer fit the height the field was measured at.
+                // One line: the one [`InputState::inset`] centers. RichEdit's
+                // own is taller for some fonts (Maple Mono NF CN), which put
+                // the text and the caret below the center, cut off at the
+                // bottom, while the placeholder drawn here stayed centered.
+                let line = if config.multiline {
+                    line_pitch(style)
                 } else {
-                    pf.bLineSpacingRule = 0;
-                    pf.dyLineSpacing = 0;
-                }
+                    self.line_height()
+                };
+                pf.bLineSpacingRule = 4;
+                pf.dyLineSpacing = (line * s * twips).round() as i32;
                 p.bits = bits;
                 p.max_length = limit;
                 p.scroll = scroll_flags(&config);
