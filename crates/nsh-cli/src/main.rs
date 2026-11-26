@@ -20,6 +20,7 @@ mod logger;
 mod module_meta;
 mod msix;
 mod native_features;
+mod nsh_lock;
 mod nshm;
 mod package;
 mod platforms;

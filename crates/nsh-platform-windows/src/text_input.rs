@@ -2622,13 +2622,28 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
 /// paste.
 fn paste(surface: &Surface, view: &NshView, input: &InputState) {
     let text = crate::system::clipboard_text();
+    let mut paste = nsh_core::PasteEvent::new(text.unwrap_or_default());
     if view.state().events.contains(EventKind::Paste) {
-        let mut paste = nsh_core::PasteEvent::new(text.clone().unwrap_or_default());
         paste.html = crate::system::clipboard_html().unwrap_or_default();
         if let Some(image) = crate::system::clipboard_image() {
             paste.files.push(nsh_core::PastedFile::image(image));
         }
         paste.uris = crate::system::clipboard_files();
+    }
+    paste_content(surface, view, input, paste);
+}
+
+/// Pastes `paste` into `view` as the user's paste of it does: reports it
+/// (`onPaste`) if the app listens, then inserts its text as
+/// `pasteBehavior` says.
+fn paste_content(
+    surface: &Surface,
+    view: &NshView,
+    input: &InputState,
+    paste: nsh_core::PasteEvent,
+) {
+    let text = paste.text.clone();
+    if view.state().events.contains(EventKind::Paste) {
         surface.event(
             view.id(),
             EventKind::Paste,
@@ -2638,14 +2653,27 @@ fn paste(surface: &Surface, view: &NshView, input: &InputState) {
     if input.config.borrow().paste_behavior != nsh_core::PasteBehavior::Insert {
         return;
     }
-    let Some(text) = text else {
-        return;
-    };
     let text = pasted(&text, input.multiline());
     if !text.is_empty() {
         replace_selection(input, &text.replace('\n', "\r"));
         process(surface, view, input);
     }
+}
+
+/// The test agent's paste of `content` into the focused input, without
+/// the system's clipboard.
+#[cfg(feature = "dev")]
+pub(crate) fn paste_focused(
+    surface: &Surface,
+    content: nsh_core::PasteEvent,
+) -> Result<(), String> {
+    let view = focused(surface).ok_or("no focused input to paste into")?;
+    let input = input_of(&view).ok_or("the focused view is no input")?;
+    if !input.config.borrow().editable {
+        return Err("the focused input is read-only".into());
+    }
+    paste_content(surface, &view, &input, content);
+    Ok(())
 }
 
 // --- The caret's blinking ----------------------------------------------------

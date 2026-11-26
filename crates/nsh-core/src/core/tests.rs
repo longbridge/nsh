@@ -26330,6 +26330,61 @@ mod views {
         assert!(holder.is_none(), "no holder keeps what left it");
     }
 
+    /// JSX text straight in a component's children (`<Button>Open</Button>`):
+    /// JS sends a raw text run, kept without a node until a use needs one.
+    /// The component places it, so it gets its node.
+    #[test]
+    fn a_raw_text_child_of_a_component_is_placed() {
+        let mut c = core();
+        let mut registry = crate::element::Registry::new();
+        registry.register::<Holder>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Holder>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::CreateText {
+                    id: 4,
+                    text: "Open".into(),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        );
+        // Placed where the view places its children (its node made: no
+        // invalid op), a text outside a `Text` that shows nothing, as in a
+        // `View`.
+        let _ = c.commit();
+        assert_eq!(c.components.instances[&2].js_children, [4]);
+        let at = native_parent(&c, 4).expect("placed");
+        assert_eq!(c.nodes[c.key(at).unwrap() as usize].kind, Kind::View);
+        // It leaves as any child does.
+        apply(
+            &mut c,
+            vec![Op::Remove {
+                parent: 2,
+                child: 4,
+            }],
+        );
+        let _ = c.commit();
+        assert!(c.components.instances[&2].js_children.is_empty());
+    }
+
     /// Passes its children on to a holder while shown; a press hides and
     /// shows the holder.
     #[derive(Default)]
@@ -42291,6 +42346,74 @@ fn keyboard_inset_height_pads_and_animates_with_the_keyboard() {
     assert!(c.env_styled.is_empty());
     c.set_environment(env_with_keyboard(40.0, 250.0));
     assert!(c.commit().is_none());
+}
+
+#[test]
+fn the_keyboard_inset_reads_zero_under_a_view_that_clears_the_keyboard() {
+    // A bottom sheet the keyboard lifts (`clears_keyboard`): what pads by
+    // `env(keyboard-inset-height)` in it, the panel itself or its content,
+    // is not lifted a second time; outside it the inset is the keyboard's.
+    let padded = |id| {
+        style_op(
+            id,
+            &[
+                ("height", StyleValue::Number(100.0)),
+                (
+                    "paddingBottom",
+                    StyleValue::Str("env(keyboard-inset-height)"),
+                ),
+            ],
+        )
+    };
+    let mut c = core();
+    c.set_environment(env_with_keyboard(0.0, 0.0));
+    let mut ops = Vec::new();
+    for id in [2, 3, 4] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(padded(id));
+    }
+    ops.extend([
+        Op::SetProp {
+            id: 2,
+            prop: Prop::ClearsKeyboard(true),
+        },
+        // 3 in the panel 2, 4 beside it.
+        Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 4,
+            before: None,
+        },
+    ]);
+    apply(&mut c, ops);
+    c.commit();
+
+    c.set_environment(env_with_keyboard(40.0, 0.0));
+    c.commit();
+    assert_eq!(env_applied(&c, 2)[0].bottom, px(0.0));
+    assert_eq!(env_applied(&c, 3)[0].bottom, px(0.0));
+    assert_eq!(env_applied(&c, 4)[0].bottom, px(40.0));
+
+    // No longer clear of it: the inset is the keyboard's again.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::ClearsKeyboard(false),
+        }],
+    );
+    c.commit();
+    assert_eq!(env_applied(&c, 2)[0].bottom, px(40.0));
+    assert_eq!(env_applied(&c, 3)[0].bottom, px(40.0));
 }
 
 #[test]

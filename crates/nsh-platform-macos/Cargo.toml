@@ -108,3 +108,7 @@ harness = false
 [[test]]
 name = "draw_on_show"
 harness = false
+
+[[test]]
+name = "live_resize_text"
+harness = false

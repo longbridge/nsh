@@ -1283,7 +1283,9 @@ default (`RUSTUP_TOOLCHAIN` picks it) and skips the dependency caches. The Linux
 one job each and run a job more slowly than GitHub's runners, but a pull request's job waits less for them: they take
 the Linux runs of Core, Compat, Examples, TUI, Rust application's `check` and GPUI. Linux's `check` and
 `gpui-gallery` stay on GitHub's runners: the examples' tests in windows run in real time, and on the slower machines
-they time out waiting for what they press. So do the jobs that drive a browser (Rust application's `web`, Website). Pull requests from forks and the scheduled runs
+they time out waiting for what they press. The `examples` jobs run the TSX examples' tests beside the lints and unit
+tests, in a job of their own, because they spend minutes building what they run; the two examples with Rust crates
+stay in `check`, where those steps already built their hosts. So do the jobs that drive a browser (Rust application's `web`, Website). Pull requests from forks and the scheduled runs
 on `main` run every check on GitHub's runners. The release (its builds, `Plan`, `Release` and `Nightly`), the crates'
 publication, the Homebrew formula's update and the website's deployment run only on GitHub's runners: the jobs that
 hold write tokens or decide and build what users download run on fresh machines.
@@ -1293,6 +1295,16 @@ three hours (skipped when `main` has not moved since the last scheduled run, `ch
 them. The scheduled runs save the dependencies' caches the pull requests restore. TUI's
 macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome; the Website workflow builds the site on pull
 requests only when `website/`, the skills, the tasks examples or `nsh-platform-web` change.
+
+### Benchmarks
+
+The Benchmarks workflow runs nsh-engine's `bench_calls`, `bench_components` and `bench_handles` (ignored tests in
+`crates/nsh-engine/tests/engine`) for a pull request and for its merge base on `main`, on one self-hosted runner. It
+alternates the two builds for five rounds, keeps each metric's fastest value, and updates one comment on the pull request
+with the table. A metric more than 10% slower (and more than 2ns) fails the check. Running one build against itself on
+that runner moves every metric by 3% at most. Run the same comparison locally with
+`scripts/bench-compare.py run BASE_BIN HEAD_BIN --json out.json` and `scripts/bench-compare.py table out.json`, from
+`crates/nsh-engine`. `bench_gallery_scroll` stays out: it sleeps between frames and takes seconds.
 
 ### Homebrew publishing setup and recovery
 

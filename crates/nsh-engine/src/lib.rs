@@ -2999,11 +2999,13 @@ impl<M: TextEngine + 'static> Driver<M> {
 
     /// Whether nothing is left to run: no message queued, nothing due at
     /// the clock's time (a timer that keeps scheduling another at once
-    /// outlasts a flush's rounds) and no request in flight.
+    /// outlasts a flush's rounds), no request in flight and no `async fn`
+    /// call into Rust waiting for its answer.
     fn idle(&self, rx: &Receiver<Message>) -> bool {
         let now = self.clock.now();
         rx.is_empty()
             && self.state.net.idle()
+            && !self.state.core.async_calls_pending()
             && [self.due(), self.clock.next_alarm()]
                 .into_iter()
                 .flatten()

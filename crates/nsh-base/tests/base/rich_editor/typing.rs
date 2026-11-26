@@ -373,6 +373,41 @@ fn composition_shows_its_text_without_changing_the_document() {
     see(&mut app, "Sel 3-3");
 }
 
+/// The drawn caret's left edge, once `done` holds for it.
+fn caret_x(app: &mut Headless, what: &str, done: impl Fn(Points) -> bool) -> Points {
+    let x = |s: &nsh_testing::Screen| {
+        s.layout("id:rich-editor-caret")
+            .ok()
+            .flatten()
+            .map(|l| l.bounds.origin.x)
+    };
+    app.wait_until(what, Duration::from_secs(5), |s| x(s).is_some_and(&done))
+        .unwrap();
+    x(app.screen()).unwrap()
+}
+
+#[test]
+fn the_caret_shows_after_the_composition() {
+    // As a native text view draws it after its marked text, where the
+    // committed text leaves it.
+    let mut app = start(paragraphs(&["ab"]));
+    focus(&mut app);
+    keys(&mut app, &["end"]);
+    see(&mut app, "Sel 3-3");
+    let before = caret_x(&mut app, "the caret after ab", |_| true);
+    compose(&mut app, true, "にほ");
+    see(&mut app, "abにほ");
+    let composing = caret_x(&mut app, "the caret after にほ", |x| x > before);
+    see(&mut app, "Sel 3-3");
+    app.type_text("id:editor", "にほ").unwrap();
+    compose(&mut app, false, "");
+    see(&mut app, &tree(r#"doc(paragraph("abにほ"))"#));
+    see(&mut app, "Sel 5-5");
+    caret_x(&mut app, "the caret after the committed text", |x| {
+        (x - composing).0.abs() < 0.5
+    });
+}
+
 #[test]
 fn committing_a_composition_inserts_its_text_as_one_undo_step() {
     let mut app = start(paragraphs(&["ab"]));

@@ -27,7 +27,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Points,
     geometry::{Point, point},
-    selection::{SelectionModel, SelectionTexts},
+    selection::{SelectionModel, SelectionTexts, marker_of},
 };
 use rustc_hash::FxHashSet;
 
@@ -90,6 +90,8 @@ struct AreaText {
     to_root: Mat4,
     /// Its content box in the area's coordinates.
     frame: Bounds<Points>,
+    /// The list marker beside it (`selection::marker_of`).
+    marker: Option<String>,
 }
 
 /// The texts of an area in document order, as the model sees them.
@@ -102,6 +104,10 @@ struct AreaTexts {
 impl SelectionTexts for AreaTexts {
     fn len(&self) -> usize {
         self.texts.len()
+    }
+
+    fn marker(&self, i: usize) -> Option<&str> {
+        self.texts[i].marker.as_deref()
     }
 
     fn content(&self, i: usize) -> &str {
@@ -139,7 +145,7 @@ impl AreaTexts {
     fn of(area: &NshView) -> Option<Self> {
         let to_root = area.to_root()?;
         let mut texts = Vec::new();
-        collect(area, &to_root, &to_root, &mut texts);
+        collect(area, &to_root, &to_root, &mut texts, &mut None);
         Some(AreaTexts {
             area: to_root,
             texts,
@@ -170,26 +176,37 @@ impl AreaTexts {
 
 /// Adds the texts of `view`'s subtree (`m`: from its coordinates to the
 /// root's), depth first: drawing order, which is the document's.
-fn collect(view: &NshView, m: &Mat4, area: &Mat4, out: &mut Vec<AreaText>) {
+fn collect(
+    view: &NshView,
+    m: &Mat4,
+    area: &Mat4,
+    out: &mut Vec<AreaText>,
+    chrome: &mut Option<(String, Bounds<Points>)>,
+) {
     let s = view.state();
     if s.style.hidden || s.concealed || s.live.as_ref().is_some_and(|l| l.dying()) {
         return;
     }
     if let Some(drawn) = &s.text
-        && drawn.text.selectable != Some(false)
         && let Some(frame) = frame_in(area, m, drawn.content)
     {
-        out.push(AreaText {
-            view: view.clone(),
-            text: drawn.text.clone(),
-            to_root: *m,
-            frame,
-        });
+        if drawn.text.selectable == Some(false) {
+            // A list marker, maybe: the next text's copy starts with it.
+            *chrome = Some((drawn.text.text.to_string(), frame));
+        } else {
+            out.push(AreaText {
+                view: view.clone(),
+                text: drawn.text.clone(),
+                to_root: *m,
+                frame,
+                marker: marker_of(chrome.take().as_ref(), frame),
+            });
+        }
     }
     view.with_children(|children| {
         for child in children {
             let local = s.child_matrix(&child.state());
-            collect(child, &Mat4::mul(&local, m), area, out);
+            collect(child, &Mat4::mul(&local, m), area, out, chrome);
         }
     });
 }

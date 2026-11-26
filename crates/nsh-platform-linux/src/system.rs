@@ -960,7 +960,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         // The app's address: this platform keeps none.
         | Command::SetAppUrl(_)
         | Command::PushAppUrl(_) => {}
-        other => log::debug!("linux: command {other:?} is not supported"),
+        other => nsh_core::platform::warn_unsupported("linux", &other),
     }
 }
 

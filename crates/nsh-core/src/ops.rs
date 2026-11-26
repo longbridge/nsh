@@ -3948,6 +3948,13 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// Internal: the view already stands clear of the software keyboard
+    /// (a bottom sheet the keyboard lifts), so `env(keyboard-inset-height)`
+    /// reads 0 in it and in its subtree: padding by it there would lift
+    /// the content a second time.
+    #[doc(hidden)]
+    #[prop(reset = Prop::ClearsKeyboard(false))]
+    ClearsKeyboard(bool),
     /// `copyText`: what a copy of the text around the view gives in its
     /// place, when the view (or image) is inside a text (an inline
     /// formula's source, an emoji image's character): selecting across it

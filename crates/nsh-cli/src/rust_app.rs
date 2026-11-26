@@ -310,6 +310,57 @@ fn rust_runner_web_view(platform: Platform, may: impl FnOnce() -> bool) -> Vec<&
     }
 }
 
+/// Whether `nsh run`'s bundle may make a web view, as its development
+/// session last built it ([`set_dev_bundle_web_view`]); `None` when no
+/// session built it (`nsh test`, a failed build).
+static DEV_BUNDLE_WEB_VIEW: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+
+/// A Linux development host was built without web views
+/// ([`dev_host_web_view`]).
+static DEV_HOST_WITHOUT_WEB_VIEW: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Records whether the bundle a development session built may make a web
+/// view (it spells `webview`, or `nsh.json` keeps the feature). A bundle
+/// that makes one after the host was built without them says so once: the
+/// host shows a placeholder until `nsh run` starts again.
+pub(crate) fn set_dev_bundle_web_view(may: bool) {
+    let mut last = DEV_BUNDLE_WEB_VIEW
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if may
+        && last.replace(true) == Some(false)
+        && DEV_HOST_WITHOUT_WEB_VIEW.swap(false, std::sync::atomic::Ordering::Relaxed)
+    {
+        crate::ui::warn(
+            "the app now makes a WebView, which this development host was built without: \
+             it shows a placeholder until `nsh run` starts again",
+        );
+    } else if !may {
+        *last = Some(false);
+    }
+}
+
+/// The cargo arguments that turn web views on in a Rust app's Linux
+/// development host: only when the app may make one, by its bundle
+/// ([`set_dev_bundle_web_view`]; not known: kept) or its own Rust code
+/// (`may`), as its package would (#2377), and this machine can build them
+/// (`can`, [`crate::runtime::linux_web_views`]). An app that makes none
+/// builds no WebKitGTK.
+fn dev_host_web_view(may: impl FnOnce() -> bool, can: impl FnOnce() -> bool) -> Vec<&'static str> {
+    let bundle = *DEV_BUNDLE_WEB_VIEW
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let wanted = bundle.unwrap_or(true) || may();
+    if wanted && can() {
+        DEV_HOST_WITHOUT_WEB_VIEW.store(false, std::sync::atomic::Ordering::Relaxed);
+        vec!["--features", "nsh-platform-linux/webview"]
+    } else {
+        DEV_HOST_WITHOUT_WEB_VIEW.store(!wanted, std::sync::atomic::Ordering::Relaxed);
+        Vec::new()
+    }
+}
+
 impl RustApp {
     /// The generated workspace (`<app>/.nsh/rust`).
     pub(crate) fn workspace(&self) -> &Path {
@@ -2017,6 +2068,7 @@ const NSH_CRATES: &[&str] = &[
     "nsh-package",
     "nsh-js",
     "nsh-engine",
+    "nsh-gpu",
     "nsh-testing",
     "nsh-bundler",
     "nsh-dev",
@@ -2028,6 +2080,19 @@ const NSH_CRATES: &[&str] = &[
     "nsh-platform-windows",
     "nsh-platform-web",
     "nsh-platform-gpui",
+    "nsh-gpui-host",
+    "nsh-platform-tui",
+    "nsh-i18n",
+    "nsh-updater",
+    "nsh-tui-host",
+    "nsh-ios-host",
+    "nsh-ios-app",
+    "nsh-linux-host",
+    "nsh-linux-app",
+    "nsh-macos-host",
+    "nsh-macos-app",
+    "nsh-windows-host",
+    "nsh-windows-app",
 ];
 
 /// The dependencies of the app's crate `c` on nsh's crates, as `cargo
@@ -2732,8 +2797,21 @@ panic = \"abort\"
                 self.app_components(android, "nsh", "android"),
             ),
         )?;
+        self.follow_nsh_patches(ws);
         self.unify_features(ws);
         Ok(())
+    }
+
+    /// Has the lock of the generated workspace `ws` take nsh's crates from
+    /// the patches its manifest has for them ([`crate::nsh_lock`]), when it
+    /// has any: built against a checkout, or a nightly with nshm.
+    fn follow_nsh_patches(&self, ws: &Path) {
+        let patched = self.nsh.source().is_some()
+            || matches!(self.nsh, Nsh::Nightly(_)) && !self.modules.is_empty();
+        if patched {
+            let names: Vec<&str> = NSH_CRATES.iter().chain(OWN_NSHM).copied().collect();
+            crate::nsh_lock::follow_patches(ws, &names, VERSION);
+        }
     }
 
     /// The dependency on `<ws>/hack` ([`Self::unify_features`]).
@@ -3417,6 +3495,7 @@ opt-level = \"s\"
             true,
         )?;
         self.write_host(&ws, "gpui-host", "nsh-gpui-host", "development host")?;
+        self.follow_nsh_patches(&ws);
         Ok(ws)
     }
 
@@ -3434,6 +3513,7 @@ opt-level = \"s\"
             false,
         )?;
         self.write_tui_host(&ws)?;
+        self.follow_nsh_patches(&ws);
         Ok(ws)
     }
 
@@ -3476,7 +3556,12 @@ opt-level = \"s\"
             .map(|c| c.package.as_str())
             .collect();
         if self.nsh.source().is_some() {
-            changing.extend(NSH_CRATES);
+            changing.extend(
+                NSH_CRATES
+                    .iter()
+                    .filter(|name| gpui || !matches!(**name, "nsh-platform-gpui" | "nsh-gpui-host"))
+                    .copied(),
+            );
             changing.extend(
                 self.crates
                     .iter()
@@ -3508,7 +3593,7 @@ opt-level = \"s\"
         let nsh_crates = NSH_CRATES
             .iter()
             .chain(OWN_NSHM)
-            .filter(|name| gpui || **name != "nsh-platform-gpui");
+            .filter(|name| gpui || !matches!(**name, "nsh-platform-gpui" | "nsh-gpui-host"));
         if let Some(source) = self.nsh.source() {
             manifest.push_str("\n[patch.crates-io]\n");
             manifest.push_str(&crates_io);
@@ -3636,12 +3721,10 @@ opt-level = \"s\"
                 format!("\n[features]\ndefault = [{default}]\n{forward}"),
             )
         } else {
-            // Linux's host makes web views when this machine can build
-            // them ([`crate::runtime::linux_web_views`]).
-            let lib_dep = if dir == "linux-host"
-                && cfg!(target_os = "linux")
-                && !crate::runtime::linux_web_views()
-            {
+            // Linux's host has no web views of its own (WebKitGTK, a large
+            // system library to build): its build turns them on when the
+            // app may make one ([`dev_host_web_view`]).
+            let lib_dep = if dir == "linux-host" {
                 self.nsh.dep(lib, ", default-features = false")
             } else {
                 src(lib)
@@ -3909,7 +3992,13 @@ opt-level = \"s\"
         } else {
             Vec::new()
         };
-        let trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
+        let mut trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
+        if matches!(platform, Platform::Linux) && !runner {
+            trimmed.extend(dev_host_web_view(
+                || may_make_web_view(self),
+                || !cfg!(target_os = "linux") || crate::runtime::linux_web_views(),
+            ));
+        }
         let (workspace, features) = match platform {
             Platform::Gpui => (self.gpui_workspace()?, crate::runtime::gpui_features()),
             Platform::Tui => (self.tui_workspace()?, &[][..]),
@@ -4788,8 +4877,63 @@ mod tests {
 
     use super::{AppCrate, Link, Nsh, RootConfig, RustApp};
 
+    /// An app may depend on any crate nsh publishes; one missing from
+    /// `NSH_CRATES` is left on crates.io when nsh's crates are patched to a
+    /// checkout or a nightly, and its newer release then asks for a newer
+    /// `nsh-base` than the patched one.
+    #[test]
+    fn every_published_nsh_crate_is_patched() {
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut published = Vec::new();
+        for dir in [checkout.join("crates"), checkout.join("crates/gpui")] {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Ok(manifest) = std::fs::read_to_string(entry.path().join("Cargo.toml")) else {
+                    continue;
+                };
+                if name.starts_with("nsh-")
+                    && name != "nsh-cli"
+                    && !manifest.contains("publish = false")
+                {
+                    published.push(name);
+                }
+            }
+        }
+        published.sort();
+        let mut patched: Vec<String> = super::NSH_CRATES
+            .iter()
+            .chain(super::OWN_NSHM)
+            .map(|name| name.to_string())
+            .collect();
+        patched.sort();
+        assert_eq!(published, patched);
+    }
+
     /// Serialises the tests that set [`super::RUNNER_FEATURES`].
     static RUNNER_FEATURES_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn a_linux_development_host_builds_web_views_only_for_an_app_that_makes_one() {
+        let _guard = RUNNER_FEATURES_TEST
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let set = |v| *super::DEV_BUNDLE_WEB_VIEW.lock().unwrap() = v;
+        let on = ["--features", "nsh-platform-linux/webview"];
+        // No development session built the bundle (`nsh test`): kept.
+        set(None);
+        assert_eq!(super::dev_host_web_view(|| false, || true), on);
+        // A bundle that makes none, and Rust code that makes none: left out.
+        set(Some(false));
+        assert!(super::dev_host_web_view(|| false, || true).is_empty());
+        // The app's Rust code may make one.
+        assert_eq!(super::dev_host_web_view(|| true, || true), on);
+        // The bundle makes one.
+        set(Some(true));
+        assert_eq!(super::dev_host_web_view(|| false, || true), on);
+        // The machine cannot build them.
+        assert!(super::dev_host_web_view(|| true, || false).is_empty());
+        set(None);
+    }
 
     #[test]
     fn a_release_runner_builds_with_the_chosen_features() {

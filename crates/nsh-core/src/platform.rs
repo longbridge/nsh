@@ -2466,3 +2466,74 @@ mod tests {
         }
     }
 }
+
+/// Logs, once per backend and command kind, that a backend ignores a command.
+///
+/// Backends call this from their catch-all arm so an app learns that a call
+/// does nothing on this platform, without one log line per frame or call. The
+/// kind is the leading variant chain of the command's `Debug` output (for
+/// `Desktop(SetAttributes(..))`, `Desktop(SetAttributes`), so commands with
+/// different payloads share one warning.
+pub fn warn_unsupported(backend: &str, command: &dyn std::fmt::Debug) {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let debug = format!("{command:?}");
+    let key = format!("{backend}:{}", unsupported_kind(&debug));
+    let seen = SEEN.get_or_init(Default::default);
+    if seen
+        .lock()
+        .map(|mut seen| seen.insert(key))
+        .unwrap_or(false)
+    {
+        log::warn!(
+            "{backend}: {} is not supported on this platform and is ignored",
+            unsupported_kind(&debug)
+        );
+    }
+}
+
+/// The leading `Variant(Variant` (at most two levels) of a `Debug` string.
+fn unsupported_kind(debug: &str) -> &str {
+    let mut end = 0;
+    let bytes = debug.as_bytes();
+    let mut i = 0;
+    // A command and, for grouped commands such as `Desktop`, its subcommand.
+    for _ in 0..2 {
+        let start = i;
+        // Variants start with an uppercase letter; a number or a string is a payload.
+        if !bytes.get(i).is_some_and(u8::is_ascii_uppercase) {
+            break;
+        }
+        while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+            i += 1;
+        }
+        if i == start {
+            break;
+        }
+        end = i;
+        if i < bytes.len() && bytes[i] == b'(' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    if end == 0 { debug } else { &debug[..end] }
+}
+
+#[cfg(test)]
+mod unsupported_tests {
+    use super::unsupported_kind;
+
+    #[test]
+    fn kind_is_the_variant_chain() {
+        assert_eq!(
+            unsupported_kind("Desktop(SetAttributes(Foo { a: 1 }))"),
+            "Desktop(SetAttributes"
+        );
+        assert_eq!(unsupported_kind("Share { text: \"x\" }"), "Share");
+        assert_eq!(unsupported_kind("Vibrate(12)"), "Vibrate");
+        assert_eq!(unsupported_kind("Quit"), "Quit");
+    }
+}

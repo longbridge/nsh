@@ -117,6 +117,16 @@ pub trait SelectionTexts {
         false
     }
 
+    /// What a copy puts before text `i` when the selection takes it from
+    /// its start: the generated marker drawn beside it that selection
+    /// leaves out (a list item's `•` or `2.`, `userSelect: "none"`), so a
+    /// copied list keeps its markers as a browser's copy does. `None` by
+    /// default.
+    fn marker(&self, i: usize) -> Option<&str> {
+        let _ = i;
+        None
+    }
+
     /// The box around what the characters `range` of text `i` cover, in
     /// the coordinates of the content boxes ([`Self::frame`]): what
     /// [`SelectionModel::selected_bounds`] unites. `None` by default: the
@@ -558,14 +568,18 @@ impl SelectionModel {
     /// a text that continues the one before it
     /// ([`SelectionTexts::continues`]) joined to it with nothing between,
     /// other texts on one row (their frames overlap vertically) joined by a
-    /// tab, the others by a line break; an empty text inside the selection
-    /// counts as a text, so a blank line stays in the copy.
+    /// tab, the others by a line break, or by a blank line when a gap of
+    /// at least [`BLOCK_BREAK`] lies between two single-text rows (two
+    /// paragraphs, two messages; a table's rows stay a line apart); a text taken from its start gets its marker
+    /// ([`SelectionTexts::marker`]) before it. An empty text inside the
+    /// selection counts as a text, so a blank line stays in the copy.
     pub fn text(&self, texts: &impl SelectionTexts) -> String {
-        let mut out = String::new();
+        // Rows of cells, each with whether a block gap lies above it.
+        let mut rows: Vec<(bool, Vec<String>)> = Vec::new();
         let mut previous: Option<(usize, Bounds<Points>)> = None;
         let ranges = self.ranges(texts);
         let (Some(&(first, _)), Some(&(last, _))) = (ranges.first(), ranges.last()) else {
-            return out;
+            return String::new();
         };
         let mut ranges = ranges.into_iter().peekable();
         for i in first..=last {
@@ -577,14 +591,45 @@ impl SelectionModel {
                 None => continue,
             };
             let frame = texts.frame(i);
-            if let Some((before, previous)) = previous
-                && (before + 1 != i || !continues(texts, i))
+            let mut part = String::new();
+            if range.start == 0
+                && !range.is_empty()
+                && let Some(marker) = texts.marker(i)
             {
-                let same_row = previous.top() < frame.bottom() && frame.top() < previous.bottom();
-                out.push(if same_row { '\t' } else { '\n' });
+                part.push_str(marker);
+                part.push(' ');
+            }
+            part.push_str(&texts.copied(i, range));
+            match previous {
+                Some((before, _)) if before + 1 == i && continues(texts, i) => {
+                    if let Some(cell) = rows.last_mut().and_then(|r| r.1.last_mut()) {
+                        cell.push_str(&part);
+                    }
+                }
+                Some((_, previous))
+                    if previous.top() < frame.bottom() && frame.top() < previous.bottom() =>
+                {
+                    if let Some(row) = rows.last_mut() {
+                        row.1.push(part);
+                    }
+                }
+                Some((_, previous)) => {
+                    rows.push((frame.top() - previous.bottom() >= BLOCK_BREAK, vec![part]))
+                }
+                None => rows.push((false, vec![part])),
             }
             previous = Some((i, frame));
-            out.push_str(&texts.copied(i, range));
+        }
+        let mut out = String::new();
+        for (n, (gap, cells)) in rows.iter().enumerate() {
+            if n > 0 {
+                out.push('\n');
+                // A table's rows (several cells) stay a line apart.
+                if *gap && cells.len() == 1 && rows[n - 1].1.len() == 1 {
+                    out.push('\n');
+                }
+            }
+            out.push_str(&cells.join("\t"));
         }
         out
     }
@@ -1077,6 +1122,29 @@ fn unit_at(
             )
         }
     }
+}
+
+/// The vertical gap between two texts from which a copy puts a blank line
+/// between them, as between two paragraphs: wider than the spacing of a
+/// list's items or a text's lines, narrower than a paragraph's.
+pub const BLOCK_BREAK: Points = Points(8.0);
+
+/// The marker of a text whose frame is `frame`, given the last text that
+/// selection leaves out before it (`chrome`, its content and frame): that
+/// text when it is a short marker drawn on the text's first row, to its
+/// left (a list item's `•`, `2.` or `a)`). A backend listing an area's
+/// texts calls it with the unselectable text it passed last.
+pub fn marker_of(
+    chrome: Option<&(String, Bounds<Points>)>,
+    frame: Bounds<Points>,
+) -> Option<String> {
+    let (text, at) = chrome?;
+    let text = text.trim();
+    let short = !text.is_empty() && text.chars().count() <= 4 && !text.contains('\n');
+    let beside = at.right() <= frame.left() + Points(1.0)
+        && at.top() < frame.top() + Points(24.0)
+        && frame.top() < at.bottom();
+    (short && beside).then(|| text.to_string())
 }
 
 /// Whether text `i` continues the text before it (never the first).
@@ -1757,7 +1825,10 @@ mod tests {
             model.ranges(&texts),
             vec![(0, 2..11), (1, 0..21), (2, 0..3)]
         );
-        assert_eq!(model.text(&texts), "llo world\nSecond line\nmore text\nLas");
+        assert_eq!(
+            model.text(&texts),
+            "llo world\n\nSecond line\nmore text\n\nLas"
+        );
         assert!(
             !model.drag(&texts, at(24.0, 105.0)),
             "the same point changes nothing"
@@ -1829,7 +1900,7 @@ mod tests {
         assert_eq!(model.bounds(), Some((pos(0, 0), pos(2, 4))));
         assert_eq!(
             model.text(&texts),
-            "Hello world\nSecond line\nmore text\nLast"
+            "Hello world\n\nSecond line\nmore text\n\nLast"
         );
     }
 
@@ -1892,7 +1963,7 @@ mod tests {
         assert_eq!(model.bounds(), Some((pos(1, 0), pos(1, 21))));
         model.drag(&texts, at(8.0, 105.0));
         assert_eq!(model.bounds(), Some((pos(1, 0), pos(2, 4))));
-        assert_eq!(model.text(&texts), "Second line\nmore text\nLast");
+        assert_eq!(model.text(&texts), "Second line\nmore text\n\nLast");
         model.drag(&texts, at(8.0, 5.0));
         assert_eq!(model.bounds(), Some((pos(0, 0), pos(1, 21))));
     }
@@ -1938,7 +2009,7 @@ mod tests {
         assert_eq!(model.bounds(), Some((pos(0, 0), pos(0, 2))));
         assert!(model.move_handle(&texts, Handle::Start, at(8.0, 45.0)));
         assert_eq!(model.bounds(), Some((pos(0, 2), pos(1, 1))));
-        assert_eq!(model.text(&texts), "llo world\nS");
+        assert_eq!(model.text(&texts), "llo world\n\nS");
         // The start handle passed the end: it is the end now.
         assert!(model.move_handle(&texts, Handle::End, at(24.0, 5.0)));
         assert_eq!(model.bounds(), Some((pos(0, 2), pos(0, 3))));
@@ -2211,7 +2282,7 @@ mod tests {
         );
         assert!(model.texts_changed(&more));
         assert_eq!(model.bounds(), Some((pos(2, 0), pos(3, 2))));
-        assert_eq!(model.text(&more), "Second line\nmore text\nLa");
+        assert_eq!(model.text(&more), "Second line\nmore text\n\nLa");
         // The text of an end goes: the selection goes too.
         let gone = Keyed(
             Fake::new(&[
@@ -2355,7 +2426,7 @@ mod tests {
         assert!(model.extend(&texts, Movement::Character, Direction::Forward));
         assert_eq!(model.focus(), Some(pos(1, 0)));
         assert!(model.extend(&texts, Movement::Character, Direction::Forward));
-        assert_eq!(model.text(&texts), "ld\nS");
+        assert_eq!(model.text(&texts), "ld\n\nS");
         // Back past the anchor: the anchor stays.
         for _ in 0..6 {
             model.extend(&texts, Movement::Character, Direction::Backward);
