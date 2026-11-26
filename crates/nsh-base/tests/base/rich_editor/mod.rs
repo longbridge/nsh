@@ -4,6 +4,7 @@
 //! pastes as blocks, a node view renders an atom, undo takes typing
 //! back, and lists' items show their markers.
 
+mod code_highlight;
 mod commands;
 mod composition;
 mod content_size;

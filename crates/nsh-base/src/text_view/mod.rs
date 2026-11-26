@@ -6,7 +6,7 @@ mod common;
 pub mod document;
 mod extension;
 mod formula;
-mod highlight;
+pub(crate) mod highlight;
 mod html;
 mod markdown;
 #[cfg(feature = "math")]
