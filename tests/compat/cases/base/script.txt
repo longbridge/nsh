@@ -4487,8 +4487,8 @@ tap id:read
 expect Read: range 2:1 to 1:0 active 2:1
 # A title press reports its column. The name cell of row 1 carries the
 # class from `cellClasses`. The rendered text sits in the render's holder,
-# in the placeholder, in that cell.
-style parent:parent:parent:text:"Cell 1:name fig" backgroundColor #00ff00ff
+# in that cell.
+style parent:parent:text:"Cell 1:name fig" backgroundColor #00ff00ff
 tap text:Name
 expect Column: 0 1
 # A sortable column's sort button reports the next sort, which the app

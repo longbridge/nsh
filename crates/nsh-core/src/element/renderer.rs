@@ -183,6 +183,58 @@ impl<T: JsValue + Clone + PartialEq + 'static> Renderer<T> {
         }
         Rendered(node)
     }
+
+    /// `el` (a view with no children of its own) holding what the renderer
+    /// `place` gives renders for its key and value, without a view of the
+    /// render's own: the app's JS function's content goes into `el` itself,
+    /// a Rust closure's is its child. `place` is bound: when the key or
+    /// the value it gives changes, the content is rendered again, as
+    /// [`Renderer::render`]'s would; `None` holds nothing.
+    ///
+    /// For a view a component makes many of, a list's or a table's cells:
+    /// each is one view fewer than with [`Renderer::render`] placed in it.
+    /// Hidden while `nsh-base`'s DataTable is its only user.
+    #[doc(hidden)]
+    pub fn render_into<E: Element>(
+        mut el: E,
+        place: impl Fn() -> Option<(Self, SharedString, T)> + 'static,
+    ) -> E {
+        let place = crate::element::computed(place);
+        el.node().bound_attrs.push(Rc::new(move |attrs| {
+            let at = place.with(|place| {
+                let (renderer, key, value) = place.as_ref()?;
+                let (prop, host, func) = match &renderer.kind {
+                    Kind::Rust(_) => return None,
+                    Kind::Js { prop, host } => (*prop, *host, None),
+                    Kind::JsFn { prop, host, func } => (*prop, *host, Some(func.clone())),
+                };
+                Some(RenderAt(Rc::new(RenderPlace {
+                    host,
+                    prop,
+                    key: key.clone(),
+                    value: Rc::new(value.clone()),
+                    func,
+                })))
+            });
+            if at.is_some() || attrs.rare.is_some() {
+                attrs.rare_mut().render = at;
+            }
+        }));
+        let content = super::dynamic(move || {
+            place.with(|place| match place {
+                Some((
+                    Renderer {
+                        kind: Kind::Rust(f),
+                    },
+                    _,
+                    value,
+                )) => Some(f(value)),
+                _ => None,
+            })
+        });
+        el.node().children.push(content.0);
+        el
+    }
 }
 
 /// What a [`Renderer`] rendered, placed as a view: style it like one (its
