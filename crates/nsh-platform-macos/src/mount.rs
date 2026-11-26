@@ -309,6 +309,7 @@ impl Mounter {
         // Pictures of items the batch did not apply (their views gone).
         self.rasters = crate::text::Rasters::default();
         self.draw_shown();
+        crate::view::compact_gone_leaves();
         self.deleting.clear();
         self.layout_animation = None;
         crate::navigation::end_batch(surface);
