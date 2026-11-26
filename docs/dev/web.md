@@ -387,8 +387,9 @@ root (`set_root`); `app_root()` is generated from `"root"`, `"theme"` (compiled 
 (`nsh_base::registry_of([parts::core])`, `RustApp::rust_web_sets`), not `nsh_base::registry()`: with no JS, nothing
 makes a component by its registered name, the root makes each component by type (`nsh_base::select()`), which links
 that component where it is used, and the set gives the theme's tokens and the built-in scroll bars. Registering every
-part would link every component of `nsh/base` into the module. The page calls `player.runRust()` (`nsh_start_rust`)
-instead of `runModule`:
+part would link every component of `nsh/base` into the module, and for the same reason the runtime (feature
+`rust-parts`) has no `nsh/base` default of its own: it serves the sets `rust_app!` gave, plus the parts whose gates a
+component made by name ran. The page calls `player.runRust()` (`nsh_start_rust`) instead of `runModule`:
 the packaged page when `app.rust` is set (no `app.js`), the dev page (`{{rust}}`) once the dev server greets it; the
 dev session publishes no bundles (`DevSession::rust_root`). The browser host's exports (`nsh_browser_*`) are
 `cfg(feature = "browser-core")`. The runtime builds to
@@ -397,8 +398,8 @@ dev session publishes no bundles (`DevSession::rust_root`). The browser host's e
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
 (`nsh_core::element::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
 Rust app (2026-11) its `nsh.wasm` is 9.15 MB (3.11 MB with `gzip -9`, 2.18 MB with brotli; 12.78 / 4.40 / 3.00 MB
-while it registered every part of `nsh/base`; `examples/tasks-rs` 5.23 MB, 11.04 MB before): no browser host, which
-a TSX entry needs.
+while it registered every part of `nsh/base`; `examples/tasks-rs` 4.26 MB, 5.36 MB while the runtime kept a default
+`nsh/base` set, 11.04 MB before that): no browser host, which a TSX entry needs.
 
 ### Crates that call JS through wasm-bindgen
 
