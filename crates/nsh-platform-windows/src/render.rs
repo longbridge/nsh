@@ -1947,7 +1947,9 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
         }
     };
     let window = Some((root, size));
-    match draw_into(
+    let fps = surface.fps();
+    let started = fps.as_ref().map(|_| std::time::Instant::now());
+    let drawn = draw_into(
         surface,
         &gfx,
         &target,
@@ -1956,7 +1958,9 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
         composition,
         None,
         window,
-    ) {
+    );
+    let painted = started.map(|s| s.elapsed());
+    match drawn {
         Ok(drawn) => {
             if let Some(c) = composition
                 && let Err(err) = c.present(drawn.layers.len())
@@ -1966,11 +1970,16 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
                 device_lost(surface);
                 return false;
             }
+            let shown = std::time::Instant::now();
             if let Err(err) = chain.present(None) {
                 log::warn!("present failed: {err}");
                 *swap = None;
                 device_lost(surface);
                 return false;
+            }
+            // Drawn whole, every frame.
+            if let (Some(fps), Some(painted)) = (&fps, painted) {
+                fps.painted(painted, shown.elapsed(), drawn_share(None, size));
             }
             crate::surface::items_placed(placed, drawn.items, None);
             crate::surface::composed_placed(composed, composition, drawn.composed, &drawn.layers);
