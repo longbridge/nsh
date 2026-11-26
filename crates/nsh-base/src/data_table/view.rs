@@ -1194,6 +1194,16 @@ fn cell(
         // The cell holds what the app draws itself: no view of the
         // render's own between them.
         let render_dt = dt.clone();
+        // PROTOTYPE (T-J0032): NSH_CELL_REUSE=a|b keys each cell view's
+        // render by the view (its slot), not by the row it shows.
+        let slot_key: Option<SharedString> = std::env::var("NSH_CELL_REUSE")
+            .ok()
+            .filter(|m| m == "a" || m == "b")
+            .map(|_| {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                format!("slot:{n}").into()
+            });
         Renderer::render_into(el, move || {
             let render = props.render_cell.get()?;
             let (row, def) = (row.get()?, def.get()?);
@@ -1213,7 +1223,11 @@ fn cell(
                 text: render_dt.cell_text(row, def),
                 ..value
             };
-            Some((render, format!("cell:{row}:{def}").into(), value))
+            let key = match &slot_key {
+                Some(k) => k.clone(),
+                None => format!("cell:{row}:{def}").into(),
+            };
+            Some((render, key, value))
         })
         .into_element()
     } else {
