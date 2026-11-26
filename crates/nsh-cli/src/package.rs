@@ -69,7 +69,9 @@ impl PackageTarget {
         use crate::module_meta::Platform;
         match self {
             PackageTarget::Ios => Some((&["aarch64-apple-ios"], Platform::Ios)),
-            PackageTarget::IosSimulator => Some((&["aarch64-apple-ios-sim"], Platform::Ios)),
+            PackageTarget::IosSimulator => {
+                Some((&[runtime::IOS_SIMULATOR_TRIPLE], Platform::Ios))
+            }
             PackageTarget::Macos => Some((
                 arch.unwrap_or_else(Arch::native).macos_triples(),
                 Platform::Macos,
