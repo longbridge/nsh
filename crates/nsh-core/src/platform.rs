@@ -592,8 +592,7 @@ pub struct Environment {
     pub tab_bar: bool,
     /// Whether the platform puts images on the system clipboard and reads
     /// them back (`Clipboard.readImage`, `writeImage`, `hasImage`). `None`
-    /// (the default): as NSH's own backends on [`Self::os`], every OS but
-    /// Android, whose backend holds text only. A platform built outside
+    /// (the default): yes, as every NSH backend does. A platform built outside
     /// NSH says what it does with `Some`: without images its image calls
     /// reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and `hasImage` is
     /// false.

@@ -3376,11 +3376,7 @@ opt-level = \"s\"
     ) -> anyhow::Result<Option<crate::runtime::WebRuntime>> {
         const WASM: &str = "wasm32-unknown-unknown";
         let out = self.workspace.join("web-runtime");
-        let wasm = if rust {
-            out.join("nsh-rust.wasm")
-        } else {
-            out.join(kind.file())
-        };
+        let wasm = out.join(web_runtime_file(kind, rust));
         // The module's wasm-bindgen glue, when the app's crates call JS
         // through wasm-bindgen (`crate::bindgen`).
         let stem = wasm
@@ -3442,22 +3438,17 @@ opt-level = \"s\"
         };
         let built = self.build_with(cmd, &build)?;
         fs::create_dir_all(&out)?;
-        // Both kinds build to the same file: each keeps a copy of its own,
-        // through wasm-bindgen when the app's crates call JS through it.
-        // A runtime wasm-bindgen runs on cannot be split afterwards, so what
-        // the app does not use is left out before it: the gates of the parts
-        // of `nsh/base` the app never makes by name and the shader gate when
-        // it shows no shader.
-        let pruned = if rust {
-            self.without_unused_gates(&built, &out, &stem)?
-        } else {
-            None
+        // Each kind has its own file (`web_runtime_file`). The development
+        // one goes through wasm-bindgen when the app's crates call JS
+        // through it; the published one is linkable and kept as it is:
+        // `nsh package` splits it first (`web::link`).
+        runtime.glue = match kind {
+            crate::runtime::WebKind::Browser => {
+                crate::bindgen::install_linkable(&built, &out, &stem)?;
+                None
+            }
+            crate::runtime::WebKind::Dev => crate::bindgen::install(&built, &out, &stem)?,
         };
-        let installed = crate::bindgen::install(pruned.as_deref().unwrap_or(&built), &out, &stem);
-        if let Some(pruned) = &pruned {
-            let _ = fs::remove_file(pruned);
-        }
-        runtime.glue = installed?;
         if self.nsh.source().is_none() {
             let js = self.resolved_crate("nsh-platform-web")?.join("web/nsh.js");
             crate::runtime::copy_browser_host(
@@ -3902,33 +3893,6 @@ opt-level = \"s\"
             once.record(&path);
         }
         Ok(path)
-    }
-
-    /// The web runtime `built` without the gates the app does not need, in
-    /// `out`, when it goes through wasm-bindgen
-    /// ([`crate::web::without_unused_gates`]); `None` when it does not or
-    /// every gate stays.
-    fn without_unused_gates(
-        &self,
-        built: &Path,
-        out: &Path,
-        stem: &str,
-    ) -> anyhow::Result<Option<PathBuf>> {
-        let module = fs::read(built).with_context(|| format!("read {}", built.display()))?;
-        if crate::bindgen::needs(&module)?.is_none() {
-            return Ok(None);
-        }
-        let Some(pruned) = crate::web::without_unused_gates(&module)? else {
-            return Ok(None);
-        };
-        ui::debug(format!(
-            "web runtime: left out the gates the app does not need: nsh/base's parts it never makes by name, shaders it never shows ({} to {} bytes)",
-            module.len(),
-            pruned.len()
-        ));
-        let path = out.join(format!("{stem}-without-gates.wasm"));
-        fs::write(&path, pruned).with_context(|| format!("write {}", path.display()))?;
-        Ok(Some(path))
     }
 
     /// The development host (`runner` false) or release runner of the app,
@@ -4859,6 +4823,19 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
     match name {
         "nsh-platform-gpui" | "nsh-gpui-host" => source.join("crates/gpui").join(name),
         _ => source.join("crates").join(name),
+    }
+}
+
+/// The file in `web-runtime/` an app's web runtime of `kind` is put in;
+/// `rust`: a Rust app's. One per kind: the development one goes through
+/// wasm-bindgen as it is built and the published one does not
+/// (`bindgen::install_linkable`), so neither may replace the other's module
+/// or remove its glue (`nsh dev` serves the development one as it finds it).
+fn web_runtime_file(kind: crate::runtime::WebKind, rust: bool) -> &'static str {
+    match (rust, kind) {
+        (true, crate::runtime::WebKind::Browser) => "nsh-rust-browser.wasm",
+        (true, crate::runtime::WebKind::Dev) => "nsh-rust-dev.wasm",
+        (false, kind) => kind.file(),
     }
 }
 
@@ -6628,6 +6605,48 @@ mod tests {
             assert_eq!(manifest.matches(table).count(), 1, "{table}: {manifest}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_published_web_runtime_leaves_the_development_one_and_its_glue() {
+        use crate::runtime::WebKind;
+        let out = std::env::temp_dir().join(format!("nsh-rust-web-kinds-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).unwrap();
+        for rust in [false, true] {
+            let stem = |kind| {
+                super::web_runtime_file(kind, rust)
+                    .strip_suffix(".wasm")
+                    .unwrap()
+            };
+            let (dev, browser) = (stem(WebKind::Dev), stem(WebKind::Browser));
+            assert_ne!(dev, browser);
+            // What `bindgen::install` leaves for the development runtime
+            // when its crates call JS through wasm-bindgen.
+            let dev_files = [
+                out.join(format!("{dev}.wasm")),
+                out.join(format!("{dev}-bindgen.js")),
+                out.join(format!("{dev}-bindgen/snippets/a.js")),
+            ];
+            for file in &dev_files {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, "dev").unwrap();
+            }
+            let built = out.join("built.wasm");
+            std::fs::write(&built, "linkable").unwrap();
+            crate::bindgen::install_linkable(&built, &out, browser).unwrap();
+            for file in &dev_files {
+                assert_eq!(
+                    std::fs::read_to_string(file).unwrap(),
+                    "dev",
+                    "{}",
+                    file.display()
+                );
+            }
+            let published = out.join(format!("{browser}.wasm"));
+            assert_eq!(std::fs::read_to_string(published).unwrap(), "linkable");
+        }
+        let _ = std::fs::remove_dir_all(&out);
     }
 
     #[test]

@@ -978,5 +978,7 @@ taken only when what they show changed:
 
 `file_drop.rs` retains the pasteboard file URLs from entry through target changes and
 sends them with `onFileDragEnter`. Finder file references are resolved with `filePathURL`
-so apps can preview filenames. Drop reads the pasteboard again; clearing the drag releases
+so apps can preview filenames. Drop reads the pasteboard again and sends the URLs with
+`draggingLocation` converted to the event root, as mouse events convert `locationInWindow`
+(`pagePosition`, `EventPayload::FileDropAt`); clearing the drag releases
 the offered list. This reads URL metadata, not file contents.

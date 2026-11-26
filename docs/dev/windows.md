@@ -586,7 +586,9 @@ for `onFileDragEnter`. Moves between destinations reuse it. Enter and
 over callbacks convert screen pixels to client points and use retained view hit
 testing, stopping at a modal root. Eligible targets advertise Copy. Drop reads
 the local file list in native order and converts absolute paths to escaped file
-URLs, then releases the storage medium with `ReleaseStgMedium`. Leave, drop,
+URLs, then releases the storage medium with `ReleaseStgMedium`; the drop
+event carries the drop point converted as the over callbacks do (client
+points, `pagePosition`, `EventPayload::FileDropAt`). Leave, drop,
 disablement and deletion clear the active destination. Applications decide what
 to do with the URLs; receiving a drop does not itself open or transfer a file.
 

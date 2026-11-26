@@ -181,7 +181,11 @@ and input methods. The sink is the editor's one stop of Tab; the content box tak
 that scrolls a field into view as it focuses it (a browser) finds it, and scrolling the selection into view
 (`scroll_into_view`) brings the node in whole, as ProseMirror scrolls a node selection's DOM node. The sink's changes are replayed at the caret as the code `Editor`'s are (`sink_text.rs`), and a caret the
 platform moves in the sink without a key (an input method that puts its caret between the brackets it typed) moves
-the editor's by as much, within the textblock and over text the document shows the same way. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
+the editor's by as much, within the textblock and over text the document shows the same way. The sink is emptied
+when the caret moves and once it holds 256 bytes; on iOS it is set to the text of the caret's textblock before it
+instead (`sink_context`, 128 bytes at most), as UIKit's keyboard repeats a held Delete (and speeds up to words) only
+over text it sees before the input's caret. The platform's text stays while it still ends with that text: setting it
+again would stop the held Delete. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's
 typography, and the document waits; the caret is drawn after it, as a native text view draws it after its marked
 text, while the sink (where the candidates open) stays at its start. The commit is one transaction tagged with the composition's id (`composition`
@@ -193,9 +197,12 @@ the document and transaction revision unchanged; a text commit remains a normal 
 the view while composing and release it on the end notification. Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
 and offers each as a `KeyEvent` to the selected node's view, the plugins' `handle_key_down`, the base keymap, then
 copy / cut / select all and the caret movement (graphemes, words, line ends, lines and pages by geometry, keeping the
-goal x, the document's ends). An Escape none of them takes collapses a selection to its head; with nothing selected,
-in a terminal, it blurs the editor, so the focus can leave it (Escape stays bound for the plugins' own, a
-suggestion's).
+goal x, the document's ends). Left or Right onto a selectable inline atom a node view draws selects it as a node
+first and the next press moves past it (`inline_node_beside`, prosemirror-view's `selectHorizontally`): the node view
+shows it as `selected`, the caret being hidden. An atom drawn without a node view (a built-in image), or whose spec
+turns `selectable` off (a mention, a hard break), is stepped over as one character. An Escape none of them takes collapses
+a selection to its head; with nothing selected, in a terminal, it blurs the editor, so the focus can leave it (Escape
+stays bound for the plugins' own, a suggestion's).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection (a press inside an inline node view's box
 selects its node without Shift or Mod: `inline_view_at`, after prosemirror-view's `selectClickedLeaf`; an inline

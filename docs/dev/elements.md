@@ -685,7 +685,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   and the line rules applied, `onChangeText` reporting it, no key, and a step of the platform's undo history, which a
   new value is not. Linux: the editors' `delete-from-cursor` / `insert-at-cursor` signals (`GtkText`; inserting
   from outside an edit would clear its history) or one user action on the `GtkTextBuffer`; web: `execCommand("insertText")`;
-  headless: at the end, as a paste; Windows, Android and GPUI insert nothing yet and log a warning.
+  Android: `Editable.replace` on the selection (filters such as `maxLength` apply); headless: at the end, as a paste; Windows and GPUI insert nothing yet and log a warning.
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
@@ -871,6 +871,14 @@ sends `onError` with `ERR_NSH_WEBVIEW_TERMINATED` (Rust `on_process_terminated`)
 next `reload()`, `load()` or new source shows a page again. Android's `WebBox` handles
 `onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
 same web view.
+
+`scrollable={false}` stops only the user scrolling the page's viewport: the page still
+gets every touch (its own drag handlers, sliders and sortable lists work) and its scripts
+still scroll it, as a `UIScrollView` with `scrollEnabled` off on iOS. Android and Windows
+put `html { overflow: hidden !important; }` in each document (Android from `WebBox.java`
+as the document starts and when the prop changes, never by keeping moves from the
+WebView), Linux a user style sheet hiding the top document's overflow; macOS keeps wheel
+and trackpad scrolls from the page.
 
 
 

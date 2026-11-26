@@ -454,7 +454,10 @@ pub(crate) fn drop_uris(surface: &Surface, x: f32, y: f32, uris: Vec<String>) ->
     surface.event(
         destination.id(),
         EventKind::FileDrop,
-        EventPayload::FileDrop(uris),
+        EventPayload::FileDropAt {
+            uris,
+            page_position: point(Points(x), Points(y)),
+        },
     );
     clear(surface);
     true
