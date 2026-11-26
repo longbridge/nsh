@@ -230,7 +230,7 @@ An attribute a platform's windows do not have is kept and has no effect there: t
 |---|---|
 | macOS | AppKit's `contentAspectRatio`: every edge and corner keeps the ratio as the user drags. |
 | Windows | The drag's rectangle is fixed in `WM_SIZING`: a side edge sets the height from the width, the top or bottom edge sets the width from the height, a corner follows its width. The edge the user holds stays under the pointer. `minSize` and `maxSize` still apply; a ratio they cannot meet gives way to them. |
-| Linux | No effect yet. GTK 4 has no call for it; Wayland has no aspect ratio for a resize at all (the compositor picks the size), and X11's size hints would need GDK's own X11 calls. Draw the content letterboxed, or correct the size in `onBoundsChange` if you must. |
+| Linux | No effect yet. GTK 4 has no call for it; Wayland has no aspect ratio for a resize at all (the compositor picks the size), and on X11 GDK 4 rewrites the whole `WM_NORMAL_HINTS` property, without an aspect field, each time it lays the window out, which includes every step of a drag, so a ratio set beside it would vanish while the user resizes. Draw the content letterboxed, or correct the size in `onBoundsChange` if you must. |
 | GPUI apps (Windows, Linux) | No effect: GPUI owns the window's resize loop. |
 | iOS, Android, Web, terminal | No windows: no effect. |
 

@@ -230,7 +230,7 @@ let Some(doc) = open_window(
 |---|---|
 | macOS | AppKit 的 `contentAspectRatio`：拖动任何边或角都保持比例。 |
 | Windows | 在 `WM_SIZING` 里修正拖动的矩形：拖左右边按宽度定高度，拖上下边按高度定宽度，拖角按宽度。用户按住的边始终跟着指针。`minSize` 和 `maxSize` 仍然有效；比例和它们冲突时以它们为准。 |
-| Linux | 暂不生效。GTK 4 没有对应的调用；Wayland 在交互式调整时根本没有宽高比约束（尺寸由合成器决定），X11 的 size hints 要直接调用 GDK 的 X11 接口。可以让内容加黑边显示，或者在 `onBoundsChange` 里修正尺寸。 |
+| Linux | 暂不生效。GTK 4 没有对应的调用；Wayland 在交互式调整时根本没有宽高比约束（尺寸由合成器决定），X11 上 GDK 4 每次排版窗口（包括拖动中的每一步）都会整个重写 `WM_NORMAL_HINTS`，不带宽高比字段，另外写进去的比例会在用户拖动时被冲掉。可以让内容加黑边显示，或者在 `onBoundsChange` 里修正尺寸。 |
 | GPUI 应用（Windows、Linux） | 不生效：调整大小的过程由 GPUI 控制。 |
 | iOS、Android、Web、终端 | 没有窗口，不生效。 |
 
