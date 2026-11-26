@@ -19,6 +19,10 @@
   (Dynamic Type on iOS; on both, a box a fraction of a point shorter than the line's measured height).
   CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
   excess. Empty and zero-height boxes stay empty.
+  On both, the box a text measures holds its cut last line as drawn: the end of the text that `ellipsis-start` and
+  `ellipsis-middle` keep (and an ellipsis, which takes the font of the text's end) grows that line when it is set in a
+  larger font or holds a taller attachment, below the line above, as on a line not cut; a fixed `lineHeight` holds a
+  larger font there as on any line. A box too short for the text keeps such a line below the line above too.
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height); Rust
   components can subscribe with `Text::on_text_layout` (`TextGeometry`) to query `lines`, `hit_test`, `caret_rect` and
   `range_rects` directly on the engine's final layout in source UTF-16 offsets (skipping synthetic span-padding
