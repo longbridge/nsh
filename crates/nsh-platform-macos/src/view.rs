@@ -594,7 +594,7 @@ define_class!(
         #[unsafe(method(prepareForDragOperation:))]
         fn prepare_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
             self.input_surface().is_some_and(|surface| {
-                crate::file_drop::update(&surface, sender) == NSDragOperation::Copy
+                !crate::file_drop::update(&surface, sender).is_empty()
             })
         }
 
