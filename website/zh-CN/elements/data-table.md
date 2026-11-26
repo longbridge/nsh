@@ -173,6 +173,12 @@ const page = signal({ start: 0, rows: load(0) });
 
 屏幕阅读器得到一个网格（名称来自 `accessibilityLabel`），由列标题和单元格组成，被选中的会读出为已选中。
 
+### 拖选单元格区域
+
+设置 `customCellSelection` 后，鼠标按下可选单元格时触发 `onCellDrag({ start, end, extend })`，拖到新单元格时再次触发。拖到表格边缘时，表格会滚动。两个端点都使用从 0 开始的行索引和列定义索引，按住 Shift 时 `extend` 为 `true`。应用负责保存选区，并在收到 `onCopySelection` 时复制选区内容。复制快捷键和表格的 `copy()` 方法都会触发这个事件。
+
+`cellSelectionRange` 接受 `[top, bottom, left, right]`，用于在滚动列上绘制选区。再传入 `activeRow, activeCol` 可保留活动单元格的底色。用 `selectionFill` 和 `selectionOutline` 设置填充和外框的样式。
+
 <a id="keyboard"></a>
 
 ## 键盘
@@ -215,6 +221,8 @@ const page = signal({ start: 0, rows: load(0) });
 ## 调整和移动列
 
 拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize({ key, width })` 报告每一步。连续按两次边缘会把该列适配到最宽的文本和标题。拖动标题会移动列，并用一条线显示将放下的位置；`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在同一侧的固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
+
+设置 `deferColumnResize` 后，拖动时用 `moveIndicator` 显示参考线，松开时再应用宽度并报告变化。
 
 <a id="filling-the-width"></a>
 
@@ -355,6 +363,9 @@ const columns: DataTableColumn[] = [
 | `cellColumnSelected` | 被选中列的单元格，排在 `cell` 之后 |
 | `rowHeader` | 行号单元格 |
 | `rowHeaderCorner` | 行号上方的角落 |
+| `rowHeaderHighlighted` | 高亮行的行号，排在 `rowHeader` 之后 |
+| `selectionFill` | 选区的填充 |
+| `selectionOutline` | 选区的外框 |
 | `fixedEdge` | 固定列和在其下滚动的列之间的线：左侧固定列的尾部边缘，右侧固定列的起始边缘 |
 | `empty` | `empty` 插槽的盒子 |
 
@@ -370,6 +381,10 @@ const columns: DataTableColumn[] = [
 | `dataStart` | `.data_start(..)` | `number` | `0` | `data` 第一行对应的行号。 |
 | `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | 所给各行的类名，按它们在 `data` 中的位置对应：行自己的外观，不需要每行调用 JS。 |
 | `cellClasses` | `.cell_classes(..)` | `DataTableCellClass[]` | `[]` | 单个单元格的类名，按数据行号和列下标对应，加在部件类和该列 `cellClass` 之后。单元格的文字仍由表格绘制。 |
+| `customCellSelection` | `.custom_cell_selection(..)` | `boolean` | `false` | 报告鼠标拖选和复制请求，由应用维护选区。 |
+| `cellSelectionRange` | `.cell_selection_range(..)` | `number[]` | `[]` | 滚动列中的选区边界，可附带活动单元格索引。 |
+| `highlightedRowHeaders` | `.highlighted_row_headers(..)` | `number[]` | `[]` | 用 `rowHeaderHighlighted` 标出的行索引。 |
+| `highlightedColumnHeaders` | `.highlighted_column_headers(..)` | `number[]` | `[]` | 用 `headerCellSelected` 标出的列定义索引。 |
 | `rowHeight` | `.row_height(..)` | `number` | `32` | 表体行的高度，单位为点；在终端里一行就是一个 Cell。 |
 | `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度；在终端里标题行就是一个 Cell。 |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | 列上方的标签，从最低一层开始。 |
@@ -384,6 +399,7 @@ const columns: DataTableColumn[] = [
 | `rowHeader` | `.row_header(..)` | `boolean` | 开启 `cellSelectable` 时显示 | 左侧的一列行号。 |
 | `stripe` | `.stripe(..)` | `boolean` | `false` | 奇数行使用 `rowOdd` 部件。 |
 | `resizableColumns` | `.resizable_columns(..)` | `boolean` | `true` | 拖动列的边缘调整宽度。 |
+| `deferColumnResize` | `.defer_column_resize(..)` | `boolean` | `false` | 拖动时显示参考线，松开时应用列宽。 |
 | `movableColumns` | `.movable_columns(..)` | `boolean` | `true` | 拖动标题移动列。 |
 | `loading` | `.loading(..)` | `boolean` | `false` | 表格正在加载：`onLoadMore` 等待，`loadingView` 显示。 |
 | `hasMore` | `.has_more(..)` | `boolean` | `false` | 还有更多行可以加载。 |
@@ -409,6 +425,8 @@ const columns: DataTableColumn[] = [
 |---|---|---|
 | `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | 用户改变了选择：`{ selection }`，一个 `{ row?, column? }` 或 `null`。 |
 | `onRowPress` | `.on_row_press(\|event: &DataTablePress\| ..)` | 按下了一行或一个单元格：`{ row, column?, clicks, shift, control, alt, platform }`。 |
+| `onCellDrag` | `.on_cell_drag(\|start: &DataTableTarget, end: &DataTableTarget, extend: &bool\| ..)` | 鼠标按下或拖过可选单元格，报告 `{ start, end, extend }`。 |
+| `onCopySelection` | `.on_copy_selection(\|\| ..)` | 应用维护的选区收到复制请求。 |
 | `onColumnPress` | `.on_column_press(\|event: &DataTableColumnPress\| ..)` | 按下了一个标题：`{ column, clicks, shift, control, alt, platform }`。 |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | 一行、一个单元格或一个标题被连按两次：`{ target }`，一个 `{ row?, column? }`。 |
 | `onRowActivate` | `.on_row_activate(\|row: &u32\| ..)` | 获得焦点的行被激活（Enter / Return）：`{ row }`，与 `onRowPress` 报告的数字相同。 |

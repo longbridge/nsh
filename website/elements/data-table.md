@@ -203,6 +203,17 @@ select.
 Screen readers get a grid (named by `accessibilityLabel`) of column headers and cells, the selected ones said to be
 selected.
 
+### Dragging a range of cells
+
+With `customCellSelection`, `onCellDrag({ start, end, extend })` fires when the mouse presses a selectable cell
+and again as the end cell changes. The table scrolls when the pointer reaches an edge. Both targets use zero-based
+data row and column definition indexes. Holding Shift sets `extend`. The app keeps the range and handles
+`onCopySelection` when the user presses the copy shortcut or the app calls the ref's `copy()`.
+
+Set `cellSelectionRange` to `[top, bottom, left, right]` to draw that range over the scrolling columns. Append
+`activeRow, activeCol` to leave the active cell unfilled. Set the `selectionFill` and `selectionOutline` parts
+to style the range.
+
 ## Keyboard
 
 Pressing the table, or reaching it with Tab (macOS, the web), gives it the keyboard until another press, the focus
@@ -248,6 +259,8 @@ reports every step. Pressing the edge twice in a row fits the column to its wide
 `{ key, from, to, order }`, `order` being the `key`s of all the columns in the order shown. Fixed columns stay among
 the ones fixed at their side. `resizableColumns` and `movableColumns` turn both off for the table, and a column's `resizable` and
 `movable` win over them.
+
+With `deferColumnResize`, the `moveIndicator` part follows the dragged edge. The table applies and reports the new width on release.
 
 ## Filling the width
 
@@ -399,6 +412,9 @@ parts provide the table's structure and alignment; their classes supply the appe
 | `cellColumnSelected` | The cells of the selected column, after `cell` |
 | `rowHeader` | The row header cells, the row numbers |
 | `rowHeaderCorner` | The corner above the row headers |
+| `rowHeaderHighlighted` | A highlighted row number, after `rowHeader` |
+| `selectionFill` | The fill of the selected range |
+| `selectionOutline` | The outline of the selected range |
 | `fixedEdge` | The line between the fixed columns and the columns that scroll under them: at the trailing edge of those at the left, the leading edge of those at the right |
 | `empty` | The box of the `empty` slot |
 
@@ -412,6 +428,10 @@ parts provide the table's structure and alignment; their classes supply the appe
 | `dataStart` | `.data_start(..)` | `number` | `0` | The row of the first row of `data`. |
 | `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | Classes of the rows given, by their place in `data`: a row's own look, with no call into JS per row. |
 | `cellClasses` | `.cell_classes(..)` | `DataTableCellClass[]` | `[]` | Classes of single cells, by data row and column index, after the part's and the column's `cellClass`. The cell's text stays the table's. |
+| `customCellSelection` | `.custom_cell_selection(..)` | `boolean` | `false` | Reports mouse drags and copy requests for an app-owned selection. |
+| `cellSelectionRange` | `.cell_selection_range(..)` | `number[]` | `[]` | Range bounds over the scrolling columns, with optional active cell indexes. |
+| `highlightedRowHeaders` | `.highlighted_row_headers(..)` | `number[]` | `[]` | Data row indexes to mark with `rowHeaderHighlighted`. |
+| `highlightedColumnHeaders` | `.highlighted_column_headers(..)` | `number[]` | `[]` | Column definition indexes to mark with `headerCellSelected`. |
 | `rowHeight` | `.row_height(..)` | `number` | `32` | The height of a body row, in points; in a terminal a row is one Cell. |
 | `headerHeight` | `.header_height(..)` | `number` | the row height | The height of a title row; in a terminal a title row is one Cell. |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | Labels above the columns, lowest level first. |
@@ -426,6 +446,7 @@ parts provide the table's structure and alignment; their classes supply the appe
 | `rowHeader` | `.row_header(..)` | `boolean` | shown with `cellSelectable` | A column of row numbers at the left. |
 | `stripe` | `.stripe(..)` | `boolean` | `false` | Odd rows get the `rowOdd` part. |
 | `resizableColumns` | `.resizable_columns(..)` | `boolean` | `true` | A drag of a column's edge resizes it. |
+| `deferColumnResize` | `.defer_column_resize(..)` | `boolean` | `false` | Shows a guide during a drag and applies the width on release. |
 | `movableColumns` | `.movable_columns(..)` | `boolean` | `true` | A drag of a title moves its column. |
 | `loading` | `.loading(..)` | `boolean` | `false` | The table is loading: `onLoadMore` waits and `loadingView` shows. |
 | `hasMore` | `.has_more(..)` | `boolean` | `false` | There are more rows to load. |
@@ -449,6 +470,8 @@ parts provide the table's structure and alignment; their classes supply the appe
 |---|---|---|
 | `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | The user changed the selection: `{ selection }`, a `{ row?, column? }` or `null`. |
 | `onRowPress` | `.on_row_press(\|event: &DataTablePress\| ..)` | A row or cell was pressed: `{ row, column?, clicks, shift, control, alt, platform }`. |
+| `onCellDrag` | `.on_cell_drag(\|start: &DataTableTarget, end: &DataTableTarget, extend: &bool\| ..)` | The mouse pressed or moved across selectable cells, reporting `{ start, end, extend }`. |
+| `onCopySelection` | `.on_copy_selection(\|\| ..)` | Copy was requested for the app-owned selection. |
 | `onColumnPress` | `.on_column_press(\|event: &DataTableColumnPress\| ..)` | A title was pressed: `{ column, clicks, shift, control, alt, platform }`. |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | A row, cell or title was pressed twice: `{ target }`, a `{ row?, column? }`. |
 | `onRowActivate` | `.on_row_activate(\|row: &u32\| ..)` | The focused row was activated (Enter / Return): `{ row }`, the number `onRowPress` reports. |

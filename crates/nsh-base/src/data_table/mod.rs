@@ -403,6 +403,20 @@ pub struct DataTableProps {
     /// paints a selection of cells with no call into JS per cell.
     #[prop(default)]
     pub cell_classes: Prop<Vec<DataTableCellClass>>,
+    /// Row headers highlighted by an app-owned cell selection, by data index.
+    #[prop(default)]
+    pub highlighted_row_headers: Prop<Vec<u32>>,
+    /// Column titles highlighted by an app-owned cell selection, by definition index.
+    #[prop(default)]
+    pub highlighted_column_headers: Prop<Vec<u32>>,
+    /// App-owned rectangular cell selection overlay as `[top, bottom, left, right]`
+    /// or `[top, bottom, left, right, activeRow, activeCol]`, styled by the app via
+    /// the `selectionFill` and `selectionOutline` parts.
+    #[prop(default)]
+    pub cell_selection_range: Prop<Vec<u32>>,
+    /// Reports mouse range drags and copy requests for an app-owned cell selection.
+    #[prop(default)]
+    pub custom_cell_selection: Prop<bool>,
     /// The height of a body row, in points (default 32; in a terminal a
     /// row is one Cell, whatever this is).
     #[prop(default = Points(32.0))]
@@ -461,6 +475,9 @@ pub struct DataTableProps {
     /// column's `resizable` wins).
     #[prop(default = true)]
     pub resizable_columns: Prop<bool>,
+    /// Move a guide while dragging and apply the width on release.
+    #[prop(default)]
+    pub defer_column_resize: Prop<bool>,
     /// Whether a drag of a title moves its column (default true; a column's
     /// `movable` wins).
     #[prop(default = true)]
@@ -524,6 +541,12 @@ pub enum DataTableEvent {
     /// with Shift or the secondary modifier here.
     #[args(event)]
     RowPress(DataTablePress),
+    /// The mouse pressed or dragged across data cells. Both targets use data indexes;
+    /// `extend` is true when Shift was held to extend from the existing anchor.
+    #[args(start, end, extend)]
+    CellDrag(DataTableTarget, DataTableTarget, bool),
+    /// Copy was requested for the app-owned cell selection.
+    CopySelection,
     /// A title was pressed (not its sort button, and not a drag that moved
     /// the column). With `selectOnModifierPress` off, a press with Shift or
     /// the secondary modifier leaves the table's selection and the app

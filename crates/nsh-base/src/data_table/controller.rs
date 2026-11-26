@@ -125,6 +125,9 @@ pub(crate) struct Dt {
     pub(crate) cell_marks: Signal<CellMarks>,
     /// Row selection and row menu target; unchanged on cell/column selection.
     pub(crate) row_marks: Signal<RowMarks>,
+    // Native scroll reports can arrive several wheel events behind.
+    pub(super) wheel_x: Signal<Option<Points>>,
+    pub(super) wheel_y: Signal<Option<Points>>,
     pub(crate) scroll_x: Signal<Points>,
     pub(crate) scroll_y: Signal<Points>,
     pub(crate) viewport: Signal<Size<Points>>,
@@ -134,6 +137,8 @@ pub(crate) struct Dt {
     pub(crate) hover: Signal<Option<usize>>,
     pub(crate) focused: Signal<bool>,
     pub(crate) column_drag: Signal<Option<MoveDrag>>,
+    /// The column and proposed width while the resize guide is visible.
+    pub(crate) resize_guide: Signal<Option<(usize, f32)>>,
     pub(crate) vscroll: ElementRef,
     pub(crate) hscroll: ElementRef,
     pub(crate) strip: ElementRef,
@@ -232,6 +237,8 @@ impl Dt {
             data_rev: signal(0),
             cell_marks: signal((None, None, None)),
             row_marks: signal((None, None)),
+            wheel_x: signal(None),
+            wheel_y: signal(None),
             scroll_x: signal(Points::ZERO),
             scroll_y: signal(Points::ZERO),
             viewport: signal(Size::default()),
@@ -239,6 +246,7 @@ impl Dt {
             hover: signal(None),
             focused: signal(false),
             column_drag: signal(None),
+            resize_guide: signal(None),
             vscroll: element_ref(),
             hscroll: element_ref(),
             strip: element_ref(),
@@ -1045,6 +1053,11 @@ impl Dt {
     /// Explicit desktop drags (the web scrollbar) use the whole range;
     /// wheels use the local anchor. Both start from the content now shown.
     pub(crate) fn drag_started(&self, horizontal: bool, offset: Point<Points>) {
+        if horizontal {
+            self.wheel_x.set(None);
+        } else {
+            self.wheel_y.set(None);
+        }
         if !self.web_desktop {
             return;
         }
@@ -1082,8 +1095,37 @@ impl Dt {
         self.rest();
     }
 
+    /// The two axes of one touchpad event move the same viewport together.
+    pub(super) fn pan_by_wheel(&self, event: &nsh_core::WheelEvent) {
+        let g = untracked(|| self.geo());
+        let delta = event.delta.points(px(g.row_height));
+        let advance =
+            |axis: &Axis, by: Points, pending: Signal<Option<Points>>, current: Signal<Points>| {
+                if by == Points::ZERO {
+                    return None;
+                }
+                let from = pending
+                    .get_untracked()
+                    .unwrap_or_else(|| current.get_untracked());
+                let to =
+                    axis.scroll_points(axis.content_offset(f64::from(from.0)) + f64::from(by.0));
+                if to == from {
+                    return None;
+                }
+                pending.set(Some(to));
+                Some(to)
+            };
+        if let Some(x) = advance(&g.x, delta.x, self.wheel_x, self.scroll_x) {
+            self.hscroll.scroll_to(point(x, Points::ZERO), false);
+        }
+        if let Some(y) = advance(&g.y, delta.y, self.wheel_y, self.scroll_y) {
+            self.vscroll.scroll_to(point(Points::ZERO, y), false);
+        }
+    }
+
     /// Scrolls the rows to content offset `content` at the top.
     pub(super) fn scroll_rows_to(&self, g: &Geo, content: f64, animated: bool) {
+        self.wheel_y.set(None);
         let y = self.offset_to(&g.y, g.cy, content, animated, self.anchor_y, self.scroll_y);
         self.vscroll
             .scroll_to(Point { x: Points::ZERO, y }, animated);
@@ -1092,6 +1134,7 @@ impl Dt {
     /// Scrolls the scrolling columns to content offset `content` at the
     /// start.
     fn scroll_columns_to(&self, g: &Geo, content: f64, animated: bool) {
+        self.wheel_x.set(None);
         let x = self.offset_to(&g.x, g.cx, content, animated, self.anchor_x, self.scroll_x);
         self.hscroll
             .scroll_to(Point { x, y: Points::ZERO }, animated);
@@ -1193,6 +1236,116 @@ impl Dt {
             column,
             header: false,
         }
+    }
+
+    pub(crate) fn drag_cell_at(&self, position: Point<Points>) -> Option<DataTableTarget> {
+        let hit = self.target_at(position);
+        let row = hit.row?;
+        let column = hit.column?;
+        (!hit.header && self.selectable(column)).then_some(DataTableTarget {
+            row: Some(row as u32),
+            column: Some(column as u32),
+        })
+    }
+
+    /// Viewport-relative pointer coordinates from a `hit_view` content point.
+    pub(crate) fn drag_viewport_point(&self, position: Point<Points>) -> Point<Points> {
+        Point {
+            x: position.x - self.scroll_x.get_untracked(),
+            y: position.y - self.scroll_y.get_untracked(),
+        }
+    }
+
+    /// Resolves a viewport-relative pointer to the nearest selectable data cell,
+    /// clamping outside the table bounds so drags never stall at headers or edges.
+    pub(crate) fn drag_cell_at_viewport(&self, viewport: Point<Points>) -> Option<DataTableTarget> {
+        let g = untracked(|| self.geo());
+        self.drag_cell_at_offsets(viewport, &g, g.cx, g.cy)
+    }
+
+    fn drag_cell_at_offsets(
+        &self,
+        viewport: Point<Points>,
+        g: &Geo,
+        cx: f64,
+        cy: f64,
+    ) -> Option<DataTableTarget> {
+        let row_count = self.row_count();
+        if row_count == 0 {
+            return None;
+        }
+        let raw_row = ((cy + viewport.y.0 as f64) / g.row_height as f64).floor();
+        let row = (raw_row.max(0.0) as usize).min(row_count - 1);
+        let col_view = g.columns_view();
+        let col_x = (viewport.x.0 as f64 - g.lead as f64).clamp(0.0, (col_view - 0.5).max(0.0));
+        let column = {
+            let st = self.st.borrow();
+            let display = st
+                .columns
+                .display_at(col_x, cx, col_view)
+                .or_else(|| st.columns.len().checked_sub(1))?;
+            st.columns.def(display)
+        };
+        self.selectable(column).then_some(DataTableTarget {
+            row: Some(row as u32),
+            column: Some(column as u32),
+        })
+    }
+
+    /// Whether a viewport-relative pointer is outside the scroll area and should auto-scroll.
+    pub(crate) fn drag_needs_auto_scroll(&self, viewport: Point<Points>) -> bool {
+        let g = untracked(|| self.geo());
+        let vx = viewport.x.0 as f64;
+        let vy = viewport.y.0 as f64;
+        let lead = g.lead as f64;
+        let right = lead + g.x.viewport;
+        let bottom = g.y.viewport;
+        vx < lead || vx > right - 8.0 || vy < 0.0 || vy > bottom - 8.0
+    }
+
+    /// Advances scroll by one frame while dragging past an edge and returns the new target cell.
+    pub(crate) fn drag_auto_scroll(&self, viewport: Point<Points>) -> Option<DataTableTarget> {
+        let g = untracked(|| self.geo());
+        let vx = viewport.x.0 as f64;
+        let vy = viewport.y.0 as f64;
+        let lead = g.lead as f64;
+        let right = lead + g.x.viewport;
+        let bottom = g.y.viewport;
+
+        let dx = if vx < lead {
+            -((lead - vx) * 0.45).clamp(6.0, 36.0)
+        } else if vx > right - 8.0 {
+            ((vx - (right - 8.0)) * 0.45).clamp(6.0, 36.0)
+        } else {
+            0.0
+        };
+        let dy = if vy < 0.0 {
+            -((-vy) * 0.45).clamp(6.0, 36.0)
+        } else if vy > bottom - 8.0 {
+            ((vy - (bottom - 8.0)) * 0.45).clamp(6.0, 36.0)
+        } else {
+            0.0
+        };
+        if dx == 0.0 && dy == 0.0 {
+            return None;
+        }
+
+        let max_cx = (g.x.extent() - g.x.viewport).max(0.0);
+        let max_cy = (g.y.extent() - g.y.viewport).max(0.0);
+        let next_cx = (g.cx + dx).clamp(0.0, max_cx);
+        let next_cy = (g.cy + dy).clamp(0.0, max_cy);
+        let moved_x = (next_cx - g.cx).abs() > 0.5;
+        let moved_y = (next_cy - g.cy).abs() > 0.5;
+        if !moved_x && !moved_y {
+            return None;
+        }
+        if moved_x {
+            self.scroll_columns_to(&g, next_cx, false);
+        }
+        if moved_y {
+            self.scroll_rows_to(&g, next_cy, false);
+        }
+        self.drag_cell_at_offsets(viewport, &g, next_cx, next_cy)
     }
 
     /// A press (or tap) of the body, at `press.position` in the hit layer's
@@ -1523,6 +1676,17 @@ impl Dt {
         let Some((def, from)) = *self.resizing.borrow() else {
             return;
         };
+        if self.props.defer_column_resize.get_untracked() {
+            let width = {
+                let st = self.st.borrow();
+                if def >= st.columns.len() {
+                    return;
+                }
+                st.columns.clamped_width(def, from + offset.0)
+            };
+            self.resize_guide.set(Some((def, width)));
+            return;
+        }
         self.set_width(def, from + offset.0, true);
         // As gpui-component's: the edge being dragged stays in view, the
         // table scrolling as it passes the viewport's end.
@@ -1554,9 +1718,15 @@ impl Dt {
     /// The drag ended at `offset`. A press that did not move the handle,
     /// twice in a row, fits the column.
     pub(crate) fn resize_end(&self, offset: Points) {
-        let Some((def, _)) = self.resizing.borrow_mut().take() else {
+        let Some((def, from)) = self.resizing.borrow_mut().take() else {
             return;
         };
+        if self.props.defer_column_resize.get_untracked() {
+            self.resize_guide.set(None);
+            if offset.0 != 0.0 && self.set_width(def, from + offset.0, true).is_some() {
+                self.reveal_trailing_edge(def);
+            }
+        }
         if offset.0.abs() > MOVE_SLOP {
             *self.handle_tap.borrow_mut() = None;
             return;
@@ -1793,7 +1963,9 @@ impl Dt {
     }
 
     pub(crate) fn copy_selection(&self) {
-        if let Some(text) = self.selection_text() {
+        if self.props.custom_cell_selection.get_untracked() {
+            self.cx.emit(DataTableEvent::CopySelection);
+        } else if let Some(text) = self.selection_text() {
             drop(set_clipboard(text));
         }
     }
