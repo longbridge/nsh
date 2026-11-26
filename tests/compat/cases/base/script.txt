@@ -4670,6 +4670,19 @@ covers [nsh/base] moveTableColumn
 covers [nsh/base] setColumnWidth
 covers [nsh/base] setRowHeight
 
+# base-rich-editor-table-grip
+# A tap in a cell shows its column's grip on the table's top border, just
+# above the cell's text; a tap on the grip selects the column and reports it.
+tap id:case-base-rich-editor-table-grip
+expect GripPress none
+tap text:a1
+# Past the double-tap window, so the grip's tap is a single one.
+wait 600
+touch start text:a1 7 -4
+touch end
+expect GripPress 7 - 0 true cell
+covers [events] RichEditor.onTableGripPress
+
 # base-rich-editor-extensions
 tap id:case-base-rich-editor-extensions
 tap text:RunExtensions

@@ -201,6 +201,27 @@ impl RichEditorSelection {
     }
 }
 
+/// A press of a table's row or column grip (`onTableGripPress`): pressed and
+/// let go without dragging, after the press selected that row or column. A
+/// drag moves the row or column instead and reports nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct RichEditorTableGripPress {
+    /// The position before the table, the `table` the table commands take
+    /// (`moveTableRow`, `setColumnWidth`).
+    pub table: u32,
+    /// The row, for a row's grip.
+    #[prop(skip_none)]
+    pub row: Option<u32>,
+    /// The column, for a column's grip.
+    #[prop(skip_none)]
+    pub column: Option<u32>,
+    /// Where the grip was pressed, in the root view.
+    pub page_position: Point<Points>,
+    /// The grip's box in the root view: what a menu is placed against.
+    pub page_bounds: Bounds<Points>,
+}
+
 /// The events of a [`RichEditor`].
 #[derive(Debug, Clone, PartialEq, Event)]
 #[non_exhaustive]
@@ -240,6 +261,11 @@ pub enum RichEditorEvent {
     /// picked suggestion) reports again, so this is a sign of typing, not a
     /// count of characters.
     ReadonlyInput,
+    /// A table's row or column grip was pressed and let go without
+    /// dragging, after the press selected its row or column: where the app
+    /// opens its own menu for that row or column.
+    #[args(event)]
+    TableGripPress(RichEditorTableGripPress),
 }
 
 /// The methods of a [`RichEditor`]'s ref.

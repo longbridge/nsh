@@ -665,6 +665,20 @@ While the document can be edited:
 - The table the selection is in shows grips (`tableGrip`) on its top border over each column and on its left border
   beside each row. Pressing one selects that column or row; dragging it on desktops shows where it drops
   (`tableDropIndicator`) and moves it there on release.
+- A grip pressed and let go without dragging (a tap on touch screens) calls `onTableGripPress` after it selected its
+  column or row, with `{ table, row, column, pagePosition, pageBounds }`: `table` is the position before the table,
+  `row` is set for a row's grip and `column` for a column's, and `pageBounds` is the grip's box in the root view, where
+  the app opens its own menu for that row or column. A drag moves the row or column and does not call it, nor does a
+  release after the grip's table or line went away.
+
+```tsx
+<RichEditor
+  editor={editor}
+  onTableGripPress={({ table, row, column, pageBounds }) =>
+    openLineMenu({ table, row, column, anchor: pageBounds })
+  }
+/>
+```
 
 ```tsx
 <RichEditor
