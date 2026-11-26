@@ -75,9 +75,9 @@ const SHADER_GATE: &str = "nsh_feature_shader";
 const SHADER_MARK: &str = nsh_core::element::__private::SHADER_USE_MARKER;
 
 /// The gates of `wasm`, a Rust app's linkable runtime, the app does not
-/// need: left out of a runtime wasm-bindgen runs on with the code only they
-/// reach, as `nsh package` splits it (`web::link`), rather than published
-/// as side modules no page loads.
+/// need: left out with the code only they reach, as `nsh package` splits
+/// it (`web::app_split`), rather than published as side modules no page
+/// loads.
 ///
 /// - The `nsh_part_*` gates go when the app makes no component by name
 ///   (every one stays when it does: a part is loaded when its first
@@ -800,7 +800,7 @@ fn read_u32(bytes: &[u8]) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use wasmparser::Validator;
 
     use super::*;
@@ -815,7 +815,7 @@ mod tests {
 
     /// [`module`] with `gate` the name of function 0 (`b`) and `callee` that
     /// of function 2 (`c`).
-    fn module_named(gate: &str, callee: &str) -> Vec<u8> {
+    pub(in crate::web) fn module_named(gate: &str, callee: &str) -> Vec<u8> {
         fn section(out: &mut Vec<u8>, id: u8, contents: &[u8]) {
             out.push(id);
             put_uleb(out, contents.len() as u64);
@@ -958,8 +958,8 @@ mod tests {
         assert_eq!(read_sleb5(&side.bodies[0][9..]), 1024);
     }
 
-    /// `wasm` split without its [`unused_gates`], as `web::link` leaves
-    /// them out.
+    /// `wasm` split without its [`unused_gates`], as `web::app_split`
+    /// leaves them out.
     fn pruned(wasm: &[u8]) -> Vec<u8> {
         let unused = unused_gates(wasm).unwrap();
         assert!(!unused.is_empty());
