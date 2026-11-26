@@ -78,7 +78,13 @@ fn destination_changed(surface: &Rc<Surface>, id: NodeId, enabled: bool) {
 }
 
 fn install(surface: &Rc<Surface>) {
-    let controller = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    // Wayland compositors may pre-select Move for a file-manager drag before
+    // we answer; a Copy-only target then never matches and GTK rejects the
+    // whole drag. Take both and prefer Copy (see `action`).
+    let controller = gtk::DropTarget::new(
+        gdk::FileList::static_type(),
+        gdk::DragAction::COPY | gdk::DragAction::MOVE,
+    );
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);
     controller.set_preload(true);
     let weak = Rc::downgrade(surface);
@@ -88,7 +94,7 @@ fn install(surface: &Rc<Surface>) {
                 .value()
                 .map(|value| file_uris(&value))
                 .unwrap_or_default();
-            update(&surface, x, y)
+            action(update(&surface, x, y), offered(controller))
         })
     });
     // Preloading is asynchronous: report a stationary drag as soon as its
@@ -101,9 +107,10 @@ fn install(surface: &Rc<Surface>) {
         }
     });
     let weak = Rc::downgrade(surface);
-    controller.connect_motion(move |_, x, y| {
-        weak.upgrade()
-            .map_or(gdk::DragAction::empty(), |surface| update(&surface, x, y))
+    controller.connect_motion(move |controller, x, y| {
+        weak.upgrade().map_or(gdk::DragAction::empty(), |surface| {
+            action(update(&surface, x, y), offered(controller))
+        })
     });
     let weak = Rc::downgrade(surface);
     controller.connect_leave(move |_| {
@@ -123,18 +130,36 @@ fn install(surface: &Rc<Surface>) {
     *surface.file_drop.controller.borrow_mut() = Some(controller);
 }
 
-fn update(surface: &Surface, x: f64, y: f64) -> gdk::DragAction {
+/// Moves the drag to `x`, `y`: whether a view there takes drops. Negotiation
+/// accepts while the list is loading; entry always carries a local file list.
+fn update(surface: &Surface, x: f64, y: f64) -> bool {
     surface.file_drop.position.set(Some((x, y)));
     let target = input::file_drop_target(surface, x as f32, y as f32);
-    let action = if target.is_some() {
-        gdk::DragAction::COPY
-    } else {
-        gdk::DragAction::empty()
-    };
-    // Negotiate Copy while loading; entry always carries a local file list.
+    let accepts = target.is_some();
     let ready = !surface.file_drop.uris.borrow().is_empty();
     set_target(surface, if ready { target } else { None });
-    action
+    accepts
+}
+
+fn offered(controller: &gtk::DropTarget) -> gdk::DragAction {
+    controller
+        .current_drop()
+        .map_or(gdk::DragAction::COPY, |drop| drop.actions())
+}
+
+/// The action to answer with: Copy whenever the drag allows it, so the source
+/// keeps its files. Move only when the compositor already chose it; answering
+/// Copy and Move then lets it renegotiate to Copy.
+fn action(accepts: bool, offered: gdk::DragAction) -> gdk::DragAction {
+    if !accepts {
+        gdk::DragAction::empty()
+    } else if offered.contains(gdk::DragAction::COPY) {
+        gdk::DragAction::COPY
+    } else if offered.contains(gdk::DragAction::MOVE) {
+        gdk::DragAction::MOVE
+    } else {
+        gdk::DragAction::empty()
+    }
 }
 
 fn set_target(surface: &Surface, target: Option<NshView>) {
@@ -255,7 +280,7 @@ mod tests {
                 gtk::gio::File::for_uri("https://example.com/remote.png"),
             ])
             .to_value();
-            assert_eq!(update(&surface, 10.0, 10.0), gdk::DragAction::COPY);
+            assert!(update(&surface, 10.0, 10.0));
             assert!(surface.file_drop.target.borrow().is_none());
             preloaded(&surface, &controller, Some(files.clone()));
             assert_eq!(
@@ -279,5 +304,16 @@ mod tests {
             assert!(surface.file_drop.uris.borrow().is_empty());
             reset(&surface);
         });
+    }
+
+    #[test]
+    fn answers_copy_when_offered_and_move_only_when_preselected() {
+        use gdk::DragAction as A;
+        assert_eq!(action(true, A::COPY | A::MOVE | A::ASK), A::COPY);
+        assert_eq!(action(true, A::COPY), A::COPY);
+        // Wayland: the compositor pre-selected Move before we answered.
+        assert_eq!(action(true, A::MOVE), A::MOVE);
+        assert_eq!(action(true, A::LINK), A::empty());
+        assert_eq!(action(false, A::COPY | A::MOVE), A::empty());
     }
 }
