@@ -32,34 +32,34 @@
     }
   },
   "linux": {
-    "startup_ms": 596,
+    "startup_ms": 575,
     "startup_runs": [
-      739,
-      645,
-      576,
-      596,
-      585
+      571,
+      575,
+      595,
+      563,
+      579
     ],
     "animation": {
       "hz": 60,
       "budget_ms": 16.67,
-      "frame_p95_ms": 1.96,
-      "frame_max_ms": 2.36,
-      "gap_p50_ms": 16.65,
-      "gap_p95_ms": 17.21,
-      "gap_max_ms": 18.69,
+      "frame_p95_ms": 1.62,
+      "frame_max_ms": 2.57,
+      "gap_p50_ms": 16.66,
+      "gap_p95_ms": 17.05,
+      "gap_max_ms": 19.17,
       "over_pct": 0,
       "seconds": 15
     },
     "scroll": {
       "hz": 60.0,
       "budget_ms": 16.67,
-      "frame_p95_ms": 10.83,
-      "frame_max_ms": 20.66,
-      "gap_p50_ms": 16.65,
-      "gap_p95_ms": 23.04,
-      "gap_max_ms": 34.82,
-      "over_pct": 2,
+      "frame_p95_ms": 2.24,
+      "frame_max_ms": 3.71,
+      "gap_p50_ms": 16.66,
+      "gap_p95_ms": 17.36,
+      "gap_max_ms": 18.43,
+      "over_pct": 0,
       "seconds": 20
     }
   }
