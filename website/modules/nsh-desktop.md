@@ -230,7 +230,7 @@ function focusedWindow(): WindowRef | null;
 ```tsx
 function SaveButton() {
   const win = currentWindow(); // while rendering
-  return <Button onPress={() => save().then(() => win.close())}>Save</Button>;
+  return <Button onPress={() => save().then(() => win.close())}><Text>Save</Text></Button>;
 }
 ```
 
