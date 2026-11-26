@@ -21,7 +21,7 @@ use serde_json::Value;
 
 use super::{
     controller::{BlockItem, Rv},
-    geometry::{DOC, InlineMap, Run, slot_id},
+    geometry::{COMPOSITION_SIDE, DOC, InlineMap, Run, slot_id},
     node_view::{MarkView, NodeView, NodeViewCx},
     parts::{self, Part},
     table,
@@ -1161,15 +1161,16 @@ fn inline_of(
             _ => {}
         }
     }
-    // After the caret's position, so the caret (and the input method's
-    // candidates at it) stays at the composition's start.
+    // After the caret's position, so the caret's offset (and the input
+    // method's candidates at it) stays at the composition's start; the
+    // drawn caret goes past it (`Geometry::caret_glyph_rect`).
     if let Some((pos, text)) = composition
         && pos >= start
         && pos <= end
         && !text.is_empty()
     {
         cuts.push(pos - start);
-        widgets.push((pos - start, i32::MAX, Err(text.to_owned())));
+        widgets.push((pos - start, COMPOSITION_SIDE, Err(text.to_owned())));
     }
     crate::sort::sort_by_key(&mut widgets, |w| (w.0, w.1));
     let mut out = Inline::default();
@@ -1850,7 +1851,7 @@ fn caret(rv: Rv) -> impl IntoElement {
         rv.sel_rev.get();
         rv.layout_rev.get();
         rv.doc_rev.get();
-        if rv.composition.get().is_some() || !rv.props.editable.get() {
+        if !rv.props.editable.get() {
             return None;
         }
         let empty_text = {
