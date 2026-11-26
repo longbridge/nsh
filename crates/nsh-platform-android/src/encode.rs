@@ -812,11 +812,26 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(61);
                         e.int(id as i32);
                     }
-                    // Answered by the sink (`host::answer_clipboard_reads`);
-                    // images are not written to Android's clipboard.
-                    Command::ReadClipboardImage { .. }
-                    | Command::ReadClipboardFiles { .. }
-                    | Command::SetClipboardImage(_) => e.int(-1),
+                    // `ClipboardReads.java`: the clip's first image
+                    // (`content:` URI) as a `data:` URI and its size, read
+                    // off the main thread.
+                    Command::ReadClipboardImage { id, has_only } => {
+                        e.int(67);
+                        e.int(id as i32);
+                        e.bool(has_only);
+                    }
+                    // `ClipboardReads.java`: the clip's `content:` URIs,
+                    // copied into the app's cache, as `file:` URLs.
+                    Command::ReadClipboardFiles { id } => {
+                        e.int(66);
+                        e.int(id as i32);
+                    }
+                    // `ClipboardReads.writeImage`: the image, saved to the
+                    // cache, as a `content:` URI the app's FilesProvider serves.
+                    Command::SetClipboardImage(uri) => {
+                        e.int(68);
+                        e.string(uri);
+                    }
                     // `Picker.java`: the request, the limit, the longest
                     // side (0: any), the quality (-1: none), the format.
                     Command::PickImages { id, request } => {

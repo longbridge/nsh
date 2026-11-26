@@ -1669,16 +1669,13 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
-/// Android's backend, and a platform built outside NSH that says so
-/// (`Environment::clipboard_images`), hold text only on the clipboard.
+/// A platform built outside NSH that says so
+/// (`Environment::clipboard_images`) holds text only on the clipboard.
 #[test]
 fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
-    // Android by its OS alone, as an environment that names only the OS
-    // has it; a platform built outside NSH by what it says.
-    for (os, platform, clipboard_images) in [
-        (nsh_engine::Os::Android, None, None),
-        (nsh_engine::Os::Ios, Some("miniprogram"), Some(false)),
-    ] {
+    {
+        let (os, platform, clipboard_images) =
+            (nsh_engine::Os::Ios, Some("miniprogram"), Some(false));
         let (_engine, rx) = start_in(
             CLIPBOARD_IMAGE_TEXT_ONLY,
             Environment {
@@ -1712,6 +1709,37 @@ fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
         assert!(batches.iter().any(|b| shows(b, wanted)), "{os:?} {wanted}");
         assert_eq!(commands, 0, "an image call reached the platform on {os:?}");
     }
+}
+
+/// Android's backend reads and writes clipboard images (`ClipboardReads.java`):
+/// its image calls reach the platform.
+#[test]
+fn android_clipboard_images_reach_the_platform() {
+    let (_engine, rx) = start_in(
+        CLIPBOARD_IMAGE_TEXT_ONLY,
+        Environment {
+            os: nsh_engine::Os::Android,
+            ..Environment::default()
+        },
+    );
+    let (mut wrote, mut read) = (false, false);
+    until(&rx, |batch| {
+        for item in &batch.items {
+            match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::SetClipboardImage(_),
+                } => wrote = true,
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::ReadClipboardImage { .. },
+                } => read = true,
+                _ => {}
+            }
+        }
+        wrote && read
+    });
+    assert!(wrote && read, "writeImage {wrote}, readImage {read}");
 }
 
 const CLIPBOARD_REFUSED: &str = r#"import { mount, signal, Text } from "nsh";
