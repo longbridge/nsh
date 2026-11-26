@@ -81,18 +81,18 @@ use objc2_app_kit::{
     NSControlTextEditingDelegate, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags,
     NSEventPhase, NSEventType, NSFocusRingType, NSFontAttributeName,
     NSForegroundColorAttributeName, NSGestureRecognizer, NSGestureRecognizerState, NSLineBreakMode,
-    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSPasteboard, NSResponder,
-    NSScrollElasticity, NSScrollView, NSSecureTextField, NSSecureTextFieldCell, NSSpellChecker,
-    NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldCell, NSTextFieldDelegate,
-    NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
-    NSView, NSWritingDirection,
+    NSMutableParagraphStyle, NSParagraphStyle, NSParagraphStyleAttributeName, NSPasteboard,
+    NSResponder, NSScrollElasticity, NSScrollView, NSSecureTextField, NSSecureTextFieldCell,
+    NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldCell,
+    NSTextFieldDelegate, NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate,
+    NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
 };
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGPath;
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSDictionary, NSNotification, NSNotificationCenter, NSObject,
-    NSObjectProtocol, NSPoint, NSRange, NSRect, NSString, NSUndoManager,
-    NSUndoManagerDidRedoChangeNotification, NSUndoManagerDidUndoChangeNotification,
+    NSArray, NSAttributedString, NSDictionary, NSMutableDictionary, NSNotification,
+    NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect, NSString,
+    NSUndoManager, NSUndoManagerDidRedoChangeNotification, NSUndoManagerDidUndoChangeNotification,
 };
 use objc2_quartz_core::{CALayer, CAShapeLayer};
 
@@ -3152,7 +3152,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         Editor::Area {
             scroller,
             view: text,
-            ..
+            storage,
         } => {
             // A built-in bar of the app's takes the indicator's place; the
             // text still scrolls with the wheel, the keys and the caret.
@@ -3180,7 +3180,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
                 correct && NSSpellChecker::isAutomaticTextReplacementEnabled(),
             );
             let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
-            text.setDefaultParagraphStyle(Some(&paragraph(line, align)));
+            apply_paragraph(text, storage, &paragraph(line, align, direction));
             // The space above the first line and below the last.
             text.setTextContainerInset(CGSize::new(0.0, line.inset));
             let label = &input.placeholder;
@@ -3365,16 +3365,63 @@ impl LineBox {
     }
 }
 
-/// A text view's paragraph style: alignment and lines.
-fn paragraph(line: LineBox, align: NSTextAlignment) -> Retained<NSMutableParagraphStyle> {
+/// A text view's paragraph style: alignment, writing direction and lines.
+fn paragraph(
+    line: LineBox,
+    align: NSTextAlignment,
+    direction: NSWritingDirection,
+) -> Retained<NSMutableParagraphStyle> {
     let style = NSMutableParagraphStyle::new();
     style.setAlignment(align);
+    style.setBaseWritingDirection(direction);
     if line.fragment > 0.0 {
         style.setMinimumLineHeight(line.fragment);
         style.setMaximumLineHeight(line.fragment);
         style.setLineSpacing(line.spacing);
     }
     style
+}
+
+/// Applies `style` to a multiline text view's defaults, typing attributes and
+/// existing storage. `setDefaultParagraphStyle:` updates neither
+/// `typingAttributes` nor characters already in the storage, so typing into an
+/// empty view or at index 0 (with no preceding character to inherit from)
+/// otherwise falls back to `typingAttributes` and resets the paragraph's line
+/// height to AppKit's default.
+fn apply_paragraph(text: &NSTextView, storage: &NSTextStorage, style: &NSParagraphStyle) {
+    text.setDefaultParagraphStyle(Some(style));
+    let typing = NSMutableDictionary::dictionaryWithDictionary(&text.typingAttributes());
+    // SAFETY: `NSParagraphStyleAttributeName` is an immutable AppKit attribute
+    // key taking an `NSParagraphStyle`, and the resulting dictionary stays
+    // valid typing attributes for the text view.
+    unsafe {
+        typing.insert(NSParagraphStyleAttributeName, style);
+        text.setTypingAttributes(&typing);
+    }
+    let len = storage.length();
+    if len > 0 {
+        let whole = NSRange::new(0, len);
+        let mut effective = NSRange::new(0, 0);
+        // SAFETY: index 0 is within the non-empty storage and `effective` is a
+        // valid out-pointer.
+        let matches = unsafe {
+            storage.attribute_atIndex_effectiveRange(
+                NSParagraphStyleAttributeName,
+                0,
+                &mut effective,
+            )
+        }
+        .is_some_and(|current| effective == whole && style.isEqual(Some(&current)));
+        if !matches {
+            // SAFETY: `whole` covers the storage and `style` is a valid
+            // `NSParagraphStyle`.
+            unsafe {
+                storage.beginEditing();
+                storage.addAttribute_value_range(NSParagraphStyleAttributeName, style, whole);
+                storage.endEditing();
+            }
+        }
+    }
 }
 
 /// The placeholder's color: the config's, else the text color at half its
@@ -4353,7 +4400,9 @@ mod tests {
                 inset: 3.0,
             }
         );
-        let style = paragraph(line, NSTextAlignment::Left);
+        let style = paragraph(line, NSTextAlignment::Left, NSWritingDirection::Natural);
+        assert_eq!(style.alignment(), NSTextAlignment::Left);
+        assert_eq!(style.baseWritingDirection(), NSWritingDirection::Natural);
         assert_eq!(style.minimumLineHeight(), 18.0);
         assert_eq!(style.maximumLineHeight(), 18.0);
         assert_eq!(style.lineSpacing(), 6.0);
@@ -4369,7 +4418,15 @@ mod tests {
 
     #[test]
     fn no_line_height_leaves_the_fonts_lines() {
-        let style = paragraph(LineBox::new(0.0, 18.0), NSTextAlignment::Left);
+        let style = paragraph(
+            LineBox::new(0.0, 18.0),
+            NSTextAlignment::Left,
+            NSWritingDirection::RightToLeft,
+        );
+        assert_eq!(
+            style.baseWritingDirection(),
+            NSWritingDirection::RightToLeft
+        );
         assert_eq!(style.minimumLineHeight(), 0.0);
         assert_eq!(style.maximumLineHeight(), 0.0);
         assert_eq!(style.lineSpacing(), 0.0);

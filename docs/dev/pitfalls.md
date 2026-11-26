@@ -1074,6 +1074,11 @@ Things that were found the hard way. Read the section of the area you change bef
   the text (15 pt system font, 24 pt lines: `NSTextInsertionIndicator` 24 tall, text 18 tall at the fragment's bottom). A
   fragment of the font's height with `lineSpacing`, and half of it as the container's inset, gives a caret as tall as
   the text and text in the middle of the same 24 pt lines (`LineBox`).
+- **`NSTextView::setDefaultParagraphStyle:` updates neither `typingAttributes` nor existing `textStorage` attributes**:
+  typing into an empty multiline input or at index 0 (where there is no preceding character to inherit attributes from)
+  falls back to `typingAttributes` and resets the whole paragraph's line height to AppKit's default; changing
+  `lineHeight`, alignment or writing direction on existing text likewise leaves old attributes in storage until
+  reapplied (`text_input.rs`, `apply_paragraph`).
 
 ## Testing on simulators and emulators
 
