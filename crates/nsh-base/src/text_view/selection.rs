@@ -509,8 +509,8 @@ impl Cut {
                 })
             }
             Block::Table(table) => {
-                let rows: Vec<&Vec<TableCell>> =
-                    std::iter::once(&table.head).chain(&table.rows).collect();
+                let has_head = !table.head.is_empty();
+                let rows: Vec<&Vec<TableCell>> = table.all_rows().collect();
                 let mut kept = Vec::new();
                 for (i, row) in rows.iter().enumerate() {
                     if i > 0 {
@@ -539,7 +539,7 @@ impl Cut {
                 // The header stays a header; rows without it keep the
                 // table's own header.
                 let mut kept = kept.into_iter();
-                let head = if kept.as_slice()[0].0 == 0 {
+                let head = if has_head && kept.as_slice()[0].0 == 0 {
                     kept.next().map(|(_, c)| c).unwrap_or_default()
                 } else {
                     table.head.clone()
@@ -754,7 +754,16 @@ fn md_block(block: &Block, indent: &str, out: &mut String) {
                     out.push_str(" |");
                 }
             };
-            row(&table.head, out);
+            // Markdown has no table without a header: a table with none
+            // takes its first row as one.
+            let (head, body) = match table.head.is_empty() {
+                true => table
+                    .rows
+                    .split_first()
+                    .map_or((&[][..], &[][..]), |(h, b)| (h.as_slice(), b)),
+                false => (table.head.as_slice(), table.rows.as_slice()),
+            };
+            row(head, out);
             out.push('\n');
             out.push_str(indent);
             out.push('|');
@@ -766,7 +775,7 @@ fn md_block(block: &Block, indent: &str, out: &mut String) {
                     ColumnAlign::Right => " --: |",
                 });
             }
-            for r in &table.rows {
+            for r in body {
                 out.push('\n');
                 out.push_str(indent);
                 row(r, out);
@@ -1029,9 +1038,12 @@ fn html_block(block: &Block, out: &mut String) {
                 }
                 out.push_str("</tr>");
             };
-            out.push_str("<table><thead>");
-            row(&table.head, "th", out);
-            out.push_str("</thead>");
+            out.push_str("<table>");
+            if !table.head.is_empty() {
+                out.push_str("<thead>");
+                row(&table.head, "th", out);
+                out.push_str("</thead>");
+            }
             if !table.rows.is_empty() {
                 out.push_str("<tbody>");
                 for r in &table.rows {
@@ -1406,6 +1418,34 @@ mod tests {
         assert_eq!(
             sel(md, "3\t4", TextSelectionFormat::Markdown),
             "| a | b |\n| --- | --- |\n| 3 | 4 |"
+        );
+    }
+
+    /// A table without a header copies without one: no empty header row
+    /// in its HTML, its first row as Markdown's (which needs one), and
+    /// its plain text has no blank line first.
+    #[test]
+    fn headless_table_copies() {
+        let html = "<table><tr><td>a</td><td>b</td></tr><tr><td>1</td><td>2</td></tr></table>";
+        let doc = Parser::new().html(html);
+        assert_eq!(doc.plain_text(), "a\tb\n1\t2");
+        assert_eq!(
+            to_html(&doc),
+            "<table><tbody><tr><td>a</td><td>b</td></tr><tr><td>1</td><td>2</td></tr></tbody></table>"
+        );
+        assert_eq!(to_markdown(&doc), "| a | b |\n| --- | --- |\n| 1 | 2 |");
+        let reported = Reported {
+            text: "1\t2".to_owned(),
+            start: None,
+        };
+        assert_eq!(
+            selected(
+                &doc,
+                &Source::Html(html.to_owned()),
+                &reported,
+                TextSelectionFormat::Markdown
+            ),
+            "| 1 | 2 |\n| --- | --- |"
         );
     }
 
