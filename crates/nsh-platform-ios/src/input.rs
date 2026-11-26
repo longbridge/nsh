@@ -1316,8 +1316,14 @@ impl Input {
             TextAlign::Center => NSTextAlignment::Center,
             TextAlign::Right => NSTextAlignment::Right,
         };
-        // UIKit tints the caret and the selection with one color.
-        let tint = config.caret_color.or(config.selection_color).map(ui_color);
+        // UIKit tints the caret and the selection with one color. It also
+        // draws an input method's marked range and a caret of its own in
+        // the tint while composing, whatever `caretRectForPosition:` says:
+        // on a sink they would show over the editor's own drawing.
+        let tint = match is_sink(&config) {
+            true => Some(UIColor::clearColor()),
+            false => config.caret_color.or(config.selection_color).map(ui_color),
+        };
         match &self.editor {
             Editor::Line(field) => {
                 field.setFont(Some(&font));
@@ -1709,6 +1715,12 @@ fn ui_color(color: Color) -> Retained<UIColor> {
     UIColor::colorWithRed_green_blue_alpha(r, g, b, a)
 }
 
+/// Whether an input draws no caret and no text: another view's sink for
+/// typed text and input methods (an editor's), which draws them itself.
+fn is_sink(config: &InputConfig) -> bool {
+    config.caret_hidden && config.style.color.is_transparent()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1747,5 +1759,22 @@ mod tests {
     #[test]
     fn a_missing_content_type_is_none() {
         assert!(ios17_content_type(c"UITextContentTypeThatDoesNotExist").is_none());
+    }
+
+    /// Only an input without a caret and with transparent text is a sink:
+    /// an app's `caret={false}` input keeps its selection's tint.
+    #[test]
+    // InputConfig is non-exhaustive outside nsh-core.
+    #[allow(clippy::field_reassign_with_default)]
+    fn only_an_input_without_caret_or_text_is_a_sink() {
+        let mut c = InputConfig::default();
+        c.caret_hidden = true;
+        c.style.color = Color::TRANSPARENT;
+        assert!(is_sink(&c));
+        c.style.color = Color::BLACK;
+        assert!(!is_sink(&c));
+        c.style.color = Color::TRANSPARENT;
+        c.caret_hidden = false;
+        assert!(!is_sink(&c));
     }
 }
