@@ -983,13 +983,18 @@ the offered list. This reads URL metadata, not file contents.
 Each pasteboard item drops as one `Offer` (`file_drop::offer`), decided as a paste decides
 (`system::paste_item`): its local file when the app can read it where it is (`prefer_file_url`;
 a directory counts), when the item has no picture of `system::IMAGE_TYPES`, or when Finder put
-it there (its picture is the file's icon); else its first picture. The file is probed only when the
+it there (its picture is the file's icon); else its pictures, the first of their types with data
+dropping. The file is probed only when the
 item also carries a picture, so a Finder drag opens no files. Chat apps and similar sources drag
 a picture as data alone, or beside the URL of a file in their own container that other apps cannot
 read. When every item is a file, the drag drops its `uris`; else promised files (a page's image
 may carry its picture too, but the promise keeps the file's name and format); else the items drop as
-contents (`drop_contents`): pictures from their data (TIFF and BMP made PNG by `system::to_png`),
-files read where they are, directories left out. Entry reports the pictures' types without reading
+contents (`drop_contents`). The drop copies the pictures' data from the pasteboard on the main
+thread (`take`, no more pictures than a drop holds), then on a global queue reads the files where
+they are and makes TIFF and BMP pictures PNG (`system::to_png`, `contents_of`), stopping once the
+drop holds as many files as a pick does; only regular files are read (a directory, a pipe or a
+device is left out: reading a pipe may never end). `onFileDrop` comes after, on the main thread.
+Entry reports the pictures' types without reading
 their data. The drop operation is a copy, or the generic operation when the source offers no copy,
 which those sources often do (`drop_operation`); a move or a link is refused, at
 `prepareForDragOperation:` too.

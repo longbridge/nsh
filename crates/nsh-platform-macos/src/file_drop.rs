@@ -18,6 +18,7 @@ use std::{
 };
 
 use block2::RcBlock;
+use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use nsh_core::{
     EventKind, EventPayload, FileContents,
     geometry::{Point, Points, point},
@@ -284,12 +285,12 @@ pub(crate) fn perform(surface: &Surface, sender: &ProtocolObject<dyn NSDraggingI
 enum Offer {
     /// A local file or directory, by its URL.
     Uri(String),
-    /// A picture as its data: that of pasteboard item `item`, of type `kind`
-    /// (one of [`IMAGE_TYPES`]), named after the item's file if it names
-    /// one.
+    /// A picture as its data: that of pasteboard item `item`, of the first
+    /// of `kinds` (those of [`IMAGE_TYPES`] it offers, in that order) that
+    /// has data, named after the item's file if it names one.
     Picture {
         item: usize,
-        kind: &'static str,
+        kinds: Vec<&'static str>,
         name: Option<String>,
     },
 }
@@ -299,7 +300,7 @@ enum Offer {
 /// item ([`crate::system::pasted`]): its file when `readable` says this app
 /// can read it where it is (a directory counts), when the item offers no
 /// picture, or when Finder put it there (with the file's icon, no picture
-/// of it); else its first picture of [`IMAGE_TYPES`]. `readable` is only
+/// of it); else its pictures of [`IMAGE_TYPES`]. `readable` is only
 /// asked when the item also offers a picture, which spares probing each
 /// file of a Finder drag. An item with neither is left out.
 fn offer(
@@ -309,13 +310,14 @@ fn offer(
     readable: impl FnOnce(&Path) -> bool,
 ) -> Option<Offer> {
     let offers = |kind: &str| types.iter().any(|offered| offered == kind);
-    let Some(kind) = IMAGE_TYPES
+    let kinds = IMAGE_TYPES
         .iter()
         .map(|(_, kind)| *kind)
-        .find(|kind| offers(kind))
-    else {
+        .filter(|kind| offers(kind))
+        .collect::<Vec<_>>();
+    if kinds.is_empty() {
         return uri.map(Offer::Uri);
-    };
+    }
     let path = uri.as_deref().and_then(nsh_core::access::file_url_path);
     if let Some(uri) = uri
         && (offers("com.apple.finder.node")
@@ -328,7 +330,7 @@ fn offer(
         path.file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
     });
-    Some(Offer::Picture { item, kind, name })
+    Some(Offer::Picture { item, kinds, name })
 }
 
 /// What each item on `board` drops as ([`offer`]).
@@ -382,7 +384,7 @@ fn offered_types(offers: &[Offer]) -> Vec<String> {
         .iter()
         .map(|offer| match offer {
             Offer::Uri(uri) => nsh_core::platform::file_mime_type(uri).to_owned(),
-            Offer::Picture { kind, .. } => picture_type(kind).0.to_owned(),
+            Offer::Picture { kinds, .. } => picture_type(kinds[0]).0.to_owned(),
         })
         .collect()
 }
@@ -410,34 +412,81 @@ fn picture_data(kind: &str, bytes: Vec<u8>) -> Option<Vec<u8>> {
     }
 }
 
-/// The contents of `offers`, read from `board`, in their order: each
-/// picture from its data, each file from where it is. Directories and
-/// what cannot be read are left out.
-fn contents_on(board: &NSPasteboard, offers: &[Offer]) -> Vec<PickedFile> {
+/// What a drop of contents takes from the drag's pasteboard, on the main
+/// thread ([`take`]), to be read and converted off it ([`contents_of`]).
+#[derive(Debug, PartialEq)]
+enum Taken {
+    /// A file, by where it is.
+    File(PathBuf),
+    /// A picture's `bytes`, of pasteboard type `kind`, and the name it drops
+    /// under, without its extension.
+    Picture {
+        kind: &'static str,
+        stem: String,
+        bytes: Vec<u8>,
+    },
+}
+
+/// What `offers` drop from `board`, in their order: each file's path, and
+/// each picture's data of the first of its types that has some (copied
+/// here: a pasteboard is read on the main thread). Only the first `limit`
+/// pictures are copied: no more than `limit` files drop. A picture with no
+/// data is left out.
+fn take(board: &NSPasteboard, offers: &[Offer], limit: usize) -> Vec<Taken> {
     let items = board.pasteboardItems();
-    let request = FilePickRequest::new(true, 0);
-    let mut files = Vec::new();
+    let mut taken = Vec::new();
+    let mut pictures = 0;
     for (n, offer) in offers.iter().enumerate() {
         match offer {
-            Offer::Uri(uri) => {
-                let path = nsh_core::access::file_url_path(uri).filter(|path| !path.is_dir());
-                files.extend(
-                    path.map(|path| read_picked_files(&[path], &request))
-                        .unwrap_or_default(),
-                );
+            Offer::Uri(uri) => taken.extend(nsh_core::access::file_url_path(uri).map(Taken::File)),
+            Offer::Picture { .. } if pictures == limit => {}
+            Offer::Picture { item, kinds, name } => {
+                let item = items.as_ref().and_then(|items| items.iter().nth(*item));
+                let data = kinds.iter().find_map(|kind| {
+                    let data = item.as_ref()?.dataForType(&NSString::from_str(kind))?;
+                    (data.length() > 0).then(|| (*kind, data.to_vec()))
+                });
+                let Some((kind, bytes)) = data else {
+                    log::warn!("a dropped picture ({kinds:?}) has no data to read");
+                    continue;
+                };
+                pictures += 1;
+                taken.push(Taken::Picture {
+                    kind,
+                    stem: name.clone().unwrap_or_else(|| format!("image-{}", n + 1)),
+                    bytes,
+                });
             }
-            Offer::Picture { item, kind, name } => {
-                let data = items
-                    .as_ref()
-                    .and_then(|items| items.iter().nth(*item))
-                    .and_then(|item| item.dataForType(&NSString::from_str(kind)))
-                    .and_then(|data| picture_data(kind, data.to_vec()));
-                let Some(data) = data else {
-                    log::warn!("a dropped picture ({kind}) has no data to read");
+        }
+    }
+    taken
+}
+
+/// The contents of what a drop took ([`take`]), in its order, until
+/// `request`'s limit is reached: each file read where it is, each picture
+/// as [`picture_type`] says it drops. What is not a regular file
+/// (a directory, a pipe, a device, whose reading may never end) and what
+/// cannot be read or converted are left out. Off the main thread: it reads
+/// files and converts pictures.
+fn contents_of(taken: Vec<Taken>, request: &FilePickRequest) -> Vec<PickedFile> {
+    let limit = request.limit.max(1) as usize;
+    let mut files = Vec::new();
+    for taken in taken {
+        if files.len() == limit {
+            break;
+        }
+        match taken {
+            Taken::File(path) => {
+                if path.metadata().is_ok_and(|meta| meta.is_file()) {
+                    files.extend(read_picked_files(&[path], request));
+                }
+            }
+            Taken::Picture { kind, stem, bytes } => {
+                let Some(data) = picture_data(kind, bytes) else {
+                    log::warn!("a dropped picture ({kind}) cannot be read");
                     continue;
                 };
                 let (mime, ext) = picture_type(kind);
-                let stem = name.clone().unwrap_or_else(|| format!("image-{}", n + 1));
                 files.push(PickedFile::new(
                     format!("{stem}.{ext}"),
                     mime,
@@ -446,11 +495,14 @@ fn contents_on(board: &NSPasteboard, offers: &[Offer]) -> Vec<PickedFile> {
             }
         }
     }
-    finish_files(&request, files)
+    finish_files(request, files)
 }
 
 /// Drops `offers` at `x`, `y` on the view there that listens, as their
-/// contents (`files`, [`contents_on`]): whether one took them.
+/// contents (`files`): whether one takes them. What they drop is taken from
+/// `board` here ([`take`]), then read and converted on a global queue
+/// ([`contents_of`]), and `onFileDrop` gets it on the main thread, unless
+/// none of it could be read.
 fn drop_contents(
     surface: &Surface,
     x: f32,
@@ -459,22 +511,36 @@ fn drop_contents(
     offers: &[Offer],
 ) -> bool {
     let destination = input::file_drop_target(surface, x, y);
+    clear(surface);
     let Some(destination) = destination else {
-        clear(surface);
         return false;
     };
-    let files = contents_on(board, offers);
-    clear(surface);
-    if files.is_empty() {
+    let request = FilePickRequest::new(true, 0);
+    let taken = take(board, offers, request.limit as usize);
+    if taken.is_empty() {
         return false;
     }
-    let mime_types = files.iter().map(|file| file.mime.clone()).collect();
-    let contents = FileContents::new(files, mime_types, Some(point(Points(x), Points(y))));
-    surface.event(
-        destination.id(),
-        EventKind::FileDrop,
-        EventPayload::FileContents(Box::new(contents)),
-    );
+    let (id, key, at) = (destination.id(), surface.key(), point(Points(x), Points(y)));
+    DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+        DispatchQueueGlobalPriority::Default,
+    ))
+    .exec_async(move || {
+        let files = contents_of(taken, &request);
+        if files.is_empty() {
+            return;
+        }
+        let mime_types = files.iter().map(|file| file.mime.clone()).collect();
+        let contents = FileContents::new(files, mime_types, Some(at));
+        DispatchQueue::main().exec_async(move || {
+            if let Some(surface) = Surface::with_key(key) {
+                surface.event(
+                    id,
+                    EventKind::FileDrop,
+                    EventPayload::FileContents(Box::new(contents)),
+                );
+            }
+        });
+    });
     true
 }
 
@@ -825,10 +891,10 @@ mod tests {
     fn an_item_drops_its_readable_file_else_its_picture() {
         let uri = || Some("file:///tmp/chat%20app/a%20b.png".to_owned());
         let file = || Some(Offer::Uri(uri().unwrap()));
-        let picture = |kind, name: Option<&str>| {
+        let picture = |kinds: &[&'static str], name: Option<&str>| {
             Some(Offer::Picture {
                 item: 3,
-                kind,
+                kinds: kinds.to_vec(),
                 name: name.map(str::to_owned),
             })
         };
@@ -839,17 +905,17 @@ mod tests {
         };
         assert_eq!(offer(3, uri(), &types(&["public.png"]), readable), file());
         // One it cannot read drops the picture beside it, named after it,
-        // of the first type of `IMAGE_TYPES` the item offers.
+        // of the types of `IMAGE_TYPES` the item offers, in that order.
         let unreadable = |_: &Path| false;
         let offered = types(&["public.file-url", "public.tiff", "public.png"]);
         assert_eq!(
             offer(3, uri(), &offered, unreadable),
-            picture("public.png", Some("a b"))
+            picture(&["public.png", "public.tiff"], Some("a b"))
         );
         let offered = types(&["public.tiff", "public.jpeg"]);
         assert_eq!(
             offer(3, uri(), &offered, unreadable),
-            picture("public.jpeg", Some("a b"))
+            picture(&["public.jpeg", "public.tiff"], Some("a b"))
         );
         // Finder's icon of a file is no picture of it.
         let offered = types(&["com.apple.finder.node", "public.tiff"]);
@@ -863,7 +929,7 @@ mod tests {
         let offered = types(&["com.compuserve.gif", "public.utf8-plain-text"]);
         assert_eq!(
             offer(3, None, &offered, unasked),
-            picture("com.compuserve.gif", None)
+            picture(&["com.compuserve.gif"], None)
         );
         // Neither: left out.
         let offered = types(&["public.utf8-plain-text", "public.url"]);
@@ -890,7 +956,7 @@ mod tests {
         let file = |name: &str| Offer::Uri(format!("file:///tmp/{name}"));
         let picture = |kind| Offer::Picture {
             item: 1,
-            kind,
+            kinds: vec![kind],
             name: None,
         };
         let files = [file("a.txt"), file("dir/")];
@@ -1048,17 +1114,17 @@ mod tests {
             Offer::Uri(local(&folder.join("a.txt"))),
             Offer::Picture {
                 item: 1,
-                kind: "public.png",
+                kinds: vec!["public.png"],
                 name: None,
             },
             Offer::Picture {
                 item: 2,
-                kind: "public.jpeg",
+                kinds: vec!["public.jpeg", "public.tiff"],
                 name: Some("chat photo".to_owned()),
             },
             Offer::Picture {
                 item: 3,
-                kind: "public.tiff",
+                kinds: vec!["public.tiff"],
                 name: None,
             },
             Offer::Uri(local(&folder.join("dir"))),
@@ -1068,7 +1134,7 @@ mod tests {
         } else {
             Offer::Picture {
                 item: 6,
-                kind: "public.png",
+                kinds: vec!["public.png"],
                 name: Some("denied".to_owned()),
             }
         });
@@ -1087,7 +1153,8 @@ mod tests {
             ]
         );
 
-        let files = contents_on(&board.0, &offers);
+        let request = FilePickRequest::new(true, 0);
+        let files = contents_of(take(&board.0, &offers, 100), &request);
         let named = files
             .iter()
             .map(|file| (file.name.as_str(), file.mime.as_str()))
@@ -1112,6 +1179,116 @@ mod tests {
         assert!(files.iter().all(|file| file.status == PickedStatus::Read));
 
         drop(board);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    /// A pasteboard of `items`, each its types and data.
+    fn board_of(items: &[&[(&str, &[u8])]]) -> Board {
+        use objc2_app_kit::{NSPasteboardItem, NSPasteboardWriting};
+        use objc2_foundation::NSData;
+
+        let board = Board(NSPasteboard::pasteboardWithUniqueName());
+        board.0.clearContents();
+        let items = items
+            .iter()
+            .map(|data| {
+                let item = NSPasteboardItem::new();
+                for (kind, bytes) in *data {
+                    item.setData_forType(&NSData::with_bytes(bytes), &NSString::from_str(kind));
+                }
+                ProtocolObject::<dyn NSPasteboardWriting>::from_retained(item)
+            })
+            .collect::<Vec<_>>();
+        assert!(board.0.writeObjects(&NSArray::from_retained_slice(&items)));
+        board
+    }
+
+    #[test]
+    fn a_picture_with_no_data_of_its_first_type_drops_its_next() {
+        let tiff = tiff();
+        let board = board_of(&[
+            &[("public.png", b""), ("public.tiff", &tiff)],
+            &[("public.png", b"")],
+        ]);
+        let offers = offers_on(&board.0);
+        assert_eq!(
+            offers[0],
+            Offer::Picture {
+                item: 0,
+                kinds: vec!["public.png", "public.tiff"],
+                name: None,
+            }
+        );
+        // The second has no data at all: left out.
+        assert_eq!(
+            take(&board.0, &offers, 100),
+            [Taken::Picture {
+                kind: "public.tiff",
+                stem: "image-1".to_owned(),
+                bytes: tiff,
+            }]
+        );
+    }
+
+    #[test]
+    fn no_more_pictures_than_drop_are_copied() {
+        let png: &[u8] = b"\x89PNG";
+        let picture: &[(&str, &[u8])] = &[("public.png", png)];
+        let board = board_of(&[picture; 3]);
+        let offers = offers_on(&board.0);
+        let mut offers_and_file = offers;
+        offers_and_file.push(Offer::Uri("file:///tmp/a.txt".to_owned()));
+        let taken = take(&board.0, &offers_and_file, 2);
+        assert_eq!(
+            taken
+                .iter()
+                .map(|taken| match taken {
+                    Taken::File(path) => path.display().to_string(),
+                    Taken::Picture { stem, .. } => stem.clone(),
+                })
+                .collect::<Vec<_>>(),
+            ["image-1", "image-2", "/tmp/a.txt"]
+        );
+    }
+
+    #[test]
+    fn only_regular_files_are_read_and_no_more_than_drop() {
+        let folder = std::env::temp_dir().join(format!("nsh-drop-regular-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("dir")).unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(folder.join(name), name).unwrap();
+        }
+        // A pipe with no writer: reading it would never end.
+        let fifo = folder.join("pipe");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let taken = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| Taken::File(folder.join(name)))
+                .collect::<Vec<_>>()
+        };
+        let read = |taken: Vec<Taken>, limit| {
+            let (send, receive) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let files = contents_of(taken, &FilePickRequest::new(true, limit));
+                let _ = send.send(files.into_iter().map(|file| file.name).collect::<Vec<_>>());
+            });
+            receive
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("a drop read a file that never ends")
+        };
+        assert_eq!(read(taken(&["pipe", "dir", "a.txt"]), 0), ["a.txt"]);
+        assert_eq!(
+            read(taken(&["a.txt", "b.txt", "c.txt"]), 2),
+            ["a.txt", "b.txt"]
+        );
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
