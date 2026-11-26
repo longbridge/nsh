@@ -289,6 +289,9 @@ pub(crate) struct Surface {
     pub(crate) shortcuts: RefCell<Vec<ShortcutHandler>>,
     /// The app's own windows besides this one (`Window.open`).
     pub(crate) windows: RefCell<Vec<Rc<crate::app_window::AppWindow>>>,
+    /// The app's icon, an `.ico` file, for its own windows' title bars and
+    /// taskbar buttons (a top-level app's [`AppOptions::icon`](crate::AppOptions::icon)).
+    pub(crate) icon: RefCell<Option<std::path::PathBuf>>,
     /// The root view the input being handled is in: a window of the app's
     /// own's ([`crate::app_window::enter`]), or [`Surface::root`].
     pub(crate) input_root: RefCell<Option<NshView>>,
@@ -362,6 +365,7 @@ impl Surface {
             resize_late: Cell::new(false),
             shortcuts: RefCell::default(),
             windows: RefCell::default(),
+            icon: RefCell::default(),
             input_root: RefCell::default(),
             chrome: Default::default(),
             main_unshown: Cell::new(true),
