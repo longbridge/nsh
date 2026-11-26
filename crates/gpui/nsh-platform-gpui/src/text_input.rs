@@ -2245,6 +2245,27 @@ fn unit_of(m: Modifiers) -> Unit {
     if word { Unit::Word } else { Unit::Char }
 }
 
+/// GPUI offers keys to AppKit's input context first while there is marked
+/// text. If an unmodified composition key still reaches the window, keep
+/// it out of shortcuts, navigation and controls such as Terminal's input.
+pub(crate) fn macos_composition_key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
+    if !event.down
+        || event.modifiers != Modifiers::default()
+        || !matches!(event.vk, VK_RETURN | VK_ESCAPE | VK_BACK | VK_DELETE)
+        || ime::marked_text_range(surface).is_none()
+    {
+        return false;
+    }
+    match event.vk {
+        VK_RETURN => ime::unmark_text(surface),
+        VK_ESCAPE => ime::replace_and_mark_text_in_range(surface, None, "", None),
+        // A keyboard delete is neither an IME commit nor a text edit while
+        // marked text remains. A terminal input cannot undo a sent commit.
+        _ => {}
+    }
+    true
+}
+
 /// A key for the focused field; true when handled.
 pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     if !event.down {
@@ -2659,6 +2680,106 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    fn composing_field() -> (Rc<Surface>, NshView) {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let view = NshView::new(11, nsh_core::ViewKind::Input);
+        view.insert_before(&surface.root, None);
+        focus_for_test(&surface, &view);
+        (surface, view)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn delegated_return_confirms_text_before_terminal_style_binding() {
+        use nsh_core::keymap::{KeyBinding, Keymap, Keystroke, When};
+
+        let (surface, view) = composing_field();
+        let input = input_of(&view).unwrap();
+        input.config.borrow_mut().multiline = true;
+        // Terminal also binds Return even though an Input has the focus.
+        let enter = Keystroke::parse_with("enter", true).unwrap();
+        let binding = KeyBinding::new(1, enter, When::Always, true);
+        crate::keymap::set(&surface, Arc::new(Keymap::new(vec![binding])));
+        ime::replace_and_mark_text_in_range(&surface, None, "你", None);
+        assert!(crate::input::key(&surface, key_down(VK_RETURN)));
+        assert!(!input.composing());
+        assert_eq!(input.model.borrow().text(), "你");
+
+        // Without the binding or marked text, Return inserts a newline.
+        crate::keymap::clear(&surface);
+        assert!(crate::input::key(&surface, key_down(VK_RETURN)));
+        assert_eq!(input.model.borrow().text(), "你\n");
+        surface_stopped(surface.key());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn delegated_deletion_preserves_marked_text_and_committed_text() {
+        let (surface, view) = composing_field();
+        let input = input_of(&view).unwrap();
+        input.model.borrow_mut().set_text("abc");
+        input.model.borrow_mut().select(1, 1);
+        ime::replace_and_mark_text_in_range(&surface, None, "x", None);
+        for vk in [VK_BACK, VK_DELETE] {
+            assert!(crate::input::key(&surface, key_down(vk)));
+            assert_eq!(input.composed.borrow().as_deref(), Some("x"));
+            assert_eq!(input.model.borrow().text(), "abc");
+        }
+        ime::replace_text_in_range(&surface, None, "新");
+        assert!(!input.composing());
+        assert!(crate::input::key(&surface, key_down(VK_BACK)));
+        assert_eq!(input.model.borrow().text(), "abc");
+        surface_stopped(surface.key());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn delegated_escape_cancels_composition_without_moving_focus() {
+        let (surface, view) = composing_field();
+        ime::replace_and_mark_text_in_range(&surface, None, "ni", None);
+        assert!(crate::input::key(&surface, key_down(VK_ESCAPE)));
+        assert_eq!(focused(&surface), Some(view.clone()));
+        let input = input_of(&view).unwrap();
+        assert!(!input.composing());
+        assert!(input.model.borrow().text().is_empty());
+
+        // The next Escape can go through navigation and blur the field.
+        assert!(crate::input::key(&surface, key_down(VK_ESCAPE)));
+        assert!(focused(&surface).is_none());
+        surface_stopped(surface.key());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn modified_application_shortcuts_still_work_during_composition() {
+        use nsh_core::keymap::{KeyBinding, Keymap, Keystroke, When};
+
+        let (surface, view) = composing_field();
+        let stroke = Keystroke::parse_with("cmd+k", true).unwrap();
+        let binding = KeyBinding::new(1, stroke, When::Always, false);
+        crate::keymap::set(&surface, Arc::new(Keymap::new(vec![binding])));
+        ime::replace_and_mark_text_in_range(&surface, None, "ni", None);
+        let mut event = key_down(0x4B);
+        event.modifiers.meta = true;
+        assert!(crate::input::key(&surface, event));
+        assert_eq!(
+            input_of(&view).unwrap().composed.borrow().as_deref(),
+            Some("ni")
+        );
+        surface_stopped(surface.key());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn key_down(vk: u16) -> KeyEvent {
+        KeyEvent {
+            vk,
+            down: true,
+            repeat: false,
+            modifiers: Modifiers::default(),
+        }
+    }
 
     /// Use a cached layout so routing tests need neither a window nor fonts.
     fn scrolling_field() -> (Rc<Surface>, NshView, Rc<InputState>, NshView) {

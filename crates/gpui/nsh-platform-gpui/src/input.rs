@@ -1371,6 +1371,9 @@ pub(crate) fn window_key(
     if event.down && !MODIFIERS.contains(&event.vk) {
         surface.control(|c| c.set_input_modality(InputModality::Keyboard));
     }
+    if cfg!(target_os = "macos") && crate::text_input::macos_composition_key(surface, &event) {
+        return true;
+    }
     if event.down && event.vk == VK_ESCAPE {
         crate::text_input::disarm(surface);
     }

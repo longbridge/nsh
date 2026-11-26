@@ -32,7 +32,9 @@ says how.
   which notifies the view.
 - **Input** comes from GPUI's mouse, scroll, key and input method events; hit testing, presses, the responder system,
   scrolling and text editing are the same logic as the Windows backend's. A zoomable scroll view zooms with a touchpad
-  pinch around the pointer, and scrolls both ways while zoomed.
+  pinch around the pointer, and scrolls both ways while zoomed. On macOS, if the input method leaves
+  an unmodified Return or Escape to the field while it still has marked text, Return confirms that text
+  without submitting, and Escape cancels it without moving focus.
 
 ## Requirements
 

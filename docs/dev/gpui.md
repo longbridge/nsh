@@ -245,9 +245,12 @@ the same GPUI queue as its commit before drawing the screenshots; the deadline o
   Shift+/), and its `code` is always empty: GPUI's public API exposes no scan code or key position, and no DOM
   code is ever inferred from the logical key. The app's shortcuts and the window's take the key first
   (`keymap::key_stroke`), by the source's own key: a key with a virtual code by the code, and one without (`?`) by
-  its canonical stroke (`shift+/`), so `nsh/keymap` bindings fire for those keys too. A mount's `capture_keys`
-  (on the focus or around it) then decides whether the platform keeps it — a binding that consumes the key runs
-  before any capture notification, a taken key runs no default, and a text field or native component owns its
+  its canonical stroke (`shift+/`), so `nsh/keymap` bindings fire for those keys too. On macOS, if marked
+  text remains when GPUI delivers an unmodified Return, Escape, Backspace or Delete, the input router
+  takes it before shortcuts. Return confirms the composition without submitting, Escape cancels it
+  without moving focus, and Backspace and Delete leave the text unchanged until the IME updates it.
+  A mount's `capture_keys` (on the focus or around it) then decides whether the platform keeps it — a binding
+  that consumes the key runs before any capture notification, a taken key runs no default, and a text field or native component owns its
   keys (the views around them never see them). `defaultPrevented` reports the mounted policy's decision for that
   transition, decided anew for each from the rules matched by the same canonical stroke of the source's key,
   never by rewriting the event: its key, code and modifiers stay exactly as the source reported them. GPUI
