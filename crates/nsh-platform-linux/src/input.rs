@@ -550,7 +550,7 @@ fn set_cursor(view: &NshView, over_link: bool) {
 /// handled happened in.
 /// Simulated input goes to the window whose root view is `root` (`None`:
 /// the surface's), as a real event in it would.
-#[cfg(feature = "dev")]
+#[cfg(any(test, feature = "dev"))]
 pub(crate) fn set_event_root(surface: &Surface, root: Option<NshView>) {
     *surface.input.window_root.borrow_mut() = root;
 }
