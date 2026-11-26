@@ -1418,6 +1418,7 @@ mod tests {
             closed: Cell::new(false),
             hidden: Cell::new(false),
             state: Cell::new(None),
+            damage: Default::default(),
         }));
         let registered = |hwnd: HWND| {
             // SAFETY: reads the property OLE's RegisterDragDrop sets.
