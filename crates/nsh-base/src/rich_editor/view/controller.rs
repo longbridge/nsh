@@ -1397,6 +1397,15 @@ impl Rv {
             }
             return;
         }
+        // Left or Right onto a selectable inline atom (a chip, an inline
+        // image) selects it as a node, as ProseMirror does; the next one
+        // leaves it on the far side.
+        if !m.extend
+            && m.unit == Unit::Char
+            && let Some(node) = inline_node_beside(&doc, &sel, m.dir)
+        {
+            return self.set_selection(node, true);
+        }
         let head = sel.head();
         let affinity = sel.affinity();
         let target: Option<(usize, Affinity, Option<Selection>)> = match m.unit {
@@ -3249,6 +3258,34 @@ pub(crate) fn drop_transaction(
     tr.set_meta("uiEvent", Value::from("drop"));
     tr.scroll_into_view();
     Some(tr)
+}
+
+/// The node selection of the inline atom right beside a caret toward
+/// `dir`, when its type can be selected (prosemirror-view's
+/// `selectHorizontally`). Atoms whose spec turns `selectable` off (a
+/// mention, a hard break) are left to the caret, which steps over them.
+fn inline_node_beside(doc: &Node, sel: &Selection, dir: i32) -> Option<Selection> {
+    if !sel.empty() || sel.as_text().is_none() {
+        return None;
+    }
+    let head = sel.resolved_head();
+    if !head.parent().inline_content() {
+        return None;
+    }
+    let node = if dir > 0 {
+        head.node_after()
+    } else {
+        head.node_before()
+    }?;
+    if node.is_text() || !node.is_atom() || !NodeSelection::is_selectable(&node) {
+        return None;
+    }
+    let from = if dir > 0 {
+        head.pos
+    } else {
+        head.pos - node.node_size()
+    };
+    Some(NodeSelection::create(doc, from))
 }
 
 /// A textblock's content as text: its texts, and U+FFFC for each inline

@@ -269,7 +269,7 @@ const editor = createRichEditor({ extensions: [StarterKit, Signature.configure({
 
 ### 节点视图
 
-`addNodeView` 返回一个组件，由它渲染该扩展节点类型的每个节点：正文里的股票标签、段落之间的卡片、@ 提及、嵌入内容。节点类型必须是原子节点（`atom: true` 或叶子节点）：光标把它当作一个字符或一个块跳过，Backspace 删除它。有内容的节点会被拒绝。
+`addNodeView` 返回一个组件，由它渲染该扩展节点类型的每个节点：正文里的股票标签、段落之间的卡片、@ 提及、嵌入内容。节点类型必须是原子节点（`atom: true` 或叶子节点）：方向键移到它时先把它作为节点选中，再按一次才越过它，与 ProseMirror 和 Tiptap 相同（`selectable: false` 的节点，如 @ 提及，被当作一个字符跳过），Backspace 删除它。有内容的节点会被拒绝。
 
 ```tsx
 import { RichEditor, StarterKit, createRichEditor, defineExtension, type RichNodeViewProps } from "nsh/base";

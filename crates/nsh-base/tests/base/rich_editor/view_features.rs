@@ -62,6 +62,37 @@ fn a_mention_shows_its_text_and_is_one_position() {
 }
 
 #[test]
+fn an_arrow_stops_on_a_selectable_inline_node_and_selects_it() {
+    let mut app = start(json!({"type": "doc", "content": [
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "a"},
+            {"type": "tag"},
+            {"type": "text", "text": "b"},
+        ]},
+    ]}));
+    see(&mut app, "Tag Some(2) false");
+    focus_start(&mut app);
+    // `a` is 1..2, the tag 2..3: the arrow that reaches it selects it, and
+    // its view hears so.
+    keys(&mut app, &["right", "right"]);
+    see(&mut app, "Sel 2-3");
+    see(&mut app, "Tag Some(2) true");
+    // The next one goes on past it; back again selects it from that side.
+    keys(&mut app, &["right"]);
+    see(&mut app, "Sel 3-3");
+    see(&mut app, "Tag Some(2) false");
+    keys(&mut app, &["left"]);
+    see(&mut app, "Sel 2-3");
+    see(&mut app, "Tag Some(2) true");
+    keys(&mut app, &["left"]);
+    see(&mut app, "Sel 2-2");
+    // Shift extends over it as over a character.
+    keys(&mut app, &["shift+right"]);
+    see(&mut app, "Sel 2-3");
+    see(&mut app, "Tag Some(2) false");
+}
+
+#[test]
 fn typing_at_a_gap_cursor_opens_a_paragraph() {
     let mut app = start(two_atoms());
     focus_start(&mut app);
