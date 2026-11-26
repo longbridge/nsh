@@ -11295,6 +11295,12 @@ impl<M: TextEngine> Core<M> {
         // window follows a jump in this same commit. In its parent's
         // viewport, the view around it scrolls instead.
         let mut outer_to = None;
+        // The `ScrollTo`s sent with this layout, recorded after its
+        // anchoring `ScrollBy` (below): the platform applies that one
+        // first, a mount item before the commands. Counted the other way,
+        // a report between the two would replay the `ScrollBy` over the
+        // `ScrollTo` and leave the list believed away from where it is.
+        let mut scrolls_to = Vec::new();
         for (target, command) in &mut self.commands {
             if *target != id {
                 continue;
@@ -11341,7 +11347,7 @@ impl<M: TextEngine> Core<M> {
                 outer_to = Some((o.start + offset, animated));
                 continue;
             }
-            list.issue_scroll_to(offset);
+            scrolls_to.push(offset);
             let (x, y) = if horizontal {
                 (Points(offset), Points::ZERO)
             } else {
@@ -11364,11 +11370,7 @@ impl<M: TextEngine> Core<M> {
         if let (Some(offset), Some(o)) = (retarget, &outer) {
             outer_to = Some((o.start + offset, true));
         } else if let Some(offset) = retarget {
-            self.nodes[key as usize]
-                .list
-                .as_mut()
-                .expect("list")
-                .issue_scroll_to(offset);
+            scrolls_to.push(offset);
             let (x, y) = if horizontal {
                 (Points(offset), Points::ZERO)
             } else {
@@ -11674,12 +11676,12 @@ impl<M: TextEngine> Core<M> {
             .as_ref()
             .and_then(|s| s.content)
             .map_or(0.0, |c| if horizontal { c.width.0 } else { c.height.0 });
+        let list = self.nodes[key as usize].list.as_mut().expect("list");
         if anchor != 0.0 {
-            self.nodes[key as usize]
-                .list
-                .as_mut()
-                .expect("list")
-                .issue_scroll_by(anchor);
+            list.issue_scroll_by(anchor);
+        }
+        for offset in scrolls_to {
+            list.issue_scroll_to(offset);
         }
         let scroll_by = (anchor != 0.0).then(|| {
             let (dx, dy) = if horizontal {

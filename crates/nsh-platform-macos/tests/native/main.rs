@@ -15,6 +15,8 @@
 #[cfg(target_os = "macos")]
 mod canvas_bounds;
 #[cfg(target_os = "macos")]
+mod clamped_scroll;
+#[cfg(target_os = "macos")]
 mod deleted_scroll;
 #[cfg(target_os = "macos")]
 mod download_redirect;
@@ -196,6 +198,8 @@ fn main() {
             } else if std::env::var_os("NSH_KEYBOARD_CHECK_ONLY").is_some() {
                 window_press::run();
                 keyboard::run();
+            } else if std::env::var_os("NSH_CLAMPED_SCROLL_CHECK_ONLY").is_some() {
+                clamped_scroll::run();
             } else if std::env::var_os("NSH_DELETED_SCROLL_CHECK_ONLY").is_some() {
                 deleted_scroll::run();
             } else if std::env::var_os("NSH_DOWNLOAD_REDIRECT_CHECK_ONLY").is_some() {
@@ -263,6 +267,7 @@ fn main() {
                 scaled_input::run();
                 zoom::run();
                 deleted_scroll::run();
+                clamped_scroll::run();
                 scroll_indicator_layout::run();
                 download_redirect::run();
                 mount::run();
