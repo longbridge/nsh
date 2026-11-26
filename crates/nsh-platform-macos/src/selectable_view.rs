@@ -71,6 +71,10 @@ impl SelectionTexts for Texts {
         self.contents[i].copied_text(range)
     }
 
+    fn attributed(&self, i: usize) -> Option<&AttributedText> {
+        Some(&self.contents[i])
+    }
+
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.frames[i]
     }
@@ -419,6 +423,17 @@ impl AreaSelection {
         let active = active.as_ref().filter(|a| !a.model.is_empty())?;
         let texts = collect(&active.area()?);
         Some(active.model.text(&texts)).filter(|t| !t.is_empty())
+    }
+
+    /// The selected text and its HTML ([`SelectionModel::html`]: with
+    /// bold, italic or links), as a copy puts them on the pasteboard
+    /// (`None` as [`Self::text`]).
+    pub(crate) fn copy(&self) -> Option<(String, Option<String>)> {
+        let active = self.active.borrow();
+        let active = active.as_ref().filter(|a| !a.model.is_empty())?;
+        let texts = collect(&active.area()?);
+        let text = active.model.text(&texts);
+        (!text.is_empty()).then(|| (text, active.model.html(&texts)))
     }
 
     /// Selects every text of the area last pressed (Cmd+A). False without

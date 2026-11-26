@@ -2692,13 +2692,29 @@ pub(crate) fn write_selection(
     surface: &crate::surface::Surface,
     board: &objc2_app_kit::NSPasteboard,
 ) -> bool {
-    let Some(text) = selection_text(surface) else {
+    // A selectable view's selection also goes as HTML, keeping its bold,
+    // italic and links in a rich text editor.
+    let Some((text, html)) = surface.selection.area.copy().or_else(|| {
+        surface
+            .selection
+            .with_range()
+            .and_then(|v| selected_text(&v))
+            .map(|text| (text, None))
+    }) else {
         return false;
     };
     board.clearContents();
-    // SAFETY: an immutable AppKit constant.
-    let kind = unsafe { objc2_app_kit::NSPasteboardTypeString };
+    // SAFETY: immutable AppKit constants.
+    let (kind, kind_html) = unsafe {
+        (
+            objc2_app_kit::NSPasteboardTypeString,
+            objc2_app_kit::NSPasteboardTypeHTML,
+        )
+    };
     board.setString_forType(&objc2_foundation::NSString::from_str(&text), kind);
+    if let Some(html) = html {
+        board.setString_forType(&objc2_foundation::NSString::from_str(&html), kind_html);
+    }
     true
 }
 

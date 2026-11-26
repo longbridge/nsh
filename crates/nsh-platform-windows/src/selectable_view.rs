@@ -148,6 +148,10 @@ impl SelectionTexts for Texts {
         self.texts[i].copied_text(range)
     }
 
+    fn attributed(&self, i: usize) -> Option<&AttributedText> {
+        Some(&self.texts[i])
+    }
+
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.frames[i]
     }
@@ -341,9 +345,7 @@ pub(crate) fn menu_role(
     }
     match role {
         MenuRole::Copy => {
-            if let Some(text) = selected_text(surface.key(), Some(area)) {
-                crate::system::set_clipboard_text(&text);
-            }
+            copy(surface.key(), Some(area));
             true
         }
         MenuRole::SelectAll => {
@@ -728,6 +730,23 @@ fn autoscroll(surface: Weak<Surface>) {
     schedule(surface);
 }
 
+/// Copies the selection of `area`, if it is current and has one: its text
+/// and, with bold, italic or links, its HTML (`SelectionModel::html`).
+fn copy(surface: u64, area: Option<&NshView>) {
+    let Some(current) = take(surface, area) else {
+        return;
+    };
+    let copied = (!current.model.is_empty()).then(|| {
+        let texts = Texts::of(&current.area);
+        (current.model.text(&texts), current.model.html(&texts))
+    });
+    put(current);
+    // A selection of hidden characters only copies nothing.
+    if let Some((text, html)) = copied.filter(|(t, _)| !t.is_empty()) {
+        crate::system::set_clipboard_item(&text, html.as_deref());
+    }
+}
+
 /// The selected text of `area`, if it is current and has a selection.
 fn selected_text(surface: u64, area: Option<&NshView>) -> Option<String> {
     let current = take(surface, area)?;
@@ -803,16 +822,14 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, area: &NshView) {
     use crate::chrome::LocalItem;
     let key = surface.key();
     let selected = selected_text(key, Some(area)).is_some_and(|t| !t.is_empty());
-    let (copy, all) = (area.clone(), area.clone());
+    let (copied, all) = (area.clone(), area.clone());
     let mut items = vec![
         LocalItem::Item {
             role: Some(MenuRole::Copy),
             label: String::new(),
             enabled: selected,
             action: Rc::new(move |s| {
-                if let Some(text) = selected_text(s.key(), Some(&copy)) {
-                    crate::system::set_clipboard_text(&text);
-                }
+                copy(s.key(), Some(&copied));
             }),
         },
         LocalItem::Item {
@@ -858,9 +875,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     let ctrl = event.modifiers.ctrl && !event.modifiers.alt;
     match event.vk {
         VK_C | VK_INSERT if ctrl && !empty => {
-            if let Some(text) = selected_text(key, Some(&area)) {
-                crate::system::set_clipboard_text(&text);
-            }
+            copy(key, Some(&area));
         }
         VK_A if ctrl => select_all(key, &area),
         VK_ESCAPE if !empty => {

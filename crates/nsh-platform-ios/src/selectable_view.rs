@@ -120,6 +120,10 @@ impl SelectionTexts for AreaTexts {
         self.entries[i].text.copied_text(range)
     }
 
+    fn attributed(&self, i: usize) -> Option<&AttributedText> {
+        Some(&self.entries[i].text)
+    }
+
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.entries[i].frame
     }
@@ -419,12 +423,16 @@ define_class!(
 
         #[unsafe(method(copy:))]
         fn copy(&self, _sender: Option<&AnyObject>) {
-            let text = {
+            let (text, html) = {
                 let texts = self.ivars().texts.borrow();
-                self.ivars().model.borrow().text(&*texts)
+                let model = self.ivars().model.borrow();
+                (model.text(&*texts), model.html(&*texts))
             };
-            if !text.is_empty() {
-                crate::system::set_clipboard(&text);
+            // Bold, italic and links go as HTML too, for rich text editors.
+            match html {
+                _ if text.is_empty() => {}
+                Some(html) => crate::system::set_clipboard_html(&text, &html),
+                None => crate::system::set_clipboard(&text),
             }
         }
 
