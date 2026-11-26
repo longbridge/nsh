@@ -95,10 +95,11 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/out"
           ls -la . Counter
-          test -x Counter/counter
-          test -f Counter/counter.desktop || ls Counter/*.desktop
+          test -x Counter/Counter
+          test -f Counter/com.example.counter.desktop
           tar -tzf Counter.tar.gz | tee files.txt
-          grep -q '^Counter/counter$' files.txt
+          grep -q '^Counter/Counter$' files.txt
+          grep -q '^Counter/com.example.counter.desktop$' files.txt
 
   windows:
     needs: changed
