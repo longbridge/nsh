@@ -113,9 +113,9 @@ parts! {
     /// The line at the fixed columns' trailing edge, over the columns that
     /// scroll under them.
     fixed_edge => FixedEdge,
-    /// Fill boxes positioned over `cellSelectionRange` (excluding the active cell when given); styled by the app.
+    /// The fill over a selected range of cells, excluding the active cell.
     selection_fill => SelectionFill,
-    /// Outline box positioned to the exact bounds of `cellSelectionRange`; styled by the app.
+    /// The outline of a selected range of cells.
     selection_outline => SelectionOutline,
     /// What shows when there are no rows (the `empty` slot's box).
     empty => Empty,

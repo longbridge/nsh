@@ -175,9 +175,11 @@ const page = signal({ start: 0, rows: load(0) });
 
 ### 拖选单元格区域
 
-设置 `customCellSelection` 后，鼠标按下可选单元格时触发 `onCellDrag({ start, end, extend })`，拖到新单元格时再次触发。拖到表格边缘时，表格会滚动。两个端点都使用从 0 开始的行索引和列定义索引，按住 Shift 时 `extend` 为 `true`。应用负责保存选区，并在收到 `onCopySelection` 时复制选区内容。复制快捷键和表格的 `copy()` 方法都会触发这个事件。
+同时开启 `cellSelectable` 和 `cellRangeSelectable` 后，可以用鼠标拖选矩形区域。按住 Shift 可从原起点扩选，拖到视图边缘时表格会自动滚动。`selectOnModifierPress={false}` 时，带修饰键的按下仍交给应用处理。
 
-`cellSelectionRange` 接受 `[top, bottom, left, right]`，用于在滚动列上绘制选区。再传入 `activeRow, activeCol` 可保留活动单元格的底色。用 `selectionFill` 和 `selectionOutline` 设置填充和外框的样式。
+`onSelectionChange` 和表格引用的 `selection()` 都会返回 `{ row, column, range: { start, end, active? } }`。区域包含起点和终点，每个坐标包含零起始的行索引和列定义索引，区间内的列按屏幕上的顺序计算。`active` 缺省时使用 `start`，外层的 `row` 和 `column` 指向活动单元格。应用也可以通过 `selection` 或 `select()` 设置该区域。方向键从活动单元格移动，复制快捷键复制该单元格。
+
+用 `selectionFill` 和 `selectionOutline` 设置选区样式。表格自动为选区内的行号应用 `rowHeaderHighlighted`，为列标题应用 `headerCellSelected`。
 
 <a id="keyboard"></a>
 
@@ -221,8 +223,6 @@ const page = signal({ start: 0, rows: load(0) });
 ## 调整和移动列
 
 拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize({ key, width })` 报告每一步。连续按两次边缘会把该列适配到最宽的文本和标题。拖动标题会移动列，并用一条线显示将放下的位置；`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在同一侧的固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
-
-设置 `deferColumnResize` 后，拖动时用 `moveIndicator` 显示参考线，松开时再应用宽度并报告变化。
 
 <a id="filling-the-width"></a>
 
@@ -347,7 +347,7 @@ const columns: DataTableColumn[] = [
 | `headerContent` | 标题文字和排序按钮的布局行，可设置两者的间距 |
 | `headerCellDragging` | 正在拖动的标题，排在 `headerCell` 之后 |
 | `headerCellSorted` | 表格当前排序所依据的列的标题，排在 `headerCell` 之后 |
-| `headerCellSelected` | 被选中列的标题，排在 `headerCell` 之后 |
+| `headerCellSelected` | 被选中列或选区内列的标题，排在 `headerCell` 之后 |
 | `sortIndicator` | 可排序列的排序按钮 |
 | `sortAscending`、`sortDescending` | 上下两个箭头，当前排序方向应用 `selected:` |
 | `resizeHandle` | 列尾部边缘供拖动调整的线 |
@@ -363,9 +363,9 @@ const columns: DataTableColumn[] = [
 | `cellColumnSelected` | 被选中列的单元格，排在 `cell` 之后 |
 | `rowHeader` | 行号单元格 |
 | `rowHeaderCorner` | 行号上方的角落 |
-| `rowHeaderHighlighted` | 高亮行的行号，排在 `rowHeader` 之后 |
-| `selectionFill` | 选区的填充 |
-| `selectionOutline` | 选区的外框 |
+| `rowHeaderHighlighted` | 选区内的行号，排在 `rowHeader` 之后 |
+| `selectionFill` | 选区填充，活动单元格除外 |
+| `selectionOutline` | 选区外框 |
 | `fixedEdge` | 固定列和在其下滚动的列之间的线：左侧固定列的尾部边缘，右侧固定列的起始边缘 |
 | `empty` | `empty` 插槽的盒子 |
 
@@ -381,10 +381,6 @@ const columns: DataTableColumn[] = [
 | `dataStart` | `.data_start(..)` | `number` | `0` | `data` 第一行对应的行号。 |
 | `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | 所给各行的类名，按它们在 `data` 中的位置对应：行自己的外观，不需要每行调用 JS。 |
 | `cellClasses` | `.cell_classes(..)` | `DataTableCellClass[]` | `[]` | 单个单元格的类名，按数据行号和列下标对应，加在部件类和该列 `cellClass` 之后。单元格的文字仍由表格绘制。 |
-| `customCellSelection` | `.custom_cell_selection(..)` | `boolean` | `false` | 报告鼠标拖选和复制请求，由应用维护选区。 |
-| `cellSelectionRange` | `.cell_selection_range(..)` | `number[]` | `[]` | 滚动列中的选区边界，可附带活动单元格索引。 |
-| `highlightedRowHeaders` | `.highlighted_row_headers(..)` | `number[]` | `[]` | 用 `rowHeaderHighlighted` 标出的行索引。 |
-| `highlightedColumnHeaders` | `.highlighted_column_headers(..)` | `number[]` | `[]` | 用 `headerCellSelected` 标出的列定义索引。 |
 | `rowHeight` | `.row_height(..)` | `number` | `32` | 表体行的高度，单位为点；在终端里一行就是一个 Cell。 |
 | `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度；在终端里标题行就是一个 Cell。 |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | 列上方的标签，从最低一层开始。 |
@@ -392,6 +388,7 @@ const columns: DataTableColumn[] = [
 | `rowSelectable` | `.row_selectable(..)` | `boolean` | `true` | 按下和按键可以选择行。 |
 | `columnSelectable` | `.column_selectable(..)` | `boolean` | `true` | 按下标题会选中该列，左右键在列之间移动。 |
 | `cellSelectable` | `.cell_selectable(..)` | `boolean` | `false` | 按下和按键可以选择单元格。 |
+| `cellRangeSelectable` | `.cell_range_selectable(..)` | `boolean` | `false` | 与 `cellSelectable` 一起启用鼠标拖选和 Shift 扩选。 |
 | `selectOnModifierPress` | `.select_on_modifier_press(..)` | `boolean` | `true` | 按住 Shift 或命令键按下时选中行、单元格或标题。 |
 | `selection` | `.selection(..)` | `DataTableSelection` | | 当前选择，由应用设置。 |
 | `loopSelection` | `.loop_selection(..)` | `boolean` | `true` | 方向键在两端循环。 |
@@ -399,7 +396,6 @@ const columns: DataTableColumn[] = [
 | `rowHeader` | `.row_header(..)` | `boolean` | 开启 `cellSelectable` 时显示 | 左侧的一列行号。 |
 | `stripe` | `.stripe(..)` | `boolean` | `false` | 奇数行使用 `rowOdd` 部件。 |
 | `resizableColumns` | `.resizable_columns(..)` | `boolean` | `true` | 拖动列的边缘调整宽度。 |
-| `deferColumnResize` | `.defer_column_resize(..)` | `boolean` | `false` | 拖动时显示参考线，松开时应用列宽。 |
 | `movableColumns` | `.movable_columns(..)` | `boolean` | `true` | 拖动标题移动列。 |
 | `loading` | `.loading(..)` | `boolean` | `false` | 表格正在加载：`onLoadMore` 等待，`loadingView` 显示。 |
 | `hasMore` | `.has_more(..)` | `boolean` | `false` | 还有更多行可以加载。 |
@@ -423,10 +419,8 @@ const columns: DataTableColumn[] = [
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | 用户改变了选择：`{ selection }`，一个 `{ row?, column? }` 或 `null`。 |
+| `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | 用户改变了选择：`{ selection }`，一个 `{ row?, column?, range? }` 或 `null`。 |
 | `onRowPress` | `.on_row_press(\|event: &DataTablePress\| ..)` | 按下了一行或一个单元格：`{ row, column?, clicks, shift, control, alt, platform }`。 |
-| `onCellDrag` | `.on_cell_drag(\|start: &DataTableTarget, end: &DataTableTarget, extend: &bool\| ..)` | 鼠标按下或拖过可选单元格，报告 `{ start, end, extend }`。 |
-| `onCopySelection` | `.on_copy_selection(\|\| ..)` | 应用维护的选区收到复制请求。 |
 | `onColumnPress` | `.on_column_press(\|event: &DataTableColumnPress\| ..)` | 按下了一个标题：`{ column, clicks, shift, control, alt, platform }`。 |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | 一行、一个单元格或一个标题被连按两次：`{ target }`，一个 `{ row?, column? }`。 |
 | `onRowActivate` | `.on_row_activate(\|row: &u32\| ..)` | 获得焦点的行被激活（Enter / Return）：`{ row }`，与 `onRowPress` 报告的数字相同。 |

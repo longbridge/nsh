@@ -294,10 +294,6 @@ impl Columns {
         first..end.min(n)
     }
 
-    pub(crate) fn clamped_width(&self, def: usize, width: f32) -> f32 {
-        clamp(&self.specs[def], width)
-    }
-
     /// Sets definition `def`'s width (clamped to its limits), which it then
     /// keeps instead of growing; whether a width shown changed.
     pub(crate) fn set_width(&mut self, def: usize, width: f32) -> bool {
@@ -308,7 +304,7 @@ impl Columns {
     /// Sets definition `def`'s base width (clamped to its limits), which it
     /// still grows from; whether a width shown changed.
     pub(crate) fn set_base(&mut self, def: usize, width: f32) -> bool {
-        self.bases[def] = self.clamped_width(def, width);
+        self.bases[def] = clamp(&self.specs[def], width);
         self.relayout()
     }
 

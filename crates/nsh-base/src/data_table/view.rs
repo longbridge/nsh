@@ -29,15 +29,15 @@ use std::{
 
 use nsh_core::{
     TouchEvent, TouchPhase,
-    element::{EventKind, EventPayload, Os, Style},
+    element::{EventKind, EventPayload, Style},
     prelude::*,
 };
 
 use super::{
-    DataTableAlign, DataTableCell, DataTableHeaderCell, DataTablePart, DataTableProps,
-    DataTableSortDirection,
+    DataTableAlign, DataTableCell, DataTableCellPosition, DataTableCellRange, DataTableHeaderCell,
+    DataTablePart, DataTableProps, DataTableSortDirection,
     columns::Columns,
-    controller::{CustomCell, Dt, Geo, MOVE_SLOP, PressRegion, SORT_WIDTH},
+    controller::{CustomCell, Dt, Geo, MOVE_SLOP, PressRegion, SORT_WIDTH, secondary_modifier},
     selection::Selection,
 };
 use crate::{HandleEdge, text_view::merge_styles};
@@ -250,8 +250,7 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
             )
             .child(strip(strip_dt, strip_x))
             .child(projected_vertical_bar(bar_dt))
-            .child(overlays(over_dt))
-            .child(resize_guide(dt)),
+            .child(overlays(over_dt)),
     )
 }
 
@@ -265,16 +264,11 @@ fn content_width(dt: &Dt) -> f32 {
 
 #[derive(Clone, Copy)]
 struct DragStroke {
-    start: super::DataTableTarget,
-    last: super::DataTableTarget,
-    extend: bool,
+    range: DataTableCellRange,
     viewport: Point<Points>,
 }
 
-fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
-    let drag = dt.clone();
-    let wheel = dt.clone();
-    let hit_view = element_ref();
+fn range_drag(dt: Dt, hit_view: ElementRef) -> impl Fn(&TouchEvent) + Clone {
     let stroke = Rc::new(Cell::new(None::<DragStroke>));
     let auto_scroll = Rc::new(RefCell::new(None::<Spawned<()>>));
     {
@@ -283,6 +277,96 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
             auto_scroll.borrow_mut().take();
         });
     }
+    let apply = {
+        let dt = dt.clone();
+        move |range| {
+            hit_view.cancel_press();
+            hit_view.focus();
+            dt.set_focus(true);
+            dt.select_drag_range(range);
+        }
+    };
+    let advance = {
+        let stroke = stroke.clone();
+        move |mut drag: DragStroke, end: Option<DataTableCellPosition>| {
+            if let Some(end) = end
+                && end != drag.range.end
+            {
+                drag.range.end = end;
+                apply(drag.range);
+            }
+            stroke.set(Some(drag));
+        }
+    };
+    move |event: &TouchEvent| {
+        if !dt.props.cell_range_selectable.get_untracked()
+            || !dt.props.cell_selectable.get_untracked()
+        {
+            auto_scroll.borrow_mut().take();
+            stroke.set(None);
+            return;
+        }
+        let Some(point) = event
+            .points
+            .iter()
+            .find(|p| p.changed && p.pointer_type == PointerType::Mouse)
+        else {
+            return;
+        };
+        let viewport = dt.drag_viewport_point(point.location);
+        match event.phase {
+            TouchPhase::Start => {
+                auto_scroll.borrow_mut().take();
+                stroke.set(None);
+                let shift = event.modifiers.shift;
+                if secondary_modifier(event.modifiers)
+                    || (shift && !dt.props.select_on_modifier_press.get_untracked())
+                {
+                    return;
+                }
+                let Some(cell) = dt.drag_cell_at(point.location) else {
+                    return;
+                };
+                let range = dt.drag_range(cell, shift);
+                stroke.set(Some(DragStroke { range, viewport }));
+            }
+            TouchPhase::Move => {
+                if let Some(mut drag) = stroke.get() {
+                    drag.viewport = viewport;
+                    advance(drag, dt.drag_cell_at_viewport(viewport));
+                    if dt.drag_needs_auto_scroll(viewport) {
+                        if auto_scroll.borrow().is_none() {
+                            let dt = dt.clone();
+                            let stroke = stroke.clone();
+                            let advance = advance.clone();
+                            *auto_scroll.borrow_mut() =
+                                Some(set_interval(Duration::from_millis(16), move || {
+                                    if let Some(drag) = stroke.get() {
+                                        advance(drag, dt.drag_auto_scroll(drag.viewport));
+                                    }
+                                }));
+                        }
+                    } else {
+                        auto_scroll.borrow_mut().take();
+                    }
+                }
+            }
+            TouchPhase::End | TouchPhase::Cancel => {
+                auto_scroll.borrow_mut().take();
+                if event.phase == TouchPhase::End
+                    && let Some(drag) = stroke.get()
+                {
+                    advance(drag, dt.drag_cell_at_viewport(viewport));
+                }
+                stroke.set(None);
+            }
+        }
+    }
+}
+
+fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
+    let hit_view = element_ref();
+    let drag = range_drag(dt.clone(), hit_view);
     let props = dt.props;
     let (scroll_dt, hscroll_dt, strip_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
@@ -307,13 +391,6 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         })
         .bounces(move || props.bounces.get())
         .on_scroll(move |e: &ScrollEvent| {
-            if scroll_dt
-                .wheel_y
-                .get_untracked()
-                .is_some_and(|to| (to.0 - e.offset.y.0).abs() < 0.5)
-            {
-                scroll_dt.wheel_y.set(None);
-            }
             scroll_dt.scroll_y.set(e.offset.y);
         })
         .on_scroll_drag_start({
@@ -366,13 +443,6 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                             move |_: &Point<Points>| dt.rest()
                         })
                         .on_scroll(move |e: &ScrollEvent| {
-                            if hscroll_dt
-                                .wheel_x
-                                .get_untracked()
-                                .is_some_and(|to| (to.0 - e.offset.x.0).abs() < 0.5)
-                            {
-                                hscroll_dt.wheel_x.set(None);
-                            }
                             hscroll_dt.scroll_x.set(e.offset.x);
                             // The desktops' bar follows, unless it leads.
                             if lead.take(Side::Table) {
@@ -393,121 +463,7 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                                 .min_h(relative(1.0))
                                 .h(move || Length::from(px(strip_dt.geo().y.extent() as f32)))
                                 .element_ref(&hit_view)
-                                .when(is_desktop() && !dt.web_desktop, |v| {
-                                    v.on_wheel(move |e: &nsh_core::WheelEvent| {
-                                        wheel.pan_by_wheel(e)
-                                    })
-                                })
-                                .on_touch(move |event: &TouchEvent| {
-                                    if !props.custom_cell_selection.get_untracked() {
-                                        return;
-                                    }
-                                    let Some(point) = event.points.iter().find(|p| {
-                                        p.changed && p.pointer_type == PointerType::Mouse
-                                    }) else {
-                                        return;
-                                    };
-                                    match event.phase {
-                                        TouchPhase::Start => {
-                                            auto_scroll.borrow_mut().take();
-                                            hit_view.focus();
-                                            let secondary = if matches!(os(), Os::Ios | Os::MacOs) {
-                                                event.modifiers.cmd
-                                            } else {
-                                                event.modifiers.ctrl
-                                            };
-                                            if secondary {
-                                                stroke.set(None);
-                                                return;
-                                            }
-                                            let Some(cell) = drag.drag_cell_at(point.location)
-                                            else {
-                                                stroke.set(None);
-                                                return;
-                                            };
-                                            let extend = event.modifiers.shift;
-                                            let viewport = drag.drag_viewport_point(point.location);
-                                            hit_view.cancel_press();
-                                            drag.set_focus(true);
-                                            stroke.set(Some(DragStroke {
-                                                start: cell,
-                                                last: cell,
-                                                extend,
-                                                viewport,
-                                            }));
-                                            drag.cx.emit(super::DataTableEvent::CellDrag(
-                                                cell, cell, extend,
-                                            ));
-                                        }
-                                        TouchPhase::Move => {
-                                            let Some(mut active) = stroke.get() else {
-                                                return;
-                                            };
-                                            let viewport = drag.drag_viewport_point(point.location);
-                                            active.viewport = viewport;
-                                            if let Some(end) = drag.drag_cell_at_viewport(viewport)
-                                                && end != active.last
-                                            {
-                                                active.last = end;
-                                                drag.cx.emit(super::DataTableEvent::CellDrag(
-                                                    active.start,
-                                                    end,
-                                                    active.extend,
-                                                ));
-                                            }
-                                            stroke.set(Some(active));
-                                            if drag.drag_needs_auto_scroll(viewport) {
-                                                if auto_scroll.borrow().is_none() {
-                                                    let dt = drag.clone();
-                                                    let stroke = stroke.clone();
-                                                    let handle = set_interval(
-                                                        Duration::from_millis(16),
-                                                        move || {
-                                                            let Some(mut cur) = stroke.get() else {
-                                                                return;
-                                                            };
-                                                            if let Some(end) =
-                                                                dt.drag_auto_scroll(cur.viewport)
-                                                                && end != cur.last
-                                                            {
-                                                                cur.last = end;
-                                                                stroke.set(Some(cur));
-                                                                dt.cx.emit(
-                                                                    super::DataTableEvent::CellDrag(
-                                                                        cur.start, end, cur.extend,
-                                                                    ),
-                                                                );
-                                                            }
-                                                        },
-                                                    );
-                                                    *auto_scroll.borrow_mut() = Some(handle);
-                                                }
-                                            } else {
-                                                auto_scroll.borrow_mut().take();
-                                            }
-                                        }
-                                        TouchPhase::End | TouchPhase::Cancel => {
-                                            auto_scroll.borrow_mut().take();
-                                            if event.phase == TouchPhase::End
-                                                && let Some(active) = stroke.get()
-                                            {
-                                                let viewport =
-                                                    drag.drag_viewport_point(point.location);
-                                                if let Some(end) =
-                                                    drag.drag_cell_at_viewport(viewport)
-                                                    && end != active.last
-                                                {
-                                                    drag.cx.emit(super::DataTableEvent::CellDrag(
-                                                        active.start,
-                                                        end,
-                                                        active.extend,
-                                                    ));
-                                                }
-                                            }
-                                            stroke.set(None);
-                                        }
-                                    }
-                                })
+                                .on_touch(drag)
                                 .on(EventKind::Press, move |p: &EventPayload| {
                                     if let EventPayload::Press(e) = p {
                                         press.press_with(e);
@@ -1030,8 +986,8 @@ fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
                         },
                     )),
             )
-            .when(which == Region::Scroll, |v| {
-                v.child(selection_overlay(sel_dt))
+            .when(which != Region::Lead, |v| {
+                v.child(selection_overlay(sel_dt, which))
             })
     })
 }
@@ -1066,85 +1022,86 @@ fn clip_rect(
     })
 }
 
-/// Headless geometry overlay for `cellSelectionRange`: positions the optional
-/// fill regions (excluding the active cell when 6 indexes are given) and the
-/// range outline box inside `Region::Scroll`; appearance is supplied entirely
-/// by the app via `SelectionFill` and `SelectionOutline` parts.
-fn selection_overlay(dt: Dt) -> impl IntoElement {
+/// Styles the selected rectangle in each clipped column region.
+fn selection_overlay(dt: Dt, which: Region) -> impl IntoElement {
     let props = dt.props;
+    let selected = dt.cell_range;
     let active = move || {
-        props
-            .cell_selection_range
-            .with(|r| r.len() == 4 || r.len() == 6)
+        selected.get().is_some()
             && (part_styled(props, DataTablePart::SelectionFill)
                 || part_styled(props, DataTablePart::SelectionOutline))
     };
     when(active, move || {
-        let layout_dt = dt.clone();
+        let dt = dt.clone();
         let layout = computed(move || {
-            layout_dt.layout_rev.get();
-            let g = layout_dt.geo();
-            let range = props.cell_selection_range.get();
-            if range.len() != 4 && range.len() != 6 {
-                return SelectionOverlayLayout::default();
-            }
-            let top = range[0].min(range[1]) as usize;
-            let bottom = range[0].max(range[1]) as usize;
-            let st = layout_dt.st.borrow();
-            let (Some(first), Some(last)) = (
-                st.columns.display_of(range[2] as usize),
-                st.columns.display_of(range[3] as usize),
-            ) else {
+            let Some(range) = selected.get() else {
                 return SelectionOverlayLayout::default();
             };
-            let left_d = first.min(last);
-            let right_d = first.max(last);
-            let fixed_w = st.columns.fixed_width();
-            let rx0 = st.columns.start(left_d) - fixed_w - g.cx;
-            let rx1 = st.columns.start(right_d) + st.columns.display_width(right_d) as f64
-                - fixed_w
-                - g.cx;
-            let row_h = g.row_height as f64;
-            let ry0 = top as f64 * row_h - g.cy;
-            let ry1 = (bottom + 1) as f64 * row_h - g.cy;
+            let Some(columns) = dt.range_columns(range) else {
+                return SelectionOverlayLayout::default();
+            };
+            let g = dt.geo();
+            let st = dt.st.borrow();
+            let fixed = st.columns.fixed_len();
+            let end = st.columns.end_start();
+            let end_left = st.columns.end_left(g.columns_view(), g.cx);
+            let (zone, origin, vw) = match which {
+                Region::Fixed => (0..fixed, 0.0, f64::from(g.fixed)),
+                Region::Scroll => (
+                    fixed..end,
+                    st.columns.fixed_width() + g.cx,
+                    end_left - f64::from(g.fixed),
+                ),
+                Region::End => (
+                    end..st.columns.len(),
+                    st.columns.start(end),
+                    f64::from(g.end),
+                ),
+                Region::Lead => unreachable!(),
+            };
+            if columns.start >= zone.end || columns.end <= zone.start || vw <= 0.0 {
+                return SelectionOverlayLayout::default();
+            }
 
-            let vw = g.x.viewport;
+            // Extend behind each clipping edge at a region seam so the
+            // outline draws only the true edges of the rectangle.
+            const PAD: f64 = 16.0;
+            let rx0 = if columns.start < zone.start {
+                -PAD
+            } else {
+                st.columns.start(columns.start) - origin
+            };
+            let rx1 = if columns.end > zone.end {
+                vw + PAD
+            } else {
+                st.columns.start(columns.end) - origin
+            };
+            let row_h = f64::from(g.row_height);
+            let rows = range.rows();
+            let ry0 = f64::from(*rows.start()) * row_h - g.cy;
+            let ry1 = (f64::from(*rows.end()) + 1.0) * row_h - g.cy;
             let vh = g.y.viewport;
             if rx1 <= 0.0 || rx0 >= vw || ry1 <= 0.0 || ry0 >= vh {
                 return SelectionOverlayLayout::default();
             }
 
-            // Use exact cell-range geometry; clip far off-screen edges past
-            // `overflow_hidden` so large selections stay bounded without
-            // painting false edges inside the viewport.
-            let pad = 16.0;
-            let outline = clip_rect((rx0, ry0, rx1, ry1), (-pad, -pad, vw + pad, vh + pad));
+            let outline = clip_rect((rx0, ry0, rx1, ry1), (-PAD, -PAD, vw + PAD, vh + PAD));
             let viewport = (0.0, 0.0, vw, vh);
-            let full_fill = || [clip_rect((rx0, ry0, rx1, ry1), viewport), None, None, None];
-
-            let fills = if range.len() == 6 {
-                let active_row = range[4] as usize;
-                let active_col = range[5] as usize;
-                if let Some(active_d) = st.columns.display_of(active_col) {
-                    let ax0 = (st.columns.start(active_d) - fixed_w - g.cx).clamp(rx0, rx1);
-                    let ax1 = (st.columns.start(active_d)
-                        + st.columns.display_width(active_d) as f64
-                        - fixed_w
-                        - g.cx)
-                        .clamp(rx0, rx1);
-                    let ay0 = (active_row as f64 * row_h - g.cy).clamp(ry0, ry1);
-                    let ay1 = ((active_row + 1) as f64 * row_h - g.cy).clamp(ry0, ry1);
-                    [
-                        clip_rect((rx0, ry0, rx1, ay0), viewport),
-                        clip_rect((rx0, ay1, rx1, ry1), viewport),
-                        clip_rect((rx0, ay0, ax0, ay1), viewport),
-                        clip_rect((ax1, ay0, rx1, ay1), viewport),
-                    ]
-                } else {
-                    full_fill()
-                }
+            let active = range.active_cell();
+            let active_display = st.columns.display_of(active.column as usize);
+            let fills = if let Some(display) = active_display.filter(|d| zone.contains(d)) {
+                let ax0 = (st.columns.start(display) - origin).clamp(rx0, rx1);
+                let ax1 = (st.columns.start(display + 1) - origin).clamp(rx0, rx1);
+                let ay0 = (f64::from(active.row) * row_h - g.cy).clamp(ry0, ry1);
+                let ay1 = ((f64::from(active.row) + 1.0) * row_h - g.cy).clamp(ry0, ry1);
+                [
+                    clip_rect((rx0, ry0, rx1, ay0), viewport),
+                    clip_rect((rx0, ay1, rx1, ry1), viewport),
+                    clip_rect((rx0, ay0, ax0, ay1), viewport),
+                    clip_rect((ax1, ay0, rx1, ay1), viewport),
+                ]
             } else {
-                full_fill()
+                [clip_rect((rx0, ry0, rx1, ry1), viewport), None, None, None]
             };
 
             SelectionOverlayLayout { outline, fills }
@@ -1362,6 +1319,7 @@ fn body_row(
 /// The number of a row, in the row header column.
 fn row_number(dt: Dt, row: Memo<Option<usize>>) -> impl IntoElement {
     let props = dt.props;
+    let selected = dt.cell_range;
     parts(
         view()
             .absolute()
@@ -1373,9 +1331,9 @@ fn row_number(dt: Dt, row: Memo<Option<usize>>) -> impl IntoElement {
         move || {
             let mut list = vec![DataTablePart::RowHeader];
             if row.get().is_some_and(|row| {
-                props
-                    .highlighted_row_headers
-                    .with(|rows| rows.contains(&(row as u32)))
+                selected
+                    .get()
+                    .is_some_and(|range| range.rows().contains(&(row as u32)))
             }) {
                 list.push(DataTablePart::RowHeaderHighlighted);
             }
@@ -1819,6 +1777,21 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
                 .map(|s| s.direction)
         })
     };
+    let range_selected = {
+        let dt = dt.clone();
+        computed(move || {
+            dt.cell_range
+                .get()
+                .and_then(|range| dt.range_columns(range))
+                .is_some_and(|columns| {
+                    dt.st
+                        .borrow()
+                        .columns
+                        .display_of(def)
+                        .is_some_and(|display| columns.contains(&display))
+                })
+        })
+    };
     let selected = {
         let dt = dt.clone();
         computed(move || dt.selection() == Selection::Column(def))
@@ -1836,11 +1809,7 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
         if sorted.get().is_some() {
             list.push(DataTablePart::HeaderCellSorted);
         }
-        if selected.get()
-            || props
-                .highlighted_column_headers
-                .with(|cols| cols.contains(&(def as u32)))
-        {
+        if selected.get() || range_selected.get() {
             list.push(DataTablePart::HeaderCellSelected);
         }
         if dragging.get() {
@@ -2183,38 +2152,6 @@ fn handle(props: DataTableProps, start: Dt, drag: Dt, end: Dt, def: usize) -> im
 
 fn resize_handle_component() -> crate::ResizeHandleElement {
     crate::resize_handle()
-}
-
-/// A single composited guide follows the pointer without relaying out any cells.
-fn resize_guide(dt: Dt) -> impl IntoElement {
-    let props = dt.props;
-    let guide = dt.resize_guide;
-    when(
-        move || guide.get().is_some(),
-        move || {
-            let dt = dt.clone();
-            part(
-                view()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left_0()
-                    .w(px(DROP_LINE))
-                    .pointer_events(PointerEvents::None)
-                    .translate_x(move || {
-                        let x = guide.get().and_then(|(def, width)| {
-                            let g = dt.geo();
-                            let st = dt.st.borrow();
-                            let display = st.columns.display_of(def)?;
-                            Some(column_x(&st.columns, &g, display) + width - DROP_LINE / 2.0)
-                        });
-                        DefiniteLength::from(px(x.unwrap_or_default()))
-                    }),
-                props,
-                DataTablePart::MoveIndicator,
-            )
-        },
-    )
 }
 
 /// The line where a dragged column will drop.

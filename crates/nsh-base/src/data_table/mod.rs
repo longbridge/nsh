@@ -190,7 +190,57 @@ pub struct DataTableSort {
     pub direction: DataTableSortDirection,
 }
 
-/// What is selected: a row alone, a column alone, or a cell (both). Rows
+/// The data indexes of a cell. Columns keep their definition indexes when moved.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct DataTableCellPosition {
+    /// The zero-based data row.
+    pub row: u32,
+    /// The zero-based index in `columns`.
+    pub column: u32,
+}
+
+impl DataTableCellPosition {
+    /// Makes a position from a data row and a column definition index.
+    pub fn new(row: u32, column: u32) -> Self {
+        Self { row, column }
+    }
+}
+
+/// A rectangular selection between two cells, including both endpoints.
+/// Between the endpoints, columns follow their order on screen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct DataTableCellRange {
+    /// The cell where selection began.
+    pub start: DataTableCellPosition,
+    /// The cell where selection ends.
+    pub end: DataTableCellPosition,
+    /// The active, unfilled cell within the range. Defaults to `start`.
+    #[prop(skip_none)]
+    pub active: Option<DataTableCellPosition>,
+}
+
+impl DataTableCellRange {
+    /// Makes a range with its start as the active cell.
+    pub fn new(start: DataTableCellPosition, end: DataTableCellPosition) -> Self {
+        Self {
+            start,
+            end,
+            active: None,
+        }
+    }
+
+    pub(crate) fn active_cell(self) -> DataTableCellPosition {
+        self.active.unwrap_or(self.start)
+    }
+
+    pub(crate) fn rows(self) -> std::ops::RangeInclusive<u32> {
+        self.start.row.min(self.end.row)..=self.start.row.max(self.end.row)
+    }
+}
+
+/// What is selected: a row alone, a column alone, a cell or a cell range. Rows
 /// count from 0 in the data; a column is its index among the `columns`
 /// (whatever order the user moved them to).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
@@ -202,6 +252,9 @@ pub struct DataTableSelection {
     /// The selected column.
     #[prop(skip_none)]
     pub column: Option<u32>,
+    /// A rectangle of selected cells. When present, `row` and `column` report its active cell.
+    #[prop(skip_none)]
+    pub range: Option<DataTableCellRange>,
 }
 
 /// A range of rows or columns, `start` up to but not including `end`.
@@ -403,20 +456,6 @@ pub struct DataTableProps {
     /// paints a selection of cells with no call into JS per cell.
     #[prop(default)]
     pub cell_classes: Prop<Vec<DataTableCellClass>>,
-    /// Row headers highlighted by an app-owned cell selection, by data index.
-    #[prop(default)]
-    pub highlighted_row_headers: Prop<Vec<u32>>,
-    /// Column titles highlighted by an app-owned cell selection, by definition index.
-    #[prop(default)]
-    pub highlighted_column_headers: Prop<Vec<u32>>,
-    /// App-owned rectangular cell selection overlay as `[top, bottom, left, right]`
-    /// or `[top, bottom, left, right, activeRow, activeCol]`, styled by the app via
-    /// the `selectionFill` and `selectionOutline` parts.
-    #[prop(default)]
-    pub cell_selection_range: Prop<Vec<u32>>,
-    /// Reports mouse range drags and copy requests for an app-owned cell selection.
-    #[prop(default)]
-    pub custom_cell_selection: Prop<bool>,
     /// The height of a body row, in points (default 32; in a terminal a
     /// row is one Cell, whatever this is).
     #[prop(default = Points(32.0))]
@@ -446,6 +485,9 @@ pub struct DataTableProps {
     /// its row (when `rowSelectable`).
     #[prop(default)]
     pub cell_selectable: Prop<bool>,
+    /// With `cellSelectable`, mouse drags and Shift-presses select a rectangle of cells.
+    #[prop(default)]
+    pub cell_range_selectable: Prop<bool>,
     /// Whether a press with Shift or the platform's secondary modifier
     /// (Command on Apple platforms, Control elsewhere) held selects, as a
     /// press without it does (default true): a row, a cell or a title. An
@@ -475,9 +517,6 @@ pub struct DataTableProps {
     /// column's `resizable` wins).
     #[prop(default = true)]
     pub resizable_columns: Prop<bool>,
-    /// Move a guide while dragging and apply the width on release.
-    #[prop(default)]
-    pub defer_column_resize: Prop<bool>,
     /// Whether a drag of a title moves its column (default true; a column's
     /// `movable` wins).
     #[prop(default = true)]
@@ -541,12 +580,6 @@ pub enum DataTableEvent {
     /// with Shift or the secondary modifier here.
     #[args(event)]
     RowPress(DataTablePress),
-    /// The mouse pressed or dragged across data cells. Both targets use data indexes;
-    /// `extend` is true when Shift was held to extend from the existing anchor.
-    #[args(start, end, extend)]
-    CellDrag(DataTableTarget, DataTableTarget, bool),
-    /// Copy was requested for the app-owned cell selection.
-    CopySelection,
     /// A title was pressed (not its sort button, and not a drag that moved
     /// the column). With `selectOnModifierPress` off, a press with Shift or
     /// the secondary modifier leaves the table's selection and the app
