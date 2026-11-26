@@ -49,6 +49,8 @@ mod input_focus;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
+mod input_line_height;
+#[cfg(target_os = "macos")]
 mod input_restyle;
 #[cfg(target_os = "macos")]
 mod input_tab_stops;
@@ -197,6 +199,8 @@ fn main() {
                 removed_focus::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_INPUT_LINE_HEIGHT_CHECK_ONLY").is_some() {
+                input_line_height::run();
             } else if std::env::var_os("NSH_INPUT_TAB_STOPS_CHECK_ONLY").is_some() {
                 input_tab_stops::run();
             } else if std::env::var_os("NSH_FITTING_INPUT_CHECK_ONLY").is_some() {
@@ -283,6 +287,7 @@ fn main() {
                 fitting_input::run();
                 input_focus::run();
                 input_baseline::run();
+                input_line_height::run();
                 input_restyle::run();
                 removed_focus::run();
                 focus_selection::run();

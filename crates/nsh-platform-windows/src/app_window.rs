@@ -1415,6 +1415,7 @@ mod tests {
             pixels: Cell::new((0, 0)),
             scale: Cell::new(1.0),
             invalid: Cell::new(false),
+            damage: Default::default(),
             positioned: Cell::new(true),
             reported: Cell::new(None),
             opened: Cell::new(false),
