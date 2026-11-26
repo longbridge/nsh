@@ -923,6 +923,11 @@ impl UiThread {
         UiThread(DISPATCHER.with(Cell::get))
     }
 
+    /// Whether the calling thread is this UI thread.
+    pub(crate) fn is_current(self) -> bool {
+        self.0 != 0 && DISPATCHER.with(Cell::get) == self.0
+    }
+
     /// Runs `f` on that thread (from any thread), in its message loop.
     /// Dropped when it has no dispatcher or the post fails (the thread is
     /// gone).

@@ -2324,6 +2324,8 @@ async function signOut() {
 
 `press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`；推送 SDK 等其他代码显示的通知的点击交给 Rust 代码用 `nsh::notifications::set_foreign_handler` 设置的处理者（见 [Android](../docs/android.md#来自其他代码的通知)），不会触发 `press`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收；否则远程通知和其他原生代码安排的通知交给 Rust 代码用 `nsh_platform_apple::notifications::set_foreign_handler` 设置的处理者（见 [iOS](../docs/ios.md#来自其他代码的通知)），不会触发 `press`。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
 
+在 Windows 上，点击通知会将可聚焦的应用窗口切到前台，优先选择未最小化的窗口，仅在没有可见的未最小化窗口时恢复已最小化的窗口。隐藏的窗口保持隐藏，即使没有可激活的窗口，应用仍会收到 `press` 事件。
+
 ### Notifications.permission
 
 `permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改，`nsh/mobile` 的 [`AppSettings.open`](./nsh-mobile.md#appsettings) 可以把用户带过去）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
