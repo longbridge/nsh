@@ -278,6 +278,20 @@ impl Native for WindowsNative {
         self.in_focused(move |s| synth::press(s, vk, modifiers));
     }
 
+    fn focused(&self) -> Option<NodeId> {
+        self.in_focused(|s| crate::text_input::focused(s).map(|view| view.id()))
+            .flatten()
+    }
+
+    fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        // As the user's paste of `content` does, without the system's
+        // clipboard: reported, then its text inserted as `pasteBehavior`
+        // says.
+        let content = content.clone();
+        self.in_focused(move |s| crate::text_input::paste_focused(s, content))
+            .unwrap_or_else(|| Err(self.gone()))
+    }
+
     fn mouse(&self) -> bool {
         true
     }

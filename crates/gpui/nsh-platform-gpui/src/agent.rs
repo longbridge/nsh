@@ -429,6 +429,20 @@ impl Native for GpuiNative {
             .flatten()
     }
 
+    fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        // As the user's paste of `content` does, without the system's
+        // clipboard: reported, then its text inserted as `pasteBehavior`
+        // says.
+        let content = content.clone();
+        let (done, result) = std::sync::mpsc::channel();
+        self.edit_in_focus(move |surface| {
+            let _ = done.send(crate::text_input::paste_focused(surface, content));
+        })?;
+        result
+            .try_recv()
+            .unwrap_or_else(|_| Err("the focused window did not take the paste".into()))
+    }
+
     fn right_click(&self, at: Point<Points>) -> Result<(), String> {
         // The secondary button.
         self.click(at, CLICK, 1);
