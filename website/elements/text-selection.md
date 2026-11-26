@@ -11,8 +11,9 @@ demo: el-text-selection
 A [`View`](./view.md) with `selectable` makes the texts inside it select together, as a web page's do: one selection
 runs from a place in one text to a place in another, across views, [`Text`](./text.md) elements and
 [`TextView`](./text-view.md)s, in reading order. Make a chat transcript selectable and a selection can start in one
-message and end in the next; Copy puts the selected text on the clipboard, with texts side by side joined by a tab and
-the others by a line break. Rust sets it with `view().selectable(true)`, TSX with `<View selectable>`; whether a single
+message and end in the next; Copy puts the selected text on the clipboard as a browser does: texts side by side
+joined by a tab, texts on the next line by a line break, and separate blocks (paragraphs, messages) by a blank line. A
+list item copied from its start keeps its marker (`•`, `2.`), although the marker itself is never highlighted. Rust sets it with `view().selectable(true)`, TSX with `<View selectable>`; whether a single
 text can be selected is its `userSelect` style.
 
 ```tsx tabs
