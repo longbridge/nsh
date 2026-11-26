@@ -1,0 +1,34 @@
+{
+  "macos": {
+    "startup_ms": 576,
+    "startup_runs": [
+      569,
+      564,
+      576,
+      578,
+      596
+    ],
+    "animation": {
+      "hz": 41,
+      "budget_ms": 24.39,
+      "frame_p95_ms": 0.6,
+      "frame_max_ms": 0.65,
+      "gap_p50_ms": 22.32,
+      "gap_p95_ms": 25.96,
+      "gap_max_ms": 28.37,
+      "over_pct": 0,
+      "seconds": 15
+    },
+    "scroll": {
+      "hz": 46,
+      "budget_ms": 21.74,
+      "frame_p95_ms": 3.37,
+      "frame_max_ms": 4.01,
+      "gap_p50_ms": 21.43,
+      "gap_p95_ms": 27.46,
+      "gap_max_ms": 29.47,
+      "over_pct": 0,
+      "seconds": 25
+    }
+  }
+}
