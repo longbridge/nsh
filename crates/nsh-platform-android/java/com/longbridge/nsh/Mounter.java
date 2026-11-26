@@ -3257,6 +3257,7 @@ final class Mounter {
             }
             case 4: {
                 String source = optString(b, objects);
+                String poster = optString(b, objects);
                 boolean paused = b.getInt() != 0, muted = b.getInt() != 0;
                 float volume = b.getFloat(), rate = b.getFloat();
                 boolean repeat = b.getInt() != 0;
@@ -3265,8 +3266,8 @@ final class Mounter {
                 float interval = b.getFloat();
                 int audioSession = b.getInt();
                 if (v instanceof VideoBox) {
-                    ((VideoBox) v).configure(source, paused, muted, volume, rate, repeat, mode, controls, interval,
-                            audioSession);
+                    ((VideoBox) v).configure(source, poster, paused, muted, volume, rate, repeat, mode, controls,
+                            interval, audioSession);
                 }
                 break;
             }

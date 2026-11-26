@@ -29,7 +29,7 @@ GStreamer 插件；不支持 `rate`（始终以 1× 播放），`onEnd` 只对�
 在 [Windows](./windows.md) 上，Web 视图是位于子窗口中的 WebView2 控件，跟随它的视图移动：它会被父视图和圆角裁剪，但绘制在它上方的
 NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（Windows 11 自带，Windows 10 上随 Edge 安装），否则显示占位视图；
 不支持 HTML 的 `baseUrl`、`scrollable` 和 `allowsBackForwardNavigationGestures`。视频是普通内容（像其他视图一样被裁剪、
-变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器；`rate` 可用，没有封面图（poster），开启 `controls` 时控制栏始终显示。
+变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器；`rate` 可用，开启 `controls` 时控制栏始终显示。
 
 ## WebView
 
@@ -606,6 +606,7 @@ pub fn player() -> impl IntoElement {
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `src` | `string` | | 视频的 URL。 |
+| `poster` | `string` | | 视频加载时显示的图片，直到第一帧就绪。 |
 | `paused` | `boolean` | `false` | 暂停播放。 |
 | `muted` | `boolean` | `false` | 静音。 |
 | `volume` | `number` | `1` | 0..1。 |

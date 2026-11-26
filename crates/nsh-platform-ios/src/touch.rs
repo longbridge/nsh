@@ -175,7 +175,7 @@ impl TouchTracker {
         }
         self.ivars().activated.set(Some(id));
         if self.ivars().reported.get() == timestamp * 1000.0 {
-            self.report(TouchPhase::Move, &tracked);
+            self.report(TouchPhase::Move, &tracked, None);
         }
     }
 
@@ -186,7 +186,7 @@ impl TouchTracker {
             return;
         }
         let changed: Vec<u32> = self.ivars().tracked.borrow().iter().map(|t| t.id).collect();
-        self.report(TouchPhase::Cancel, &changed);
+        self.report(TouchPhase::Cancel, &changed, None);
         self.ivars().tracked.borrow_mut().clear();
     }
 
