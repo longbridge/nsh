@@ -132,12 +132,18 @@ pub fn add_ui_set(set: Registry) {
 }
 
 /// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s parts
-/// and the app's sets their gates added ([`add_ui_set`]).
+/// and the app's sets their gates added ([`add_ui_set`]). A Rust app's
+/// runtime (feature `rust-parts`) has no `nsh/base` default: `rust_app!`
+/// sets its sets before the page can start it, and a default would keep
+/// parts of `nsh/base` the app never uses in its module.
 fn ui_sets() -> Vec<Registry> {
     UI_SETS
         .with(|s| s.borrow().clone())
         .map(with_gated_parts)
         .unwrap_or_else(|| {
+            #[cfg(feature = "rust-parts")]
+            let mut sets = Vec::new();
+            #[cfg(not(feature = "rust-parts"))]
             let mut sets = vec![base_set()];
             APP_SETS.with(|a| sets.extend(a.borrow().iter().cloned()));
             sets
@@ -289,8 +295,8 @@ pub extern "C" fn nsh_feature_math() {
 
 /// `nsh/base` in the lite runtime (feature `base-full` off): its controls
 /// (the core and the parts split from it), so the larger parts' code stays
-/// out of the module.
-#[cfg(not(feature = "base-full"))]
+/// out of the module. A Rust app's runtime (`rust-parts`) has none.
+#[cfg(not(any(feature = "base-full", feature = "rust-parts")))]
 fn base_set() -> Registry {
     use nsh_base::parts::{self, Part};
     nsh_base::registry_of([
