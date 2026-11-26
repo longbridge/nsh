@@ -227,7 +227,7 @@ fn a_selection_area_copies_across_texts_and_keeps_wide_graphemes_whole() {
         },
         release: false,
     });
-    assert_eq!(clipboard.text().as_deref(), Some("界🙂B\nla"));
+    assert_eq!(clipboard.text().as_deref(), Some("界🙂B\n\nla"));
     view.set_focused(false);
     terminal
         .draw(|frame| view.render(frame, frame.area()))

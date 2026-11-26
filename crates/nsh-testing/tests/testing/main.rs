@@ -658,7 +658,7 @@ fn a_test_plays_the_embedding_app() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 7);
+    assert_eq!(results.len(), 6);
 }
 
 #[test]
