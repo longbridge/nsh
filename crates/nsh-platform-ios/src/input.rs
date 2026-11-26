@@ -155,6 +155,18 @@ define_class!(
             unsafe { msg_send![super(self), caretRectForPosition: position] }
         }
 
+        /// An input with no caret drawn is another view's sink (an editor's,
+        /// which holds the text itself), often empty: it says it has text,
+        /// as UIKit repeats a held Delete only while the input has text.
+        #[unsafe(method(hasText))]
+        fn has_text(&self) -> Bool {
+            if self.ivars().caret_hidden.get() {
+                return Bool::YES;
+            }
+            // SAFETY: calling the superclass implementation.
+            unsafe { msg_send![super(self), hasText] }
+        }
+
         /// A paste (the edit menu, Command+V): reported, and its text
         /// inserted as `pasteBehavior` says, within `maxLength`.
         #[unsafe(method(paste:))]
@@ -362,6 +374,18 @@ define_class!(
         fn shown_caret_rect(&self, position: Option<&objc2::runtime::AnyObject>) -> CGRect {
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), caretRectForPosition: position] }
+        }
+
+        /// An input with no caret drawn is another view's sink (an editor's,
+        /// which holds the text itself), often empty: it says it has text,
+        /// as UIKit repeats a held Delete only while the input has text.
+        #[unsafe(method(hasText))]
+        fn has_text(&self) -> Bool {
+            if self.ivars().caret_hidden.get() {
+                return Bool::YES;
+            }
+            // SAFETY: calling the superclass implementation.
+            unsafe { msg_send![super(self), hasText] }
         }
 
         /// A paste (the edit menu, Command+V): reported, and its text
