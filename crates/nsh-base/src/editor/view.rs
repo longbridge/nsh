@@ -14,9 +14,9 @@ use nsh_core::{
 use super::{
     EditorDecoration, EditorDiagnosticSeverity, EditorPart, EditorProps,
     controller::Ed,
-    state::{GutterMark, GutterPlace, LabelKey, RowContent, RulerMark, SpanFont, SpanTags},
+    state::{GutterMark, GutterPlace, RowContent, RulerMark, SpanFont, SpanLabel, SpanTags},
 };
-use crate::{input, theme};
+use crate::{input, text_view::merge_styles, theme};
 
 /// The width of a caret.
 pub(crate) const CARET_WIDTH: f32 = 2.0;
@@ -53,13 +53,9 @@ pub(crate) fn parts<E: Element>(el: E, props: EditorProps, list: &'static [Edito
         })
     })
     .inline_style(move || {
-        props.styles.with(|s| {
-            Style::from_decls(
-                list.iter()
-                    .filter_map(|p| s.get(*p))
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
-        })
+        props
+            .styles
+            .with(|s| merge_styles(list.iter().filter_map(|p| s.get(*p))))
     })
 }
 
@@ -1241,8 +1237,7 @@ fn row_view(ed: Ed, slot: ReadSignal<(usize, usize)>) -> impl IntoElement {
                             .and_then(|d| d.line_style.clone())
                     })
                     .collect();
-                let style =
-                    Style::from_decls(styles.iter().flat_map(|s| s.decls().iter().cloned()));
+                let style = merge_styles(&styles);
                 // A row with larger text is taller, and so is its text's
                 // line (the others take the root's): in the binding the row
                 // has, no style of its own for the rows that need none.
@@ -1287,10 +1282,9 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
     {
         let st = ed.st.borrow();
         for span in content.spans {
-            if let Some(item) = span.label {
-                if let Some(d) = st.decoration_items.get(item) {
-                    let key = st.label_key(item, span.font.as_ref());
-                    out.push(label_box(&ed, d, key, span.font, span.text).into_element());
+            if let Some(label) = span.label {
+                if let Some(d) = st.decoration_items.get(label.item) {
+                    out.push(label_box(&ed, label, d, span.font, span.text).into_element());
                 }
                 continue;
             }
@@ -1343,9 +1337,7 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
                     el = el.app_class(Some(SharedString::from(classes.join(" "))));
                 }
                 if !styles.is_empty() {
-                    el = el.inline_style(Style::from_decls(
-                        styles.iter().flat_map(|s| s.decls().iter().cloned()),
-                    ));
+                    el = el.inline_style(merge_styles(&styles));
                 }
             } else {
                 el = tagged(el, props, tags, span.composition, classes, styles);
@@ -1367,24 +1359,30 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
     out
 }
 
-/// A replacing decoration's label in its row, in place of `source` (the
-/// range's text): a box of the decoration's `labelClass` and `labelStyle`
-/// holding its label in `font` (the decorations' font around it, else the
-/// editor's), centered on the row's text, its lines as tall as
+/// The label of replacing decoration `d` (`label`) in its row, in place of
+/// `source` (the range's text): a box of the decoration's `labelClass` and
+/// `labelStyle` holding its label in `font` (the decorations' font around
+/// it, else the editor's), centered on the row's text, its lines as tall as
 /// the font (so padding keeps it within the row unless the app sets
 /// another `leading-*`). The box reports the width it was laid out at
 /// (its margins included, as the outer box's) for the caret and presses
-/// after it; copies and screen readers take the range's text, and presses
-/// pass to the rows below, as on the text.
+/// after this decoration's range; copies and screen readers take the
+/// range's text, and presses pass to the rows below, as on the text.
+///
+/// The box is keyed by its decoration, look and font. A row made again
+/// keeps a box only for the same label: a kept box's listener hears the
+/// frame it was last laid out at, before the new content is, which for
+/// another label's box would be that label's width reported as this one's.
 fn label_box(
     ed: &Ed,
+    label: SpanLabel,
     d: &EditorDecoration,
-    key: LabelKey,
     font: Option<SpanFont>,
     source: String,
 ) -> View {
+    let SpanLabel { item, key } = label;
     let width_ed = ed.clone();
-    let mut outer = view();
+    let mut outer = view().key(format!("label:{item}:{:x}:{:x}", key.0, key.1));
     if let Some(font) = font {
         // Inherited, so the box's classes can still set another.
         outer = outer
@@ -1398,7 +1396,7 @@ fn label_box(
         .copy_text(SharedString::from(source.clone()))
         .accessible(true)
         .label(SharedString::from(source))
-        .on_layout(move |b: &Bounds<Points>| width_ed.set_label_width(key, b.size.width))
+        .on_layout(move |b: &Bounds<Points>| width_ed.set_label_width(item, key, b.size.width))
         .child(
             view()
                 .app_class(d.label_class.clone())
@@ -1441,12 +1439,11 @@ fn tagged(
     })
     .inline_style(move || {
         props.styles.with(|s| {
-            Style::from_decls(
+            merge_styles(
                 style_list
                     .iter()
                     .filter_map(|p| s.get(*p))
-                    .chain(styles.iter())
-                    .flat_map(|s| s.decls().iter().cloned()),
+                    .chain(styles.iter()),
             )
         })
     })

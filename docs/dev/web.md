@@ -243,11 +243,14 @@ from it. `nsh package --target web` makes these modules from `nsh-browser.wasm` 
 Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web/`. A runtime wasm-bindgen ran on
 (`crates/nsh-cli/src/bindgen.rs`) is published whole (`web::link`): wasm-bindgen rewrites the module and keeps the
 `linking` and `reloc.*` sections of the one it read, which no longer describe it, so it has no side modules. A
-Rust app's runtime is pruned before wasm-bindgen instead (`RustApp::without_unused_part_gates`): when no code
+Rust app's runtime is pruned before wasm-bindgen instead (`RustApp::without_unused_gates`): when no code
 reachable from its other exports makes a component by name (`ComponentElement::by_name`, found by the symbol
 `nsh_core::element::__private::BY_NAME_MARKER` names: the stand-in `make` of such an element, kept by a test in
 `nsh-core`), the `nsh_part_*` gates go with the code only they reach; when one does, every gate
-stays, as a part is loaded when its first component is made. A runtime with every
+stays, as a part is loaded when its first component is made. The `nsh_feature_shader` gate (naga's GLSL ES
+back end) goes the same way when no code reachable from the other exports (and the part gates that stay) makes a shader view
+or a shader transition (`nsh_core::element::__private::SHADER_USE_MARKER`, the function every `shader()`-like
+constructor and `transition_shader` calls, kept by a test in `nsh-core`). A runtime with every
 component (the website's, the development host's) serves every app.
 
 A shared runtime (`nsh package --shared-runtime`; not for a Rust app or one with wasm-bindgen glue, which fails) splits whatever the app uses: its main module

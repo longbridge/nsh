@@ -2604,16 +2604,22 @@ pub(crate) fn selection_up(view: &crate::view::NshView) -> bool {
 }
 
 /// A key went down: Cmd+C copies the selection, Escape clears it, Cmd+A
-/// selects all of the last pressed selectable text. True if it was
-/// handled.
+/// selects all of the last pressed selectable text, and Shift with an arrow
+/// key, Home or End extends the selection of the selectable view last
+/// pressed ([`extend_key`]). True if it was handled.
 pub(crate) fn selection_key(
-    surface: &crate::surface::Surface,
+    surface: &std::rc::Rc<crate::surface::Surface>,
     event: &objc2_app_kit::NSEvent,
 ) -> bool {
     use objc2_app_kit::NSEventModifierFlags;
     let command = event
         .modifierFlags()
         .contains(NSEventModifierFlags::Command);
+    if let Some((movement, direction)) = extend_key(event)
+        && crate::selectable_view::extend_by_key(surface, movement, direction)
+    {
+        return true;
+    }
     match crate::input::shortcut_key(event) {
         Some('c') if command => copy(surface),
         Some('a') if command => select_all(surface),
@@ -2627,6 +2633,51 @@ pub(crate) fn selection_key(
         }
         _ => false,
     }
+}
+
+/// How a key extends a selection, as `NSTextView`'s standard key bindings
+/// do (the `…AndModifySelection:` actions): Shift+Left / Right by a
+/// character, with Option by a word, with Command to the line's edge;
+/// Shift+Up / Down by a line, with Option to the paragraph's edge, with
+/// Command to the document's, as Shift+Home / End go. `None` for other
+/// keys, and with Control (Mission Control's spaces).
+fn extend_key(
+    event: &objc2_app_kit::NSEvent,
+) -> Option<(
+    nsh_core::selection::Movement,
+    nsh_core::selection::Direction,
+)> {
+    use nsh_core::selection::{Direction, Movement};
+    use objc2_app_kit::NSEventModifierFlags;
+    const HOME: u16 = 115;
+    const END: u16 = 119;
+    const LEFT: u16 = 123;
+    const RIGHT: u16 = 124;
+    const DOWN: u16 = 125;
+    const UP: u16 = 126;
+    let flags = event.modifierFlags();
+    if !flags.contains(NSEventModifierFlags::Shift) || flags.contains(NSEventModifierFlags::Control)
+    {
+        return None;
+    }
+    let command = flags.contains(NSEventModifierFlags::Command);
+    let option = flags.contains(NSEventModifierFlags::Option);
+    let (code, direction) = match event.keyCode() {
+        code @ (HOME | LEFT | UP) => (code, Direction::Backward),
+        code @ (END | RIGHT | DOWN) => (code, Direction::Forward),
+        _ => return None,
+    };
+    let movement = match (code, command, option) {
+        (HOME | END, false, false) => Movement::Document,
+        (LEFT | RIGHT, false, false) => Movement::Character,
+        (LEFT | RIGHT, false, true) => Movement::Word,
+        (LEFT | RIGHT, true, false) => Movement::LineEdge,
+        (UP | DOWN, false, false) => Movement::Line,
+        (UP | DOWN, false, true) => Movement::Paragraph,
+        (UP | DOWN, true, false) => Movement::Document,
+        _ => return None,
+    };
+    Some((movement, direction))
 }
 
 /// Copies the selection to the general pasteboard (the Edit menu's Copy).

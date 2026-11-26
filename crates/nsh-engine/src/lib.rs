@@ -2466,16 +2466,19 @@ impl<M: TextEngine + 'static> Driver<M> {
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(app_access(&config.app));
         let mut core = Core::new(text_engine.clone(), config.viewport);
-        // nsh.json's `application.quitMode`, else the default
-        // `"platform"`: Windows and Linux quit when the last window
-        // closes; macOS stays in the Dock. The app can change it at run
-        // time with `Application.setQuitMode`.
-        let mode = config
+        // Explicit `<Window>` scenes default to `"platform"` (Windows and
+        // Linux quit when the last window closes; macOS stays in the Dock),
+        // while a plain root's implicit main window quits on close unless the
+        // app explicitly sets `application.quitMode` or calls
+        // `Application.setQuitMode`.
+        core.__set_default_quit_mode(nsh_core::desktop::QuitMode::Platform);
+        if let Some(mode) = config
             .app
             .application()
-            .map(|options| options.quit_mode)
-            .unwrap_or_default();
-        core.set_quit_mode(mode);
+            .and_then(|options| options.__explicit_quit_mode())
+        {
+            core.set_quit_mode(mode);
+        }
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());
@@ -4134,6 +4137,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         horizontal_size_class: env.horizontal_size_class,
         vertical_size_class: env.vertical_size_class,
         safe_area: insets(env),
+        reserved_regions: env.reserved_regions,
         title_bar: env.title_bar,
         window_state: env.window_state,
         keyboard_height: env.keyboard_height,

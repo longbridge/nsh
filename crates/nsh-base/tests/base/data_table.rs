@@ -828,3 +828,74 @@ fn the_horizontal_bar_spans_the_scrolling_columns_only() {
     assert_eq!(bar.bounds.origin.x.0, 100.0);
     assert_eq!(bar.bounds.size.width.0, 400.0);
 }
+
+/// Quotes sorted by symbol whose parts have typed styles
+/// (`StyleRefinement`, as a Rust app types them): the root's bold weight
+/// for all the text, titles red but the sorted one blue (its part comes
+/// after), cells green.
+#[component]
+fn TypedStyles() -> impl IntoElement {
+    use nsh_base::{DataTableStyles, text_view::PartStyle};
+    use nsh_core::element::StyleRefinement;
+
+    let color = |c: u32| PartStyle(StyleRefinement::default().text_color(rgb(c)).into());
+    let mut styles = DataTableStyles::default();
+    styles.root = Some(PartStyle(
+        StyleRefinement::default()
+            .font_weight(FontWeight::BOLD)
+            .into(),
+    ));
+    styles.header_cell = Some(color(0xff0000));
+    styles.header_cell_sorted = Some(color(0x0000ff));
+    styles.cell = Some(color(0x00ff00));
+    let mut sort = DataTableSort::default();
+    sort.key = "symbol".into();
+    data_table()
+        .h(px(200.0))
+        .columns(vec![column("symbol"), column("last")])
+        .data(
+            DataTableRows::new(1)
+                .texts("symbol", ["AAPL"])
+                .numbers("last", [231.5]),
+        )
+        .sort(Some(sort))
+        .styles(styles)
+}
+
+#[test]
+fn typed_part_styles_reach_their_parts_the_later_winning() {
+    let app = start::<TypedStyles>();
+    let style = |selector: &str| app.screen().span_style(selector).unwrap();
+    assert_eq!(style("text:symbol").color, nsh_core::Color(0x0000_ffff));
+    assert_eq!(style("text:last").color, nsh_core::Color(0xff00_00ff));
+    assert_eq!(style("text:AAPL").color, nsh_core::Color(0x00ff_00ff));
+    assert_eq!(style("text:AAPL").font_weight, 700);
+}
+
+/// Striped rows whose parts have typed styles: every row red, the rows
+/// of odd position blue (`rowOdd` comes after `row`), which their cells'
+/// text takes.
+#[component]
+fn TypedRows() -> impl IntoElement {
+    use nsh_base::{DataTableStyles, text_view::PartStyle};
+    use nsh_core::element::StyleRefinement;
+
+    let color = |c: u32| PartStyle(StyleRefinement::default().text_color(rgb(c)).into());
+    let mut styles = DataTableStyles::default();
+    styles.row = Some(color(0xff0000));
+    styles.row_odd = Some(color(0x0000ff));
+    data_table()
+        .h(px(200.0))
+        .columns(vec![column("symbol")])
+        .data(DataTableRows::new(2).texts("symbol", ["AAPL", "MSFT"]))
+        .stripe(true)
+        .styles(styles)
+}
+
+#[test]
+fn typed_row_styles_merge_in_order_the_later_winning() {
+    let app = start::<TypedRows>();
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("text:AAPL"), nsh_core::Color(0xff00_00ff));
+    assert_eq!(color("text:MSFT"), nsh_core::Color(0x0000_ffff));
+}

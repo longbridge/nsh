@@ -856,6 +856,14 @@ impl Painter<'_> {
         let docked = layer.overlay
             && !layer.boxed
             && view.props.accessibility.role == AccessibilityRole::Summary;
+        // A floating box (a "back to bottom" pill, a composer over the
+        // timeline) that casts a shadow stands off what scrolls under it:
+        // its shadow is a Cell left blank each side, and the row below it
+        // when the shadow falls down, so no word behind it runs into its
+        // label or shows in the gap under it.
+        if !layer.overlay && !visible.is_empty() && floats_with_shadow(view) {
+            clear_shadow(self.buffer, visible, clip, view);
+        }
         if layer.overlay && surface && !visible.is_empty() {
             dialog::clear(self.buffer, visible);
             // A word behind it that the box cuts at its sides (or the
@@ -3721,14 +3729,40 @@ fn gradient(
     if layers.is_empty() {
         return None;
     }
+    // The surface the terminal actually shows under the box: a step of
+    // its ramp, not the app's page color (which the terminal's background
+    // stands for, and may be far darker or lighter than it).
+    let base = parent.ramp.map_or(parent.rgb, |ramp| {
+        ramp.mix(palette::LADDER[parent.level.min(palette::LADDER.len() - 1)])
+    });
     let [red, green, blue, alpha] = fill.0.to_be_bytes();
     let alpha = f32::from(alpha) / 255.0;
     let under: palette::Rgb = std::array::from_fn(|i| {
         let top = f32::from([red, green, blue][i]);
-        (top * alpha + f32::from(parent.rgb[i]) * (1.0 - alpha)).round() as u8
+        (top * alpha + f32::from(base[i]) * (1.0 - alpha)).round() as u8
     });
-    let color_at =
-        |point: (f32, f32)| crate::gradient::over(under, layers.iter().map(|l| l.at(point)));
+    // The hue a too-faint wash is lifted toward: the box's own fill, else
+    // its gradient's first visible stop.
+    let toward: palette::Rgb = if fill.0 & 255 != 0 {
+        [red, green, blue]
+    } else {
+        effects
+            .background_images
+            .iter()
+            .flat_map(|g| g.stops.iter())
+            .find(|stop| stop.color.0 & 255 != 0)
+            .map_or(base, |stop| {
+                let [r, g, b, _] = stop.color.0.to_be_bytes();
+                [r, g, b]
+            })
+    };
+    let color_at = |point: (f32, f32)| {
+        palette::apart(
+            crate::gradient::over(under, layers.iter().map(|l| l.at(point))),
+            base,
+            toward,
+        )
+    };
     for y in visible.y..visible.bottom() {
         let py = (i32::from(y) - bounds.top) as f32 * ch + ch / 2.0;
         for x in visible.x..visible.right() {
@@ -3853,6 +3887,57 @@ fn emphasize_border(buffer: &mut Buffer, bounds: CellBounds, visible: Rect) {
             if edge {
                 let cell = &mut buffer[(x, y)];
                 cell.modifier = (cell.modifier | Modifier::BOLD) - Modifier::DIM;
+            }
+        }
+    }
+}
+
+/// Whether `view` casts an outer shadow: on a screen, it floats over what
+/// is around it.
+fn floats_with_shadow(view: &NshView) -> bool {
+    view.style
+        .effects
+        .as_deref()
+        .is_some_and(|effects| effects.box_shadows.iter().any(|shadow| !shadow.inset))
+}
+
+/// Blanks the Cells a floating box's shadow covers around `visible`
+/// (inside `clip`): a Cell each side, and the row below or above as the
+/// shadow falls. What is drawn after it (the box itself, a later
+/// sibling) paints over.
+fn clear_shadow(buffer: &mut Buffer, visible: Rect, clip: Rect, view: &NshView) {
+    let (mut down, mut up) = (false, false);
+    if let Some(effects) = view.style.effects.as_deref() {
+        for shadow in effects.box_shadows.iter().filter(|shadow| !shadow.inset) {
+            down |= shadow.offset_y.0 > 0.0;
+            up |= shadow.offset_y.0 < 0.0;
+        }
+    }
+    let x = visible.x.saturating_sub(1);
+    let right = visible.right().saturating_add(1);
+    let y = if up {
+        visible.y.saturating_sub(1)
+    } else {
+        visible.y
+    };
+    let bottom = if down {
+        visible.bottom().saturating_add(1)
+    } else {
+        visible.bottom()
+    };
+    let ring = Rect::new(x, y, right - x, bottom - y).intersection(clip);
+    let area = ring.intersection(buffer.area);
+    for row in area.y..area.bottom() {
+        for column in area.x..area.right() {
+            let inside = row >= visible.y
+                && row < visible.bottom()
+                && column >= visible.x
+                && column < visible.right();
+            // The scroll bar on the clip's right edge stays.
+            let bar = column + 1 == clip.right()
+                && matches!(buffer[(column, row)].symbol(), "│" | "┃" | "╹" | "╻");
+            if !inside && !bar {
+                buffer[(column, row)].reset();
             }
         }
     }

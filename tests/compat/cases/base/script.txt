@@ -659,8 +659,11 @@ frame id:avoid-padding-inner 0 0 390 30
 frame id:avoid-off 0 185 390 30
 tap text:Dismiss the keyboard
 expect Dismiss: called
+# No region reserved headless.
+expect Reserved regions: 0
 covers [nsh] safeArea
 covers [nsh] safeAreaInsets
+covers [nsh] reservedRegions
 covers [nsh] keyboardFrame
 covers [nsh] Keyboard
 # base-text-view

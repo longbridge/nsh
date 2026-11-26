@@ -5753,7 +5753,6 @@ version = "0.7.0"
 name = "nsh-js"
 version = "0.7.0"
 dependencies = [
- "futures-util",
  "getrandom 0.4.3",
  "libc",
  "log",
@@ -5763,14 +5762,11 @@ dependencies = [
  "quickjs-jit",
  "quickjs-jit-stdlib",
  "rustc-hash 2.1.3",
- "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
- "tokio-tungstenite",
  "url",
- "webpki-roots 0.26.11",
 ]
 
 [[package]]

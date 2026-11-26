@@ -379,7 +379,11 @@ color and the theme's status colors are left out: a mark's look is the app's `cl
 
 A decoration's `label` replaces its range's text on screen, as CodeMirror's replace decorations do: the display map
 lays the range out as one unit as wide as the label's box (as its layout reports it; the label's text in its font until
-then), so carets, presses, wrapping and the rows' widths go around it, and the row draws the box in its place. The label
+then), so carets, presses, wrapping and the rows' widths go around it, and the row draws the box in its place. Each range
+keeps its own box's width, so boxes of one look laid out a little apart in different rows never take turns relaying
+the rows; a range whose box has not been laid out yet (a row out of view) takes the width the first box of its look and
+font reported. A row made again keeps a label's box only for the same decoration, look and font, so a box never reports
+another label's width. The label
 is in the font of the decoration font run around its start (a date in a heading is a heading's size), and the row keeps
 the height the display map gives it. The range's text comes back while the editor has the focus and a selection touches the range (inside it or at
 either end), worked out again when the selections, the text, the decorations or the focus change: a move that touches

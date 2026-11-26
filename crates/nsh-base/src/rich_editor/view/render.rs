@@ -34,6 +34,7 @@ use crate::{
         state::{Decoration, DecorationKind},
         tables::{TableRole, table_role},
     },
+    text_view::merge_styles,
     theme,
 };
 
@@ -69,13 +70,9 @@ pub(crate) fn parts<E: Element>(el: E, rv: &Rv, list: &'static [Part]) -> E {
         })
     })
     .inline_style(move || {
-        props.styles.with(|s| {
-            Style::from_decls(
-                list.iter()
-                    .filter_map(|p| s.part(*p))
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
-        })
+        props
+            .styles
+            .with(|s| merge_styles(list.iter().filter_map(|p| s.part(*p))))
     })
 }
 
@@ -588,20 +585,39 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         Some((block_ref, _)) => view().element_ref(&block_ref),
         None => view(),
     };
+    let wrapper = wrapper.on_layout(move |b: &Bounds<Points>| {
+        if let Some(frame) = scroll_frame {
+            frame.update(|parts| parts.1 = *b);
+            update_scrolled_table(&layout_rv, id, parent, frame);
+        } else {
+            layout_rv.set_frame(id, Some(parent), *b);
+        }
+        if let Some((_, size)) = slotted
+            && size.get_untracked() != b.size
+        {
+            size.set(b.size);
+        }
+    });
+    // A list's item carries its marker, placed in the indent before it;
+    // a terminal's goes in flow before the content instead, as TextView
+    // sets its markers, since its Cells round the indent down.
+    let marked = list_marker(&rv, &first).is_some();
+    let wrapper = match marked {
+        true if terminal => wrapper.flex_row().child(marker(rv.clone(), item, true)),
+        true => wrapper.relative().child(marker(rv.clone(), item, false)),
+        false => wrapper,
+    };
+    // Tables are grids of their cells (`table.rs`).
+    let wrapper = match (table_role(first.node.ty()), &kind) {
+        (_, Kind::View(_)) => wrapper,
+        (Some(TableRole::Table), _) => table::grid(wrapper, &rv, item),
+        (Some(TableRole::Cell | TableRole::HeaderCell), _) => table::cell(wrapper, &rv, item),
+        _ => wrapper,
+    };
+    // The parts' classes and styles after the block's own styles: a table's
+    // theme colors are bound, and an app's typed part style bound before
+    // them would be covered by them.
     let wrapper = wrapper
-        .on_layout(move |b: &Bounds<Points>| {
-            if let Some(frame) = scroll_frame {
-                frame.update(|parts| parts.1 = *b);
-                update_scrolled_table(&layout_rv, id, parent, frame);
-            } else {
-                layout_rv.set_frame(id, Some(parent), *b);
-            }
-            if let Some((_, size)) = slotted
-                && size.get_untracked() != b.size
-            {
-                size.set(b.size);
-            }
-        })
         .app_class(move || {
             let it = item.get();
             let (selected, focused) = active.get();
@@ -635,25 +651,9 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
                 if focused && let Some(style) = s.part(Part::FocusedNode) {
                     list.push(style.clone());
                 }
-                parts::merge(&list)
+                merge_styles(&list)
             })
         });
-    // A list's item carries its marker, placed in the indent before it;
-    // a terminal's goes in flow before the content instead, as TextView
-    // sets its markers, since its Cells round the indent down.
-    let marked = list_marker(&rv, &first).is_some();
-    let wrapper = match marked {
-        true if terminal => wrapper.flex_row().child(marker(rv.clone(), item, true)),
-        true => wrapper.relative().child(marker(rv.clone(), item, false)),
-        false => wrapper,
-    };
-    // Tables are grids of their cells (`table.rs`).
-    let wrapper = match (table_role(first.node.ty()), &kind) {
-        (_, Kind::View(_)) => wrapper,
-        (Some(TableRole::Table), _) => table::grid(wrapper, &rv, item),
-        (Some(TableRole::Cell | TableRole::HeaderCell), _) => table::cell(wrapper, &rv, item),
-        _ => wrapper,
-    };
     let task = render_kind(&first.node) == Some("task");
     let content = match kind {
         Kind::View(view) => {
@@ -1468,7 +1468,7 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, id: u64) -> Vec<AnyElement> {
                                 .iter()
                                 .flat_map(|m| parts::mark_styles(s, m))
                                 .collect();
-                            parts::merge(&list)
+                            merge_styles(&list)
                         })
                     })
                     .when_some(hint, |t, hint| t.child(hint))
@@ -1528,7 +1528,7 @@ fn leaf(
         .inline_style(move || {
             props
                 .styles
-                .with(|s| parts::merge(&parts::node_styles(s, &style_node)))
+                .with(|s| merge_styles(&parts::node_styles(s, &style_node)))
         })
     };
     if let Some(view) = rv.node_view(node.ty().name()) {
@@ -1585,7 +1585,7 @@ fn leaf(
             .inline_style(move || {
                 props
                     .styles
-                    .with(|s| parts::merge(&parts::node_styles(s, &style_node)))
+                    .with(|s| merge_styles(&parts::node_styles(s, &style_node)))
             })
             .into_element();
     }

@@ -421,8 +421,8 @@ async function changeLanguage(language: string) {
 ### 退出
 
 应用的生命周期由应用自己负责。关闭窗口只关闭那个窗口；最后一个窗口关闭时按退出模式处理：
-`"platform"`（默认）让 macOS 应用留在 Dock 中，在 Windows 和 Linux 上退出；`"lastWindowClosed"` 在所有平台上退出；
-`"explicit"` 让应用继续运行，以便打开另一个窗口、显示托盘菜单或调用 `quit()`。应用用
+`"platform"`（声明了 `<Window>` 场景的应用的默认值）让 macOS 应用留在 Dock 中，在 Windows 和 Linux 上退出；`"lastWindowClosed"` 在所有平台上退出；
+`"explicit"` 让应用继续运行，以便打开另一个窗口、显示托盘菜单或调用 `quit()`。未声明 `<Window>` 的裸 `mount(App)` 应用使用隐式主窗口，除非显式在 nsh.json 中配置 `application.quitMode` 或调用 `Application.setQuitMode`，关闭该窗口时在所有平台（包括 macOS）上都会直接退出。应用用
 `Application.setQuitMode("platform")`（Rust：`set_quit_mode(QuitMode::Platform)`）设置它；nsh.json 的
 `application.quitMode` 保存启动时的同一个模式。`Application.on("lastWindowClosed")` 在最后一个窗口
 关闭后收到通知。Rust listener 在退出模式生效前同步运行；JS listener 在后续提交中、决定之后运行。
@@ -733,7 +733,7 @@ interface TitleBarArea {
 }
 ```
 
-当前窗口隐藏的标题栏的区域，单位为点（响应式）：它的 `height`，以及系统窗口按钮在左端（`left`）和右端（`right`）占用的宽度。用它来布局标题栏，避免内容被窗口按钮遮住。系统显示标题栏时（以及全屏时、桌面平台之外和终端应用中）三者都为 0。Rust：`title_bar() -> Edges<Points>`，其中 `top` 是高度，`left` 和 `right` 是窗口按钮的宽度；读取它会订阅变化。
+当前窗口隐藏的标题栏的区域，单位为点（响应式）：它的 `height`，以及系统窗口按钮在左端（`left`）和右端（`right`）占用的宽度。用它来布局标题栏，避免内容被窗口按钮遮住。系统显示标题栏时（以及全屏时、桌面平台之外、终端应用中或窗口已关闭时）三者都为 0。在渲染期外调用（事件回调、定时器或异步回调）时，为兼容单窗口应用会读取已打开的 `"main"` 窗口（未打开时返回全 0）；多窗口应用应在渲染时先捕获 `currentWindow()` 再调用 `win.titleBar()`。Rust：`title_bar() -> Edges<Points>`，其中 `top` 是高度，`left` 和 `right` 是窗口按钮的宽度；读取它会订阅变化。
 
 | | `height` | `left` | `right` |
 |---|---|---|---|
@@ -776,7 +776,7 @@ interface Display {
 }
 ```
 
-`win.state()` 是平台报告的一个窗口的状态，`windowState()` 是当前窗口的，`displays()` 是各个显示器，主显示器排在最前；它们都是响应式的。所有矩形的单位都是点，使用屏幕坐标：从主显示器的左上角量起，`y` 向下增长，与 `setBounds` 相同。模式、所在显示器、焦点、最小化或可见状态的变化立即报告；移动和调整大小在窗口停下片刻后报告，读取它们的代码每次移动只运行一次，而不是每一步都运行。Rust：`WindowRef::state() -> Option<WindowState>` 和 `displays() -> Vec<Display>`（类型在 `nsh_core::desktop` 中）；读取即订阅变化。
+`win.state()` 是平台报告的一个窗口的状态，`windowState()` 是当前窗口的（在渲染期外的事件回调、定时器或异步回调中调用时，为兼容单窗口应用会读取已打开的 `"main"` 窗口，窗口未打开或已关闭时返回 `null`；多窗口应用应在渲染时先捕获 `currentWindow()` 再调用 `win.state()`），`displays()` 是各个显示器，主显示器排在最前；它们都是响应式的。所有矩形的单位都是点，使用屏幕坐标：从主显示器的左上角量起，`y` 向下增长，与 `setBounds` 相同。模式、所在显示器、焦点、最小化或可见状态的变化立即报告；移动和调整大小在窗口停下片刻后报告，读取它们的代码每次移动只运行一次，而不是每一步都运行。Rust：`WindowRef::state() -> Option<WindowState>` 和 `displays() -> Vec<Display>`（类型在 `nsh_core::desktop` 中）；读取即订阅变化。
 
 显示器的 `cutouts` 是摄像头外壳挡住的区域，使用同样的屏幕坐标：在有刘海的 MacBook 上，是屏幕顶部正中的一个矩形，高度与菜单栏相同。窗口可以据此贴在刘海旁边，或者让内容从刘海里展开；其他显示器上这个列表为空。
 

@@ -5165,10 +5165,12 @@
 					popped.set(page, () => entries.set(untracked(entries).filter((value) => value !== entry)));
 					return page;
 				};
-				return typeof rendered === "function" ? computed(() => {
-					const value = rendered();
+				if (typeof rendered !== "function") return screenFor(rendered);
+				return computed(() => {
+					let value = rendered();
+					while (typeof value === "function") value = value();
 					return untracked(() => screenFor(value));
-				}) : screenFor(rendered);
+				});
 			});
 			rt.insert(node, rows);
 			return node;
@@ -5376,6 +5378,7 @@
 				bottom: 0,
 				left: 0
 			},
+			reservedRegions: [],
 			titleBar: {
 				height: 0,
 				left: 0,
@@ -5451,6 +5454,7 @@
 			windowSize: () => fields.window(),
 			colorScheme: () => fields.colorScheme(),
 			setColorScheme,
+			reservedRegions: () => fields.reservedRegions(),
 			fontScale: () => fields.fontScale(),
 			pixelRatio: () => fields.pixelRatio(),
 			locale: () => fields.locale(),
@@ -5503,7 +5507,7 @@
 				reactive.batch(() => {
 					for (const [name, signal] of Object.entries(fields)) {
 						const value = name === "colorScheme" && appearance !== "system" ? appearance : next[name];
-						if (!same(value, reactive.untracked(signal), 2)) signal.set(value);
+						if (!same(value, reactive.untracked(signal), 4)) signal.set(value);
 					}
 				});
 				dom.rootProp("layoutDirectionRtl", next.rtl);

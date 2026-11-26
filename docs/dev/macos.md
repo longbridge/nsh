@@ -521,7 +521,9 @@ The paths below keep their existing behavior:
   `commit_marked` on blur, and `unmarkText` (a return during a composition), which AppKit performs as removing the
   marked text and inserting it again unmarked.
 - **At the root** (`view.rs` `keyDown:` → `input::key`): the selected text's Cmd+A / Cmd+C / Escape (`text.rs`;
-  also the root's `selectAll:` / `copy:` for the menu), going back (`navigation::key_pressed`: Escape, Option+Left,
+  also the root's `selectAll:` / `copy:` for the menu), Shift with the arrows, Home and End extending a selectable
+  view's selection (`text::extend_key` → `selectable_view::extend_by_key`, `NSTextView`'s `…AndModifySelection:`
+  bindings; `scroll::reveal_rect` brings the focus's caret into view), going back (`navigation::key_pressed`: Escape, Option+Left,
   Cmd+[), Tab / Shift+Tab into fields and pressable views, and scrolling the scroll view around the focused view or under the mouse:
   arrows by a line, Page Up / Down, Option+Up / Down and Space / Shift+Space by a page, Home / End and Cmd+Up / Down
   to the edges. The mouse's back button goes back from `input::event`.

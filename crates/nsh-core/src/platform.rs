@@ -5,7 +5,7 @@
 pub mod clipboard;
 pub mod web_evaluation;
 
-use crate::geometry::{Edges, Points, Size};
+use crate::geometry::{Bounds, Edges, Points, Size};
 
 /// The native component of `nsh/mobile`'s `TabBar`, which the iOS and
 /// Android backends register themselves (`TabBarComponent.java`'s `NAME` keeps
@@ -440,6 +440,11 @@ pub struct Environment {
     pub vertical_size_class: Option<SizeClass>,
     /// Insets not covered by system UI (notch, home indicator, title bar).
     pub safe_area: Edges<Points>,
+    /// The parts of the surface the device reserves inside the safe area
+    /// (TS: `reservedRegions()`): the fold of a partly folded display,
+    /// a camera that shows through it. Empty where the platform reports
+    /// none.
+    pub reserved_regions: ReservedRegions,
     /// The title bar's area while the app hides it (desktops,
     /// [`crate::desktop::TitleBarStyle::Hidden`]): `top` is its height,
     /// `left` and `right` the widths the system's window controls take at
@@ -678,6 +683,7 @@ impl Default for Environment {
             horizontal_size_class: None,
             vertical_size_class: None,
             safe_area: Edges::default(),
+            reserved_regions: ReservedRegions::NONE,
             title_bar: Edges::default(),
             window_state: None,
             keyboard_height: Points(0.0),
@@ -849,6 +855,125 @@ impl std::fmt::Debug for Locale {
 impl std::fmt::Display for Locale {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// What a reserved region asks of the content in it (TS:
+/// `ReservedRegion["kind"]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, crate::element::PropEnum)]
+#[non_exhaustive]
+pub enum ReservedRegionKind {
+    /// Something covers it (a camera that shows through the display):
+    /// keep what matters out of it.
+    #[default]
+    Occlusion,
+    /// The display divides there (the fold of a partly folded display):
+    /// keep content clear of it, on either side.
+    Division,
+}
+
+impl ReservedRegionKind {
+    /// The kind's name in TS (`"occlusion"`, `"division"`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Occlusion => "occlusion",
+            Self::Division => "division",
+        }
+    }
+}
+
+/// A part of the surface the device reserves (TS: `ReservedRegion`): what
+/// UIKit calls a reserved region (`UIView.ReservedRegion`), Jetpack
+/// WindowManager a display feature.
+#[derive(Debug, Clone, Copy, PartialEq, Default, crate::element::JsObject)]
+#[non_exhaustive]
+pub struct ReservedRegion {
+    /// What it asks of the content in it.
+    pub kind: ReservedRegionKind,
+    /// Where it is, in the surface's points (as layout places views),
+    /// with the margin interactive content keeps from it.
+    pub bounds: Bounds<Points>,
+}
+
+impl ReservedRegion {
+    /// A region of `kind` at `bounds`.
+    pub fn new(kind: ReservedRegionKind, bounds: Bounds<Points>) -> ReservedRegion {
+        ReservedRegion { kind, bounds }
+    }
+}
+
+/// The regions the device reserves in a surface ([`ReservedRegion`]), at
+/// most [`ReservedRegions::CAPACITY`]. Held inline so that the environment
+/// stays `Copy`.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ReservedRegions {
+    regions: [ReservedRegion; ReservedRegions::CAPACITY],
+    len: u8,
+}
+
+impl ReservedRegions {
+    /// How many it keeps: a device reserves a few (iPhone Duo: its fold
+    /// and its cameras); the rest are left out.
+    pub const CAPACITY: usize = 8;
+
+    /// None, the default.
+    pub const NONE: ReservedRegions = ReservedRegions {
+        regions: [ReservedRegion {
+            kind: ReservedRegionKind::Occlusion,
+            bounds: Bounds {
+                origin: crate::geometry::Point {
+                    x: Points(0.0),
+                    y: Points(0.0),
+                },
+                size: Size {
+                    width: Points(0.0),
+                    height: Points(0.0),
+                },
+            },
+        }; ReservedRegions::CAPACITY],
+        len: 0,
+    };
+
+    /// These regions, the first [`ReservedRegions::CAPACITY`] kept.
+    pub fn new(regions: impl IntoIterator<Item = ReservedRegion>) -> ReservedRegions {
+        let mut list = Self::NONE;
+        for region in regions.into_iter().take(Self::CAPACITY) {
+            list.regions[usize::from(list.len)] = region;
+            list.len += 1;
+        }
+        list
+    }
+
+    /// All of them.
+    pub fn as_slice(&self) -> &[ReservedRegion] {
+        &self.regions[..usize::from(self.len)]
+    }
+
+    /// All of them.
+    pub fn iter(&self) -> impl Iterator<Item = ReservedRegion> + '_ {
+        self.as_slice().iter().copied()
+    }
+
+    /// There are none.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// How many there are.
+    pub fn len(&self) -> usize {
+        usize::from(self.len)
+    }
+}
+
+impl Default for ReservedRegions {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+impl std::fmt::Debug for ReservedRegions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.as_slice()).finish()
     }
 }
 

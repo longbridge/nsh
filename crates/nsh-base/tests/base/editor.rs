@@ -1166,3 +1166,170 @@ fn a_label_shows_in_place_of_its_range_until_the_caret_touches_it() {
         Ok(Some("due @2026-11-25 ok\nnext"))
     );
 }
+
+/// A row made again keeps a label's box only for the same label: a kept
+/// box first hears the frame it was last laid out at, which for another
+/// label's box would report that label's width as this one's. A new label
+/// for the same range is a new box, and shows.
+#[test]
+fn a_label_box_is_kept_only_for_the_same_label() {
+    use nsh_base::editor::{EditorDecoration, EditorPosition, EditorRange};
+
+    #[component]
+    fn Relabeled() -> impl IntoElement {
+        let later = signal(false);
+        let decorations = move || {
+            let mut due = EditorDecoration::default();
+            due.range = EditorRange::new(EditorPosition::new(0, 4), EditorPosition::new(0, 15));
+            due.label = Some(if later.get() { "Next week" } else { "Tomorrow" }.into());
+            vec![due]
+        };
+        view()
+            .child(
+                view().test_id("editor").w(px(600.0)).h(px(200.0)).child(
+                    editor()
+                        .default_value("due @2026-11-25 ok\nnext")
+                        .decorations(decorations)
+                        .size_full(),
+                ),
+            )
+            .child(
+                view()
+                    .test_id("later")
+                    .w(px(20.0))
+                    .h(px(20.0))
+                    .on_press(move || later.set(true)),
+            )
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<Relabeled>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    see(&mut app, "Tomorrow");
+    let source = "label:@2026-11-25";
+    let first = app.screen().id(source).unwrap();
+    // Typing at the line's end, away from the range (which the app's
+    // decorations keep), makes the row again with the same label: the same
+    // box.
+    focus(&mut app);
+    keys(&mut app, &["end"]);
+    app.type_text("id:editor", "!").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    assert_eq!(
+        app.screen().input_text("id:editor"),
+        Ok(Some("due @2026-11-25 ok!\nnext"))
+    );
+    assert!(app.shows("Tomorrow"));
+    assert_eq!(app.screen().id(source), Ok(first));
+    // Another label over the range: shown, in a box of its own.
+    app.press("id:later").unwrap();
+    see(&mut app, "Next week");
+    assert!(!app.shows("Tomorrow"));
+    let now = app.screen().id(source).expect("the new label's box");
+    assert_ne!(now, first);
+}
+
+/// A text color as a Rust app types it (`StyleRefinement`), not as
+/// declarations.
+fn typed_color(color: u32) -> nsh_core::element::Style {
+    nsh_core::element::StyleRefinement::default()
+        .text_color(rgb(color))
+        .into()
+}
+
+/// Component `C` on a Linux desktop's headless surface, shown once
+/// `text` is.
+fn start_component<C: Component<Props = ()>>(text: &str) -> Headless {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    see(&mut app, text);
+    app
+}
+
+/// Typed part styles reach a line number of one part and the caret's,
+/// which takes `lineNumber` then `activeLineNumber`, the later winning.
+#[test]
+fn typed_part_styles_reach_line_numbers_of_one_part_and_of_two() {
+    use nsh_base::{editor::EditorStyles, text_view::PartStyle};
+    use nsh_core::Color;
+
+    #[component]
+    fn Numbered() -> impl IntoElement {
+        let mut styles = EditorStyles::default();
+        styles.line_number = Some(PartStyle(typed_color(0xff0000)));
+        styles.active_line_number = Some(PartStyle(typed_color(0x0000ff)));
+        view().test_id("editor").w(px(600.0)).h(px(200.0)).child(
+            editor()
+                .default_value("abc\ndef")
+                .styles(styles)
+                .size_full(),
+        )
+    }
+
+    let app = start_component::<Numbered>("def");
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("id:editor >> text:1"), Color(0x0000_ffff));
+    assert_eq!(color("id:editor >> text:2"), Color(0xff00_00ff));
+}
+
+/// Typed decoration styles reach their range's text (`style`) and their
+/// lines' rows (`lineStyle`), whose text takes their color; where two
+/// decorations cover the same text or line, the later one wins.
+#[test]
+fn typed_decoration_styles_reach_their_text_and_rows_the_later_winning() {
+    use nsh_base::editor::{EditorDecoration, EditorPosition, EditorRange};
+    use nsh_core::Color;
+
+    #[component]
+    fn Decorated() -> impl IntoElement {
+        let range = |line, from, to| {
+            EditorRange::new(
+                EditorPosition::new(line, from),
+                EditorPosition::new(line, to),
+            )
+        };
+        let text = |line, from, to, color| {
+            let mut d = EditorDecoration::default();
+            d.range = range(line, from, to);
+            d.style = Some(typed_color(color));
+            d
+        };
+        let row = |line, color| {
+            let mut d = EditorDecoration::default();
+            d.range = range(line, 0, 3);
+            d.line_style = Some(typed_color(color));
+            d
+        };
+        view().test_id("editor").w(px(600.0)).h(px(200.0)).child(
+            editor()
+                .default_value("abc and xyz\ndef\nghi")
+                .decorations(vec![
+                    text(0, 0, 3, 0xff0000),
+                    text(0, 8, 11, 0xff0000),
+                    text(0, 8, 11, 0x0000ff),
+                    row(1, 0x00ff00),
+                    row(2, 0x00ff00),
+                    row(2, 0x0000ff),
+                ])
+                .size_full(),
+        )
+    }
+
+    let app = start_component::<Decorated>("ghi");
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("id:editor >> text:abc"), Color(0xff00_00ff));
+    assert_ne!(color("id:editor >> text: and "), Color(0xff00_00ff));
+    assert_eq!(color("id:editor >> text:xyz"), Color(0x0000_ffff));
+    assert_eq!(color("id:editor >> text:def"), Color(0x00ff_00ff));
+    assert_eq!(color("id:editor >> text:ghi"), Color(0x0000_ffff));
+}

@@ -2705,6 +2705,50 @@ fn key_scroll_view(view: &NshView, horizontal: bool, dx: f32, dy: f32) -> Option
 pub(crate) fn reveal(surface: &Rc<Surface>, target: &NshView) {
     // The rectangles are AppKit's, which the bounds place.
     commit_ancestors(target);
+    reveal_with(surface, target, |view| {
+        // In the scroll view's coordinates: zoomed, as AppKit converts.
+        target
+            .ns()
+            .convertRect_toView(target.ns().bounds(), Some(view.ns()))
+    });
+}
+
+/// Scrolls the scroll views around `target` (animated) so that `rect` (in
+/// `target`'s coordinates) shows: the caret a key moved a selection's
+/// focus to. A text view draws in its parent's layer, with no superview
+/// AppKit could convert through: `rect` goes up the views' tree instead
+/// ([`rect_in`]).
+pub(crate) fn reveal_rect(surface: &Rc<Surface>, target: &NshView, rect: CGRect) {
+    reveal_with(surface, target, |view| rect_in(target, rect, view));
+}
+
+/// `rect` of `target` in the viewport of `scroll`, a view around it: moved
+/// by the frames of the views between, and by the offset and zoom of each
+/// scroll view on the way, as [`crate::selectable_view`] places its texts.
+fn rect_in(target: &NshView, rect: CGRect, scroll: &NshView) -> CGRect {
+    let (mut x, mut y, mut scale) = (rect.origin.x, rect.origin.y, 1.0);
+    let mut current = target.clone();
+    while let Some(parent) = current.parent_view() {
+        let frame = current.ns().frame();
+        let (ox, oy) = bounds_origin(&parent);
+        let z = f64::from(zoom(&parent));
+        x = (frame.origin.x + x - f64::from(ox)) * z;
+        y = (frame.origin.y + y - f64::from(oy)) * z;
+        scale *= z;
+        if &parent == scroll {
+            break;
+        }
+        current = parent;
+    }
+    CGRect::new(
+        CGPoint::new(x, y),
+        CGSize::new(rect.size.width * scale, rect.size.height * scale),
+    )
+}
+
+/// Scrolls the scroll views around `target` (animated) so that the
+/// rectangle `rect_in` gives in each one's viewport shows.
+fn reveal_with(surface: &Rc<Surface>, target: &NshView, rect_in: impl Fn(&NshView) -> CGRect) {
     // Content moved by the scroll views inside, which rectangles measured
     // now do not show yet.
     let (mut moved_x, mut moved_y) = (0.0, 0.0);
@@ -2714,10 +2758,7 @@ pub(crate) fn reveal(surface: &Rc<Surface>, target: &NshView) {
         if view.kind() != ViewKind::Scroll || !mapped(&view) {
             continue;
         }
-        // In the scroll view's coordinates: zoomed, as AppKit converts.
-        let bounds = target
-            .ns()
-            .convertRect_toView(target.ns().bounds(), Some(view.ns()));
+        let bounds = rect_in(&view);
         let (base, p, lims, dims) = {
             let state = view.state();
             let Some(s) = &state.scroll else { continue };

@@ -16,6 +16,8 @@ mod selection;
 mod tex_text;
 mod view;
 
+pub(crate) use self::parts::merge_styles;
+
 /// Makes formulas typeset in a web runtime: the gate of its side module
 /// (`nsh_feature_math`), which holds what this reaches and nothing else does.
 #[cfg(all(feature = "math", target_arch = "wasm32"))]

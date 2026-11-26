@@ -430,12 +430,14 @@ async function changeLanguage(language: string) {
 ### Quitting
 
 The app owns its lifecycle. Closing a window closes that window only; closing the last window follows the quit mode:
-`"platform"` (the default) keeps a macOS app running in the Dock and quits on Windows and Linux, `"lastWindowClosed"`
-quits on every platform, `"explicit"` leaves the app running so it can open another window, show a tray menu or call
-`quit()`. The app sets it with `Application.setQuitMode("platform")` (Rust: `set_quit_mode(QuitMode::Platform)`);
-nsh.json's `application.quitMode` holds the same mode from launch. `Application.on("lastWindowClosed")` hears the last
-window go, after its close path. Rust listeners run synchronously before the quit mode acts; JS listeners run in a later
-commit, after the decision.
+`"platform"` (the default for apps that declare `<Window>` scenes) keeps a macOS app running in the Dock and quits on
+Windows and Linux, `"lastWindowClosed"` quits on every platform, `"explicit"` leaves the app running so it can open
+another window, show a tray menu or call `quit()`. A plain `mount(App)` root with no `<Window>` scenes uses an implicit
+main window that quits on every platform when closed unless the app explicitly sets `application.quitMode` in nsh.json
+or calls `Application.setQuitMode`. The app sets it with `Application.setQuitMode("platform")` (Rust:
+`set_quit_mode(QuitMode::Platform)`); nsh.json's `application.quitMode` holds the same mode from launch.
+`Application.on("lastWindowClosed")` hears the last window go, after its close path. Rust listeners run synchronously
+before the quit mode acts; JS listeners run in a later commit, after the decision.
 
 A macOS Dock or Finder reopen, or a later launch on Windows and Linux, reaches `Application.on("reopen")` (Rust:
 `on_reopen`): the app opens or focuses the window it wants. NSH never shows a window of its own.
@@ -766,7 +768,7 @@ interface TitleBarArea {
 }
 ```
 
-The hidden title bar's area of the current window, in points (reactive): its `height`, and the widths the system's window controls take at its `left` and `right` ends. Lay your bar out with it so that nothing goes under the controls. All three are 0 while the system shows its title bar (and in full screen, off the desktops, and in a terminal app). Rust: `title_bar() -> Edges<Points>`, whose `top` is the height and `left` and `right` the controls' widths; reading it subscribes to changes.
+The hidden title bar's area of the current window, in points (reactive): its `height`, and the widths the system's window controls take at its `left` and `right` ends. Lay your bar out with it so that nothing goes under the controls. All three are 0 while the system shows its title bar (and in full screen, off the desktops, in a terminal app, or when the window is closed). Called outside a render (in an event handler, timer or async callback), it reads the open `"main"` window for compatibility (all 0 when none is open); in multi-window apps, capture `currentWindow()` while rendering and call `win.titleBar()`. Rust: `title_bar() -> Edges<Points>`, whose `top` is the height and `left` and `right` the controls' widths; reading it subscribes to changes.
 
 | | `height` | `left` | `right` |
 |---|---|---|---|
@@ -809,7 +811,7 @@ interface Display {
 }
 ```
 
-`win.state()` is a window as the platform reports it, `windowState()` the current window's, and `displays()` the displays, the primary one first; all are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setBounds` takes them. A change of mode, of display, of focus, or of being minimized or visible is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `WindowRef::state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
+`win.state()` is a window as the platform reports it, `windowState()` the current window's (or the open `"main"` window's when called outside a render such as an event handler, timer or async callback, returning `null` when closed or none is open; in multi-window apps, capture `currentWindow()` while rendering and call `win.state()`), and `displays()` the displays, the primary one first; all are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setBounds` takes them. A change of mode, of display, of focus, or of being minimized or visible is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `WindowRef::state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
 
 A display's `cutouts` are the parts of it a camera housing covers, in the same screen coordinates: on a MacBook with a notch, one rectangle at the top's middle, as tall as the menu bar. A window can sit beside the notch, or show content that grows out of it; on every other display the list is empty.
 
