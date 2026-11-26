@@ -91,7 +91,9 @@ pub use storage::{FileStorage, resolve_data_dir, support_dir};
 pub use crate::{
     cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
-    host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
+    host_channel::{
+        HostCall, HostChannel, HostReply, HostSender, HostSenderClosed, OpenUrlRequest,
+    },
 };
 use crate::{
     host_channel::HostRefusal,
@@ -1617,6 +1619,9 @@ enum Message {
     /// The embedding app's event (`nsh/host`'s `host.on`): its name and
     /// data.
     HostEvent(String, nsh_core::JsonValue),
+    /// An event of one of this app's calls ([`HostSender`]): delivered as
+    /// [`Message::HostEvent`], but never kept for the next app.
+    CallerEvent(String, nsh_core::JsonValue),
     /// The embedding app's answer to call `.0` (`host.call`).
     HostReply(u64, Result<nsh_core::JsonValue, String>),
     /// The embedding app's answer to call `.0` the core made
@@ -4624,7 +4629,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         // The components' listeners hear it, then JS's.
-        Message::HostEvent(name, data) => {
+        Message::HostEvent(name, data) | Message::CallerEvent(name, data) => {
             state.core.host_event(&name, &data);
             if let Some(script) = script {
                 script.host_event(&name, data);
