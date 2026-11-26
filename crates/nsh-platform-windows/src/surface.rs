@@ -1297,6 +1297,15 @@ impl Surface {
     /// deadline ran without a tick ([`Surface::keep_deadline`]), which keeps
     /// the real time ([`nsh_core::animation::Animator::tick_frame`]).
     fn frame(self: &Rc<Self>, drawn: bool) {
+        // Not while a batch is applied: a call it makes that pumps the
+        // thread's messages may dispatch a tick or a deadline's timer here,
+        // and writing the animated values borrows the mounter the batch
+        // holds. The frame is skipped: the tick still counts as handled
+        // ([`Surface::tick`]), so the ticker posts the next one, and the
+        // deadline's timer is set again.
+        if self.mounter.try_borrow_mut().is_err() {
+            return;
+        }
         let started = self
             .fps
             .borrow()
@@ -1619,6 +1628,114 @@ mod tests {
             Cursor::Pointer,
             "the batch sent meanwhile is applied"
         );
+    }
+
+    /// A tick or a deadline's timer dispatched while a batch is applied (a
+    /// call it makes pumped the thread's messages) skips its frame, which
+    /// would borrow the mounter the batch holds; the tick counts as handled,
+    /// so the ticker posts the next one.
+    #[test]
+    fn a_tick_while_a_batch_is_applied_skips_its_frame() {
+        let surface = Surface::new(Environment::default());
+        let window = TestWindow(
+            crate::window::create(&surface, "NSH tick re-entry", (320, 240), None, false).unwrap(),
+        );
+        pump();
+        let ticker = crate::window::Ticker::start(window.0).unwrap();
+        // Paused, it posts nothing of its own; a tick is in the queue.
+        ticker.pause();
+        ticker.posted_for_test();
+        *surface.ticker.borrow_mut() = Some(ticker);
+        let frames = Rc::new(Cell::new(0));
+        let counted = frames.clone();
+        surface.frame_clients.borrow_mut().push((
+            Box::new(move |surface: &Rc<Surface>, _| {
+                counted.set(counted.get() + 1);
+                surface.write_animations();
+                Next::Done
+            }),
+            None,
+        ));
+        let tick = || {
+            // SAFETY: posting to the test's own window.
+            unsafe {
+                PostMessageW(
+                    Some(window.0),
+                    crate::window::WM_NSH_TICK,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            }
+            .unwrap();
+        };
+        {
+            let _applying = surface.mounter.borrow_mut();
+            tick();
+            pump();
+            // The deadline's timer runs the same frame.
+            surface.frame(false);
+        }
+        assert_eq!(frames.get(), 0, "a frame ran inside the batch");
+        let pending = surface.ticker.borrow().as_ref().unwrap().pending_for_test();
+        assert!(!pending, "the tick counts as handled");
+        tick();
+        pump();
+        assert_eq!(frames.get(), 1);
+    }
+
+    /// A Rust root with nothing to send after its first frame.
+    #[nsh_core::prelude::component]
+    fn Still() -> impl nsh_core::prelude::IntoElement {
+        nsh_core::prelude::view()
+    }
+
+    /// While a resize waits for the engine's layout (`await_layout`, an
+    /// engine running), a wake-up a handler there pumps waits on the drain
+    /// alone, the mounter free, and is asked for again after it: the
+    /// batches stay in order and none waits for the engine's next message.
+    #[test]
+    fn a_wake_up_while_a_resize_awaits_the_layout_waits_for_it() {
+        let surface = Surface::new(Environment::default());
+        let _window = TestWindow(
+            crate::window::create(&surface, "NSH await layout", (320, 240), None, false).unwrap(),
+        );
+        pump();
+        surface.start(EngineConfig::new(nsh_engine::App::Rust(
+            nsh_core::element::Root::new::<Still>(|| ()),
+        )));
+        // The test sends in the engine's place; the engine is there for
+        // `await_layout`, which waits for none without one.
+        let sink = surface.queue_for_test();
+        let late = Sink {
+            hwnd: sink.hwnd.clone(),
+            tx: sink.tx.clone(),
+            pending: sink.pending.clone(),
+        };
+        let weak = Rc::downgrade(&surface);
+        let later = Cell::new(Some(cursor_batch(&surface, Cursor::Pointer)));
+        let free = Rc::new(Cell::new(None));
+        let seen = free.clone();
+        *surface.on_error.borrow_mut() = Some(Box::new(move |_| {
+            let (Some(surface), Some(batch)) = (weak.upgrade(), later.take()) else {
+                return;
+            };
+            seen.set(Some(surface.mounter.try_borrow_mut().is_ok()));
+            late.submit(batch);
+            pump();
+        }));
+        let size = Size::new(Points(400.0), Points(300.0));
+        sink.report_error("pumps the messages");
+        sink.resized(size);
+        surface.await_layout(size);
+        assert_eq!(free.get(), Some(true), "the mounter was free");
+        assert!(!surface.resize_late.get(), "the layout came");
+        assert_ne!(
+            surface.root.state().style.cursor,
+            Cursor::Pointer,
+            "applied inside the wait"
+        );
+        pump();
+        assert_eq!(surface.root.state().style.cursor, Cursor::Pointer);
     }
 
     /// A minimized window's client area is empty: the app keeps the size it
