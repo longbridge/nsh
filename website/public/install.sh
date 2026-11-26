@@ -69,9 +69,12 @@ step() {
       1) frame=⠋ ;; 2) frame=⠙ ;; 3) frame=⠹ ;; 4) frame=⠸ ;; 5) frame=⠼ ;;
       6) frame=⠴ ;; 7) frame=⠦ ;; 8) frame=⠧ ;; 9) frame=⠇ ;; 10) frame=⠏ ;;
     esac
-    printf '\r\033[K\033[36m%s\033[0m %s' "$frame" "$label" >&2
+    # Build the whole line first and write it once, then clear what is
+    # left of the previous frame. Clearing first and appending the size
+    # from a separate command shows a frame without it: the size blinks.
+    size=
     if [ -n "${download_file:-}" ] && [ -f "$download_file" ]; then
-      wc -c < "$download_file" | awk -v total="${download_total:-0}" '{
+      size=$(wc -c < "$download_file" | awk -v total="${download_total:-0}" '{
         mb = $1 / 1048576
         if (total > 0) {
           pct = int($1 * 100 / total); if (pct > 100) pct = 100
@@ -79,8 +82,9 @@ step() {
         } else {
           printf "  \033[2m%.1f MB\033[0m", mb
         }
-      }' >&2
+      }')
     fi
+    printf '\r\033[36m%s\033[0m %s%s\033[K' "$frame" "$label" "$size" >&2
     sleep 0.1
   done
   status=0
