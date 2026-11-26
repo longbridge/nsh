@@ -982,7 +982,8 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
             }
             // Follow redirects here so `Range` and `Accept-Encoding` survive
             // cross-origin redirects (e.g. GitHub Releases -> asset CDN) on
-            // every platform stack and every hop stays HTTPS (or loopback).
+            // every platform stack and every hop stays HTTPS (or loopback), or
+            // on the origin of a plain-HTTP feed (`updater_redirect_allowed`).
             request.follow_redirects = false;
             let task = self.network.fetch(request, events);
 
@@ -1020,8 +1021,11 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
                                 head.url.as_str()
                             };
                             let next = nsh_core::access::resolve_reference(base, location.trim());
-                            if !is_updater_url(&next) {
-                                break Err(format!("redirect to non-HTTPS URL {next:?}"));
+                            if !updater_redirect_allowed(base, &next) {
+                                break Err(format!(
+                                    "redirect to non-HTTPS URL {next:?} (plain HTTP stays on \
+                                     the feed's origin)"
+                                ));
                             }
                             redirect_to = Some(next);
                             break Ok(());
@@ -1155,6 +1159,23 @@ fn is_updater_url(url: &str) -> bool {
                 parts.host.as_str(),
                 "127.0.0.1" | "localhost" | "::1" | "[::1]"
             ))
+}
+
+/// Whether a response from `from` may redirect to `to`: HTTPS (or loopback)
+/// always; plain HTTP only from plain HTTP on the same origin. `nsh-updater`
+/// lets a request start on plain HTTP only for a feed the app opted in to
+/// (`packages.allowHttp`), and keeps what the feed names on its origin; this
+/// keeps its redirects there too, and never downgrades an HTTPS request.
+fn updater_redirect_allowed(from: &str, to: &str) -> bool {
+    if is_updater_url(to) {
+        return true;
+    }
+    let origin = |url| {
+        nsh_core::access::parse_url(url)
+            .filter(|parts| parts.scheme == "http")
+            .map(|parts| (parts.host, parts.port.unwrap_or(80)))
+    };
+    origin(from).is_some_and(|from| origin(to) == Some(from))
 }
 
 /// The platform's HTTP stack, used by JS `fetch`.
@@ -5123,6 +5144,37 @@ mod updater_range_tests {
         assert!(!is_updater_url("http://example.com/a.tar.gz"));
         assert!(!is_updater_url("http://localhost.evil.dev/a.tar.gz"));
         assert!(!is_updater_url("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn plain_http_redirects_stay_on_the_feed_origin() {
+        let feed = "http://10.0.0.2:8080/updates/latest.json";
+        assert!(updater_redirect_allowed(
+            feed,
+            "http://10.0.0.2:8080/other/latest.json"
+        ));
+        assert!(updater_redirect_allowed(
+            feed,
+            "https://cdn.example/latest.json"
+        ));
+        assert!(updater_redirect_allowed(
+            "http://10.0.0.2/a",
+            "http://10.0.0.2:80/b"
+        ));
+        assert!(!updater_redirect_allowed(
+            feed,
+            "http://10.0.0.2/latest.json"
+        ));
+        assert!(!updater_redirect_allowed(
+            feed,
+            "http://10.0.0.3:8080/latest.json"
+        ));
+        assert!(!updater_redirect_allowed(feed, "file:///etc/passwd"));
+        // Never from HTTPS down to plain HTTP, even on the same host.
+        assert!(!updater_redirect_allowed(
+            "https://10.0.0.2/latest.json",
+            "http://10.0.0.2/latest.json"
+        ));
     }
 
     struct NoopTask;
