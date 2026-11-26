@@ -481,6 +481,16 @@ Tab 与 Shift-Tab 在单元格之间移动，在最后一个单元格按 Tab 会
 
 - 在桌面平台上，每列的右边框和每行的下边框可以调整尺寸：指针显示调整光标和 `tableResizeHandle` 线条，表格随拖动变化，松开时在一步中设置 `colwidth` 或 `height`，撤销可以一次撤回。`resizable: false` 关闭此功能，`lastColumnResizable: false` 保持最后一列的宽度。
 - 选区所在的表格在其上边框每列上方、左边框每行旁边显示抓手（`tableGrip`）。按下抓手选中该列或该行；在桌面平台上拖动抓手会显示放置位置（`tableDropIndicator`），松开时移动到那里。
+- 按下抓手后没有拖动就松开（触摸屏上为轻点），会在选中该列或该行之后调用 `onTableMenu`，参数为 `{ table, row, column, bounds }`：`table` 是表格之前的位置，行抓手带 `row`，列抓手带 `column`，`bounds` 是抓手在根视图中的边界，应用在这里打开该行或该列的菜单。拖动会移动行或列，不调用它；松开前抓手所在的表格或行列已被删除时也不调用。
+
+```tsx
+<RichEditor
+  editor={editor}
+  onTableMenu={({ table, row, column, bounds }) =>
+    openLineMenu({ table, row, column, anchor: bounds })
+  }
+/>
+```
 
 ```tsx
 <RichEditor
