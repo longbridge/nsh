@@ -304,19 +304,21 @@ impl GpuViews {
     /// done: the views whose frame shown is new, which the backend draws
     /// again (`f(id)`).
     pub fn tick(&mut self, mut f: impl FnMut(NodeId)) {
+        // Collect first: a collected frame frees its read-back buffer, so the
+        // frame asked for below has one to render into instead of being
+        // skipped while the GPU is only one frame ahead.
+        if let Some(Some(device)) = self.worker.as_ref().and_then(|w| w.device.get()) {
+            let _ = device.device.poll(wgpu::PollType::Poll);
+            for (&id, view) in &self.views {
+                if view.shared.frames().collect() {
+                    f(id);
+                }
+            }
+        }
         if self.views.values().any(|v| {
             v.shared.due.load(Ordering::Acquire) && !v.shared.hidden.load(Ordering::Acquire)
         }) {
             self.send(Command::Frame);
-        }
-        let Some(Some(device)) = self.worker.as_ref().and_then(|w| w.device.get()) else {
-            return;
-        };
-        let _ = device.device.poll(wgpu::PollType::Poll);
-        for (&id, view) in &self.views {
-            if view.shared.frames().collect() {
-                f(id);
-            }
         }
     }
 
