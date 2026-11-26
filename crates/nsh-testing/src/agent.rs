@@ -1354,18 +1354,18 @@ pub trait Native: Send + Sync {
         options: DragOptions,
     ) -> Result<(), String> {
         let _ = (from, to, options);
-        Err("`dragAndHold` runs headless, on Linux and on iOS for now".into())
+        Err("`dragAndHold` runs headless, on Linux, Windows and iOS for now".into())
     }
     /// Drops local files (`file:` URLs) at `at`, as a file manager's drag
     /// does.
     fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
         let _ = (at, uris);
-        Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
+        Err("`dropFiles` runs headless, on Linux, macOS and Windows for now".into())
     }
     /// Lets go of the button [`Native::drag_and_hold`] holds, at `at`.
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
         let _ = at;
-        Err("`drop` runs headless, on Linux and on iOS for now".into())
+        Err("`drop` runs headless, on Linux, Windows and iOS for now".into())
     }
     /// Holds modifier keys down (`down`) or lets go of them: the presses,
     /// drags and hovers until then carry them. One that cannot refuses it.
@@ -1373,7 +1373,7 @@ pub trait Native: Send + Sync {
         let _ = keys;
         Err(crate::failure::unsupported_here(
             if down { "keyboard.down" } else { "keyboard.up" },
-            "holding keys runs headless and on Linux for now",
+            "holding keys runs headless, on Linux and Windows for now",
         ))
     }
     /// Types `text` into the focused input, key by key.

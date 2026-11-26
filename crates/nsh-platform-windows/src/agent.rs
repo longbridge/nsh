@@ -221,7 +221,7 @@ impl Native for WindowsNative {
                         dx: dx / n as f32,
                         dy: dy / n as f32,
                         precise: true,
-                        modifiers: Modifiers::default(),
+                        modifiers: synth::held_keys(),
                         time: s.clock(),
                     },
                 );
@@ -254,6 +254,63 @@ impl Native for WindowsNative {
         let (x, y) = (last.x.0, last.y.0);
         self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, 0, 0));
         Ok(())
+    }
+
+    fn drag_and_hold(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("dragAndHold", options)?;
+        let (x, y) = (from.x.0, from.y.0);
+        self.in_target(move |s| {
+            synth::pointer(s, PointerKind::Move, x, y, 0, 0);
+            synth::pointer(s, PointerKind::Down, x, y, 0, 1);
+        })
+        .ok_or_else(|| self.gone())?;
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        for at in nsh_testing::agent::drag_path(from, to) {
+            next_frame();
+            let (x, y) = (at.x.0, at.y.0);
+            self.in_target(move |s| synth::pointer(s, PointerKind::Move, x, y, 0, 1));
+        }
+        Ok(())
+    }
+
+    fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, 0, 0))
+            .ok_or_else(|| self.gone())
+    }
+
+    fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        match self.in_target(move |s| crate::file_drop::drop_uris(s, x, y, uris)) {
+            Some(true) => Ok(()),
+            Some(false) => Err("no view there listens to `onFileDrop`".into()),
+            None => Err(self.gone()),
+        }
+    }
+
+    fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
+        let mut m = Modifiers::default();
+        for name in keys.split('+') {
+            match name.trim().to_ascii_lowercase().as_str() {
+                // Windows' command key is Control.
+                "mod" | "ctrl" | "control" => m.ctrl = true,
+                "alt" | "option" => m.alt = true,
+                "shift" => m.shift = true,
+                "meta" | "cmd" | "command" | "super" | "win" => m.meta = true,
+                other => {
+                    return Err(format!(
+                        "`{other}` is no modifier key: mod, shift, alt, ctrl or meta"
+                    ));
+                }
+            }
+        }
+        self.on_main(move |_| synth::hold(m, down))
+            .ok_or_else(|| self.gone())
     }
 
     fn type_text(&self, text: &str) {

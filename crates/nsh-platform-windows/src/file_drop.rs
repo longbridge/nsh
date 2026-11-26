@@ -224,6 +224,32 @@ fn files(data: &IDataObject) -> Vec<String> {
     uris
 }
 
+#[cfg(feature = "dev")]
+/// Drops `uris` at `x`, `y` (points, root coordinates) as a file
+/// manager's drag ends there, for the test agent: false when no view there
+/// takes file drops.
+pub(crate) fn drop_uris(surface: &Surface, x: f32, y: f32, uris: Vec<String>) -> bool {
+    let Some(destination) = input::file_drop_target(surface, x, y) else {
+        return false;
+    };
+    if uris.is_empty() {
+        return false;
+    }
+    *surface.file_drop.uris.borrow_mut() = uris.clone();
+    set_target(surface, Some(destination.clone()));
+    surface.event(
+        destination.id(),
+        EventKind::FileDrop,
+        EventPayload::FileDropAt {
+            uris,
+            page_position: nsh_core::prelude::point(nsh_core::Points(x), nsh_core::Points(y)),
+        },
+    );
+    surface.file_drop.uris.borrow_mut().clear();
+    set_target(surface, None);
+    true
+}
+
 #[implement(IDropTarget)]
 struct Destination {
     surface: Weak<Surface>,
