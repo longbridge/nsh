@@ -2428,6 +2428,9 @@ notifications and those other native code scheduled go to the handler Rust code 
 `press`. On Linux a press reaches
 only the running app: one left on screen after the app exits does nothing.
 
+On Windows, pressing a notification brings a focusable app window to the foreground, preferring an unminimized window and restoring a minimized one if none is open on screen.
+Hidden windows stay hidden, and the app still receives `press` when there is no window to activate.
+
 ### Notifications.permission
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
