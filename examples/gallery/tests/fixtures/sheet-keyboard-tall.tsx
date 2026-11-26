@@ -18,9 +18,11 @@ function App() {
     const submitBottom = bottom.pagePosition.y + bottom.bounds.size.height;
     const keyboardTop = windowSize().height - keyboardFrame().height;
     const onScreen = headerTop >= safeArea().top - 1;
-    // The padded sheet's submit ends right above the keyboard, not a keyboard higher.
-    const above = mode() !== "padded" || Math.abs(keyboardTop - submitBottom) <= 1;
-    report.set(onScreen && above ? "layout: ok" : `layout: header ${headerTop.toFixed(1)}, gap ${(keyboardTop - submitBottom).toFixed(1)}`);
+    // The padded sheet's submit ends right above the keyboard (its content's
+    // padding between them), not a keyboard higher.
+    const gap = keyboardTop - submitBottom;
+    const above = mode() !== "padded" || (gap >= -1 && gap <= 48);
+    report.set(onScreen && above ? "layout: ok" : `layout: header ${headerTop.toFixed(1)}, gap ${gap.toFixed(1)}`);
   }));
   const button = (m: "tall" | "padded", label: string) => (
     <View testID={`open-${m}`} role="button" onPress={() => { report.set("layout: unmeasured"); mode.set(m); }} class="rounded-full bg-primary px-6 py-3">
