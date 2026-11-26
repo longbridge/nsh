@@ -736,6 +736,7 @@ impl Surface {
         if self.resize_late.get()
             || size.width.0 <= 0.0
             || size.height.0 <= 0.0
+            || self.draining.get()
             || self.mounter.try_borrow_mut().is_err()
             || self.control.borrow().is_none()
         {
@@ -744,6 +745,12 @@ impl Surface {
         let Some(rx) = self.rx.borrow().clone() else {
             return;
         };
+        self.as_the_drain(|| self.apply_until_resized(&rx, size));
+    }
+
+    /// Applies what the engine sends until it laid the app out at `size`,
+    /// for at most [`RESIZE_WAIT`] ([`Surface::await_layout`]).
+    fn apply_until_resized(self: &Rc<Self>, rx: &Receiver<Message>, size: Size<Points>) {
         let deadline = std::time::Instant::now() + RESIZE_WAIT;
         let mut applied = false;
         loop {
@@ -971,15 +978,24 @@ impl Surface {
     /// handler) and dispatch the wake-up here, with the mounter borrowed
     /// and the batches before it not all applied. The queue then waits:
     /// the next wake-up comes when the engine sends more, and the drain
-    /// under way drains it again when it is done.
+    /// under way (this one, or [`Surface::await_layout`]'s) drains it again
+    /// when it is done.
     pub(crate) fn drain(self: &Rc<Self>) {
         if self.draining.get() || self.mounter.try_borrow_mut().is_err() {
             self.drain_deferred.set(true);
             self.pending.borrow().store(false, Ordering::Release);
             return;
         }
+        self.as_the_drain(|| self.drain_queued());
+    }
+
+    /// Runs `f`, which applies what the engine sent, as the queue's one
+    /// drain: a wake-up that comes meanwhile waits ([`Surface::drain`]),
+    /// and is asked for again after it, or the batches sent after the ones
+    /// `f` took wait for the engine's next message.
+    fn as_the_drain(&self, f: impl FnOnce()) {
         self.draining.set(true);
-        self.drain_queued();
+        f();
         self.draining.set(false);
         if self.drain_deferred.take() {
             self.wake();
@@ -1049,8 +1065,21 @@ impl Surface {
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
         crate::access::prepare(batch);
+        // The toasts' and the badge's COM calls to the shell may pump the
+        // thread's messages (a tick, a deadline's timer, which write the
+        // animated values): they run once the batch is applied, the mounter
+        // free.
+        let mut notifications = Vec::new();
         for item in &batch.items {
             self.anim.borrow_mut().apply(item);
+            if let MountItem::Command {
+                command: Command::Notification(command),
+                ..
+            } = item
+            {
+                notifications.push(command);
+                continue;
+            }
             if !matches!(
                 item,
                 MountItem::Animation(_) | MountItem::AnimationBindings { .. }
@@ -1079,6 +1108,9 @@ impl Surface {
         }
         crate::access::batch_applied(self);
         crate::input::batch_applied(self);
+        for command in notifications {
+            crate::notifications::command(self, command);
+        }
     }
 
     /// Writes the animated values to the views and reports finished
@@ -1487,6 +1519,105 @@ mod tests {
             surface.root.state().style.cursor,
             Cursor::Pointer,
             "the batch sent last is applied last"
+        );
+    }
+
+    /// A toast's or the badge's COM call to the shell may pump the
+    /// thread's messages: a tick dispatched there writes the animated
+    /// values, which borrows the mounter. The notification commands run
+    /// once the batch is applied, the mounter free.
+    #[test]
+    fn a_notification_runs_after_its_batch() {
+        let surface = Surface::new(Environment::default());
+        let window = TestWindow(
+            crate::window::create(&surface, "NSH notification", (320, 240), None, false).unwrap(),
+        );
+        pump();
+        let frames = Rc::new(Cell::new(0));
+        let counted = frames.clone();
+        surface.frame_clients.borrow_mut().push((
+            Box::new(move |surface: &Rc<Surface>, _| {
+                counted.set(counted.get() + 1);
+                surface.write_animations();
+                Next::Done
+            }),
+            None,
+        ));
+        let hwnd = window.0;
+        let weak = Rc::downgrade(&surface);
+        let free = Rc::new(Cell::new(None));
+        let seen = free.clone();
+        crate::notifications::ON_COMMAND.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let Some(surface) = weak.upgrade() else {
+                    return;
+                };
+                seen.set(Some(surface.mounter.try_borrow_mut().is_ok()));
+                // As the shell's COM call may: a tick comes meanwhile.
+                // SAFETY: posting to the test's own window.
+                unsafe {
+                    PostMessageW(Some(hwnd), crate::window::WM_NSH_TICK, WPARAM(0), LPARAM(0))
+                }
+                .unwrap();
+                pump();
+            }))
+        });
+        let mut items = cursor_batch(&surface, Cursor::Pointer).items;
+        items.insert(
+            0,
+            MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Notification(
+                    nsh_core::notifications::NotificationCommand::Listen,
+                ),
+            },
+        );
+        surface.apply(&MountBatch { items });
+        crate::notifications::ON_COMMAND.with(|hook| hook.borrow_mut().take());
+        assert_eq!(free.get(), Some(true), "the mounter is free");
+        assert_eq!(frames.get(), 1, "the tick ran");
+        assert_eq!(surface.root.state().style.cursor, Cursor::Pointer);
+    }
+
+    /// While a resize waits for the engine's layout, a wake-up that comes
+    /// (a batch's call pumped the messages) waits, and is asked for again
+    /// after: else the batches sent after the layout stay queued until the
+    /// engine sends again, which an idle app does not.
+    #[test]
+    fn a_wake_up_while_a_resize_waits_for_the_layout_comes_again() {
+        let surface = Surface::new(Environment::default());
+        let _window = TestWindow(
+            crate::window::create(&surface, "NSH resize wake-up", (320, 240), None, false).unwrap(),
+        );
+        pump();
+        let sink = surface.queue_for_test();
+        let late = Sink {
+            hwnd: sink.hwnd.clone(),
+            tx: sink.tx.clone(),
+            pending: sink.pending.clone(),
+        };
+        let weak = Rc::downgrade(&surface);
+        let later = Cell::new(Some(cursor_batch(&surface, Cursor::Pointer)));
+        *surface.on_error.borrow_mut() = Some(Box::new(move |_| {
+            let (Some(surface), Some(batch)) = (weak.upgrade(), later.take()) else {
+                return;
+            };
+            late.submit(batch);
+            // As a call a batch makes that pumps the messages.
+            let _applying = surface.mounter.borrow_mut();
+            pump();
+        }));
+        let size = Size::new(Points(400.0), Points(300.0));
+        sink.report_error("pumps the messages");
+        sink.resized(size);
+        let rx = surface.rx.borrow().clone().unwrap();
+        surface.as_the_drain(|| surface.apply_until_resized(&rx, size));
+        assert!(!surface.resize_late.get(), "the layout came");
+        pump();
+        assert_eq!(
+            surface.root.state().style.cursor,
+            Cursor::Pointer,
+            "the batch sent meanwhile is applied"
         );
     }
 
