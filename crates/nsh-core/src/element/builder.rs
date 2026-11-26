@@ -1203,6 +1203,16 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// Internal (components): the view already stands clear of the
+    /// software keyboard (a bottom sheet the keyboard lifts), so
+    /// `env(keyboard-inset-height)` reads 0 in it and in its subtree, and
+    /// content padded by it is not lifted a second time.
+    #[doc(hidden)]
+    fn clears_keyboard(mut self, clears: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(self.node(), clears, Prop::ClearsKeyboard);
+        self
+    }
+
     /// Tailwind classes the app passed (a prop naming the classes of one
     /// of the component's parts: `classes={{ heading: "text-2xl" }}`),
     /// after the element's own styles, as the app's `class` on a
@@ -1306,6 +1316,34 @@ impl Style {
         typed
             .or_else(declared)
             .filter(|c| *c != crate::element::AdaptiveColor::from(crate::Color::TRANSPARENT))
+    }
+
+    /// Internal (components): this style with its `maxHeight` at most
+    /// `cap`. A length or a percentage of `basis` (the height its view's
+    /// percentages are of) taller than `cap`, or none, gives way to `cap`;
+    /// a shorter one stays. A bottom sheet the keyboard lifts keeps its
+    /// top below the status bar so, whatever height the app gives it.
+    #[doc(hidden)]
+    pub fn max_height_at_most(&self, cap: Points, basis: Points) -> Self {
+        use taffy::CompactLength;
+        let declared = self.decls().iter().rev().find_map(|decl| match decl {
+            crate::StyleDecl::Set(crate::StyleKey::MaxHeight, crate::PropertyValue::Lpa(v)) => {
+                let raw = v.into_raw();
+                Some(match raw.tag() {
+                    CompactLength::LENGTH_TAG => Some(raw.value()),
+                    CompactLength::PERCENT_TAG => Some(basis.0 * raw.value()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        });
+        if declared.flatten().is_some_and(|height| height <= cap.0) {
+            return self.clone();
+        }
+        self.clone().with(
+            crate::StyleKey::MaxHeight,
+            crate::PropertyValue::Lpa(taffy::LengthPercentageAuto::length(cap.0.max(0.0))),
+        )
     }
 
     /// Its declarations, in order (not its typed styles').

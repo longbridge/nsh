@@ -767,6 +767,9 @@ struct Node {
     /// `copyText`: what a copy of its text gives in its place as an
     /// attachment (or as the content of a render placed there).
     copy_text: Option<Arc<str>>,
+    /// It stands clear of the software keyboard: `env(keyboard-inset-height)`
+    /// reads 0 in it and in its subtree (`Prop::ClearsKeyboard`).
+    clears_keyboard: bool,
     /// Laid out right to left (the resolved `direction`).
     rtl: bool,
     /// `direction`: `None` inherits.
@@ -1073,6 +1076,7 @@ impl Node {
             z_index: 0,
             vertical_align: crate::style::VerticalAlign::Baseline,
             copy_text: None,
+            clears_keyboard: false,
             rtl: false,
             direction: None,
             has_logical: false,
@@ -6747,6 +6751,14 @@ impl<M: TextEngine> Core<M> {
                     if node.kind == Kind::Text && node.inline {
                         rebuild_span = true;
                     }
+                }
+            }
+            Prop::ClearsKeyboard(value) => {
+                if node.clears_keyboard != value {
+                    // The `env()` terms in its subtree may come to
+                    // something else: `sync_env` compares them all at the
+                    // end of the commit and restyles the ones that did.
+                    node.clears_keyboard = value;
                 }
             }
             Prop::CopyText(value) => {
