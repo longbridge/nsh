@@ -24,8 +24,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # What each workflow builds and tests (its `-p` packages), and the files
 # outside those crates it reads (tests' fixtures, `include_bytes!`).
 WORKFLOWS = {
-    # The engine benchmarks (scripts/bench-compare.py).
-    "bench.yml": {"packages": ["nsh-engine"], "files": ["scripts/bench-compare.py"]},
     "website.yml": {
         "packages": ["nsh-platform-web", "nsh-bundler", "nsh-cli", "xtask"],
         "files": [
