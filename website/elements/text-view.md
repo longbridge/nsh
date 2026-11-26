@@ -126,7 +126,10 @@ The content is one of three props, read in this order:
   A tag that names no HTML element and no `tag` extension (`<US tech>`, `<公司名>`) shows as written.
 - **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through, text colors too (a
   `<span style="color: …">` or a `<font color="…">` is a `textStyle` in its color); scripts, styles, form
-  controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body).
+  controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body). A table has
+  a header row only when it marks one (`<thead>`, or a first row of `<th>` cells): the `<td>` tables emails lay out
+  show none. An image that cannot load (a `cid:` part of an email, a failed download) shows its alt text in its
+  place, not an empty box its size.
 - **`document`**: blocks the app builds or keeps: plain objects in TSX, `nsh_base::text_view::Document` in Rust
   ([The document model](#the-document-model)).
 
