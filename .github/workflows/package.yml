@@ -25,6 +25,7 @@ on:
       - "crates/nsh-linux-app/**"
       - "crates/nsh-windows-app/**"
       - "examples/counter/**"
+      - "examples/gallery/icon.png"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -135,11 +136,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "RUSTC=$rustc" >> $env:GITHUB_ENV
 
+      # MSIX needs the app's logos and the counter has no icon: package a
+      # copy of it with the gallery's.
       - name: Package the counter (directory, zip and MSIX)
         run: |
           cargo build -p nsh-cli
+          app=target/package-counter
+          mkdir -p "$app"
+          cp examples/counter/App.tsx examples/counter/tsconfig.json "$app/"
+          cp examples/gallery/icon.png "$app/"
+          printf '{\n  "name": "Counter",\n  "id": "com.example.counter",\n  "icon": "icon.png"\n}\n' > "$app/nsh.json"
           # `--format msix` writes the directory and `.zip` as well.
-          ./target/debug/nsh package examples/counter --target windows --format msix -o "$RUNNER_TEMP/out"
+          ./target/debug/nsh package "$app" --target windows --format msix -o "$RUNNER_TEMP/out"
 
       - name: Check the packages
         run: |

@@ -92,6 +92,7 @@ WORKFLOWS = {
             "crates/nsh-cli/src/runtime.rs", "crates/nsh-cli/src/rust_app.rs",
             "crates/nsh-cli/src/native_features.rs", "crates/nsh-package/**",
             "crates/nsh-linux-app/**", "crates/nsh-windows-app/**", "examples/counter/**",
+            "examples/gallery/icon.png",
         ],
     },
     "rust-app.yml": {
