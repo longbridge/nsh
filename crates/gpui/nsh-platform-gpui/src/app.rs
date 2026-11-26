@@ -1247,39 +1247,106 @@ fn main_window_options(
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     let ok = Rc::new(std::cell::Cell::new(true));
     let result = ok.clone();
-    gpui_platform::application().run(move |cx| {
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
+    RUNS_APP.set(true);
+    // A restart starts the program with the arguments it was started with.
+    let arguments = std::env::args_os().skip(1).collect();
+    gpui_platform::application()
+        .with_restart_arguments(arguments)
+        .run(move |cx| {
+            // What the app left to do as it quits (an update to install), also
+            // before a restart starts it again.
+            cx.on_app_quit(|_| {
+                nsh_core::restart::run_at_exit();
+                async {}
+            })
+            .detach();
+            cx.on_window_closed(|cx, _| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
+            let background = options.background;
+            if background {
+                crate::window::run_in_background(cx);
             }
-        })
-        .detach();
-        let background = options.background;
-        if background {
-            crate::window::run_in_background(cx);
-        }
-        crate::window::place_windows(options.display, options.keep_size, cx);
-        match open(source, options, cx) {
-            // Shown without activating anything: the window that would have
-            // the keyboard.
-            Ok((handle, true)) if background => {
-                let _ = handle.update(cx, |_, window, cx| {
-                    crate::window::show_window(window, true, cx)
-                });
+            crate::window::place_windows(options.display, options.keep_size, cx);
+            match open(source, options, cx) {
+                // Shown without activating anything: the window that would have
+                // the keyboard.
+                Ok((handle, true)) if background => {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        crate::window::show_window(window, true, cx)
+                    });
+                }
+                Ok((_, true)) => cx.activate(true),
+                // Hidden: the app stays where the user is.
+                Ok((_, false)) => {}
+                Err(err) => {
+                    log::error!("cannot open a window: {err}");
+                    ok.set(false);
+                    cx.quit();
+                }
             }
-            Ok((_, true)) => cx.activate(true),
-            // Hidden: the app stays where the user is.
-            Ok((_, false)) => {}
-            Err(err) => {
-                log::error!("cannot open a window: {err}");
-                ok.set(false);
-                cx.quit();
-            }
-        }
-    });
+        });
     if result.get() {
         std::process::ExitCode::SUCCESS
     } else {
         std::process::ExitCode::FAILURE
+    }
+}
+
+thread_local! {
+    /// This process is [`run_app`]'s: the app's lifecycle is nsh's, not an
+    /// embedding app's.
+    static RUNS_APP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The app asked to start again as it quits ([`request_restart`]).
+    static RESTART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks the quit that follows as a restart ([`nsh_core::restart`]): true
+/// in [`run_app`]'s process. A view embedded in another app leaves the
+/// app's lifecycle to that app: false there, with nothing marked.
+pub(crate) fn request_restart() -> bool {
+    RUNS_APP.get() && {
+        RESTART.set(true);
+        true
+    }
+}
+
+/// Quits, and starts the app again once this process has exited when it
+/// asked to ([`request_restart`]).
+pub(crate) fn quit(cx: &mut GpuiApp) {
+    if !RESTART.take() {
+        cx.quit();
+        return;
+    }
+    if cfg!(feature = "dev") {
+        // `nsh run` ends with its host and stops the dev server: a host
+        // started again would be cut off from both, so it only quits.
+        log::warn!("a development host quits on restart; restarting runs in a packaged app");
+        cx.quit();
+        return;
+    }
+    if let Some(path) = restart_path() {
+        cx.set_restart_path(path);
+    }
+    // GPUI waits for this process to exit, then starts the program; the
+    // quit runs what the app left to do (`on_app_quit` in `run_app`).
+    cx.restart();
+}
+
+/// What a restart starts: the program [`nsh_core::restart`] has (an
+/// update's new one), its `.app` on macOS, which `open` starts. `None`
+/// leaves it to GPUI.
+fn restart_path() -> Option<std::path::PathBuf> {
+    let program = nsh_core::restart::program_path().ok()?;
+    if cfg!(target_os = "macos") {
+        program
+            .ancestors()
+            .find(|path| path.extension().is_some_and(|ext| ext == "app"))
+            .map(Into::into)
+    } else {
+        Some(program)
     }
 }

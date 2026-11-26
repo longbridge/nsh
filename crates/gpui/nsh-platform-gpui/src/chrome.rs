@@ -379,6 +379,23 @@ pub(crate) fn key_pressed(surface: &Surface) {
     surface.chrome.alt_armed.set(false);
 }
 
+/// Logs, once per process, that `what` has no effect here and why.
+fn warn_once(what: &'static str, why: &str) {
+    thread_local! {
+        static WARNED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    }
+    let first = WARNED.with(|warned| {
+        let mut warned = warned.borrow_mut();
+        !warned.contains(&what) && {
+            warned.push(what);
+            true
+        }
+    });
+    if first {
+        log::warn!("{what} has no effect: {why}");
+    }
+}
+
 fn push(surface: &Surface, op: Op) {
     surface.chrome.ops.borrow_mut().push(op);
     surface.invalidate();
@@ -404,9 +421,18 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // The main window is open already.
         DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Quit => push(surface, Op::Quit),
-        // The backend for embedding: when the app restarts is the embedding
-        // app's to decide.
-        DesktopCommand::Restart => {}
+        // Quits as above, then starts the app again; an embedding app's
+        // lifecycle is its own.
+        DesktopCommand::Restart => {
+            if crate::app::request_restart() {
+                push(surface, Op::Quit);
+            } else {
+                warn_once(
+                    "Application.restart",
+                    "the embedding app decides when it restarts",
+                );
+            }
+        }
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);
@@ -433,10 +459,12 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             };
             menus::open(surface, menus::Kind::App, items.clone(), anchor, false);
         }
-        // The host app owns the tray and global shortcuts.
-        DesktopCommand::SetTray(_)
-        | DesktopCommand::RegisterGlobalShortcut { .. }
-        | DesktopCommand::UnregisterGlobalShortcut(_) => {}
+        // Not in this backend yet: said once, not silently dropped.
+        DesktopCommand::SetTray(_) => warn_once("tray", "not supported by the GPUI backend yet"),
+        DesktopCommand::RegisterGlobalShortcut { .. }
+        | DesktopCommand::UnregisterGlobalShortcut(_) => {
+            warn_once("global shortcuts", "not supported by the GPUI backend yet")
+        }
         // Commands added later.
         #[allow(unreachable_patterns)]
         _ => {}
@@ -806,7 +834,7 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
             }
             Op::Quit => {
                 if !ask_to_close(surface, CloseRequest::Quit, window, cx) {
-                    cx.quit();
+                    crate::app::quit(cx);
                 }
             }
             Op::Hide => cx.hide(),

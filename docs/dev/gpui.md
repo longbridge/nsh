@@ -264,7 +264,8 @@ the same GPUI queue as its commit before drawing the screenshots; the deadline o
   inline JS does not control the host window. `AppView::on_close_request` hands the owned window's quit and close
   requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, the close button) to
   the host, which quits or closes when it is ready (after saving, say); `Application.restart()` does
-  nothing here, restarting is the host's, and so is opening at login (`Application.launchAtLogin()` reads
+  nothing here (logged once), restarting is the host's; under `run_app` it quits as `quit` does and GPUI's
+  `App::restart` starts the program again with its arguments (a development host only quits). Opening at login is the host's (`Application.launchAtLogin()` reads
   `false`: `EngineConfig::login_item` stays `None`). `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode, `set_theme_overrides` only the tokens it names (over the host's theme if there is one: `Surface::host_tokens`); `set_ui_sets`
