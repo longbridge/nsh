@@ -51,6 +51,8 @@ pub(crate) struct InputIvars {
     max_length: Cell<Option<u32>>,
     /// No caret is drawn (`caret={false}`).
     caret_hidden: Cell<bool>,
+    /// The input is another view's sink ([`is_sink`]).
+    sink: Cell<bool>,
     /// What return does (`InputConfig::submit`).
     submit: Cell<SubmitBehavior>,
     /// A line break typed with a modifier (Shift / Option+Return) is being
@@ -100,6 +102,7 @@ impl Default for InputIvars {
             }),
             max_length: Cell::new(None),
             caret_hidden: Cell::new(false),
+            sink: Cell::new(false),
             submit: Cell::new(SubmitBehavior::Newline),
             line_break: Cell::new(false),
             caret: Cell::new(Bounds::default()),
@@ -155,12 +158,12 @@ define_class!(
             unsafe { msg_send![super(self), caretRectForPosition: position] }
         }
 
-        /// An input with no caret drawn is another view's sink (an editor's,
-        /// which holds the text itself), often empty: it says it has text,
-        /// as UIKit repeats a held Delete only while the input has text.
+        /// A sink ([`is_sink`]: an editor's, which holds the text itself)
+        /// is often empty: it says it has text, as UIKit repeats a held
+        /// Delete only while the input has text.
         #[unsafe(method(hasText))]
         fn has_text(&self) -> Bool {
-            if self.ivars().caret_hidden.get() {
+            if self.ivars().sink.get() {
                 return Bool::YES;
             }
             // SAFETY: calling the superclass implementation.
@@ -376,12 +379,12 @@ define_class!(
             unsafe { msg_send![super(self), caretRectForPosition: position] }
         }
 
-        /// An input with no caret drawn is another view's sink (an editor's,
-        /// which holds the text itself), often empty: it says it has text,
-        /// as UIKit repeats a held Delete only while the input has text.
+        /// A sink ([`is_sink`]: an editor's, which holds the text itself)
+        /// is often empty: it says it has text, as UIKit repeats a held
+        /// Delete only while the input has text.
         #[unsafe(method(hasText))]
         fn has_text(&self) -> Bool {
-            if self.ivars().caret_hidden.get() {
+            if self.ivars().sink.get() {
                 return Bool::YES;
             }
             // SAFETY: calling the superclass implementation.
@@ -1360,6 +1363,7 @@ impl Input {
                 traits(field.as_ref(), &config);
                 field.ivars().max_length.set(config.max_length);
                 field.ivars().caret_hidden.set(config.caret_hidden);
+                field.ivars().sink.set(is_sink(&config));
             }
             Editor::Area { view, placeholder } => {
                 view.setFont(Some(&font));
@@ -1383,6 +1387,7 @@ impl Input {
                 traits(view.as_ref(), &config);
                 view.ivars().max_length.set(config.max_length);
                 view.ivars().caret_hidden.set(config.caret_hidden);
+                view.ivars().sink.set(is_sink(&config));
                 view.ivars().submit.set(config.submit());
                 // A built-in bar of the app's takes the indicator's place;
                 // the text still scrolls.
