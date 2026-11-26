@@ -5,8 +5,8 @@ name: macOS
 # own input (`nsh test --target macos`, docs/dev/macos.md). The other jobs
 # build and unit-test the macOS backend but drive no window, so regressions
 # only that platform has (#3244, #3245) reached a release. macOS runners are
-# scarce: pull requests run it only when they touch the macOS backend, the
-# code it shares with iOS, the test runner or the smoke set; main runs it
+# scarce: pull requests run it only when they touch nsh-core, the macOS
+# backend, the code it shares with iOS, the test runner or the smoke set; main runs it
 # every three hours when it moved.
 
 on:
@@ -17,8 +17,10 @@ on:
     # and so cancels its runs still queued or running once it merges or closes.
     types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
+      - "crates/nsh-core/**"
       - "crates/nsh-platform-apple/**"
       - "crates/nsh-platform-macos/**"
+      - "crates/nsh-macos-app/**"
       - "crates/nsh-macos-host/**"
       - "crates/nsh-testing/**"
       - "examples/gallery/tests/smoke.test.tsx"
