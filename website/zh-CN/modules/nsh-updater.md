@@ -44,7 +44,7 @@ interface UpdatePromptOptions {
 
 ```tsx
 promptForUpdate({ quiet: true }); // 启动时
-<Button onPress={() => promptForUpdate()}>Check for Updates…</Button>;
+<Button onPress={() => promptForUpdate()}><Text>Check for Updates…</Text></Button>;
 ```
 
 提示文字为英文。应用名称来自 `nsh.json` 的 `"name"`。

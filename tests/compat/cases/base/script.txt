@@ -4480,6 +4480,10 @@ expect Selected: row 2 column 2
 tap id:read
 expect Read: 2:1 0-5
 tap id:scroll
+# A typed rectangle round-trips through the same ref, with its active cell.
+tap id:select-range
+tap id:read
+expect Read: range 2:1 to 1:0 active 2:1
 # A title press reports its column. The name cell of row 1 carries the
 # class from `cellClasses`. The rendered text sits in the render's holder,
 # in the placeholder, in that cell.

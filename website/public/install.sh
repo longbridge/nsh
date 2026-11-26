@@ -170,6 +170,16 @@ esac
 command -v curl > /dev/null 2>&1 || fail "curl is required"
 
 asset="nsh-$platform.tar.gz"
+# Name the release before downloading it: `releases/latest` redirects to
+# `releases/tag/<tag>`. The download then uses that tag, so a release
+# published meanwhile cannot mix in. Without an answer it falls back to
+# the `latest` download URL.
+if [ "$version" = "latest" ]; then
+  tag=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$repository/releases/latest" 2> /dev/null) || tag=
+  case "$tag" in
+    */releases/tag/?*) version="${tag##*/releases/tag/}" ;;
+  esac
+fi
 if [ "$version" = "latest" ]; then
   url="https://github.com/$repository/releases/latest/download/$asset"
 else
@@ -178,7 +188,10 @@ fi
 
 work="$(mktemp -d)"
 
-echo "Installing NSH $version for $platform"
+case "$version" in
+  latest) echo "Installing the latest NSH release for $platform" ;;
+  *) echo "Installing NSH $version for $platform" ;;
+esac
 if [ -n "$tty" ]; then
   download_file="$work/$asset"
   # The total size comes from Content-Length after redirects; without it the
