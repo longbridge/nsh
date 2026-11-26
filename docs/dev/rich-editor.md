@@ -194,7 +194,16 @@ meta, which the history groups). `RichEditorEvent::CompositionChange(bool)` (Rus
 including cancellation, after its session flag, held input and composition signal are updated. Updates within an
 active composition keep the same state and emit no further transition. Starting and canceling composition leave
 the document and transaction revision unchanged; a text commit remains a normal transaction. Observers can retain
-the view while composing and release it on the end notification. Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
+the view while composing and release it on the end notification. While the editor cannot be edited (`editable` false,
+the session's `editable` / `setEditable(false)`, or a plugin's `editable`), the sink still takes text and the document keeps it out: each sink change that inserts
+text reports `RichEditorEvent::ReadonlyInput` (Rust
+`.on_readonly_input`, JS `onReadonlyInput()`), with no payload,, so an app can offer editing to a soft keyboard's
+typing, which arrives as no key. It is sent from `sink_edited`, once per change of the sink (a composition's commit
+once, before the end's `CompositionChange(false)`), not from `text_input`, which the ref's
+`insertText` also calls. A change that only deletes (a soft keyboard's Backspace) and pastes report nothing: the
+event is for typed text, a hardware keyboard's Backspace and Mod+V arrive as keys an app can bind, and the touch
+menu of a read-only editor offers no Paste. A hardware Return is a bound key too, so only a software keyboard's return
+reports. A change that replaces sink text (autocorrect, a picked suggestion) reports again. Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
 and offers each as a `KeyEvent` to the selected node's view, the plugins' `handle_key_down`, the base keymap, then
 copy / cut / select all and the caret movement (graphemes, words, line ends, lines and pages by geometry, keeping the
 goal x, the document's ends). Left or Right onto a selectable inline atom a node view draws selects it as a node

@@ -46,6 +46,12 @@ mount(() => (
 
 `onCompositionChange({ composing })` 在此视图开始输入法组合输入时报告 `true`，结束时报告 `false`，取消也会报告结束。组合中的文本更新保持当前状态。回调执行时，会话的 `composing` 值和已提交文本已经更新，应用可以在组合输入期间保留编辑器视图，在结束时释放它。开始或取消组合输入可以保持文档及其修订号不变；`onChange` 报告文档修改。
 
+`onReadonlyInput()` 在用户往不可编辑的编辑器（`editable={false}`、编辑器的 `editable: false` / `setEditable(false)`，或插件的 `editable`）里输入文字时触发，这些文字不会进入文档：硬件键盘输入的字符、软键盘的输入和输入法提交的文字，每次变化触发一次。应用可以用它提示进入编辑，例如阅读视图在用户开始打字时切换到编辑。应用自己插入的文字、删除和粘贴不会报告。键盘替换已输入的词时（自动更正、选候选词）会再触发一次，所以它只表示用户在打字，不能当作字数。
+
+```tsx
+<RichEditor editor={editor} editable={false} onReadonlyInput={() => showEditHint()} />
+```
+
 ## 样式
 
 编辑器以应用的外观绘制文档：`classes` 和 `styles` 设置它的各个部件（`root`、`content`、`caret`、`selection`、`placeholder`、`composition`、`selectedNode`、`listMarker`、触摸选区的手柄 `selectionHandle`、`selectionHandleStart`、`selectionHandleEnd`，以及表格的 `selectedCell`、`tableGrip`、`tableResizeHandle`、`tableDropIndicator`），按类型设置节点（`nodes: { heading: "text-2xl font-bold", "heading[level=2]": "text-xl" }`），以及设置标记（`marks: { bold: "font-bold" }`）。节点规格把 `extra.listMarker` 设为 `"bullet"` 或 `"ordered"` 的列表（starter schema 的列表）中，每一项都在 `listMarker` 部件中显示标记：按层级显示 `•`、`◦`、`▪`，或从列表的 `start` 开始编号，放在列表项之前、列表的缩进中（如浏览器缩进 `ul`，在列表上设置 `pl-6`）。
