@@ -1121,7 +1121,7 @@ fn package_catalyst(
     let macos = contents.join("MacOS");
     fs::create_dir_all(&macos)?;
     let meta = crate::module_meta::for_dev_host(
-        "aarch64-apple-ios-macabi",
+        crate::runtime::MAC_CATALYST_TRIPLE,
         crate::module_meta::Platform::Ios,
     );
     let strings = dev_host_strings(config, &meta)?;
@@ -1151,7 +1151,7 @@ pub(crate) fn package_ios(
     // translates them anew) is signed again, as a new binary is.
     let plist = app.join("Info.plist");
     let meta = crate::module_meta::for_dev_host(
-        "aarch64-apple-ios-sim",
+        crate::runtime::IOS_SIMULATOR_TRIPLE,
         crate::module_meta::Platform::Ios,
     );
     let strings = dev_host_strings(config, &meta)?;
