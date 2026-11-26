@@ -1231,13 +1231,16 @@ unsafe extern "system" fn tx_notify(this: This, code: u32, _: *mut c_void) -> HR
 }
 
 unsafe extern "system" fn tx_imm_get_context(this: This) -> HIMC {
+    // The context of the window the field shows in, which has the keys
+    // (one of the app's own windows has its own): where the services
+    // place the composition and the candidates, in its client pixels.
     // SAFETY: the host's window.
-    unsafe { ImmGetContext(host(this).hwnd) }
+    unsafe { ImmGetContext(host(this).shown_in.get()) }
 }
 
 unsafe extern "system" fn tx_imm_release_context(this: This, himc: HIMC) {
     // SAFETY: a context from `tx_imm_get_context`.
-    let _ = unsafe { ImmReleaseContext(host(this).hwnd, himc) };
+    let _ = unsafe { ImmReleaseContext(host(this).shown_in.get(), himc) };
 }
 
 unsafe extern "system" fn tx_get_selection_bar_width(_: This, out: *mut i32) -> HRESULT {
