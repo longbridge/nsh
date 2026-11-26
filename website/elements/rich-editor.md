@@ -331,13 +331,22 @@ editor.run(command("toggleBold"));
 ```
 
 `StarterKit` brings `Document`, `Paragraph`, the text node, `Heading`, `Blockquote`, `BulletList`, `OrderedList`,
-`ListItem`, `TaskList`, `TaskItem`, `CodeBlock`, `HardBreak`, `HorizontalRule`, `RichImage` (Tiptap's `Image`),
+`ListItem`, `TaskList`, `TaskItem`, `CodeBlock`, `CodeBlockHighlight`, `HardBreak`, `HorizontalRule`, `RichImage` (Tiptap's `Image`),
 `Bold`, `Italic`, `Strike`, `Code`, `Underline`, `RichLink` (Tiptap's `Link`), `Highlight`, `Subscript`, `Superscript`, `RichTextStyle` (Tiptap's `TextStyle`),
 `TextAlign`, `History`, `TrailingNode`, `Typography` and `ListKeymap`. An option named as one set to `false` leaves
 it out, an object configures it (`heading: { levels }`, `history: { depth }`, `textAlign: { types }`,
 `codeBlock: { enableTabIndentation }`). Each class's `configure(options)` and `extend({...})` make a
 `RichExtension`, which has `name`, `type`, `priority` and `options`. Every editor also gets the core keymap (Enter,
 Backspace, Delete, select all).
+
+Code blocks that name a language (` ```rust `, `toggleCodeBlock({ language: "rust" })`) are colored as `TextView`
+colors fenced code, with the same syntaxes and palette: that is `CodeBlockHighlight`, which plays the part of Tiptap's
+`CodeBlockLowlight` without a highlighter to pass in. `StarterKit.configure({ codeBlockHighlight: false })` leaves
+code plain. Typing in a long block does not wait for the colors: they are worked out off the engine thread and arrive
+a moment later. On the web the syntaxes come from the page once, the first time a block needs them, shared with
+`TextView`; they are not in the first download. Without the platform's feature `highlight` code stays plain.
+
+In Rust it is `kit::code_block_highlight()`, part of `kit::starter_kit()` and of `starter::plugins`.
 
 Each extension adds Tiptap's commands, which `command(name, args)` runs: `toggleBold`, `setItalic`,
 `unsetStrike`, `toggleHeading({ level })`, `setParagraph`, `toggleBlockquote`, `toggleBulletList`,
@@ -665,6 +674,20 @@ While the document can be edited:
 - The table the selection is in shows grips (`tableGrip`) on its top border over each column and on its left border
   beside each row. Pressing one selects that column or row; dragging it on desktops shows where it drops
   (`tableDropIndicator`) and moves it there on release.
+- A grip pressed and let go without dragging (a tap on touch screens) calls `onTableMenu` after it selected its
+  column or row, with `{ table, row, column, bounds }`: `table` is the position before the table, `row` is set for a
+  row's grip and `column` for a column's, and `bounds` is the grip's box in the root view, where the app opens its own
+  menu for that row or column. A drag moves the row or column and does not call it, nor does a
+  release after the grip's table or line went away.
+
+```tsx
+<RichEditor
+  editor={editor}
+  onTableMenu={({ table, row, column, bounds }) =>
+    openLineMenu({ table, row, column, anchor: bounds })
+  }
+/>
+```
 
 ```tsx
 <RichEditor

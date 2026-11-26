@@ -101,6 +101,8 @@ mod title_bar;
 #[cfg(target_os = "macos")]
 mod tray_owner;
 #[cfg(target_os = "macos")]
+mod web_file_input;
+#[cfg(target_os = "macos")]
 mod web_load_wait;
 #[cfg(target_os = "macos")]
 mod window_alert;
@@ -163,6 +165,9 @@ fn main() {
             } else if std::env::var_os("NSH_FILE_PANELS_CHECK_ONLY").is_some() {
                 window_press::run();
                 file_panels::run();
+            } else if std::env::var_os("NSH_WEB_FILE_INPUT_CHECK_ONLY").is_some() {
+                window_press::run();
+                web_file_input::run();
             } else if std::env::var_os("NSH_TRAY_OWNER_CHECK_ONLY").is_some() {
                 window_press::run();
                 tray_owner::run();
@@ -265,6 +270,7 @@ fn main() {
                 menu_labels::run();
                 menu_lifetime::run();
                 file_panels::run();
+                web_file_input::run();
                 tray_owner::run();
                 window_frames::run();
                 window_layout::run();

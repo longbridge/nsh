@@ -839,6 +839,48 @@ markdown-rs's syntax, and `ParseContext` reads a node's children as the parser d
 read a part at a time. Long documents stay fast with plugins; a plugin whose `configure` turns a construct on or off
 has each text parsed in one go.
 
+`ParseContext::conversion_id` tells conversions apart. Every callback of one conversion (a `Parser::markdown` call, or
+a text a `TextView` reads) gets the same `ConversionId`: the nodes read with `ParseContext::blocks` and `inlines`, the
+parts of a long text, a container's content and footnotes. Each conversion gets a new one, even of the same text, in
+views that share their plugins, and in a `Parser::markdown` called inside a callback. A plugin that works something out
+from the whole source does it once per conversion and keeps it under the id; the id says nothing about how many times
+or in what order nodes are offered.
+
+```rust
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use nsh_base::text_view::{ConversionId, ParseContext};
+
+/// Abbreviations and their titles.
+type Terms = Rc<HashMap<String, String>>;
+
+/// `*[HTML]: HyperText Markup Language` lines anywhere in the text, read once
+/// per conversion and consulted by the plugin's `inline`.
+#[derive(Default)]
+struct Abbreviations {
+    last: RefCell<Option<(ConversionId, Terms)>>,
+}
+
+impl Abbreviations {
+    fn of(&self, cx: &ParseContext<'_>) -> Terms {
+        let mut last = self.last.borrow_mut();
+        if let Some((id, terms)) = &*last
+            && *id == cx.conversion_id()
+        {
+            return terms.clone();
+        }
+        let terms: Terms = Rc::new(
+            cx.source()
+                .lines()
+                .filter_map(|line| line.strip_prefix("*[")?.split_once("]: "))
+                .map(|(term, title)| (term.to_owned(), title.to_owned()))
+                .collect(),
+        );
+        *last = Some((cx.conversion_id(), terms.clone()));
+        terms
+    }
+}
+```
+
 ## Props
 
 | Prop | Rust | Type | Default | Description |

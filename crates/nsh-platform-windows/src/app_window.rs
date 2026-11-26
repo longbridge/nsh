@@ -102,6 +102,8 @@ pub(crate) struct AppWindow {
     scale: Cell<f32>,
     /// A `WM_PAINT` is asked for.
     invalid: Cell<bool>,
+    /// What changed since its last frame: the next frame draws only that.
+    damage: crate::surface::Damage,
     /// It was sized and placed as the app opened it ([`place`]): until
     /// then its size is the system's default, which is reported to nobody.
     positioned: Cell<bool>,
@@ -402,6 +404,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         pixels: Cell::new((0, 0)),
         scale: Cell::new(1.0),
         invalid: Cell::new(false),
+        damage: Default::default(),
         positioned: Cell::new(false),
         reported: Cell::new(None),
         opened: Cell::new(false),
@@ -410,12 +413,17 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         state: Cell::new(None),
     });
     let weak = Rc::downgrade(&window);
-    view.set_invalidate(Rc::new(move |_, _| {
+    view.set_invalidate(Rc::new(move |view, rect| {
         if let Some(window) = weak.upgrade() {
-            invalidate(&window);
+            match rect {
+                Some(rect) => window.damage.view_rect(view, rect),
+                None => window.damage.view(view),
+            }
+            request_paint(&window);
         }
     }));
     surface.windows.borrow_mut().push(window.clone());
+    crate::file_drop::window_opened(surface, id, hwnd);
     crate::shell::sync(surface, hwnd, None, resolved);
     place(&window, open);
     window.positioned.set(true);
@@ -529,9 +537,34 @@ fn main_title(surface: &Surface) -> String {
     String::from_utf16_lossy(&text[..n.max(0) as usize])
 }
 
-/// Asks for `window` to be drawn again (once, however often asked before it
-/// is).
+/// Asks for the whole of `window` to be drawn again (once, however often
+/// asked before it is).
 fn invalidate(window: &AppWindow) {
+    window.damage.whole();
+    request_paint(window);
+}
+
+/// Asks for `area` (DIPs) of the window of the app's own `hwnd` to be drawn
+/// again: what is drawn there besides its views (its caption buttons).
+/// False when `hwnd` is not one.
+pub(crate) fn invalidate_area(
+    surface: &Surface,
+    hwnd: HWND,
+    area: crate::view::WindowRect,
+) -> bool {
+    let Ok(windows) = surface.windows.try_borrow() else {
+        return false;
+    };
+    let Some(window) = windows.iter().find(|w| w.hwnd == hwnd) else {
+        return false;
+    };
+    window.damage.area(area);
+    request_paint(window);
+    true
+}
+
+/// Asks for a `WM_PAINT` of `window`, which draws what changed.
+fn request_paint(window: &AppWindow) {
     if !window.invalid.replace(true) {
         crate::window::invalidate(window.hwnd);
     }
@@ -593,7 +626,7 @@ fn fill_background(surface: &Surface, id: NodeId, hwnd: HWND) {
 
 /// The window's client area was resized or moved to another scale: the
 /// root view takes its size, which the core lays the root out at.
-fn resized(surface: &Surface, window: &AppWindow) {
+fn resized(surface: &Rc<Surface>, window: &AppWindow) {
     // Made at the system's default size (`CW_USEDEFAULT`, most of the
     // screen), which its styles report before it is placed: the app would
     // lay itself out for a window nobody sees.
@@ -624,6 +657,9 @@ fn resized(surface: &Surface, window: &AppWindow) {
     }
     if window.reported.replace(Some(size)) != Some(size) {
         surface.control(|c| c.set_root_size(window.id, size, EdgeInsets::default()));
+        // Drawn at the new size rather than the last layout clipped or
+        // short of the edge, as the main window's.
+        surface.await_layout(window.id, size);
         // The dialogs presented in it follow its size.
         crate::navigation::surface_resized(surface, size.width.0, size.height.0);
         crate::system::window_resized(surface, window.id, size.width.0, size.height.0);
@@ -652,6 +688,7 @@ fn paint(surface: &Rc<Surface>, window: &AppWindow) {
             scale: window.scale.get(),
             placed: &window.placed,
             composed: &window.composed,
+            damage: &window.damage,
         },
     );
     if deferred {
@@ -1018,6 +1055,7 @@ fn destroy(surface: &Surface, window: &AppWindow) {
     window.placed.borrow_mut().clear();
     window.composed.borrow_mut().clear();
     window.swap.borrow_mut().take();
+    crate::file_drop::window_closing(surface, window.hwnd);
     // SAFETY: plain calls on a window of this thread, if it is still there
     // (the system destroys owned windows with their owner).
     unsafe {
@@ -1075,6 +1113,7 @@ mod tests {
             pixels: Cell::new((0, 0)),
             scale: Cell::new(1.0),
             invalid: Cell::new(false),
+            damage: Default::default(),
             positioned: Cell::new(true),
             reported: Cell::new(None),
             opened: Cell::new(false),
@@ -1156,6 +1195,7 @@ mod tests {
                 pixels: Cell::new((0, 0)),
                 scale: Cell::new(1.0),
                 invalid: Cell::new(false),
+                damage: Default::default(),
                 positioned: Cell::new(true),
                 reported: Cell::new(None),
                 opened: Cell::new(false),
@@ -1334,6 +1374,68 @@ mod tests {
         );
     }
 
+    /// A view in a window of the app's own (`<Window>`) that listens for
+    /// file drops makes that window an OLE drop destination, not only the
+    /// main window: Explorer looks the destination up on the window under
+    /// the pointer (#3395).
+    #[test]
+    fn a_window_of_the_apps_own_takes_file_drops() {
+        use windows::{
+            Win32::{System::Ole::OleInitialize, UI::WindowsAndMessaging::GetPropW},
+            core::w,
+        };
+
+        // SAFETY: OLE on this test's thread, as the app's UI thread has it.
+        let _ = unsafe { OleInitialize(None) };
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let id: NodeId = 7;
+        let view = NshView::new(id, ViewKind::Modal);
+        let hwnd = crate::window::create_app_window(
+            surface,
+            id,
+            WindowKind::Normal,
+            &WindowAttributes::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        surface.windows.borrow_mut().push(Rc::new(AppWindow {
+            id,
+            hwnd,
+            view: view.clone(),
+            owner: None,
+            modal: false,
+            composition: None,
+            web: RefCell::default(),
+            placed: RefCell::default(),
+            composed: RefCell::default(),
+            swap: RefCell::new(None),
+            target_scale: Cell::new(0.0),
+            pixels: Cell::new((0, 0)),
+            scale: Cell::new(1.0),
+            invalid: Cell::new(false),
+            positioned: Cell::new(true),
+            reported: Cell::new(None),
+            opened: Cell::new(false),
+            closed: Cell::new(false),
+            hidden: Cell::new(false),
+            state: Cell::new(None),
+        }));
+        let registered = |hwnd: HWND| {
+            // SAFETY: reads the property OLE's RegisterDragDrop sets.
+            !unsafe { GetPropW(hwnd, w!("OleDropTargetInterface")) }.is_invalid()
+        };
+        view.state_mut().events.set(EventKind::FileDrop, true);
+        crate::file_drop::events_changed(surface, &view);
+        assert!(registered(hwnd), "the window showing the view takes drops");
+
+        let window = get(surface, id).unwrap();
+        destroy(surface, &window);
+        surface.windows.borrow_mut().clear();
+        crate::file_drop::reset(surface);
+    }
+
     #[test]
     fn activation_target_skips_hidden_host_and_hidden_app_windows() {
         let app = crate::app::AppView::new(None, Default::default()).unwrap();
@@ -1364,6 +1466,7 @@ mod tests {
             pixels: Cell::new((0, 0)),
             scale: Cell::new(1.0),
             invalid: Cell::new(false),
+            damage: Default::default(),
             positioned: Cell::new(true),
             reported: Cell::new(None),
             opened: Cell::new(false),
@@ -1377,5 +1480,65 @@ mod tests {
             let _ = DestroyWindow(hwnd);
         }
         surface.windows.borrow_mut().clear();
+    }
+
+    /// A window of the app's own shows the app's icon (`nsh.json`'s, which
+    /// `nsh run` hands over as an `.ico` file) before it first shows, as the
+    /// hidden host window does: in a `mount(App)` or `<Window>` app it is the
+    /// window with the taskbar button (#3280).
+    #[test]
+    fn an_app_window_has_the_apps_icon() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            ICON_BIG, ICON_SMALL, SendMessageW, WM_GETICON,
+        };
+        if crate::window::has_own_icon() {
+            // The executable's icon is the class's; nothing is set.
+            return;
+        }
+        // A 16×16 32-bit icon, opaque blue: header, one entry, the bitmap
+        // (twice the height for the AND mask), its pixels and its mask.
+        let mut ico = vec![0, 0, 1, 0, 1, 0];
+        let image = 40 + 16 * 16 * 4 + 16 * 4;
+        ico.extend([16, 16, 0, 0, 1, 0, 32, 0]);
+        ico.extend((image as u32).to_le_bytes());
+        ico.extend(22u32.to_le_bytes());
+        ico.extend(40u32.to_le_bytes());
+        ico.extend(16i32.to_le_bytes());
+        ico.extend(32i32.to_le_bytes());
+        ico.extend([1, 0, 32, 0]);
+        ico.extend([0; 24]);
+        for _ in 0..16 * 16 {
+            ico.extend([0xff, 0, 0, 0xff]);
+        }
+        ico.extend([0; 16 * 4]);
+        let path = std::env::temp_dir().join(format!("nsh-test-icon-{}.ico", std::process::id()));
+        std::fs::write(&path, &ico).unwrap();
+
+        let options = crate::AppOptions {
+            icon: Some(path.clone()),
+            ..Default::default()
+        };
+        let app = crate::app::AppView::new(None, options).unwrap();
+        let surface = app.surface();
+        let hwnd = crate::window::create_app_window(
+            surface,
+            7,
+            WindowKind::Normal,
+            &WindowAttributes::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        let icon = |which: u32| {
+            // SAFETY: a plain query of the test's own window.
+            unsafe { SendMessageW(hwnd, WM_GETICON, Some(WPARAM(which as usize)), None) }.0
+        };
+        assert_ne!(icon(ICON_BIG), 0, "the taskbar's icon");
+        assert_ne!(icon(ICON_SMALL), 0, "the title bar's icon");
+        // SAFETY: the test's own window.
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+        let _ = std::fs::remove_file(path);
     }
 }
