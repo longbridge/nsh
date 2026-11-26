@@ -416,6 +416,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         }
     }));
     surface.windows.borrow_mut().push(window.clone());
+    crate::file_drop::window_opened(surface, id, hwnd);
     crate::shell::sync(surface, hwnd, None, resolved);
     place(&window, open);
     window.positioned.set(true);
@@ -1018,6 +1019,8 @@ fn destroy(surface: &Surface, window: &AppWindow) {
     window.placed.borrow_mut().clear();
     window.composed.borrow_mut().clear();
     window.swap.borrow_mut().take();
+    // OLE lets go of its drop destination before the window goes.
+    crate::file_drop::window_closing(surface, window.id, window.hwnd);
     // SAFETY: plain calls on a window of this thread, if it is still there
     // (the system destroys owned windows with their owner).
     unsafe {
