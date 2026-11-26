@@ -1628,9 +1628,14 @@ fn native_items(
                         .unwrap(),
                     );
                 }
-                gpui::MenuItem::action(menus::label_of(a, surface), action)
-                    .checked(a.checked == Some(true))
-                    .disabled(!a.enabled)
+                let label = menus::label_of(a, surface);
+                // AppKit sends these selectors to the first responder. GPUI
+                // dispatches MenuCommand if no native editor handles the action.
+                let item = match native_edit_action(a.role) {
+                    Some(os_action) => gpui::MenuItem::os_action(label, action, os_action),
+                    None => gpui::MenuItem::action(label, action),
+                };
+                item.checked(a.checked == Some(true)).disabled(!a.enabled)
             }
             MenuItem::Submenu {
                 label,
@@ -1647,6 +1652,16 @@ fn native_items(
 }
 
 /// Sets the application menu as macOS's menu bar.
+fn native_edit_action(role: Option<MenuRole>) -> Option<gpui::OsAction> {
+    Some(match role? {
+        MenuRole::Cut => gpui::OsAction::Cut,
+        MenuRole::Copy => gpui::OsAction::Copy,
+        MenuRole::Paste => gpui::OsAction::Paste,
+        MenuRole::SelectAll => gpui::OsAction::SelectAll,
+        _ => return None,
+    })
+}
+
 fn set_native_menus(surface: &Surface, cx: &mut App) {
     thread_local! {
         static LISTENING: Cell<bool> = const { Cell::new(false) };
@@ -1776,6 +1791,36 @@ mod tests {
     use nsh_core::desktop::{Key, Shortcut};
 
     use super::*;
+
+    #[gpui::test]
+    fn native_edit_menu_associates_the_standard_edit_actions(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let _app = crate::rt::init_test_app(cx);
+            let menu = default_mac_menu("Test");
+            let MenuItem::Submenu { items, .. } = &menu[1] else {
+                panic!("expected the Edit submenu");
+            };
+            let items = native_items(1, items, &mut Vec::new(), &mut Vec::new(), cx);
+            let actions: Vec<_> = items
+                .iter()
+                .filter_map(|item| match item {
+                    gpui::MenuItem::Action { os_action, .. } => Some(*os_action),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                actions
+                    == [
+                        None,
+                        None,
+                        Some(gpui::OsAction::Cut),
+                        Some(gpui::OsAction::Copy),
+                        Some(gpui::OsAction::Paste),
+                        Some(gpui::OsAction::SelectAll),
+                    ]
+            );
+        });
+    }
 
     #[test]
     fn set_frame_keeps_the_size_asked_until_the_window_changes() {
