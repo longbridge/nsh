@@ -79,7 +79,7 @@ fn release_notes() -> impl IntoElement {
 }
 ```
 
-在 Rust 中，`text_view()` 像 `view()` 创建视图一样创建它：每个属性一个设置方法（`.markdown(..)`、`.options(..)`、`.selectable(..)`），每个渲染函数一个闭包（`.render_image(|image| ..)`），每个事件一个监听方法（`.on_link_press(..)`），根节点使用类型化的样式方法（`.p_5()`、`.text_color(..)`），其中的文本样式会传给每个部件。
+在 Rust 中，`text_view()` 像 `view()` 创建视图一样创建它：每个属性一个设置方法（`.markdown(..)`、`.options(..)`、`.selectable(..)`），每个渲染函数一个闭包（`.render_code_block(|code| ..)`），每个事件一个监听方法（`.on_link_press(..)`），根节点使用类型化的样式方法（`.p_5()`、`.text_color(..)`），其中的文本样式会传给每个部件。
 
 <a id="built-on-text"></a>
 
@@ -350,7 +350,7 @@ text_view().markdown(doc).links(TextViewLinks::Open)
 | `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `TextViewCodeAction` | 应用自己的代码块操作（`codeBlockActions`）的图标；外面的按钮由 `TextView` 绘制。 |
 | `renderTableActions` | `.render_table_actions(\|table\| ..)` | `TextViewTable`（`Table`） | 在表格上方添加内容（复制、导出）。 |
 | `renderMath` | `.render_math(\|math\| ..)` | `TextViewMath` | 替换公式：`{ tex, display }`，`display` 表示 `$$…$$` 公式块。 |
-| `renderImage` | `.render_image(\|image\| ..)` | `TextViewImage`（`Image`） | 替换图片（`{ src, alt, title }`）：自己的加载方式、尺寸、点击查看大图。 |
+| `renderImage` | `.render_image(\|InContext(image, context)\| ..)` | `TextViewImage`（`Image`），然后是 `TextViewImageContext` | 替换图片（`{ src, alt, title }`）：自己的加载方式、尺寸、点击查看大图。第二个参数说明图片周围的内容：`context.link`（`{ url, title }`）是图片所在的链接。 |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `TextViewCustomNode`（`CustomNode`） | 按 `name` 显示自定义节点（[Markdown 扩展](#markdown-extensions)）。 |
 
 代码块的右上角浮动着操作按钮，外观统一：幽灵按钮，悬停或按下时显示背景；桌面上指针悬停在代码块上时显示，触摸屏上始终显示。`copy` 是内置的：复制代码，并短暂显示一个对勾。其他操作由应用定义：`renderCodeBlockAction` 绘制它们的图标，`onCodeBlockAction` 报告按下（内置的 `copy` 复制后也会报告）。`copy` 与 `Clipboard` 一样写入剪贴板，因此需要应用的 `clipboard` 权限（`nsh.json`）。
@@ -408,14 +408,14 @@ import { Image, View } from "nsh";
 ```rust tabs
 use nsh_base::text_view;
 use nsh_base::text_view::{CodeBlock, Image};
-use nsh_base::TextViewMath;
+use nsh_base::{TextViewImageContext, TextViewMath};
 use nsh_core::prelude::*;
 
 fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
     text_view()
         .markdown(move || markdown.get())
         .render_code_block(|code: &CodeBlock| highlighted(code.language.clone(), code.code.clone()))
-        .render_image(|img: &Image| {
+        .render_image(|InContext(img, _): &InContext<Image, TextViewImageContext>| {
             image(img.src.clone())
                 .label(img.alt.clone())
                 .aspect_ratio(16.0 / 9.0)
@@ -768,7 +768,7 @@ fn chat() -> impl IntoElement {
 | `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `(action: TextViewCodeAction) => JSX.Element` | | 应用自己的操作的图标。 |
 | `renderTableActions` | `.render_table_actions(\|table\| ..)` | `(table: TextViewTable) => JSX.Element` | | 每个表格上方的内容。 |
 | `renderMath` | `.render_math(\|math\| ..)` | `(math: TextViewMath) => JSX.Element` | | 显示公式。 |
-| `renderImage` | `.render_image(\|image\| ..)` | `(image: TextViewImage) => JSX.Element` | | 显示图片。 |
+| `renderImage` | `.render_image(\|InContext(image, context)\| ..)` | `(image: TextViewImage, context: TextViewImageContext) => JSX.Element` | | 显示图片；`context.link` 是图片外层的链接（如果有）。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | | 根节点，即各文档块组成的一列；其文本样式传给每个部件（带类型的文本样式：`styles.root`）。 |
 
 在 Rust 中，按部件给出的类和样式是 `TextViewClasses` 和 `TextViewStyles`；Rust 视图通常用 [`TextViewParts`](#typed-part-styles) 设定部件样式。

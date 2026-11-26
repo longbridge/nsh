@@ -207,7 +207,10 @@ pub use self::{
         DialogReply, ImageSize, Task,
     },
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},
-    value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
+    value::{
+        InContext, JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes,
+        render_params_of, ts_of,
+    },
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
     watch::OrderWatch,
 };

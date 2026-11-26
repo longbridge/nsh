@@ -3850,7 +3850,7 @@
 			children(id, wanted) {
 				state(id)?.lazy.set(wanted);
 			},
-			render(id, prop, key, value, func) {
+			render(id, prop, key, value, spread, func) {
 				const current = state(id);
 				if (!current) return;
 				const held = typeof func === "function" ? current.renders.get(prop)?.get(key) : void 0;
@@ -3864,7 +3864,7 @@
 						const holder = dom.rt.element("view");
 						dom.rt.prop(holder, "componentRender", `${prop}\x1f${key}`);
 						try {
-							dom.rt.insert(holder, reactive.untracked(() => render(signal ? propsOf(signal) : value)));
+							dom.rt.insert(holder, reactive.untracked(() => signal ? render(propsOf(signal)) : spread ? render(...value) : render(value)));
 							dom.rt.append(current.node, holder);
 						} catch (error) {
 							dispose();

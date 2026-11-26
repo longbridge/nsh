@@ -5,7 +5,7 @@ use std::rc::Rc;
 use nsh_core::{
     ResizeMode,
     color::Hsla,
-    element::{Reactive, Renderer, StyleRefinement},
+    element::{InContext, Reactive, Renderer, StyleRefinement},
     geometry::{DefiniteLength, Length},
     keymap::Modifiers,
     prelude::*,
@@ -107,8 +107,29 @@ pub struct TextViewProps {
     /// size, at most as wide as the text; in a line of text, the size it
     /// asks for, else three quarters of a line tall. A press on an image in
     /// a link reports the link (`onLinkPress`), on another the image
-    /// (`onImagePress`).
-    pub render_image: Prop<Option<Renderer<Image>>>,
+    /// (`onImagePress`). Beside the image it gets what surrounds it: the
+    /// link it is in (`context.link`), to draw a linked image as a link.
+    pub render_image: Prop<Option<Renderer<InContext<Image, TextViewImageContext>>>>,
+}
+
+/// What surrounds an image of a [`TextView`]'s document, beside the image
+/// its `renderImage` gets.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct TextViewImageContext {
+    /// The link the image is in (`[![alt](src)](url)`): the one a press on
+    /// the image reports (`onLinkPress`). None for an image outside links.
+    pub link: Option<TextViewImageLink>,
+}
+
+/// The link around an image of a [`TextView`] ([`TextViewImageContext`]).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct TextViewImageLink {
+    /// The link's URL.
+    pub url: SharedString,
+    /// The link's title (`[..](url "title")`), if it has one.
+    pub title: Option<SharedString>,
 }
 
 /// A formula of a [`TextView`]'s document, for its `renderMath`.
@@ -522,7 +543,7 @@ struct Cx {
     code_block_actions: Vec<TextViewCodeAction>,
     render_table_actions: Option<Renderer<Table>>,
     render_math: Option<Renderer<TextViewMath>>,
-    render_image: Option<Renderer<Image>>,
+    render_image: Option<Renderer<InContext<Image, TextViewImageContext>>>,
     plugins: Rc<MarkdownPlugins>,
     /// Set when the formula typesetter finished loading (`formula.rs`).
     math_loaded: Signal<bool>,
@@ -1970,6 +1991,11 @@ impl Cx {
         let scope = self.scope;
         let pressed = image.clone();
         let is_link = link.is_some();
+        let context = TextViewImageContext {
+            link: link
+                .clone()
+                .map(|(url, title)| TextViewImageLink { url, title }),
+        };
         // Where the link goes, on the image that takes its press (below
         // it: the image's own title, a tooltip, shows above), as on a link
         // of text.
@@ -1992,7 +2018,7 @@ impl Cx {
             AccessibilityRole::ImageButton
         };
         if let Some(render) = &self.render_image {
-            let el = render.render(format!("image:{key}"), image.clone());
+            let el = render.render(format!("image:{key}"), InContext(image.clone(), context));
             return match press {
                 Some(press) => view()
                     .role(role)
@@ -2729,7 +2755,11 @@ mod tests {
             text_view()
                 .markdown("# Title")
                 .selectable(true)
-                .render_image(|image: &Image| text(image.alt.clone()))
+                .render_image(
+                    |InContext(image, _): &InContext<Image, TextViewImageContext>| {
+                        text(image.alt.clone())
+                    },
+                )
                 .render_code_block(|code: &CodeBlock| text(code.code.clone()))
                 .on_link_press(|_event: &TextViewLinkPressEvent| {})
                 .into_element()
