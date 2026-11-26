@@ -91,7 +91,7 @@ use nsh_engine::{
 };
 use windows::{
     Win32::{
-        Foundation::{LPARAM, WPARAM},
+        Foundation::{HWND, LPARAM, WPARAM},
         Globalization::{
             GetLocaleInfoEx, GetUserDefaultLocaleName, GetUserDefaultUILanguage,
             GetUserPreferredUILanguages, LCIDToLocaleName, LOCALE_IFIRSTDAYOFWEEK, LOCALE_IMEASURE,
@@ -395,15 +395,26 @@ fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
     }
     // SAFETY: plain calls on a window handle.
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
-    // SAFETY: as above.
-    let shown = unsafe { IsWindowVisible(root).as_bool() && !IsIconic(root).as_bool() }
-        && !crate::presence::cloaked(root);
+    // The surface's root, or under window model v2 (whose host window
+    // never shows) one of the app's own windows ([`crate::app_window`]).
+    let shown = window_shown(root)
+        || crate::app_window::hwnds(surface)
+            .into_iter()
+            .any(window_shown);
     // A test's app runs as it does on screen whatever the screen shows (a
     // locked or remote session), so its tests see what they see unlocked.
     let seen = surface.testing() || crate::presence::screen_seen();
     lifecycle_of(shown, seen, crate::session::ending(), || {
         ACTIVE.with(Cell::get).unwrap_or_else(foreground_is_ours)
     })
+}
+
+/// Whether `window` is on screen: visible, not minimized, and not cloaked
+/// by the shell (on another virtual desktop).
+fn window_shown(window: HWND) -> bool {
+    // SAFETY: plain calls on a window handle.
+    (unsafe { IsWindowVisible(window).as_bool() && !IsIconic(window).as_bool() })
+        && !crate::presence::cloaked(window)
 }
 
 /// The app's state with its window `shown` (not minimized, hidden or on
