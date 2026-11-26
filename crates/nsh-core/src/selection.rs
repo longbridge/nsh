@@ -825,8 +825,8 @@ pub fn copy_offset(texts: &impl SelectionTexts, pos: TextPosition) -> u32 {
 /// The payload keys of a selectable view's `onSelectionChange` that carry
 /// [`SelectionModel::ends`] from a platform to the core: the anchor's and
 /// the focus's text node and the UTF-16 offset in it. The core replaces
-/// them with the list items they are in (`Core::locate_selection`). Hidden:
-/// a backend's wire to the core, which [`end_fields`] writes.
+/// them with the list items they are in (`Core::name_selection_ends`).
+/// Hidden: a backend's wire to the core, which [`end_fields`] writes.
 #[doc(hidden)]
 pub const END_FIELDS: [(&str, &str); 2] = [
     ("anchorNode", "anchorNodeOffset"),
@@ -838,24 +838,15 @@ pub const END_FIELDS: [(&str, &str); 2] = [
 #[doc(hidden)]
 pub fn end_fields(ends: [(u64, u32); 2]) -> [(&'static str, crate::PayloadValue); 4] {
     let number = |n: u64| crate::PayloadValue::Number(n as f64);
-    let mut fields = END_FIELDS
-        .into_iter()
-        .zip(ends)
-        .flat_map(|((node, offset), (key, at))| {
-            [(node, number(key)), (offset, number(u64::from(at)))]
-        });
-    std::array::from_fn(|_| fields.next().expect("two ends of two fields"))
+    let [(anchor, anchor_offset), (focus, focus_offset)] = END_FIELDS;
+    let [(a, a_at), (f, f_at)] = ends;
+    [
+        (anchor, number(a)),
+        (anchor_offset, number(u64::from(a_at))),
+        (focus, number(f)),
+        (focus_offset, number(u64::from(f_at))),
+    ]
 }
-
-/// The payload keys of an end once the core placed it in a list item
-/// (`Core::locate_selection`): the list, the row its cell shows and the
-/// offset in the copy of the row's item. [`name_items`] puts the item's
-/// key in place of the list and the row.
-#[doc(hidden)]
-pub const CELL_FIELDS: [(&str, &str, &str); 2] = [
-    ("anchorList", "anchorIndex", "anchorOffset"),
-    ("focusList", "focusIndex", "focusOffset"),
-];
 
 /// The payload keys of an end as listeners take it: the item's key and the
 /// offset in the copy of the item
@@ -866,35 +857,23 @@ pub const CELL_FIELDS: [(&str, &str, &str); 2] = [
 pub const ITEM_FIELDS: [(&str, &str); 2] =
     [("anchorKey", "anchorOffset"), ("focusKey", "focusOffset")];
 
-/// Names the list items of a selectable view's `onSelectionChange`
-/// payload ([`CELL_FIELDS`]) by their keys: `key_of` gives the key a
-/// list names its row by (the runtime's lists: `keyExtractor`, else the
-/// item's `key` or `id`, else its index), `None` when the list does not name it (no
-/// runtime, a Rust component's list), and then the row's index, as a
-/// string, is its key. The engine calls it with the runtime's lists.
-#[doc(hidden)]
-pub fn name_items(
-    payload: &mut crate::EventPayload,
-    mut key_of: impl FnMut(crate::NodeId, u32) -> Option<String>,
-) {
-    let crate::EventPayload::Map(fields) = payload else {
-        return;
-    };
-    for ((list, index, _), (key, _)) in CELL_FIELDS.into_iter().zip(ITEM_FIELDS) {
-        let number = |k: &str| {
-            fields.iter().find_map(|(name, v)| match v {
-                crate::PayloadValue::Number(n) if *name == k => Some(*n),
-                _ => None,
-            })
-        };
-        let (Some(l), Some(i)) = (number(list), number(index)) else {
-            continue;
-        };
-        let (l, i) = (l as crate::NodeId, i as u32);
-        let named = key_of(l, i).unwrap_or_else(|| i.to_string());
-        fields.retain(|(name, _)| *name != list && *name != index);
-        fields.push((key, crate::PayloadValue::Str(named)));
-    }
+/// What the app's runtime calls a row of a virtual list: the key a
+/// selection's end names the row's item by (`onSelectionChange`'s `anchor`
+/// and `focus`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ListItemKey {
+    /// The item's key, as the list names its items (a TSX `List`'s
+    /// `keyExtractor`, else the item's `key` or `id`, else its index).
+    Named(String),
+    /// The list is not the runtime's (a Rust component's `virtual_list`):
+    /// a list around it may name the item, else the row goes by its index.
+    NotMine,
+    /// The list is the runtime's but has no key for the row: its
+    /// `keyExtractor` threw (reported as the runtime reports exceptions)
+    /// or gave neither a string nor a number, or the row is past its
+    /// items. The end is left out rather than named by a guess.
+    Failed,
 }
 
 /// U+FFFC, which stands for an attachment in a text's content.
@@ -2008,10 +1987,7 @@ fn clamp_position(texts: &impl SelectionTexts, pos: TextPosition) -> TextPositio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        PayloadValue,
-        geometry::{bounds, point, px, size},
-    };
+    use crate::geometry::{bounds, point, px, size};
 
     /// Texts set in a monospace font: each character is 8pt wide, lines
     /// break at '\n' and are 20pt high.
@@ -2753,33 +2729,6 @@ mod tests {
         assert_eq!(copy_offset(&texts, pos(1, 0)), 13);
         assert_eq!(copy_offset(&texts, pos(1, 3)), 16);
         assert_eq!(copy_offset(&texts, pos(2, 0)), 13 + 21 + 2);
-    }
-
-    #[test]
-    fn named_items_replace_the_rows_and_unnamed_rows_go_by_their_index() {
-        let number = |n: f64| PayloadValue::Number(n);
-        let mut payload = crate::EventPayload::Map(vec![
-            ("text", PayloadValue::Str("x".into())),
-            ("anchorList", number(4.0)),
-            ("anchorIndex", number(1.0)),
-            ("anchorOffset", number(7.0)),
-            ("focusList", number(5.0)),
-            ("focusIndex", number(2.0)),
-            ("focusOffset", number(3.0)),
-        ]);
-        name_items(&mut payload, |list, index| {
-            (list == 4 && index == 1).then(|| "b".to_owned())
-        });
-        assert_eq!(
-            payload,
-            crate::EventPayload::Map(vec![
-                ("text", PayloadValue::Str("x".into())),
-                ("anchorOffset", number(7.0)),
-                ("focusOffset", number(3.0)),
-                ("anchorKey", PayloadValue::Str("b".into())),
-                ("focusKey", PayloadValue::Str("2".into())),
-            ])
-        );
     }
 
     #[test]

@@ -129,9 +129,12 @@ as the list names them: `anchor` is where the selection started (the press) and 
 `onViewableItemsChange`), and `offset` is where the end is in that item's text, as a copy of the whole item gives it
 (UTF-16 units). A drag upward has its `focus` in an earlier item than its `anchor`. Two items with the same words stay
 apart, and so do items inserted above the selection or replaced while it lasts: each event names the items the ends are
-in as of that event. An item scrolled out of view keeps its key while an end is in it. In a list inside another list's
-item, the end names the innermost item. An end outside a list item has no field. A transcript quotes the selected part
-of each message it spans:
+in as of that event (a row that makes its text anew ends the selection, as any text that goes does). An item scrolled
+out of view keeps its key while an end is in it. In a list inside another list's item, the end names the innermost
+item; a component's own list in an item (a [`Tree`](./tree.md), a `Listbox`) leaves it to the item around it. An end
+outside a list item has no field, and neither has one in a row the list has no key for (its `keyExtractor` threw, which
+is reported as any exception the app throws, or gave neither a string nor a number). A transcript quotes the selected
+part of each message it spans:
 
 ```tsx
 <View selectable onSelectionChange={({ text, anchor, focus }) => quote.set({ text, from: anchor, to: focus })}>
@@ -142,7 +145,8 @@ of each message it spans:
 ```
 
 In Rust the same ends are `TextSelectionEvent::anchor` and `focus` (`TextSelectionEndpoint { key, offset }`). A Rust
-`virtual_list`'s rows go by their index (`"3"`), as its `.keys(..)` are any hashable value. The web reports no ends
+`virtual_list`'s rows go by their index (`"3"`) when no TSX list around names the item, as its `.keys(..)` are any
+hashable value. The web reports no ends
 yet.
 
 `ref.clearSelection()` on the selectable view, or on a view inside it, clears the selection as a press elsewhere does:

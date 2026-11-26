@@ -268,7 +268,11 @@ mod imp {
             self.host.bind_list(list, binds);
         }
 
-        pub(crate) fn list_item_key(&self, list: NodeId, index: u32) -> Option<String> {
+        pub(crate) fn list_item_key(
+            &self,
+            list: NodeId,
+            index: u32,
+        ) -> nsh_core::selection::ListItemKey {
             self.host.list_item_key(list, index)
         }
 
@@ -459,7 +463,7 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn list_item_key(&self, _: NodeId, _: u32) -> Option<String> {
+        pub(crate) fn list_item_key(&self, _: NodeId, _: u32) -> nsh_core::selection::ListItemKey {
             match *self {}
         }
 

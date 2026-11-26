@@ -17,6 +17,7 @@ use nsh_core::{
     Command, EventKind, NodeId, Op, Prop, Tag,
     geometry::{Percentage, Points},
     list_diff::ListDiff,
+    selection::ListItemKey,
 };
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
@@ -1402,16 +1403,22 @@ unsafe fn named_key(cx: *mut JsContext, key_of: JsValue, item: JsValue, index: i
     }
 }
 
-/// The key of row `index` of list `list` ([`named_key`]): where a
+/// What row `index` of list `list` is called ([`named_key`]): where a
 /// selection across the list's items starts and ends
-/// (`onSelectionChange`'s `anchor` and `focus`). `None` for a list that is
-/// not the runtime's, a row past the items, or when `keyExtractor` throws
-/// (the error is dropped: the engine names the row by its index).
-pub(crate) fn row_key(cx: *mut JsContext, list: NodeId, index: u32) -> Option<String> {
-    let (props, items) = {
-        let map = lists(cx).map.borrow();
-        let d = map.get(&list)?;
-        (d.props, d.items)
+/// (`onSelectionChange`'s `anchor` and `focus`).
+/// [`ListItemKey::NotMine`] for a list that is not the runtime's;
+/// [`ListItemKey::Failed`] for a row past the items or a key that is
+/// neither a string nor a number. `Err` when reading the items or
+/// `keyExtractor` threw: the exception is pending, for the caller to
+/// report.
+pub(crate) fn row_key(cx: *mut JsContext, list: NodeId, index: u32) -> Result<ListItemKey, ()> {
+    let Some((props, items)) = lists(cx)
+        .map
+        .borrow()
+        .get(&list)
+        .map(|d| (d.props, d.items))
+    else {
+        return Ok(ListItemKey::NotMine);
     };
     let index = i64::from(index);
     // SAFETY: the list's values are duplicated before the calls, which may
@@ -1422,23 +1429,22 @@ pub(crate) fn row_key(cx: *mut JsContext, list: NodeId, index: u32) -> Option<St
         let each = reactive::untracked_with(cx, || {
             qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut())
         });
-        let key = if !qjs::JS_IsException(each) && index < length(cx, each) {
+        let key = if qjs::JS_IsException(each) || index >= length(cx, each) {
+            UNDEFINED
+        } else {
             let key_of = get(cx, props, "keyExtractor");
             let item = qjs::JS_GetPropertyInt64(cx, each, index);
             let key = reactive::untracked_with(cx, || named_key(cx, key_of, item, index));
             qjs::JS_FreeValue(cx, item);
             qjs::JS_FreeValue(cx, key_of);
             key
-        } else {
-            qjs::JS_DupValue(cx, each)
         };
-        let named = if qjs::JS_IsException(key) {
-            qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
-            None
+        let named = if qjs::JS_IsException(each) || qjs::JS_IsException(key) {
+            Err(())
         } else if qjs::JS_IsString(key) || qjs::JS_IsNumber(key) {
-            dom::string_arg(cx, key)
+            Ok(dom::string_arg(cx, key).map_or(ListItemKey::Failed, ListItemKey::Named))
         } else {
-            None
+            Ok(ListItemKey::Failed)
         };
         for v in [key, each, items, props] {
             qjs::JS_FreeValue(cx, v);

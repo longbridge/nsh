@@ -10,7 +10,7 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, NodeId, Op, PayloadValue, TouchPhase, js::Limits,
-    platform::Environment, time::Instant,
+    platform::Environment, selection::ListItemKey, time::Instant,
 };
 use rquickjs::{
     AsyncRuntime, CatchResultExt, Ctx, Function, Module, Persistent, Promise, Value, function::Opt,
@@ -688,17 +688,25 @@ impl Host {
         });
     }
 
-    /// The key row `index` of a `List` goes by (`keyExtractor`, else the
-    /// item's `key` or `id`, else its index): where a selection across the
-    /// list starts and ends (`onSelectionChange`'s `anchor` and `focus`).
-    /// `None` for a list that is not the runtime's, or when `keyExtractor`
-    /// throws.
-    pub fn list_item_key(&self, list: NodeId, index: u32) -> Option<String> {
+    /// What row `index` of virtual list `list` is called: the key of a
+    /// `List`'s item (`keyExtractor`, else the item's `key` or `id`, else
+    /// its index), where a selection across the list starts and ends
+    /// (`onSelectionChange`'s `anchor` and `focus`).
+    /// [`ListItemKey::NotMine`] for a list that is not the runtime's;
+    /// [`ListItemKey::Failed`] when the list has no key for the row: a
+    /// `keyExtractor` that throws (reported as an uncaught exception) or
+    /// gives neither a string nor a number, a row past the items, or a VM
+    /// that stopped.
+    pub fn list_item_key(&self, list: NodeId, index: u32) -> ListItemKey {
         self.guarded(Phase::Call, || {
-            self.cx
-                .with(|cx| crate::list::row_key(cx.as_raw().as_ptr(), list, index))
+            self.cx.with(|cx| {
+                crate::list::row_key(cx.as_raw().as_ptr(), list, index).unwrap_or_else(|()| {
+                    self.report::<()>(&cx, Err(rquickjs::Error::Exception));
+                    ListItemKey::Failed
+                })
+            })
         })
-        .flatten()
+        .unwrap_or(ListItemKey::Failed)
     }
 
     /// Resolves the promises of finished (or interrupted) native animations.

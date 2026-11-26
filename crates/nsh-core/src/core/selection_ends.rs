@@ -3,22 +3,24 @@
 //!
 //! A platform reports each end as the view node of its text and the UTF-16
 //! offset in it ([`crate::selection::SelectionModel::ends`]). The core knows
-//! the tree: the innermost list cell around that text and the row the cell
-//! shows. It lists the cell's texts as the platforms list an area's
-//! ([`list_texts`]) to place the end in the copy of the whole item, and
-//! hands the list and the row on; the runtime names the row by its list's
-//! key ([`crate::selection::name_items`]).
+//! the tree: the list cells around that text, innermost first, and the row
+//! each shows. The runtime names rows of its own lists
+//! ([`ListItemKey`]): the end goes by the innermost list the runtime names
+//! a row of, and where it is in the copy of that row's item, which the core
+//! gets by listing the cell's texts as the platforms list an area's
+//! ([`list_texts`]). Rows of lists the runtime does not hold (a Rust
+//! component's) go by their index.
 
 use std::{ops::Range, sync::Arc};
 
 use super::{Core, Key, Kind, LeafContext, NO_KEY};
 use crate::{
-    AttributedText, CellSlot, PayloadValue,
+    AttributedText, CellSlot, EventPayload, PayloadValue,
     geometry::{Bounds, Point, Points, point},
     ops::NodeId,
     selection::{
-        CELL_FIELDS, END_FIELDS, ListedText, SelectionTexts, TextPosition, TextTree, copy_offset,
-        list_texts,
+        END_FIELDS, ITEM_FIELDS, ListItemKey, ListedText, SelectionTexts, TextPosition, TextTree,
+        copy_offset, list_texts,
     },
     text::TextEngine,
 };
@@ -122,12 +124,21 @@ impl SelectionTexts for CellTexts {
 }
 
 impl<M: TextEngine> Core<M> {
-    /// Completes the ends of a selectable view's `onSelectionChange`
-    /// payload: each end a platform reported as a text node and an offset
-    /// in it ([`END_FIELDS`]) becomes the list, the row and the offset in
-    /// the copy of the row's item ([`CELL_FIELDS`]), or is left out when
-    /// its text is in no list item.
-    pub(super) fn locate_selection_ends(&self, fields: &mut Vec<(&'static str, PayloadValue)>) {
+    /// Names the ends of a selectable view's `onSelectionChange` payload:
+    /// each end a platform reported as a text node and an offset in it
+    /// ([`END_FIELDS`]) becomes the key of the list item it is in and the
+    /// offset in the copy of that item ([`ITEM_FIELDS`]), or is left out.
+    /// `key_of` is what the runtime calls row `index` of list `list`. The
+    /// engine calls it for each `onSelectionChange`.
+    #[doc(hidden)]
+    pub fn name_selection_ends(
+        &self,
+        payload: &mut EventPayload,
+        mut key_of: impl FnMut(NodeId, u32) -> ListItemKey,
+    ) {
+        let EventPayload::Map(fields) = payload else {
+            return;
+        };
         let number = |fields: &[(&str, PayloadValue)], key: &str| {
             fields.iter().find_map(|(k, v)| match v {
                 PayloadValue::Number(n) if *k == key && *n >= 0.0 => Some(*n),
@@ -145,29 +156,33 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .any(|(node, offset)| k == node || k == offset)
         });
-        for (end, (list, index, offset)) in ends.into_iter().zip(CELL_FIELDS) {
-            let Some((cell_list, row, item_offset)) =
-                end.and_then(|(node, at)| self.selection_end_in_item(node, at))
+        for (end, (key, offset)) in ends.into_iter().zip(ITEM_FIELDS) {
+            let Some((name, item_offset)) =
+                end.and_then(|(node, at)| self.selection_end_item(node, at, &mut key_of))
             else {
                 continue;
             };
-            fields.push((list, PayloadValue::Number(cell_list as f64)));
-            fields.push((index, PayloadValue::Number(f64::from(row))));
+            fields.push((key, PayloadValue::Str(name)));
             fields.push((offset, PayloadValue::Number(f64::from(item_offset))));
         }
     }
 
-    /// The innermost list item around text node `text` and where its
-    /// UTF-16 offset `offset` is in the copy of the item: the list, the row
-    /// the item's cell shows and that offset. `None` outside a list item,
-    /// or in a cell that shows no row.
-    fn selection_end_in_item(&self, text: NodeId, offset: u32) -> Option<(NodeId, u32, u32)> {
-        let key = self.key(text).ok()?;
-        let mut cell = key;
-        let (list, row) = loop {
-            if cell == NO_KEY {
-                return None;
-            }
+    /// The list item around text node `text` that names a selection's end
+    /// at its UTF-16 offset `offset`, and where that is in the copy of the
+    /// item. From the innermost list cell out, the first row `key_of` names
+    /// (a list the runtime holds) gives the key; one it fails to name
+    /// leaves the end out; when no list around is the runtime's, the
+    /// innermost row goes by its index. `None` outside a list item, or in a
+    /// cell that shows no row.
+    fn selection_end_item(
+        &self,
+        text: NodeId,
+        offset: u32,
+        key_of: &mut impl FnMut(NodeId, u32) -> ListItemKey,
+    ) -> Option<(String, u32)> {
+        let mut cell = self.key(text).ok()?;
+        let mut innermost = None;
+        while cell != NO_KEY {
             let node = &self.nodes[cell as usize];
             let parent = node.parent;
             if let Some(CellSlot::Item(slot)) = node.slot
@@ -175,10 +190,26 @@ impl<M: TextEngine> Core<M> {
                 && let Some(list) = self.nodes[parent as usize].list.as_deref()
             {
                 let row = list.slots.get(slot as usize)?.rendered?;
-                break (self.nodes[parent as usize].id, row);
+                match key_of(self.nodes[parent as usize].id, row) {
+                    ListItemKey::Named(key) => {
+                        return Some((key, self.offset_in_item(cell, text, offset)?));
+                    }
+                    ListItemKey::Failed => return None,
+                    ListItemKey::NotMine => {
+                        innermost.get_or_insert((cell, row));
+                    }
+                }
             }
             cell = parent;
-        };
+        }
+        let (cell, row) = innermost?;
+        Some((row.to_string(), self.offset_in_item(cell, text, offset)?))
+    }
+
+    /// Where UTF-16 offset `offset` of text node `text` is in the copy of
+    /// the list item cell `cell` shows: its texts listed as a selectable
+    /// view's backend lists them.
+    fn offset_in_item(&self, cell: Key, text: NodeId, offset: u32) -> Option<u32> {
         let listed = list_texts(&Nodes(self), &cell);
         let ids: Vec<u64> = listed
             .iter()
@@ -200,8 +231,7 @@ impl<M: TextEngine> Core<M> {
         };
         let at = texts.ids.iter().position(|&k| k == u64::from(text))?;
         let len = utf16_len(texts.content(at));
-        let item_offset = copy_offset(&texts, TextPosition::new(at, offset.min(len)));
-        Some((list, row, item_offset))
+        Some(copy_offset(&texts, TextPosition::new(at, offset.min(len))))
     }
 }
 

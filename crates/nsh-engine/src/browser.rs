@@ -91,14 +91,14 @@ pub trait Host {
     fn deliver(&self, event: JsEvent);
     /// Bind the reusable cells of a virtual list.
     fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]);
-    /// The key row `index` of a virtual list goes by, as the list names
-    /// its items (`keyExtractor`, else the item's `key` or `id`, else its
-    /// index): `onSelectionChange`'s `anchor` and `focus`. `None` by
-    /// default, and for a list the runtime does not hold: the row goes by
-    /// its index.
-    fn list_item_key(&self, list: NodeId, index: u32) -> Option<String> {
+    /// What the runtime calls row `index` of virtual list `list`: the key
+    /// `onSelectionChange`'s `anchor` and `focus` name its item by, as the
+    /// list names its items (`keyExtractor`, else the item's `key` or `id`,
+    /// else its index). [`nsh_core::selection::ListItemKey::NotMine`] by
+    /// default, and for a list the runtime does not hold.
+    fn list_item_key(&self, list: NodeId, index: u32) -> nsh_core::selection::ListItemKey {
         let _ = (list, index);
-        None
+        nsh_core::selection::ListItemKey::NotMine
     }
     /// Run callbacks posted by Rust, preserving their order.
     fn run_posted(&self);
@@ -289,7 +289,11 @@ impl Script {
     pub(crate) fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
         self.0.bind_list(list, binds);
     }
-    pub(crate) fn list_item_key(&self, list: NodeId, index: u32) -> Option<String> {
+    pub(crate) fn list_item_key(
+        &self,
+        list: NodeId,
+        index: u32,
+    ) -> nsh_core::selection::ListItemKey {
         self.0.list_item_key(list, index)
     }
     // The web culls no content (`EngineConfig::content_culling` is off

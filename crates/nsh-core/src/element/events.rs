@@ -140,8 +140,11 @@ pub struct TextSelectionEvent {
     /// it.
     pub page_bounds: Option<Bounds<Points>>,
     /// Where the selection started (the press, or the end a key extends
-    /// it from), when that is in a list item (the innermost, in nested
-    /// lists), as of the event.
+    /// it from), when that is in a list item, as of the event: the
+    /// innermost item of a TSX `List`, else of a Rust component's list.
+    /// `None` outside list items, and in a row its TSX `List` has no key
+    /// for (its `keyExtractor` threw or gave neither a string nor a
+    /// number).
     pub anchor: Option<TextSelectionEndpoint>,
     /// Where the selection goes (the end a drag or a key moves), when that
     /// is in a list item, as of the event. Before [`Self::anchor`] in the
@@ -155,9 +158,10 @@ pub struct TextSelectionEvent {
 #[non_exhaustive]
 pub struct TextSelectionEndpoint {
     /// The item's key, as the list names it: a TSX `List`'s
-    /// `keyExtractor`, else the item's `key` or `id`, else its index; a
-    /// Rust component's list (`virtual_list`) by its index. The index is
-    /// written in decimal.
+    /// `keyExtractor`, else the item's `key` or `id`, else its index. A
+    /// Rust component's list (`virtual_list`) in a TSX `List`'s item leaves
+    /// the key to that item; with no TSX list around, its row goes by its
+    /// index. The index is written in decimal.
     pub key: String,
     /// Where the end is in the item's text, as a copy of the whole item
     /// gives it, in UTF-16 code units.

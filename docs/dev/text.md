@@ -137,12 +137,14 @@
   as an end moves) and a floating `ActionMode` (Copy, Select all, Share).
 - **Ends in list items**: `onSelectionChange`'s `anchor` and `focus` name the list item each end of a selectable
   view's selection is in (`{ key, offset }`). Backends report each end as its text's node and the offset in it
-  (`SelectionModel::ends`, `selection::end_fields`) and keep the rows of the ends rendered (`KeptRows`). The core
-  places each end in the innermost list cell around its text, as the row that cell shows and the offset in the copy
-  of its item; it lists the cell's texts with the walker the backends share (`selection::list_texts`), in
-  `core/selection_ends.rs` from `Core::locate_selection`. The engine then names the row (`selection::name_items`):
-  the runtime's lists by the item's key (`nsh-js` `list::row_key`, the same naming as `onViewableItemsChange`), any
-  other list by the row's index. An end outside a list item leaves its field out. The web does not report them yet.
+  (`SelectionModel::ends`, `selection::end_fields`) and keep the rows of the ends rendered (`KeptRows`). The engine
+  has the core name them (`Core::name_selection_ends`, `core/selection_ends.rs`): from the innermost list cell around
+  the text out, the runtime says what it calls each row (`selection::ListItemKey`, `nsh-js` `list::row_key`, the same
+  naming as `onViewableItemsChange`). The first row it names gives the key, and the offset is in the copy of that
+  row's item; a row it cannot name leaves the end out; rows of lists it does not hold (a Rust component's) go by the
+  innermost one's index. The core lists a cell's texts with `selection::list_texts`, which macOS and the headless
+  backend also use for an area; the other backends still walk their views themselves. An end outside a list item
+  leaves its field out. The web does not report them yet.
 - **Selection menu**: `selectionMenu` on a selectable view (Rust `Element::selection_menu`, the host prop
   `Prop::SelectionMenu`, `ViewProps::selection_menu`) takes `nsh/desktop`'s `MenuItem`s, each running its `onSelect`;
   they go after the system's items, which always stay. The core keeps plain items and separators

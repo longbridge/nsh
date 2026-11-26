@@ -105,3 +105,32 @@ test("an end in a nested list names the innermost item", async () => {
   await app.drag("text:Inner two.", { x: -45, y: 0 });
   await app.waitFor('Ends: i2@10 i2@4 "r two."');
 });
+
+test("an end in a Rust component's list names the item of the list around it", async () => {
+  const app = await open("./Kinds.tsx", { platform: "macos" });
+  // The tree's rows are a list of its own, which the app does not name:
+  // the end names the row of the app's list the tree is in, and counts in
+  // the copy of that row's item.
+  await app.drag("text:Tree leaf two.", { x: -45, y: 0 });
+  // "Tree leaf one.\n" before it in the row's copy.
+  await app.waitFor('Ends: t@25 t@19 " leaf "');
+});
+
+test("an end in a row whose keyExtractor throws is left out", async () => {
+  const app = await open("./Kinds.tsx", { platform: "macos" });
+  await app.drag("text:Row without a key.", { x: -45, y: 0 });
+  await app.waitFor('Ends: b1@10 b1@4 "withou"');
+  await app.press("id:break");
+  // The exception is the app's, reported as any it throws: the step that
+  // made it fails.
+  let threw = "";
+  try {
+    await app.drag("text:Row without a key.", { x: -35, y: 0 });
+  } catch (e) {
+    threw = String(e);
+  }
+  if (!threw.includes("no key for this row")) throw new Error(`the drag did not report the exception: ${threw}`);
+  // The list names no item for the row now: the event leaves both ends
+  // out rather than guess one.
+  await app.waitFor('Ends: - - "ithou"');
+});
