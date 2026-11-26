@@ -862,11 +862,12 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
-                    // Not carried out on Android yet: the app's paste is
-                    // lost, so say so.
-                    Command::InsertText(_) => {
-                        log::warn!("insertText is not supported on Android yet; nothing inserted");
-                        e.int(-1);
+                    // `InputBox.insertText`: the text, in place of the
+                    // selection as the user's edit (the input's line rules,
+                    // `maxLength` and undo history apply there).
+                    Command::InsertText(text) => {
+                        e.int(65);
+                        e.string(text);
                     }
                     // `SystemUi.openPath`: the file at the path, a `content:`
                     // URI the app's FilesProvider serves, to the system's
