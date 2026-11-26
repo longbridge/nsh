@@ -2323,6 +2323,18 @@ impl Ticker {
         self.shared.pending.store(false, Ordering::Release);
     }
 
+    /// A tick is posted and not handled yet, for tests.
+    #[cfg(test)]
+    pub(crate) fn posted_for_test(&self) {
+        self.shared.pending.store(true, Ordering::Release);
+    }
+
+    /// Whether the posted tick is not handled yet, for tests.
+    #[cfg(test)]
+    pub(crate) fn pending_for_test(&self) -> bool {
+        self.shared.pending.load(Ordering::Acquire)
+    }
+
     /// No frames are wanted until [`Ticker::resume`].
     pub(crate) fn pause(&self) {
         self.shared.pending.store(false, Ordering::Release);

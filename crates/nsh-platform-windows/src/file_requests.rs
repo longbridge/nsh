@@ -63,7 +63,7 @@ pub(crate) fn request(surface: &Rc<Surface>, id: u32, request: &FileRequest) {
 }
 
 /// Runs `f` in a single-threaded COM apartment of this thread.
-fn with_com<T>(f: impl FnOnce() -> T) -> windows::core::Result<T> {
+pub(crate) fn with_com<T>(f: impl FnOnce() -> T) -> windows::core::Result<T> {
     // SAFETY: COM is initialized for this thread and uninitialized after
     // `f`, which released every interface it made.
     unsafe {
