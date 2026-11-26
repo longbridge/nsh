@@ -55,7 +55,7 @@ const MAIN: Owner = 1 << 127;
 /// import: NSH's own name, as its globals' and functions' (`__nsh_g<i>`,
 /// `__nsh_f<i>`), as wasm-bindgen removes the linker's
 /// (`__indirect_function_table`).
-const TABLE: &str = "__nsh_table";
+pub(crate) const TABLE: &str = "__nsh_table";
 /// Lazy gates past this many are kept in the main module.
 const MAX_LAZY: usize = 127;
 /// The fewest bytes of code and data a module of what several gates share
@@ -312,9 +312,11 @@ pub(crate) fn split(
 /// [`split`] for it), still has what the side modules import from it, as
 /// they import it: the memory and the function table, at least as large,
 /// the table's slots `main` fills and no other (the side modules fill the
-/// others), and the `__nsh_g*` globals and `__nsh_f*` functions, of the
+/// others), each with a function of the same type (side modules call them
+/// by it), and the `__nsh_g*` globals and `__nsh_f*` functions, of the
 /// same types, the globals with the same initial values (the stack
-/// pointer's among them).
+/// pointer's among them). Its data stays where `main`'s was: the side
+/// modules' data is at fixed addresses next to it.
 pub(crate) fn check_processed(main: &[u8], processed: &[u8]) -> anyhow::Result<()> {
     let before = SharedExports::read(main)?;
     let after = SharedExports::read(processed)?;
@@ -334,10 +336,43 @@ pub(crate) fn check_processed(main: &[u8], processed: &[u8]) -> anyhow::Result<(
         );
     }
     ensure!(
-        before.slots == after.slots,
+        before.slots.keys().eq(after.slots.keys()),
         "wasm-bindgen changed which slots of the main module's function table it fills"
     );
+    if let Some(slot) = before
+        .slots
+        .iter()
+        .find(|&(slot, ty)| after.slots[slot] != *ty)
+        .map(|(slot, _)| slot)
+    {
+        bail!(
+            "wasm-bindgen changed the type of the function in slot {slot} of the main module's function table"
+        );
+    }
+    let data = merged(before.data);
+    if let Some((start, end)) = after
+        .data
+        .into_iter()
+        .find(|&(start, end)| !data.iter().any(|&(s, e)| s <= start && end <= e))
+    {
+        bail!(
+            "wasm-bindgen put data at {start}..{end} in the main module's memory, outside its data, where side modules' data may be"
+        );
+    }
     Ok(())
+}
+
+/// `ranges` sorted and with the adjacent and overlapping ones joined.
+fn merged(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+    ranges.sort_unstable();
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    for (start, end) in ranges {
+        match out.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => out.push((start, end)),
+        }
+    }
+    out
 }
 
 /// What side modules import from a main module ([`check_processed`]).
@@ -351,8 +386,11 @@ enum Shared {
 
 struct SharedExports {
     exports: BTreeMap<String, Shared>,
-    /// The slots of the exported function table its element segments fill.
-    slots: Vec<u32>,
+    /// The slots of the exported function table its element segments fill,
+    /// with the type of the function in each, when it names one.
+    slots: BTreeMap<u32, Option<wasmparser::FuncType>>,
+    /// Where its active data segments are in memory 0: start, end.
+    data: Vec<(u64, u64)>,
 }
 
 impl SharedExports {
@@ -364,6 +402,7 @@ impl SharedExports {
         let mut tables = Vec::new();
         let mut exports = Vec::new();
         let mut segments = Vec::new();
+        let mut data = Vec::new();
         for payload in Parser::new(0).parse_all(wasm) {
             match payload? {
                 Payload::TypeSection(reader) => {
@@ -423,21 +462,49 @@ impl SharedExports {
                         else {
                             continue;
                         };
-                        let filled: Vec<bool> = match element.items {
+                        // Each item: `None` for an empty slot, else the type
+                        // of its function, when it names one.
+                        let type_of = |func: u32| {
+                            let ty = funcs
+                                .get(func as usize)
+                                .and_then(|&ty| types.get(ty as usize));
+                            ty.cloned()
+                                .context("a function of the main module has no type")
+                        };
+                        let filled: Vec<Option<Option<wasmparser::FuncType>>> = match element.items
+                        {
                             wasmparser::ElementItems::Functions(items) => items
                                 .into_iter()
-                                .map(|f| f.map(|_| true))
+                                .map(|f| anyhow::Ok(Some(Some(type_of(f?)?))))
                                 .collect::<Result<_, _>>()?,
                             wasmparser::ElementItems::Expressions(_, items) => items
                                 .into_iter()
                                 .map(|item| {
-                                    let op = item?.get_operators_reader().read()?;
-                                    anyhow::Ok(!matches!(op, Operator::RefNull { .. }))
+                                    Ok(match item?.get_operators_reader().read()? {
+                                        Operator::RefNull { .. } => None,
+                                        Operator::RefFunc { function_index } => {
+                                            Some(Some(type_of(function_index)?))
+                                        }
+                                        _ => Some(None),
+                                    })
                                 })
-                                .collect::<Result<_, _>>()?,
+                                .collect::<anyhow::Result<_>>()?,
                         };
                         let offset = super::i32_const(&offset_expr)? as u32;
                         segments.push((table_index.unwrap_or(0), offset, filled));
+                    }
+                }
+                Payload::DataSection(reader) => {
+                    for segment in reader {
+                        let segment = segment?;
+                        if let wasmparser::DataKind::Active {
+                            memory_index: 0,
+                            offset_expr,
+                        } = segment.kind
+                        {
+                            let start = u64::from(super::i32_const(&offset_expr)? as u32);
+                            data.push((start, start + segment.data.len() as u64));
+                        }
                     }
                 }
                 _ => {}
@@ -445,7 +512,8 @@ impl SharedExports {
         }
         let mut shared = SharedExports {
             exports: BTreeMap::new(),
-            slots: Vec::new(),
+            slots: BTreeMap::new(),
+            data,
         };
         for (name, kind, index) in exports {
             let index = index as usize;
@@ -454,11 +522,9 @@ impl SharedExports {
                 ExternalKind::Table if name == TABLE => {
                     for (table, offset, filled) in &segments {
                         if *table as usize == index {
-                            shared.slots.extend(
-                                (0..filled.len() as u32)
-                                    .filter(|&k| filled[k as usize])
-                                    .map(|k| offset + k),
-                            );
+                            shared.slots.extend(filled.iter().zip(*offset..).filter_map(
+                                |(item, slot)| item.as_ref().map(|ty| (slot, ty.clone())),
+                            ));
                         }
                     }
                     Shared::Table(tables[index])
@@ -477,7 +543,6 @@ impl SharedExports {
             };
             shared.exports.insert(name, item);
         }
-        shared.slots.sort_unstable();
         Ok(shared)
     }
 }

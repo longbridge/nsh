@@ -30,7 +30,8 @@ pub(crate) fn exports(wasm: &[u8]) -> anyhow::Result<Vec<String>> {
 }
 
 /// `wasm` as it is, without the custom sections a linked runtime leaves
-/// out ([`dropped_custom`]): for a runtime published whole.
+/// out ([`dropped_custom`]): for the main module wasm-bindgen wrote
+/// (`web::link`), which has none of the linker's sections left to read.
 pub(crate) fn unlinked(wasm: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut out = Vec::with_capacity(wasm.len());
     for payload in Parser::new(0).parse_all(wasm) {
@@ -1236,6 +1237,102 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("`__nsh_f3`"), "{error}");
+    }
+
+    /// A main module as [`split::check_processed`] reads it: a table of
+    /// `table` slots whose slots from 1 hold `slots` (functions of type 0,
+    /// `() -> ()`, or 1, `(i32) -> ()`), the `__nsh_g0` global of `global`,
+    /// and `data` (start, length) in its memory.
+    fn shared_main(table: u8, slots: &[u8], global: i8, data: (u16, u8)) -> Vec<u8> {
+        fn section(out: &mut Vec<u8>, id: u8, contents: &[u8]) {
+            out.push(id);
+            put_uleb(out, contents.len() as u64);
+            out.extend_from_slice(contents);
+        }
+        let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+        section(&mut wasm, 1, &[2, 0x60, 0, 0, 0x60, 1, 0x7f, 0]);
+        // Function 0, `__nsh_f0`, then one per slot.
+        let mut funcs = vec![slots.len() as u8 + 1, 0];
+        funcs.extend_from_slice(slots);
+        section(&mut wasm, 3, &funcs);
+        section(&mut wasm, 4, &[1, 0x70, 0, table]);
+        section(&mut wasm, 5, &[1, 0, 1]);
+        section(&mut wasm, 6, &[1, 0x7f, 1, 0x41, global as u8 & 0x7f, 0x0b]);
+        let mut exports = vec![4];
+        for (name, kind) in [
+            ("memory", 2),
+            (split::TABLE, 1),
+            ("__nsh_g0", 3),
+            ("__nsh_f0", 0),
+        ] {
+            put_uleb(&mut exports, name.len() as u64);
+            exports.extend_from_slice(name.as_bytes());
+            exports.extend_from_slice(&[kind, 0]);
+        }
+        section(&mut wasm, 7, &exports);
+        let mut elements = vec![1, 0, 0x41, 1, 0x0b, slots.len() as u8];
+        elements.extend(1..=slots.len() as u8);
+        section(&mut wasm, 9, &elements);
+        let mut code = vec![slots.len() as u8 + 1];
+        for _ in 0..=slots.len() {
+            code.extend_from_slice(&[2, 0, 0x0b]);
+        }
+        section(&mut wasm, 10, &code);
+        let (start, len) = data;
+        let mut segment = vec![1, 0, 0x41];
+        // A signed LEB128 of at most 3 bytes.
+        let start = u32::from(start);
+        segment.extend_from_slice(&[
+            (start & 0x7f) as u8 | 0x80,
+            ((start >> 7) & 0x7f) as u8 | 0x80,
+            (start >> 14) as u8,
+            0x0b,
+            len,
+        ]);
+        segment.resize(segment.len() + len as usize, 0);
+        section(&mut wasm, 11, &segment);
+        Validator::new().validate_all(&wasm).unwrap();
+        wasm
+    }
+
+    #[test]
+    fn wasm_bindgen_must_leave_what_side_modules_import_as_it_was() {
+        let main = shared_main(4, &[0, 1], 7, (1024, 16));
+        split::check_processed(&main, &main).unwrap();
+        // A larger table and less data are fine.
+        split::check_processed(&main, &shared_main(8, &[0, 1], 7, (1024, 8))).unwrap();
+        for (processed, expected) in [
+            (
+                shared_main(2, &[0], 7, (1024, 16)),
+                "changed the main module's `__nsh_table`",
+            ),
+            (shared_main(4, &[0], 7, (1024, 16)), "changed which slots"),
+            (
+                shared_main(4, &[0, 1, 0], 7, (1024, 16)),
+                "changed which slots",
+            ),
+            (
+                shared_main(4, &[0, 0], 7, (1024, 16)),
+                "the type of the function in slot 2",
+            ),
+            (
+                shared_main(4, &[0, 1], 8, (1024, 16)),
+                "changed the main module's `__nsh_g0`",
+            ),
+            (
+                shared_main(4, &[0, 1], 7, (1024, 17)),
+                "put data at 1024..1041",
+            ),
+            (
+                shared_main(4, &[0, 1], 7, (2048, 1)),
+                "put data at 2048..2049",
+            ),
+        ] {
+            let error = split::check_processed(&main, &processed)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
     }
 
     #[test]

@@ -199,7 +199,10 @@ pub(crate) fn package(
         };
         // A Rust app's runtime that calls JS through wasm-bindgen is split
         // without the gates the app never needs, and the code only they
-        // reach, rather than with side modules no page loads.
+        // reach, rather than with side modules no page loads. Only such a
+        // runtime, which was pruned this way when it was published whole:
+        // leaving them out of every Rust app's runtime belongs with
+        // loading its part gates on demand, a change of its own.
         if built.rust_root && bindgen.is_some() {
             let unused = prune::unused_gates(&linkable)?;
             if !unused.is_empty() {
@@ -265,6 +268,9 @@ pub(crate) fn package(
         .as_deref()
         .map(|path| publish_glue(&site, path))
         .transpose()?;
+    if let Some(run) = &bindgen {
+        run.remove_output()?;
+    }
     // A Rust app has no code of its own besides its runtime: the page
     // mounts its root. Chunk id -> URL: the page hands the map to the
     // runtime, which fetches lazy chunks on demand. Static entry
@@ -517,9 +523,18 @@ pub(crate) fn link(
     let _ = fs::remove_file(&input);
     let glue = glue?;
     let output = run.out.join(format!("{}.wasm", run.name));
-    let processed = fs::read(&output).with_context(|| format!("read {}", output.display()))?;
-    split::check_processed(&split.main, &processed)?;
-    split.main = prune::unlinked(&processed)?;
+    let processed = fs::read(&output).with_context(|| format!("read {}", output.display()));
+    let main = processed.and_then(|processed| {
+        split::check_processed(&split.main, &processed)?;
+        prune::unlinked(&processed)
+    });
+    match main {
+        Ok(main) => split.main = main,
+        Err(error) => {
+            let _ = run.remove_output();
+            return Err(error);
+        }
+    }
     Ok((split, Some(glue)))
 }
 
@@ -546,6 +561,22 @@ impl BindgenRun {
             out: out.to_owned(),
             name: format!("{stem}-main"),
         })
+    }
+
+    /// Removes what [`link`] had wasm-bindgen write: the module, the glue
+    /// and its snippets, once the package has them.
+    pub(crate) fn remove_output(&self) -> anyhow::Result<()> {
+        let glue = self.out.join(format!("{}-bindgen.js", self.name));
+        let dir = crate::bindgen::output_dir(&glue);
+        for file in [self.out.join(format!("{}.wasm", self.name)), glue] {
+            if file.exists() {
+                fs::remove_file(&file).with_context(|| format!("remove {}", file.display()))?;
+            }
+        }
+        if dir.exists() {
+            fs::remove_dir_all(&dir).with_context(|| format!("remove {}", dir.display()))?;
+        }
+        Ok(())
     }
 }
 

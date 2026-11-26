@@ -366,7 +366,7 @@ behaves as a published one. A change to the app's crate then rebuilds that crate
 a link argument of its own (nsh's `.cargo/config.toml` may not apply where the app builds, and target-wide `rustflags`
 would rebuild every dependency instead of sharing nsh's builds). The kinds build to
 `target/wasm32-unknown-unknown/{web,web-dev}/nsh_app_<package>_web.wasm` and are copied to
-`.nsh/rust/web-runtime/nsh.wasm` / `nsh-dev.wasm`, beside the syntaxes (`nsh-syntaxes.bin`, written again only
+`.nsh/rust/web-runtime/nsh-browser.wasm` / `nsh-dev.wasm`, beside the syntaxes (`nsh-syntaxes.bin`, written again only
 after the workspace's `Cargo.lock` changes, so a rebuild does not wait for `cargo metadata`); `nsh.js` is nsh's. Everything else (bundling, the
 crate's assets, the dev server) already knows the set, from its description (`docs/dev/tooling.md`).
 
@@ -390,7 +390,7 @@ instead of `runModule`:
 the packaged page when `app.rust` is set (no `app.js`), the dev page (`{{rust}}`) once the dev server greets it; the
 dev session publishes no bundles (`DevSession::rust_root`). The browser host's exports (`nsh_browser_*`) are
 `cfg(feature = "browser-core")`. The runtime builds to
-`nsh_app_<package>_rust_web.wasm`, copied to `.nsh/rust/web-runtime/nsh-rust.wasm`.
+`nsh_app_<package>_rust_web.wasm`, copied to `.nsh/rust/web-runtime/nsh-rust-dev.wasm` (development) or `nsh-rust-browser.wasm` (published).
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
 (`nsh_core::element::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
@@ -417,9 +417,12 @@ Otherwise `bindgen::process` runs the `wasm-bindgen` CLI
 with both versions and the install command when the CLI's differs) with `--target web --no-typescript
 --omit-default-module-path` (the page hands the module over: the glue names no `<module>_bg.wasm`). It writes into
 `<module>-bindgen.tmp/`, which replaces `<module>-bindgen/` once the glue is adapted, and then renames
-wasm-bindgen's module over the built one (`nsh-dev.wasm`, or the published main module's `<runtime>-main.wasm`) and
+wasm-bindgen's module over the built one (`nsh-dev.wasm`, a Rust app's `nsh-rust-dev.wasm`, or the published main
+module's `<runtime>-main.wasm`, which `nsh package` removes with its glue once they are in the package) and
 the adapted glue to `<module>-bindgen.js`: a failed run leaves the previous build's module, glue and snippets together. A runtime rebuilt
-without the glue removes the earlier build's glue and directory.
+without the glue removes the earlier build's glue and directory. Each kind of runtime has its own file
+(a Rust app's are `nsh-rust-dev.wasm` and `nsh-rust-browser.wasm`), so building the published one leaves the
+development one and its glue as they are.
 
 `bindgen::adapt` makes the glue `nsh.js`'s: the glue imports the module's other imports as ES modules (`import * as
 import1 from "nsh"`, a bare specifier no page resolves), which become empty objects `nsh.js` fills, and its
