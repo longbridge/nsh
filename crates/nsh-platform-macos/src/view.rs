@@ -1661,6 +1661,70 @@ fn foreign_mark(holder: &NSView) -> Option<&Cell<bool>> {
     holder.downcast_ref::<ViewObj>().map(|v| &v.ivars().foreign)
 }
 
+/// Whether `view`, already a subview of `container`, holds its window's
+/// keyboard focus: re-adding it to `container` would take the focus out
+/// of it (AppKit removes a view before adding it again).
+fn holds_focus(container: &NSView, view: &NSView) -> bool {
+    if superview(view).as_deref() != Some(container) {
+        return false;
+    }
+    let Some(responder) = view.window().and_then(|w| w.firstResponder()) else {
+        return false;
+    };
+    responder
+        .downcast_ref::<NSView>()
+        .is_some_and(|focused| focused.isDescendantOf(view))
+}
+
+/// Moves `view`, a subview of `container`, below `above` (to the top
+/// without one) by moving its siblings around it, so `view` never leaves
+/// `container` and keeps the keyboard focus (a press that raises the
+/// panel it focused, #3244). Siblings already in place stay.
+fn restack_around(container: &NSView, view: &NSView, above: Option<&NSView>) {
+    let siblings: Vec<Retained<NSView>> = container
+        .subviews()
+        .iter()
+        .filter(|v| !std::ptr::eq(&**v, view))
+        .collect();
+    let at = above
+        .and_then(|a| siblings.iter().position(|v| std::ptr::eq(&**v, a)))
+        .unwrap_or(siblings.len());
+    // Whether `lower` is directly below `upper` in `container`.
+    let adjacent = |lower: &NSView, upper: &NSView| {
+        let subviews = container.subviews();
+        let mut previous: Option<Retained<NSView>> = None;
+        for sub in subviews.iter() {
+            if std::ptr::eq(&*sub, upper) {
+                return previous.is_some_and(|p| std::ptr::eq(&*p, lower));
+            }
+            previous = Some(sub);
+        }
+        false
+    };
+    let mut upper: Retained<NSView> = Retained::from(view);
+    for sibling in siblings[..at].iter().rev() {
+        if !adjacent(sibling, &upper) {
+            container.addSubview_positioned_relativeTo(
+                sibling,
+                NSWindowOrderingMode::Below,
+                Some(&upper),
+            );
+        }
+        upper = sibling.clone();
+    }
+    let mut lower: Retained<NSView> = Retained::from(view);
+    for sibling in &siblings[at..] {
+        if !adjacent(&lower, sibling) {
+            container.addSubview_positioned_relativeTo(
+                sibling,
+                NSWindowOrderingMode::Above,
+                Some(&lower),
+            );
+        }
+        lower = sibling.clone();
+    }
+}
+
 /// The lowest subview of `holder` that is not ours ([`is_ours`]), the one
 /// an appended child goes below: what a scan of its subviews finds.
 ///
@@ -2687,6 +2751,9 @@ impl NshView {
             .borrow()
             .as_ref()
             .map(|(l, _)| l.clone());
+        // A view asked to draw while its box was empty made no content layer
+        // and drew nothing.
+        let had_layer = content.is_some();
         let resized = match content {
             Some(layer) => {
                 let changed = layer.frame() != bounds;
@@ -2704,8 +2771,11 @@ impl NshView {
             return;
         }
         // A text's box changes with its own `MountItem::Text`, which says
-        // whether it draws again, unless its picture was cut.
-        let keeps = self.state().text.as_ref().is_some_and(|t| !t.cut.get());
+        // whether it draws again, unless its picture was cut, or it has no
+        // picture at all: a text that got its content while its box was still
+        // empty (a new view whose frame a live resize holds back, `unplaced`)
+        // drew nothing then, and its `MountItem::Text` will not come again.
+        let keeps = had_layer && self.state().text.as_ref().is_some_and(|t| !t.cut.get());
         if !keeps {
             self.content_resized();
         }
@@ -2848,15 +2918,44 @@ impl NshView {
         self.insert_view(parent, before);
     }
 
-    fn insert_view(&self, parent: &NshView, before: Option<&NshView>) {
-        let container = parent.container();
-        let above = match before {
+    /// The view a child inserted into `parent` below `before` goes below
+    /// (none: on top).
+    fn stacked_under(
+        parent: &NshView,
+        container: &NSView,
+        before: Option<&NshView>,
+    ) -> Option<Retained<NSView>> {
+        match before {
             Some(b) => Some(Retained::from(b.ns())),
             // A lifted input's pad is not what children stack under: it
             // rides directly above its own anchor, out of their way.
-            None => first_foreign(&container).filter(|v| !parent.is_raised(v)),
-        };
-        match above {
+            None => first_foreign(container).filter(|v| !parent.is_raised(v)),
+        }
+    }
+
+    /// Moves it, already a view in `parent`, below `before` without taking
+    /// it out of `parent` when it holds the keyboard focus: AppKit drops
+    /// the focus of a view removed from its superview, so a press that
+    /// raises (zIndex) the panel it focused would lose it (#3244). Whether
+    /// it did: otherwise the caller takes it out and inserts it again.
+    pub(crate) fn restack_focused(&self, parent: &NshView, before: Option<&NshView>) -> bool {
+        if self.is_leaf_layer() || parent.is_leaf_layer() {
+            return false;
+        }
+        let container = parent.container();
+        if !holds_focus(&container, self.ns()) {
+            return false;
+        }
+        let above = Self::stacked_under(parent, &container, before);
+        restack_around(&container, self.ns(), above.as_deref());
+        parent.raise_natives();
+        self.place();
+        true
+    }
+
+    fn insert_view(&self, parent: &NshView, before: Option<&NshView>) {
+        let container = parent.container();
+        match Self::stacked_under(parent, &container, before) {
             Some(above) => container.addSubview_positioned_relativeTo(
                 self.ns(),
                 NSWindowOrderingMode::Below,

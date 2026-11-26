@@ -52,7 +52,10 @@ What is kept:
 
 What only the app's Rust code or a dynamic access needs, it keeps in `nsh.json`: `"features": ["plot"]`. Rust code that
 depends on `nsh-base` with its default features keeps them through Cargo's feature unification anyway. Development
-hosts and `nsh run` always have everything. The web links per app by what it imports (`docs/dev/browser-js-size.md`).
+hosts and `nsh run` always have everything, except Linux's `webview` for an app with Rust crates of its own, whose
+development host is built on this machine: it builds WebKitGTK only when the bundle spells `webview`, the app's Rust
+code spells `WebView` or `web_view`, or `nsh.json` keeps it (`rust_app.rs` `dev_host_web_view`). A `WebView` added
+while `nsh run` is running shows a placeholder, with a warning, until `nsh run` starts again. The web links per app by what it imports (`docs/dev/browser-js-size.md`).
 
 A part that is off leaves `nsh_base` altogether, so Rust using it does not compile. JS fails at load: `Could not find
 export 'Editor' in module 'nsh/base'`. Nothing checks at build time that an app's imports match its runtime's features,

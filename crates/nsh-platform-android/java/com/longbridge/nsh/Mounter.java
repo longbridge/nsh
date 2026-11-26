@@ -3118,6 +3118,12 @@ final class Mounter {
                 (v != null ? v : host).announceForAccessibility(text);
                 break;
             }
+            case 65: {
+                // ref.insertText(text): in place of the input's selection.
+                String text = (String) objects[b.getInt()];
+                if (v instanceof InputBox) ((InputBox) v).insertText(text);
+                break;
+            }
             case 64: {
                 textLocale = java.util.Locale.forLanguageTag((String) objects[b.getInt()]);
                 // Date and time pickers show their values in it.

@@ -183,7 +183,8 @@ that scrolls a field into view as it focuses it (a browser) finds it, and scroll
 platform moves in the sink without a key (an input method that puts its caret between the brackets it typed) moves
 the editor's by as much, within the textblock and over text the document shows the same way. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's
-typography, and the document waits; the commit is one transaction tagged with the composition's id (`composition`
+typography, and the document waits; the caret is drawn after it, as a native text view draws it after its marked
+text, while the sink (where the candidates open) stays at its start. The commit is one transaction tagged with the composition's id (`composition`
 meta, which the history groups). `RichEditorEvent::CompositionChange(bool)` (Rust
 `.on_composition_change`, JS `onCompositionChange({ composing })`) reports each view's start/end transitions,
 including cancellation, after its session flag, held input and composition signal are updated. Updates within an
