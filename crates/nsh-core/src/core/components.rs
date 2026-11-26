@@ -1744,6 +1744,13 @@ impl<M: TextEngine> Core<M> {
         self.components.executor.quitting.get() > 0
     }
 
+    /// Whether a JS call of an `async fn` into Rust (a native module's, a
+    /// class's) has not answered yet: its answer comes from elsewhere (a
+    /// request made in Rust, another thread), which nothing else counts.
+    pub fn async_calls_pending(&self) -> bool {
+        self.components.executor.calls.get() > 0
+    }
+
     /// Runs the closures that waited for the app's answer to the events
     /// handed to JS before this commit ([`crate::element::after_answer`]),
     /// each under its owner; one whose owner went is dropped unrun.
@@ -2302,12 +2309,15 @@ impl<M: TextEngine> Core<M> {
             RustCall::Task(start) => match caught(start) {
                 Ok(future) => {
                     let executor = Rc::downgrade(&self.components.executor);
+                    let pending =
+                        crate::element::quit::Pending::new(&self.components.executor.calls);
                     // A task of the root: it never goes away.
                     crate::element::task::spawn_raw(
                         &self.components.executor,
                         ROOT_ID,
                         Box::pin(async move {
                             let result = crate::element::module::catching(future).await;
+                            drop(pending);
                             match executor.upgrade() {
                                 Some(executor) if call != 0 => {
                                     executor.act(Action::Return(call, result));
