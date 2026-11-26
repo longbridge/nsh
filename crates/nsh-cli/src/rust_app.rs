@@ -3504,7 +3504,12 @@ opt-level = \"s\"
             .map(|c| c.package.as_str())
             .collect();
         if self.nsh.source().is_some() {
-            changing.extend(NSH_CRATES);
+            changing.extend(
+                NSH_CRATES
+                    .iter()
+                    .filter(|name| gpui || !matches!(**name, "nsh-platform-gpui" | "nsh-gpui-host"))
+                    .copied(),
+            );
             changing.extend(
                 self.crates
                     .iter()
