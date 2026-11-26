@@ -331,13 +331,22 @@ editor.run(command("toggleBold"));
 ```
 
 `StarterKit` brings `Document`, `Paragraph`, the text node, `Heading`, `Blockquote`, `BulletList`, `OrderedList`,
-`ListItem`, `TaskList`, `TaskItem`, `CodeBlock`, `HardBreak`, `HorizontalRule`, `RichImage` (Tiptap's `Image`),
+`ListItem`, `TaskList`, `TaskItem`, `CodeBlock`, `CodeBlockHighlight`, `HardBreak`, `HorizontalRule`, `RichImage` (Tiptap's `Image`),
 `Bold`, `Italic`, `Strike`, `Code`, `Underline`, `RichLink` (Tiptap's `Link`), `Highlight`, `Subscript`, `Superscript`, `RichTextStyle` (Tiptap's `TextStyle`),
 `TextAlign`, `History`, `TrailingNode`, `Typography` and `ListKeymap`. An option named as one set to `false` leaves
 it out, an object configures it (`heading: { levels }`, `history: { depth }`, `textAlign: { types }`,
 `codeBlock: { enableTabIndentation }`). Each class's `configure(options)` and `extend({...})` make a
 `RichExtension`, which has `name`, `type`, `priority` and `options`. Every editor also gets the core keymap (Enter,
 Backspace, Delete, select all).
+
+Code blocks that name a language (` ```rust `, `toggleCodeBlock({ language: "rust" })`) are colored as `TextView`
+colors fenced code, with the same syntaxes and palette: that is `CodeBlockHighlight`, which plays the part of Tiptap's
+`CodeBlockLowlight` without a highlighter to pass in. `StarterKit.configure({ codeBlockHighlight: false })` leaves
+code plain. Typing in a long block does not wait for the colors: they are worked out off the engine thread and arrive
+a moment later. On the web the syntaxes come from the page once, the first time a block needs them, shared with
+`TextView`; they are not in the first download. Without the platform's feature `highlight` code stays plain.
+
+In Rust it is `kit::code_block_highlight()`, part of `kit::starter_kit()` and of `starter::plugins`.
 
 Each extension adds Tiptap's commands, which `command(name, args)` runs: `toggleBold`, `setItalic`,
 `unsetStrike`, `toggleHeading({ level })`, `setParagraph`, `toggleBlockquote`, `toggleBulletList`,

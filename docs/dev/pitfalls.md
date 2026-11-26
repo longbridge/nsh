@@ -796,6 +796,12 @@ Things that were found the hard way. Read the section of the area you change bef
   sinks, wraps a line per character and soon holds such text. `TextArea` answers its visible part instead
   (`text_input.rs`).
 
+- **`NSTextView::setDefaultParagraphStyle:` updates neither `typingAttributes` nor existing `textStorage` attributes**:
+  a multiline input sets all three so typing into an empty view or at index 0 keeps its line height. Undo and redo
+  restore attributed substrings: after a restyle, reapply the current paragraph style to the restored range before
+  layout. A font or color change can split the effective range even when the paragraph style is unchanged; compare
+  its `longestEffectiveRange` before writing (`text_input.rs`).
+
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
   (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.
