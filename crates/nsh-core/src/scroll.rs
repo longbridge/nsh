@@ -203,6 +203,13 @@ pub struct Live {
     pub alpha: f32,
     /// The refresh spinner shows.
     pub refreshing: bool,
+    /// `refreshing` turned off while pulled past the top: the spinner keeps
+    /// turning until the offset returns to 0 instead of falling back to pull
+    /// progress.
+    dismissing: bool,
+    /// When the current refresh spin started (ms), so large monotonic
+    /// timestamps do not lose precision in `f32`.
+    spin_start: Option<f64>,
     /// The spinner's angle.
     pub spin: Radians,
     /// [`ScrollHost::dark`] when the indicator was last shown, for
@@ -512,6 +519,14 @@ fn shifted(phase: Phase, d: Offset, horizontal: bool) -> Phase {
         },
         other => other,
     }
+}
+
+/// Angle of the refresh spinner `elapsed` ms after it started (one turn a
+/// second), reduced in `f64` before casting to `f32` so large monotonic
+/// clocks stay precise.
+fn spin_angle(elapsed: f64) -> Radians {
+    let frac = elapsed.max(0.0).rem_euclid(1000.0) / 1000.0;
+    Radians(frac as f32 * 2.0 * PI)
 }
 
 /// The spokes of the refresh spinner, as an activity indicator of eight
@@ -921,14 +936,11 @@ impl ScrollState {
     pub fn spinner(&self, width: Points, refresh: bool) -> Option<(Point<Points>, Percentage)> {
         let y = self.y.0;
         let b = &self.behavior;
-        if self.horizontal
-            || y >= 0.0
-            || b.refresh_indicator.is_some()
-            || !(self.live.refreshing || refresh)
-        {
+        let active = self.live.refreshing || self.live.dismissing;
+        if self.horizontal || y >= 0.0 || b.refresh_indicator.is_some() || !(active || refresh) {
             return None;
         }
-        let progress = if self.live.refreshing {
+        let progress = if active {
             1.0
         } else {
             (-y / b.refresh_threshold().0).min(1.0)
@@ -1019,6 +1031,13 @@ fn moved_to(host: &impl ScrollHost, to: Offset) {
         let pulled =
             (!s.horizontal && (s.y.0 < 0.0 || to.y < 0.0)).then(|| Points((-to.y).max(0.0)));
         (s.x, s.y) = (Points(to.x), Points(to.y));
+        if !s.horizontal && to.y >= 0.0 {
+            s.live.dismissing = false;
+            if !s.live.refreshing {
+                s.live.spin_start = None;
+                s.live.spin = Radians(0.0);
+            }
+        }
         if s.indicator {
             s.live.shown = host.now();
             s.live.alpha = 1.0;
@@ -1370,10 +1389,11 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
         }
         if !s.horizontal
             && s.offset() < 0.0
-            && s.live.refreshing
+            && (s.live.refreshing || s.live.dismissing)
             && s.behavior.refresh_indicator.is_none()
         {
-            s.live.spin = Radians(((now / 1000.0) as f32 * 2.0 * PI) % (2.0 * PI));
+            let start = *s.live.spin_start.get_or_insert(now);
+            s.live.spin = spin_angle(now - start);
             redraw = true;
             busy = true;
         }
@@ -1522,6 +1542,15 @@ pub fn refreshing(host: &impl ScrollHost, refreshing: bool) {
             return None;
         }
         s.live.refreshing = refreshing;
+        if refreshing {
+            s.live.dismissing = false;
+        } else if s.offset() < 0.0 {
+            s.live.dismissing = true;
+        } else {
+            s.live.dismissing = false;
+            s.live.spin_start = None;
+            s.live.spin = Radians(0.0);
+        }
         Some((
             s.offset(),
             matches!(s.live.phase, Phase::Drag { .. }),
@@ -1826,7 +1855,10 @@ pub fn drag_end(host: &impl ScrollHost, vx: f32, vy: f32) {
     emit(host, EventKind::ScrollDragEnd);
     if refresh {
         // Shown right away, as UIRefreshControl does; JS turns it off.
-        host.scroll_mut(|s, _| s.live.refreshing = true);
+        host.scroll_mut(|s, _| {
+            s.live.refreshing = true;
+            s.live.dismissing = false;
+        });
         host.event(EventKind::Refresh, EventPayload::None);
     }
     release(host, v, 0.0);
@@ -2826,6 +2858,82 @@ mod tests {
         assert!(s.behavior.refreshes(Points(-100.0)));
         assert_eq!(s.behavior.refresh_inset(), Points(100.0));
         assert_eq!(s.spinner(Points(300.0), true), None);
+    }
+
+    #[test]
+    fn refresh_dismissal_keeps_spinning_and_large_clocks_stay_precise() {
+        let host = TestHost::new(scroll_state((300.0, 1000.0), false));
+        refreshing(&host, true);
+        // Complete the reveal to -56 and spin one step.
+        assert!(frame(&host, ANIMATION));
+        assert_eq!(host.state.borrow().y, Points(-56.0));
+        assert!(frame(&host, ANIMATION + 125.0));
+        let before = host.state.borrow().live.spin;
+        assert!(before.0 > 0.0);
+
+        // Ending refresh while pulled enters dismissing: keeps full spinning
+        // progress instead of snapping to 56/64 = 0.875, even without onRefresh.
+        refreshing(&host, false);
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|s| s.1),
+            Some(Percentage(1.0))
+        );
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), false)
+                .map(|s| s.1),
+            Some(Percentage(1.0))
+        );
+
+        // Mid-retraction: still keeps full progress and advances spin.
+        host.state.borrow_mut().live.spin_start = Some(0.0);
+        assert!(frame(&host, 150.0));
+        let mid_y = host.state.borrow().y.0;
+        assert!(mid_y < 0.0 && mid_y > -56.0, "{mid_y}");
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|s| s.1),
+            Some(Percentage(1.0))
+        );
+        assert!(host.state.borrow().live.spin.0 > 0.0);
+
+        // Settled back at 0: spinner hides, dismissing clears, and a fresh
+        // pull uses pull progress again.
+        frame(&host, ANIMATION);
+        assert_eq!(host.state.borrow().y, Points(0.0));
+        assert_eq!(host.state.borrow().spinner(Points(300.0), true), None);
+        assert!(!frame(&host, ANIMATION + 16.0));
+        host.state.borrow_mut().y = Points(-32.0);
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|s| s.1),
+            Some(Percentage(0.5))
+        );
+
+        // A monotonic clock past 115 days (where `f32` seconds lose sub-second
+        // precision) still advances through all 8 spokes evenly.
+        let mut s = scroll_state((300.0, 1000.0), false);
+        s.y = Points(-56.0);
+        s.live.refreshing = true;
+        let host = TestHost::new(s);
+        let base = 10_000_000_000.0;
+        for step in 0..8 {
+            assert!(frame(&host, base + step as f64 * 125.0));
+            let spin = host.state.borrow().live.spin;
+            let brightest = spokes(Percentage(1.0), spin)
+                .enumerate()
+                .max_by(|a, b| a.1.1.total_cmp(&b.1.1))
+                .map(|(i, _)| i);
+            assert_eq!(brightest, Some(step));
+        }
     }
 
     /// A vertical view 500 tall the tests drive by hand: the clock stays
