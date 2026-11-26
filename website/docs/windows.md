@@ -60,7 +60,8 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 `AppOptions { fps: true, .. }` in a Rust app's `run_app`, the environment variable `NSH_FPS=1`, or the app's own
 `setFpsEnabled(true)`) logs the performance monitor's readings once a second
 (target `nsh::fps`): frames shown over the display's rate, the main thread's time per frame and its phases (`tick`,
-`drain`, `paint`, `present`, `canvas`), the engine's commits, CPU and memory, in the shape the other desktops log
+`drain`, `paint`, `present`, `canvas`), the engine's commits, CPU and memory, and how much of the window the frames
+redrew (`drawn`: the mean share of its pixels per frame; `whole`: frames that redrew all of it), in the shape the other desktops log
 (milliseconds as mean/p50/p95/max). `nsh test --fps -v` shows them and `examples/gallery/tools/perf.py` reads them
 ([Performance report](./performance-report.md#windows-win32-direct2d)). Measure release builds; the monitor costs
 nothing while it is off.

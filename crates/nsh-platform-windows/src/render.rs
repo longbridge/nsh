@@ -1634,7 +1634,11 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
                 return false;
             }
             if let (Some(fps), Some(painted)) = (&fps, painted) {
-                fps.painted(painted, shown.elapsed());
+                fps.painted(
+                    painted,
+                    shown.elapsed(),
+                    drawn_share(redraw.as_deref(), size),
+                );
             }
             drop(swap);
             surface.items_placed(drawn.items, redraw.as_deref());
@@ -1655,6 +1659,22 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
         }
     }
     false
+}
+
+/// The share of the window's `size` (pixels) a frame drew: 1 for a whole
+/// frame (`None`), else the area of its rectangles (merged; overlaps, if
+/// any, counted twice, at most the whole).
+fn drawn_share(redraw: Option<&[RECT]>, size: (u32, u32)) -> f32 {
+    let Some(rects) = redraw else { return 1.0 };
+    let window = f64::from(size.0) * f64::from(size.1);
+    if window <= 0.0 {
+        return 0.0;
+    }
+    let drawn: f64 = rects
+        .iter()
+        .map(|r| f64::from(r.right - r.left) * f64::from(r.bottom - r.top))
+        .sum();
+    (drawn / window).min(1.0) as f32
 }
 
 /// Clears `areas` (DIPs, on pixels) of the target to `background`, each
