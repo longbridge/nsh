@@ -2375,11 +2375,18 @@ impl Screen {
     pub(crate) fn area_texts(
         &self,
         area: NodeId,
-    ) -> Vec<(NodeId, Arc<nsh_core::AttributedText>, Bounds<Points>)> {
+    ) -> Vec<(
+        NodeId,
+        Arc<nsh_core::AttributedText>,
+        Bounds<Points>,
+        Option<String>,
+    )> {
         let mut out = Vec::new();
         let Some(origin) = self.bounds_in_root(area).map(|b| b.origin) else {
             return out;
         };
+        // The last text selection leaves out: a list marker, maybe.
+        let mut chrome = None;
         let mut stack = vec![area];
         while let Some(id) = stack.pop() {
             let Some(view) = self.nodes.get(&id) else {
@@ -2389,15 +2396,16 @@ impl Screen {
                 continue;
             }
             if let Some(text) = &view.attributed
-                && text.selectable != Some(false)
                 && let Some(bounds) = self.bounds_in_root(id)
             {
                 let content = view.text_content;
-                out.push((
-                    id,
-                    Arc::clone(text),
-                    Bounds::new(bounds.origin - origin + content.origin, content.size),
-                ));
+                let frame = Bounds::new(bounds.origin - origin + content.origin, content.size);
+                if text.selectable == Some(false) {
+                    chrome = Some((text.text.clone(), frame));
+                } else {
+                    let marker = nsh_core::selection::marker_of(chrome.take().as_ref(), frame);
+                    out.push((id, Arc::clone(text), frame, marker));
+                }
             }
             if let Some(children) = self.children.get(&id) {
                 stack.extend(children.iter().rev());

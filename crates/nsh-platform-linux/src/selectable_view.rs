@@ -48,7 +48,8 @@ use nsh_core::{
     AttributedText, EventKind, EventPayload, NodeId, PayloadValue, TextLayout,
     geometry::{Bounds, Point, Points},
     selection::{
-        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
+        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, marker_of, reading_order,
+        reorder,
     },
 };
 use rustc_hash::FxHashMap;
@@ -126,6 +127,8 @@ struct Item {
     frame: Bounds<Points>,
     /// Whether it continues the text before it (`ViewProps::continues_text`).
     continues: bool,
+    /// The list marker beside it (`selection::marker_of`).
+    marker: Option<String>,
 }
 
 impl SelectionTexts for Texts {
@@ -155,6 +158,10 @@ impl SelectionTexts for Texts {
         self.items[i].continues
     }
 
+    fn marker(&self, i: usize) -> Option<&str> {
+        self.items[i].marker.as_deref()
+    }
+
     fn offset_at(&self, i: usize, point: Point<Points>) -> u32 {
         let item = &self.items[i];
         item.layout.downcast::<LinuxLayout>().map_or(0, |l| {
@@ -169,26 +176,31 @@ impl SelectionTexts for Texts {
 
 /// Lists the texts of `area`.
 fn collect(area: &NshView) -> Texts {
-    fn walk(area: &NshView, view: &NshView, out: &mut Vec<Item>) {
+    type Chrome = Option<(String, Bounds<Points>)>;
+    fn walk(area: &NshView, view: &NshView, out: &mut Vec<Item>, chrome: &mut Chrome) {
         {
             let s = view.state();
             if s.style.hidden {
                 return;
             }
-            if let Some(drawn) = &s.text
-                && drawn.text.selectable != Some(false)
-            {
+            if let Some(drawn) = &s.text {
                 let origin = drawn.content.origin;
                 let at = view
                     .compute_point(area, &graphene::Point::new(origin.x.0, origin.y.0))
                     .map_or(origin, |p| Point::new(Points(p.x()), Points(p.y())));
-                out.push(Item {
-                    view: view.clone(),
-                    text: drawn.text.clone(),
-                    layout: drawn.layout.clone(),
-                    frame: Bounds::new(at, drawn.content.size),
-                    continues: s.props.continues_text,
-                });
+                let frame = Bounds::new(at, drawn.content.size);
+                if drawn.text.selectable == Some(false) {
+                    *chrome = Some((drawn.text.text.to_string(), frame));
+                } else {
+                    out.push(Item {
+                        view: view.clone(),
+                        text: drawn.text.clone(),
+                        layout: drawn.layout.clone(),
+                        frame,
+                        continues: s.props.continues_text,
+                        marker: marker_of(chrome.take().as_ref(), frame),
+                    });
+                }
             }
         }
         // In reading order: a virtual list's recycled cells are mounted
@@ -197,7 +209,7 @@ fn collect(area: &NshView) -> Texts {
         let mut runs = Vec::new();
         for child in view.child_views() {
             let from = out.len();
-            walk(area, &child, out);
+            walk(area, &child, out, chrome);
             runs.push((child.state().frame, from..out.len()));
         }
         if let Some(order) = reading_order(&runs) {
@@ -205,7 +217,7 @@ fn collect(area: &NshView) -> Texts {
         }
     }
     let mut items = Vec::new();
-    walk(area, area, &mut items);
+    walk(area, area, &mut items, &mut None);
     Texts { items }
 }
 
