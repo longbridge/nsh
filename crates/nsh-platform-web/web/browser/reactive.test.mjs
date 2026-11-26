@@ -938,7 +938,7 @@ test("native touch payloads keep each point's pointer type, pressure and tilt", 
     const pointers = [["mouse", 0.5, 0, 0], ["pen", 0.25, 30, -15], ["touch", 0.5, 0, 0]];
     assert.deepEqual(f.touchEvents(), pointers.map(([pointerType, pressure, tiltX, tiltY]) => ({
       phase: "move", timestamp: 10, activated: undefined,
-      points: [{ identifier: 1, target: 2, path: [2, 1], pageX: 30, pageY: 40, locationX: 3, locationY: 4, changed: true, timestamp: 10, pointerType, pressure, tiltX, tiltY }],
+      points: [{ identifier: 1, target: 2, path: [2, 1], pageX: 30, pageY: 40, locationX: 3, locationY: 4, changed: true, timestamp: 10, pointerType, pressure, tiltX, tiltY, eraser: false, barrel: false, coalesced: [] }],
     })));
   } finally { f.close(); }
 });
