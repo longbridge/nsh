@@ -1871,9 +1871,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             (true, nsh_core::desktop::DesktopCommand::Quit) => {
                 out.item("cmd").num(id).str("quit").end();
             }
-            _ => log::debug!("web: command {desktop:?} is not supported"),
+            _ => nsh_core::platform::warn_unsupported("web", desktop),
         },
-        other => log::debug!("web: command {other:?} is not supported"),
+        other => nsh_core::platform::warn_unsupported("web", other),
     }
 }
 

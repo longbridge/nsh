@@ -8,10 +8,12 @@ applications need no JavaScript runtime. Ordinary pointer drags and title-bar
 dragging retain their existing behavior. The application decides how to consume
 dropped files.
 
-The web backend and the mobile backends deliver no file drags today. A browser
-gives a page only each item's kind and MIME type while a drag hovers (names and
-contents arrive at the drop, as `File`s, never as local paths), so a web drop
-would carry `File`s rather than `file:` URLs and needs its own payload design.
+Android views accept the same file drops (`FileDrops.java`, from another app in
+split-screen or a desktop-mode window). The web backend and iOS deliver no file
+drags today. A browser gives a page only each item's kind and MIME type while a
+drag hovers (names and contents arrive at the drop, as `File`s, never as local
+paths), so a web drop would carry `File`s rather than `file:` URLs and needs its
+own payload design.
 
 ## Contract
 

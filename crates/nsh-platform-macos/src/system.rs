@@ -764,7 +764,7 @@ pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
         | Command::SetStatusBar(_)
         | Command::LayoutAnimation(_)
         | Command::CancelPress => {}
-        other => log::debug!("macos: command {other:?} is not supported"),
+        other => nsh_core::platform::warn_unsupported("macos", &other),
     }
 }
 
