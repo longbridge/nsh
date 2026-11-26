@@ -2034,6 +2034,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "error" => "error",
                 "text" => "text",
                 "has" => "has",
+                // `Mounter.backProgress`'s steps (`BackProgressEvent::from_payload`).
+                "phase" => "phase",
+                "progress" => "progress",
+                "edge" => "edge",
                 "opened" => "opened",
                 "permission" => "permission",
                 "shown" => "shown",
