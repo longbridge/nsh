@@ -654,14 +654,19 @@ fn a_web_sheet_uses_the_presented_surface_size_and_keeps_its_close_lifecycle() {
 /// A phone's surface (390 × 844, 47 points of safe area at the top and 34
 /// at the bottom) on a manual clock showing `C`.
 fn start_on_a_phone<C: Component<Props = ()>>() -> Headless {
-    use nsh_core::platform::{Idiom, Os};
+    start_on_a_phone_with::<C>(nsh_core::platform::Os::Ios)
+}
+
+/// [`start_on_a_phone`] running `os`.
+fn start_on_a_phone_with<C: Component<Props = ()>>(os: nsh_core::platform::Os) -> Headless {
+    use nsh_core::platform::Idiom;
 
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
         ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
-    config.environment.os = Os::Ios;
+    config.environment.os = os;
     config.environment.idiom = Idiom::Phone;
     config.environment.safe_area.top = px(47.0);
     config.environment.safe_area.bottom = px(34.0);
@@ -747,6 +752,34 @@ fn a_bottom_sheet_stays_above_the_keyboard() {
         *moves.lock().unwrap(),
         [true],
         "moved once, with the keyboard"
+    );
+    keyboard(&mut app, 0.0);
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 34.0),
+        "back down with the keyboard gone"
+    );
+}
+
+#[test]
+fn an_android_bottom_sheet_stands_on_the_keyboard_as_on_ios() {
+    // Android's modal root keeps the window's full height while the IME is
+    // up (#3154), with the IME's height (the navigation bar under it
+    // included) as the keyboard: the sheet lifts itself, as on iOS, and the
+    // app pads by the safe area only (#3288).
+    let mut app = start_on_a_phone_with::<KeyboardSheet>(nsh_core::platform::Os::Android);
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Last").unwrap();
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 34.0),
+        "above the navigation bar"
+    );
+    keyboard(&mut app, 336.0);
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 336.0),
+        "right above the keyboard, not behind it"
     );
     keyboard(&mut app, 0.0);
     assert_eq!(

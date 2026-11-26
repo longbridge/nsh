@@ -277,18 +277,6 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
             // below the status bar. The panel's percentages (an app's
             // `maxHeight: "92%"`) count from this room, so its top stays on
             // the screen however the app sizes it.
-            let stage_offset = move || {
-                // This sheet owns a modal root. Android already takes
-                // the whole IME out of that root: restore only the safe
-                // area's overlap, so the panel's padding ends behind
-                // the keyboard. Other popups can live in the full
-                // surface and keep their own keyboard lift.
-                if platform_name() == "android" {
-                    Points::ZERO - keyboard_height().min(safe_area().bottom)
-                } else {
-                    keyboard_lift()
-                }
-            };
             let stage = overlay()
                 .pointer_events(PointerEvents::BoxNone)
                 .focusable(false)
@@ -302,7 +290,10 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                     };
                     let bottom = match props.side.get() {
                         Placement::Top => Points::ZERO,
-                        _ => stage_offset(),
+                        // The same on every platform: a modal root
+                        // (Android's dialog window, too) keeps the window's
+                        // full height while the keyboard is up.
+                        _ => keyboard_lift(),
                     };
                     s.left_0()
                         .right_0()
