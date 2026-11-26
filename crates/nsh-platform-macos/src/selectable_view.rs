@@ -29,7 +29,7 @@ use nsh_core::{
     geometry::{bounds, point, size},
     selection::{
         Direction, KeptRows, Movement, SelectionModel, SelectionTexts, TextPosition,
-        autoscroll_step, reading_order, reorder,
+        autoscroll_step, marker_of, reading_order, reorder,
     },
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -56,6 +56,11 @@ struct Texts {
     origins: Vec<((f32, f32), f32)>,
     /// Each text's content box in the area's coordinates.
     frames: Vec<Bounds<Points>>,
+    /// The list marker beside each text (`selection::marker_of`).
+    markers: Vec<Option<String>>,
+    /// The last text left out (`selectable={false}`) while listing, its
+    /// content and frame: maybe the marker of the next.
+    chrome: Option<(String, Bounds<Points>)>,
 }
 
 impl SelectionTexts for Texts {
@@ -86,6 +91,10 @@ impl SelectionTexts for Texts {
 
     fn continues(&self, i: usize) -> bool {
         self.views[i].state().props.continues_text
+    }
+
+    fn marker(&self, i: usize) -> Option<&str> {
+        self.markers[i].as_deref()
     }
 
     fn range_bounds(&self, i: usize, range: Range<u32>) -> Option<Bounds<Points>> {
@@ -123,20 +132,26 @@ fn walk(view: &NshView, origin: (f32, f32), zoom: f32, out: &mut Texts) {
     }
     {
         let state = view.state();
-        if let Some(drawn) = &state.text
-            && drawn.text.selectable != Some(false)
-        {
+        if let Some(drawn) = &state.text {
             let content = drawn.content;
-            out.views.push(view.clone());
-            out.contents.push(drawn.text.clone());
-            out.origins.push((origin, zoom));
-            out.frames.push(bounds(
+            let frame = bounds(
                 point(
                     Points(origin.0 + content.origin.x.0 * zoom),
                     Points(origin.1 + content.origin.y.0 * zoom),
                 ),
                 content.size * zoom,
-            ));
+            );
+            if drawn.text.selectable == Some(false) {
+                // A list marker, maybe: the next text's copy starts with it.
+                out.chrome = Some((drawn.text.text.to_string(), frame));
+            } else {
+                out.views.push(view.clone());
+                out.contents.push(drawn.text.clone());
+                out.origins.push((origin, zoom));
+                out.frames.push(frame);
+                out.markers
+                    .push(marker_of(out.chrome.take().as_ref(), frame));
+            }
         }
     }
     // Children sit in the container's bounds, which scroll views move: by
@@ -172,6 +187,7 @@ fn walk(view: &NshView, origin: (f32, f32), zoom: f32, out: &mut Texts) {
         reorder(&mut out.contents, start, &order);
         reorder(&mut out.origins, start, &order);
         reorder(&mut out.frames, start, &order);
+        reorder(&mut out.markers, start, &order);
     }
 }
 
