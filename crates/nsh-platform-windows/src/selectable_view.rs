@@ -27,7 +27,8 @@ use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Point, Points,
     geometry::point,
     selection::{
-        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
+        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, marker_of, reading_order,
+        reorder,
     },
 };
 
@@ -56,6 +57,11 @@ struct Texts {
     frames: Vec<Bounds<Points>>,
     /// Each text view's transform to the root.
     to_root: Vec<Mat4>,
+    /// The list marker beside each text (`selection::marker_of`).
+    markers: Vec<Option<String>>,
+    /// The last text left out (`selectable={false}`) while listing, its
+    /// content and frame: maybe the marker of the next.
+    chrome: Option<(String, Bounds<Points>)>,
     /// The area's transform to the root.
     area: Mat4,
 }
@@ -68,6 +74,8 @@ impl Texts {
             texts: Vec::new(),
             frames: Vec::new(),
             to_root: Vec::new(),
+            markers: Vec::new(),
+            chrome: None,
             area: area.to_root().unwrap_or_default(),
         };
         if area.attached() {
@@ -94,6 +102,7 @@ impl Texts {
             reorder(&mut self.texts, start, &order);
             reorder(&mut self.frames, start, &order);
             reorder(&mut self.to_root, start, &order);
+            reorder(&mut self.markers, start, &order);
         }
     }
 
@@ -102,7 +111,7 @@ impl Texts {
         let (text, content) = {
             let s = view.state();
             match &s.text {
-                Some(d) if takes_part(&d.text) => (d.text.clone(), d.content),
+                Some(d) => (d.text.clone(), d.content),
                 _ => return,
             }
         };
@@ -112,6 +121,13 @@ impl Texts {
         let Some(frame) = self.to_area(&to_root, content) else {
             return;
         };
+        if !takes_part(&text) {
+            // A list marker, maybe: the next text's copy starts with it.
+            self.chrome = Some((text.text.to_string(), frame));
+            return;
+        }
+        self.markers
+            .push(marker_of(self.chrome.take().as_ref(), frame));
         self.views.push(view.clone());
         self.texts.push(text);
         self.frames.push(frame);
@@ -171,6 +187,10 @@ impl SelectionTexts for Texts {
 
     fn continues(&self, i: usize) -> bool {
         self.views[i].state().props.continues_text
+    }
+
+    fn marker(&self, i: usize) -> Option<&str> {
+        self.markers[i].as_deref()
     }
 
     fn range_bounds(&self, i: usize, range: Range<u32>) -> Option<Bounds<Points>> {
