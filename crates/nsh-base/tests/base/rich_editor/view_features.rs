@@ -653,6 +653,25 @@ fn the_caret_steps_over_an_inline_image_moved_by_an_edit_above() {
     see(&mut app, "Image 8 gap 80 Some(1) rect Some((0.0, 80.0))");
 }
 
+/// A built-in inline image, which draws no selected state, is stepped
+/// over as one position: an arrow stops only on an atom a node view
+/// draws, whose `selected` shows it is selected.
+#[test]
+fn an_arrow_steps_over_a_built_in_inline_image() {
+    // `a` is 1..2, the image 2..3, `b` 3..4.
+    let doc = json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+        {"type": "text", "text": "a"},
+        image_80(),
+        {"type": "text", "text": "b"},
+    ]}]});
+    let mut app = start(doc);
+    focus_start(&mut app);
+    keys(&mut app, &["right", "right"]);
+    see(&mut app, "Sel 3-3");
+    keys(&mut app, &["left"]);
+    see(&mut app, "Sel 2-2");
+}
+
 /// An 80-point widget decoration at the start of the line, before `abcd`
 /// (1..5): what a plugin draws in a line with no position of its own.
 struct Spacer;

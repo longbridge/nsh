@@ -1397,12 +1397,17 @@ impl Rv {
             }
             return;
         }
-        // Left or Right onto a selectable inline atom (a chip, an inline
-        // image) selects it as a node, as ProseMirror does; the next one
-        // leaves it on the far side.
+        // Left or Right onto a selectable inline atom drawn by a node view
+        // (a chip) selects it as a node, as ProseMirror does; the next one
+        // leaves it on the far side. Only a node view shows it is selected
+        // (its `selected`): an atom drawn otherwise (a built-in image) is
+        // stepped over, as the caret, hidden under a node selection, would
+        // leave nothing to see.
         if !m.extend
             && m.unit == Unit::Char
-            && let Some(node) = inline_node_beside(&doc, &sel, m.dir)
+            && let Some(node) = inline_node_beside(&doc, &sel, m.dir, |node| {
+                self.node_view(node.ty().name()).is_some()
+            })
         {
             return self.set_selection(node, true);
         }
@@ -3261,15 +3266,24 @@ pub(crate) fn drop_transaction(
 }
 
 /// The node selection of the inline atom right beside a caret toward
-/// `dir`, when its type can be selected (prosemirror-view's
-/// `selectHorizontally`). Atoms whose spec turns `selectable` off (a
-/// mention, a hard break) are left to the caret, which steps over them.
-fn inline_node_beside(doc: &Node, sel: &Selection, dir: i32) -> Option<Selection> {
+/// `dir`, when its type can be selected and `shown` says its selection
+/// shows (prosemirror-view's `selectHorizontally`). Atoms whose spec turns
+/// `selectable` off (a mention, a hard break) are left to the caret, which
+/// steps over them.
+fn inline_node_beside(
+    doc: &Node,
+    sel: &Selection,
+    dir: i32,
+    shown: impl Fn(&Node) -> bool,
+) -> Option<Selection> {
     if !sel.empty() || sel.as_text().is_none() {
         return None;
     }
     let head = sel.resolved_head();
-    if !head.parent().inline_content() {
+    // An atom is a child of the textblock, so it is beside the caret only
+    // between children; inside a text, `node_after` and `node_before`
+    // would cut a copy of it on every press.
+    if head.text_offset() != 0 || !head.parent().inline_content() {
         return None;
     }
     let node = if dir > 0 {
@@ -3277,7 +3291,7 @@ fn inline_node_beside(doc: &Node, sel: &Selection, dir: i32) -> Option<Selection
     } else {
         head.node_before()
     }?;
-    if node.is_text() || !node.is_atom() || !NodeSelection::is_selectable(&node) {
+    if node.is_text() || !node.is_atom() || !NodeSelection::is_selectable(&node) || !shown(&node) {
         return None;
     }
     let from = if dir > 0 {
