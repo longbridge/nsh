@@ -1064,6 +1064,19 @@ struct CellFlags {
     active: bool,
 }
 
+/// A number no other cell view of this thread's tables had: its render's
+/// key, unique among its table's renders.
+fn next_cell_key() -> u64 {
+    thread_local! {
+        static NEXT: Cell<u64> = const { Cell::new(0) };
+    }
+    NEXT.with(|n| {
+        let k = n.get();
+        n.set(k + 1);
+        k
+    })
+}
+
 fn cell(
     dt: Dt,
     row: Memo<Option<usize>>,
@@ -1194,6 +1207,10 @@ fn cell(
         // The cell holds what the app draws itself: no view of the
         // render's own between them.
         let render_dt = dt.clone();
+        // One key per cell view, not per row: a view showing another row
+        // as the table scrolls keeps JS's holder, the app's function
+        // renders the new row into it.
+        let key: SharedString = format!("cell:{}", next_cell_key()).into();
         Renderer::render_into(el, move || {
             let render = props.render_cell.get()?;
             let (row, def) = (row.get()?, def.get()?);
@@ -1213,7 +1230,7 @@ fn cell(
                 text: render_dt.cell_text(row, def),
                 ..value
             };
-            Some((render, format!("cell:{row}:{def}").into(), value))
+            Some((render, key.clone(), value))
         })
         .into_element()
     } else {
