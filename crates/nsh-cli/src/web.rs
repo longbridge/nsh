@@ -53,8 +53,6 @@ mod compress;
 mod prune;
 mod split;
 
-pub(crate) use prune::without_unused_gates;
-
 /// The packaged page; `{{…}}` are filled in by [`page`].
 const PAGE: &str = include_str!("web/index.html");
 /// The page's own styles, a file of the site so a strict `style-src`
@@ -109,13 +107,23 @@ pub(crate) fn package(
         );
     }
     let runtime = runtime::package_web()?;
+    // Linked for the app: the parts of `nsh/base`, the standard modules
+    // and the app's own UI sets it does not use are left out.
+    let linkable =
+        fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?;
+    // A runtime whose crates call JS through wasm-bindgen: it runs on the
+    // main module once it is split ([`link`]).
+    let bindgen = crate::bindgen::needs(&linkable)
+        .with_context(|| format!("read {}", runtime.wasm.display()))?
+        .map(|version| BindgenRun::next_to(&runtime.wasm, version))
+        .transpose()?;
     // `--shared-runtime`: the runtime's shared form, the same bytes for
     // every app on this NSH version wherever it is packaged, which the
     // browser downloads once when the apps serve it from one place
     // (`--asset-url`). nsh's own runtime only: an app with Rust components
     // or wasm-bindgen glue has one of its own.
     let shared = options.shared_runtime;
-    if shared && (built.rust_root || runtime.glue.is_some()) {
+    if shared && (built.rust_root || bindgen.is_some()) {
         bail!(
             "--shared-runtime needs nsh's own runtime: an app with Rust components or wasm-bindgen glue has a runtime of its own"
         );
@@ -149,10 +157,6 @@ pub(crate) fn package(
     // shows (the app's code is minified as it is bundled).
     let js = nsh_bundler::minify_module("nsh.js", &js).map_err(anyhow::Error::msg)?;
     let js = site.add("nsh.js", js.as_bytes())?;
-    // Linked for the app: the parts of `nsh/base`, the standard modules
-    // and the app's own UI sets it does not use are left out.
-    let linkable =
-        fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?;
     // The gates the entry needs are linked into `nsh.wasm`; each other one
     // an app's chunks use is a side module of its own, which the page
     // loads before the first chunk that needs it runs (`chunkSides`), after
@@ -165,7 +169,7 @@ pub(crate) fn package(
     let entry_sides: Vec<String>;
     // An app with Rust components of its own has a runtime built for it,
     // linkable as nsh's own, with a gate per UI set (`nsh_ui_set_*`).
-    let (linked, has_math, has_emoji) = {
+    let (linked, glue, has_math, has_emoji) = {
         let plan = GatePlan::of(built);
         if let Some(whole) = &plan.whole {
             ui::warn(whole);
@@ -174,7 +178,7 @@ pub(crate) fn package(
         let has_emoji =
             plan.main.iter().any(|g| g == EMOJI_GATE) || plan.lazy().contains(&EMOJI_GATE);
         let exports = prune::exports(&linkable)?;
-        let (keep, lazy) = if shared {
+        let (mut keep, mut lazy) = if shared {
             shared_split(&exports)
         } else {
             let rust_part = |name: &str| built.rust_root && rust_on_demand(name);
@@ -193,7 +197,22 @@ pub(crate) fn package(
             lazy.extend(exports.iter().map(String::as_str).filter(|n| rust_part(n)));
             (keep, lazy)
         };
-        let split = link(&linkable, runtime.glue.is_some(), &keep, &lazy)?;
+        // A Rust app's runtime that calls JS through wasm-bindgen is split
+        // without the gates the app never needs, and the code only they
+        // reach, rather than with side modules no page loads.
+        if built.rust_root && bindgen.is_some() {
+            let unused = prune::unused_gates(&linkable)?;
+            if !unused.is_empty() {
+                ui::debug(format!(
+                    "web runtime: left out the gates the app does not need: {}",
+                    unused.join(", ")
+                ));
+                let used = |name: &&str| !unused.iter().any(|u| u == name);
+                keep.retain(used);
+                lazy.retain(used);
+            }
+        }
+        let (split, glue) = link(&linkable, &keep, &lazy, bindgen.as_ref())?;
         for side in &split.sides {
             let file = side_file_name(&side.gates);
             let url = site.add(&format!("{file}.wasm"), &side.bytes)?;
@@ -214,7 +233,7 @@ pub(crate) fn package(
         // A runtime published whole has the typesetter in its main module.
         let has_math = published.contains(MATH_GATE)
             || (split.sides.is_empty() && exports.iter().any(|e| e == MATH_GATE));
-        (split.main, has_math, has_emoji)
+        (split.main, glue, has_math, has_emoji)
     };
     let wasm = site.add("nsh.wasm", &linked)?;
     // What the runtime fetches when it first needs it: the syntaxes it
@@ -242,8 +261,7 @@ pub(crate) fn package(
     }
     // The wasm-bindgen glue of a runtime whose crates call JS through
     // wasm-bindgen (`crate::bindgen`).
-    let glue = runtime
-        .glue
+    let glue = glue
         .as_deref()
         .map(|path| publish_glue(&site, path))
         .transpose()?;
@@ -475,23 +493,60 @@ const SHADER_GATE: &str = "nsh_feature_shader";
 const EMOJI_FILE: &str = "nsh-emoji.bin";
 
 /// The modules published for an app from its linkable runtime: the main
-/// module with `keep` and side modules for `lazy` ([`split::split`]). A
-/// runtime wasm-bindgen ran on (`bindgen`) is published whole, every gate
-/// in it: wasm-bindgen rewrites the module and keeps the `linking` and
-/// `reloc.*` sections of the one it read, which no longer describe it.
+/// module with `keep` and side modules for `lazy` ([`split::split`]).
+///
+/// A runtime whose crates call JS through wasm-bindgen (`bindgen`) is split
+/// the same way first: wasm-bindgen rewrites the module it reads and keeps
+/// its `linking` and `reloc.*` sections, which then no longer describe it.
+/// It runs on the main module alone, which keeps what it reads and
+/// rewrites, and must still have what the side modules import from it
+/// ([`split::check_processed`]). Its glue is returned with the modules.
 pub(crate) fn link(
     linkable: &[u8],
-    bindgen: bool,
     keep: &[&str],
     lazy: &[&str],
-) -> anyhow::Result<prune::split::Split> {
-    if bindgen {
-        return Ok(prune::split::Split {
-            main: prune::unlinked(linkable)?,
-            sides: Vec::new(),
-        });
+    bindgen: Option<&BindgenRun>,
+) -> anyhow::Result<(prune::split::Split, Option<PathBuf>)> {
+    let mut split = split::split(linkable, keep, lazy, bindgen.is_some())?;
+    let Some(run) = bindgen else {
+        return Ok((split, None));
+    };
+    let input = run.out.join(format!("{}-split.wasm", run.name));
+    fs::write(&input, &split.main).with_context(|| format!("write {}", input.display()))?;
+    let glue = crate::bindgen::process(&input, &run.version, &run.out, &run.name);
+    let _ = fs::remove_file(&input);
+    let glue = glue?;
+    let output = run.out.join(format!("{}.wasm", run.name));
+    let processed = fs::read(&output).with_context(|| format!("read {}", output.display()))?;
+    split::check_processed(&split.main, &processed)?;
+    split.main = prune::unlinked(&processed)?;
+    Ok((split, Some(glue)))
+}
+
+/// Where wasm-bindgen runs on a runtime's main module ([`link`]): the
+/// version the runtime records, and the directory and name of its output
+/// (`bindgen::process`).
+pub(crate) struct BindgenRun {
+    version: String,
+    out: PathBuf,
+    name: String,
+}
+
+impl BindgenRun {
+    /// Its output next to the runtime `wasm`, named after it:
+    /// `<runtime>-main.wasm`, `<runtime>-main-bindgen.js`.
+    pub(crate) fn next_to(wasm: &Path, version: String) -> anyhow::Result<Self> {
+        let out = wasm.parent().context("the web runtime has no directory")?;
+        let stem = wasm
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .context("the web runtime has no name")?;
+        Ok(BindgenRun {
+            version,
+            out: out.to_owned(),
+            name: format!("{stem}-main"),
+        })
     }
-    split::split(linkable, keep, lazy)
 }
 
 /// `nsh.json` `web.base`: a path from the host's root, ending in `/` (one
@@ -2360,33 +2415,6 @@ mod tests {
         computed.computed_import = true;
         assert_eq!(linked_gates(Some(&computed)).len(), every);
         assert_eq!(linked_gates(None).len(), every);
-    }
-
-    #[test]
-    fn a_runtime_wasm_bindgen_ran_on_is_published_whole() {
-        // `run`, a function `() -> ()` that returns at once.
-        let mut module = b"\0asm\x01\0\0\0".to_vec();
-        module.extend([1, 4, 1, 0x60, 0, 0]);
-        module.extend([3, 2, 1, 0]);
-        module.extend([7, 7, 1, 3, b'r', b'u', b'n', 0, 0]);
-        module.extend([10, 4, 1, 2, 0, 0x0b]);
-        // The linker's sections of the module wasm-bindgen read, which it
-        // keeps: their symbol names function 7, which it removed.
-        let mut runtime = module.clone();
-        runtime.extend([0, 19, 7]);
-        runtime.extend(b"linking");
-        runtime.extend([2, 8, 8, 1, 0, 0, 7, 3, b'r', b'u', b'n']);
-        runtime.extend([0, 13, 10]);
-        runtime.extend(b"reloc.CODE");
-        runtime.extend([3, 0]);
-        let error = link(&runtime, false, &["run"], &[]).err().unwrap();
-        assert_eq!(
-            error.to_string(),
-            "a symbol names function 7, which the web runtime does not have"
-        );
-        let published = link(&runtime, true, &["run"], &[]).unwrap();
-        assert_eq!(published.main, module);
-        assert!(published.sides.is_empty());
     }
 
     #[test]
