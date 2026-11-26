@@ -393,6 +393,8 @@ pub(crate) fn create_app_window(
     if ex & WS_EX_LAYERED.0 != 0 {
         crate::shell::opaque_layer(hwnd);
     }
+    // Before it first shows, so its taskbar button has the app's icon.
+    set_icon(hwnd, surface.icon.borrow().as_deref());
     Ok(hwnd)
 }
 

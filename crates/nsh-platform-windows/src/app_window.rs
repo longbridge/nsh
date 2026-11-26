@@ -1378,4 +1378,64 @@ mod tests {
         }
         surface.windows.borrow_mut().clear();
     }
+
+    /// A window of the app's own shows the app's icon (`nsh.json`'s, which
+    /// `nsh run` hands over as an `.ico` file) before it first shows, as the
+    /// hidden host window does: in a `mount(App)` or `<Window>` app it is the
+    /// window with the taskbar button (#3280).
+    #[test]
+    fn an_app_window_has_the_apps_icon() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            ICON_BIG, ICON_SMALL, SendMessageW, WM_GETICON,
+        };
+        if crate::window::has_own_icon() {
+            // The executable's icon is the class's; nothing is set.
+            return;
+        }
+        // A 16×16 32-bit icon, opaque blue: header, one entry, the bitmap
+        // (twice the height for the AND mask), its pixels and its mask.
+        let mut ico = vec![0, 0, 1, 0, 1, 0];
+        let image = 40 + 16 * 16 * 4 + 16 * 4;
+        ico.extend([16, 16, 0, 0, 1, 0, 32, 0]);
+        ico.extend((image as u32).to_le_bytes());
+        ico.extend(22u32.to_le_bytes());
+        ico.extend(40u32.to_le_bytes());
+        ico.extend(16i32.to_le_bytes());
+        ico.extend(32i32.to_le_bytes());
+        ico.extend([1, 0, 32, 0]);
+        ico.extend([0; 24]);
+        for _ in 0..16 * 16 {
+            ico.extend([0xff, 0, 0, 0xff]);
+        }
+        ico.extend([0; 16 * 4]);
+        let path = std::env::temp_dir().join(format!("nsh-test-icon-{}.ico", std::process::id()));
+        std::fs::write(&path, &ico).unwrap();
+
+        let options = crate::AppOptions {
+            icon: Some(path.clone()),
+            ..Default::default()
+        };
+        let app = crate::app::AppView::new(None, options).unwrap();
+        let surface = app.surface();
+        let hwnd = crate::window::create_app_window(
+            surface,
+            7,
+            WindowKind::Normal,
+            &WindowAttributes::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        let icon = |which: u32| {
+            // SAFETY: a plain query of the test's own window.
+            unsafe { SendMessageW(hwnd, WM_GETICON, Some(WPARAM(which as usize)), None) }.0
+        };
+        assert_ne!(icon(ICON_BIG), 0, "the taskbar's icon");
+        assert_ne!(icon(ICON_SMALL), 0, "the title bar's icon");
+        // SAFETY: the test's own window.
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+        let _ = std::fs::remove_file(path);
+    }
 }
