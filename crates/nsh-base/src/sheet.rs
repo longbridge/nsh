@@ -272,35 +272,62 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                         change(false, OpenChangeReason::BackdropPress);
                     }
                 });
-            let mut panel = overlay()
-                // What reaches the bottom of the screen ends above the
-                // keyboard. A bottom sheet the keyboard lifts stays below the
-                // status bar; otherwise its height is the app's (a web sheet's
-                // presented surface may be taller than the window), or its
-                // largest detent's.
+            // Where the panel lies: the root, less what the keyboard takes
+            // at the bottom. A bottom sheet the keyboard lifts also stays
+            // below the status bar. The panel's percentages (an app's
+            // `maxHeight: "92%"`) count from this room, so its top stays on
+            // the screen however the app sizes it.
+            let stage_offset = move || {
+                // This sheet owns a modal root. Android already takes
+                // the whole IME out of that root: restore only the safe
+                // area's overlap, so the panel's padding ends behind
+                // the keyboard. Other popups can live in the full
+                // surface and keep their own keyboard lift.
+                if platform_name() == "android" {
+                    Points::ZERO - keyboard_height().min(safe_area().bottom)
+                } else {
+                    keyboard_lift()
+                }
+            };
+            let stage = overlay()
+                .pointer_events(PointerEvents::BoxNone)
+                .focusable(false)
+                .style_with(move |s| {
+                    let lifted =
+                        props.side.get() == Placement::Bottom && keyboard_lift() > Points::ZERO;
+                    let top = if lifted {
+                        safe_area().top
+                    } else {
+                        Points::ZERO
+                    };
+                    let bottom = match props.side.get() {
+                        Placement::Top => Points::ZERO,
+                        _ => stage_offset(),
+                    };
+                    s.left_0()
+                        .right_0()
+                        .top(Length::from(top))
+                        .bottom(Length::from(bottom))
+                });
+            let mut panel = view()
+                .absolute()
+                // What reaches the bottom of the stage ends above the
+                // keyboard. A bottom sheet the keyboard lifts is no taller
+                // than the stage; otherwise its height is the app's (a web
+                // sheet's presented surface may be taller than the window),
+                // or its largest detent's.
                 .style_with(move |s| {
                     let lift = keyboard_lift();
-                    // This sheet owns a modal root. Android already takes
-                    // the whole IME out of that root: restore only the safe
-                    // area's overlap, so the panel's padding ends behind
-                    // the keyboard. Other popups can live in the full
-                    // surface and keep their own keyboard lift.
-                    let offset = if platform_name() == "android" {
-                        Points::ZERO - keyboard_height().min(safe_area().bottom)
-                    } else {
-                        lift
-                    };
-                    let above = Length::from(offset);
                     let s = match props.side.get() {
                         Placement::Bottom if lift > Points::ZERO => s
                             .left_0()
                             .right_0()
-                            .bottom(above)
+                            .bottom_0()
                             .max_h(bottom_panel_max_height()),
-                        Placement::Bottom => s.left_0().right_0().bottom(above),
+                        Placement::Bottom => s.left_0().right_0().bottom_0(),
                         Placement::Top => s.left_0().right_0().top_0(),
-                        Placement::Left => s.top_0().bottom(above).left_0(),
-                        Placement::Right => s.top_0().bottom(above).right_0(),
+                        Placement::Left => s.top_0().bottom_0().left_0(),
+                        Placement::Right => s.top_0().bottom_0().right_0(),
                     };
                     match detents.largest() {
                         Some(largest) => s.h(largest),
@@ -380,7 +407,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
             // These bindings change in place when the permission changes;
             // children and scroll positions keep their state.
             panel = panel.bind_translate_y(&translate);
-            vec![backdrop.into_element(), panel.into_element()]
+            vec![backdrop.into_element(), stage.child(panel).into_element()]
         };
         let layers = when(
             move || detents.active(),

@@ -1504,3 +1504,50 @@ fn the_keyboard_raises_the_sheet_to_its_largest_detent_and_back() {
     assert_rests(&replica, 422.0);
     assert_footer_at(&app, &replica, 844.0);
 }
+
+/// A tall sheet whose app caps its panel at 92% (#3288).
+#[component]
+fn PercentKeyboardSheet() -> impl IntoElement {
+    sheet().default_open(true).popup_class("max-h-[92%]").child(
+        view()
+            .max_h(relative(1.0))
+            .pb_safe_area()
+            .child(view().test_id("header").h(px(56.0)).child(text("Header")))
+            .child(
+                scroll()
+                    .flex_shrink(1.0)
+                    .child(view().h(px(900.0)).child(text("Rows"))),
+            )
+            .child(view().test_id("submit").h(px(44.0)).child(text("Submit"))),
+    )
+}
+
+#[test]
+fn a_sheet_capped_by_the_app_stays_on_screen_above_the_keyboard() {
+    let mut app = start_on_a_phone::<PercentKeyboardSheet>();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Header").unwrap();
+    keyboard(&mut app, 336.0);
+    let header = bounds_of(&app, "header");
+    assert!(
+        header.origin.y >= px(47.0),
+        "the header below the status bar: {header:?}"
+    );
+    let submit = bounds_of(&app, "submit");
+    assert!(
+        submit.bottom() <= px(844.0 - 336.0),
+        "the submit button above the keyboard: {submit:?}"
+    );
+    keyboard(&mut app, 0.0);
+    assert_eq!(
+        bounds_of(&app, "submit").bottom(),
+        px(844.0 - 34.0),
+        "back down with the keyboard gone"
+    );
+    let header = bounds_of(&app, "header");
+    assert_eq!(
+        header.origin.y,
+        px((844.0_f32 * 0.08).round()),
+        "92% of the screen again: {header:?}"
+    );
+}
