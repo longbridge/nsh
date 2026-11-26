@@ -912,6 +912,9 @@ fn apply(
     if let Some(max) = a.max_size {
         window.setContentMaxSize(max.map_or(NSSize::new(f64::MAX, f64::MAX), ns_size));
     }
+    if let Some(ratio) = a.aspect_ratio {
+        set_aspect_ratio(window, ratio);
+    }
     if let Some(movable) = a.movable {
         window.setMovable(movable);
     }
@@ -2386,6 +2389,19 @@ fn ns_color(color: nsh_core::Color) -> Retained<NSColor> {
     let c = color.0;
     let f = |shift: u32| f64::from((c >> shift) & 0xff) / 255.0;
     NSColor::colorWithSRGBRed_green_blue_alpha(f(24), f(16), f(8), f(0))
+}
+
+/// Keeps the user's resizes of `window`'s content at `ratio` (width /
+/// height), or lets them free (`None`). AppKit holds one of the content's
+/// aspect ratio and its resize increments: the later set wins, so
+/// increments of one point clear the ratio.
+fn set_aspect_ratio(window: &NSWindow, ratio: Option<f32>) {
+    match ratio {
+        Some(r) if r.is_finite() && r > 0.0 => {
+            window.setContentAspectRatio(NSSize::new(f64::from(r), 1.0))
+        }
+        _ => window.setContentResizeIncrements(NSSize::new(1.0, 1.0)),
+    }
 }
 
 fn ns_size(size: Size<Points>) -> NSSize {
