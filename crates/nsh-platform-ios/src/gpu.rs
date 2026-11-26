@@ -222,8 +222,8 @@ impl SurfaceGpu {
         }
     }
 
-    /// Sizes the views, tells those out of every window; `true` when one
-    /// wants a frame.
+    /// Sizes the views, tells those out of sight (out of every window,
+    /// scrolled away or clipped off); `true` when one wants a frame.
     fn sync(&mut self) -> bool {
         let Some(views) = self.views.as_mut() else {
             return false;
@@ -235,7 +235,7 @@ impl SurfaceGpu {
                 size(Points(bounds.width as f32), Points(bounds.height as f32)),
                 self.scale as f32,
             );
-            views.set_hidden(id, state.host.window().is_none());
+            views.set_hidden(id, !crate::sight::shown(&state.host));
         }
         views.wants_frame()
     }
