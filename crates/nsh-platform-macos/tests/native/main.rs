@@ -95,6 +95,8 @@ mod title_bar;
 #[cfg(target_os = "macos")]
 mod tray_owner;
 #[cfg(target_os = "macos")]
+mod web_load_wait;
+#[cfg(target_os = "macos")]
 mod window_alert;
 #[cfg(target_os = "macos")]
 mod window_dialog;
@@ -200,6 +202,8 @@ fn main() {
                 deleted_scroll::run();
             } else if std::env::var_os("NSH_DOWNLOAD_REDIRECT_CHECK_ONLY").is_some() {
                 download_redirect::run();
+            } else if std::env::var_os("NSH_WEB_LOAD_WAIT_CHECK_ONLY").is_some() {
+                web_load_wait::run();
             } else if std::env::var_os("NSH_INPUT_WHEEL_CHAIN_CHECK_ONLY").is_some() {
                 input_wheel_chain::run();
             } else if std::env::var_os("NSH_SELECTION_AUTOSCROLL_CHECK_ONLY").is_some() {
@@ -265,6 +269,7 @@ fn main() {
                 deleted_scroll::run();
                 scroll_indicator_layout::run();
                 download_redirect::run();
+                web_load_wait::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();

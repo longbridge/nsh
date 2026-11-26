@@ -287,8 +287,7 @@ pub(crate) struct Surface {
     ticking: Cell<usize>,
     /// How many of the frame callbacks have only cosmetic work left (a
     /// scroll indicator fading out, keyframes repeating forever): what
-    /// [`Surface::animating`] does not count.
-    #[cfg(feature = "dev")]
+    /// [`Surface::moving`] and [`Surface::animating`] do not count.
     cosmetic_frames: Cell<usize>,
     /// The model of a test session's app (`nsh test --target`).
     #[cfg(feature = "dev")]
@@ -439,7 +438,6 @@ impl Surface {
             frame_callbacks: RefCell::default(),
             background_frames: Cell::new(0),
             ticking: Cell::new(0),
-            #[cfg(feature = "dev")]
             cosmetic_frames: Cell::new(0),
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
@@ -595,7 +593,6 @@ impl Surface {
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
         self.background_frames.set(0);
-        #[cfg(feature = "dev")]
         self.cosmetic_frames.set(0);
         crate::shader::clear(self);
     }
@@ -999,17 +996,22 @@ impl Surface {
         });
     }
 
-    /// Whether something on the surface moves or is about to: batches
-    /// waiting, a frame JS asked for, the animation graph, the platform's
-    /// own animations (transitions, navigation, scroll glides, keyframes),
-    /// or a mouse button held (a drag, a gesture). Costly one-time work
-    /// waits for none of it ([`when_idle`]).
+    /// Whether something on the surface moves and will stop, or is about
+    /// to: batches waiting, a frame JS asked for, the animation graph's
+    /// animations that end, the platform's own animations (transitions,
+    /// navigation, scroll glides, keyframes that end), or a mouse button
+    /// held (a drag, a gesture). Costly one-time work waits for it
+    /// ([`when_idle`]). What repeats forever (a spinner's keyframes, a
+    /// looping animated value) or only fades (a scroll indicator) is not
+    /// counted: it never stops, so waiting for it would only delay the
+    /// work (a web view's first load by [`crate::native`]'s `LOAD_WAIT`
+    /// each time, a warm-up for good).
     pub(crate) fn moving(&self) -> bool {
         !self.queued.borrow().is_empty()
             || self.js_frame.get()
-            || self.anim.borrow().animating()
+            || self.anim.borrow().finishing()
             || self.frame_callbacks.borrow().len() + self.ticking.get()
-                > self.background_frames.get()
+                > self.background_frames.get() + self.cosmetic_frames.get()
             || objc2_app_kit::NSEvent::pressedMouseButtons() != 0
     }
 
@@ -1028,14 +1030,9 @@ impl Surface {
     /// repeating forever, a spinner, which never end) or no longer is; it
     /// ends with `on` false.
     pub(crate) fn cosmetic_frame(&self, on: bool) {
-        #[cfg(feature = "dev")]
-        {
-            let n = self.cosmetic_frames.get();
-            self.cosmetic_frames
-                .set(if on { n + 1 } else { n.saturating_sub(1) });
-        }
-        #[cfg(not(feature = "dev"))]
-        let _ = on;
+        let n = self.cosmetic_frames.get();
+        self.cosmetic_frames
+            .set(if on { n + 1 } else { n.saturating_sub(1) });
     }
 
     /// Whether a native animation runs: the graph's (not one looping
