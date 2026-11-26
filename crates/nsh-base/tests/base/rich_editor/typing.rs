@@ -533,6 +533,25 @@ fn on_ios_the_sink_holds_the_text_before_the_caret() {
     assert_eq!(sink(&app).as_deref(), Some("one"));
 }
 
+/// A deletion the platform makes in the sink is replayed as one Backspace
+/// per grapheme it took, as each deletes one: on iOS the sink holds the
+/// text before the caret, where UIKit deletes a skin-toned emoji or a
+/// letter with its combining mark whole.
+#[test]
+fn on_ios_a_deletion_in_the_sink_takes_whole_graphemes() {
+    let mut app = start_on(paragraphs(&["ae\u{301}👍🏽"]), Os::Ios, true);
+    focus(&mut app);
+    keys(&mut app, &["right", "right", "right"]);
+    see(&mut app, "Sel 8-8");
+    assert_eq!(sink(&app).as_deref(), Some("ae\u{301}👍🏽"));
+    sink_text(&mut app, "ae\u{301}");
+    see(&mut app, &doc("ae\u{301}"));
+    see(&mut app, "Sel 4-4");
+    sink_text(&mut app, "a");
+    see(&mut app, &doc("a"));
+    see(&mut app, "Sel 2-2");
+}
+
 // Placeholder and read-only.
 
 #[test]
