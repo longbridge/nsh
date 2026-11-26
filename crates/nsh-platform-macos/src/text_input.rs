@@ -58,9 +58,11 @@
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
+    ptr::NonNull,
     rc::{Rc, Weak},
 };
 
+use block2::RcBlock;
 use nsh_core::{
     Bounds, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points, SubmitBehavior,
     TextAlign, ViewKind,
@@ -75,20 +77,22 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSDragOperation,
-    NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventPhase, NSEventType, NSFocusRingType,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSGestureRecognizer,
-    NSGestureRecognizerState, NSLineBreakMode, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollElasticity, NSScrollView,
-    NSSecureTextField, NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField,
-    NSTextFieldDelegate, NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate,
-    NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
+    NSAccessibilityConfirmAction, NSApplication, NSBorderType, NSCell, NSColor, NSControl,
+    NSControlTextEditingDelegate, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags,
+    NSEventPhase, NSEventType, NSFocusRingType, NSFontAttributeName,
+    NSForegroundColorAttributeName, NSGestureRecognizer, NSGestureRecognizerState, NSLineBreakMode,
+    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSPasteboard, NSResponder,
+    NSScrollElasticity, NSScrollView, NSSecureTextField, NSSecureTextFieldCell, NSSpellChecker,
+    NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldCell, NSTextFieldDelegate,
+    NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
+    NSView, NSWritingDirection,
 };
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGPath;
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint,
-    NSRange, NSRect, NSString, NSUndoManager,
+    NSArray, NSAttributedString, NSDictionary, NSNotification, NSNotificationCenter, NSObject,
+    NSObjectProtocol, NSPoint, NSRange, NSRect, NSString, NSUndoManager,
+    NSUndoManagerDidRedoChangeNotification, NSUndoManagerDidUndoChangeNotification,
 };
 use objc2_quartz_core::{CALayer, CAShapeLayer};
 
@@ -120,13 +124,28 @@ impl Editor {
         &self,
         fallback: Option<&Retained<NSUndoManager>>,
     ) -> Option<Retained<NSUndoManager>> {
-        let Editor::Area { view, storage, .. } = self else {
-            return None;
-        };
-        let manager = view.undoManager().or_else(|| fallback.cloned())?;
-        // SAFETY: AppKit registers text undo operations with the text storage as target.
-        unsafe { manager.removeAllActionsWithTarget(storage) };
-        Some(manager)
+        match self {
+            Editor::Area { view, storage, .. } => {
+                let manager = view.undoManager().or_else(|| fallback.cloned())?;
+                // SAFETY: AppKit registers text undo operations with the text storage as target.
+                unsafe { manager.removeAllActionsWithTarget(storage) };
+                Some(manager)
+            }
+            // A field has undo records only while the window's field editor
+            // edits it; they target that editor's text storage.
+            Editor::Line { field, .. } => {
+                let view = field.currentEditor()?.downcast::<NSTextView>().ok()?;
+                let manager = view.undoManager()?;
+                // SAFETY: the field editor's own text storage (an assign
+                // property, retained here while used), which AppKit
+                // registers its text undo operations with as target.
+                unsafe {
+                    let storage = view.textStorage()?;
+                    manager.removeAllActionsWithTarget(&storage);
+                }
+                None
+            }
+        }
     }
 
     /// The view hosted in the input's view.
@@ -706,12 +725,8 @@ impl Ctx {
         }
     }
 
-    /// Return submitted the input (`blur`: and unfocuses it).
-    fn submitted(&self, blur: bool) {
-        let Some(input) = self.input.upgrade() else {
-            return;
-        };
-        self.key_press("Enter");
+    /// Submits the input's live draft value (`blur`: and unfocuses it).
+    fn submit_editing(&self, input: &InputState, blur: bool) {
         let text = input.editor.borrow().text();
         let count = input.count.get();
         self.send(EventKind::SubmitEditing, || EventPayload::Text {
@@ -720,6 +735,100 @@ impl Ctx {
         });
         if blur {
             self.unfocus();
+        }
+    }
+
+    /// Return submitted the input (`blur`: and unfocuses it).
+    fn submitted(&self, blur: bool) {
+        let Some(input) = self.input.upgrade() else {
+            return;
+        };
+        self.key_press("Enter");
+        self.submit_editing(&input, blur);
+    }
+
+    /// Whether a semantic accessibility `AXConfirm` action can submit this
+    /// input right now: focused, enabled, editable, targetable inside the
+    /// active focus scope, and configured with a submit behavior.
+    fn can_confirm(&self) -> bool {
+        let Some((surface, view, input)) = self.get() else {
+            return false;
+        };
+        let listens_submit = {
+            let Some(state) = view.try_state() else {
+                return false;
+            };
+            if state.props.accessibility.state.disabled {
+                return false;
+            }
+            state.events.contains(EventKind::SubmitEditing)
+        };
+        if !view.can_target()
+            || input.pad.isHidden()
+            || !view
+                .ns()
+                .isDescendantOf(&crate::navigation::focus_scope(&surface))
+        {
+            return false;
+        }
+        let Ok(config) = input.config.try_borrow() else {
+            return false;
+        };
+        if !config.editable {
+            return false;
+        }
+        let accepts_submit = match config.submit() {
+            SubmitBehavior::Submit => listens_submit,
+            SubmitBehavior::BlurAndSubmit => true,
+            SubmitBehavior::Newline => false,
+        };
+        drop(config);
+        if !accepts_submit {
+            return false;
+        }
+        let Ok(editor) = input.editor.try_borrow() else {
+            return false;
+        };
+        if !editor.focused() {
+            return false;
+        }
+        match &*editor {
+            Editor::Line { field, .. } => field.isEnabled() && field.isEditable(),
+            Editor::Area { view, .. } => view.isEditable(),
+        }
+    }
+
+    /// Handles semantic accessibility `AXConfirm` on this input, routing to
+    /// the same submit path as physical Return while keeping IME composition,
+    /// non-submit behaviors, and disabled/unfocused guards intact.
+    fn confirm(&self) -> bool {
+        if !self.can_confirm() {
+            return false;
+        }
+        let Some(input) = self.input.upgrade() else {
+            return false;
+        };
+        let behavior = input.config.borrow().submit();
+        let editing = input.editor.borrow().editing();
+        if let Some(text_view) = editing
+            .as_deref()
+            .and_then(|editor| editor.downcast_ref::<NSTextView>())
+            && text_view.hasMarkedText()
+        {
+            text_view.unmarkText();
+            self.composition_changed();
+            return true;
+        }
+        match behavior {
+            SubmitBehavior::Newline => false,
+            SubmitBehavior::Submit => {
+                self.submit_editing(&input, false);
+                true
+            }
+            SubmitBehavior::BlurAndSubmit => {
+                self.submit_editing(&input, true);
+                true
+            }
         }
     }
 
@@ -1092,6 +1201,35 @@ macro_rules! define_field {
                     }
                 }
 
+                #[unsafe(method(isAccessibilitySelectorAllowed:))]
+                fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+                    if selector == sel!(accessibilityPerformConfirm) {
+                        self.ivars().get().is_some_and(Ctx::can_confirm)
+                    } else {
+                        // SAFETY: NSTextField's own answer.
+                        unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+                    }
+                }
+
+                #[unsafe(method(accessibilityPerformConfirm))]
+                fn accessibility_perform_confirm(&self) -> bool {
+                    self.ivars().get().is_some_and(Ctx::confirm)
+                }
+
+                #[unsafe(method(accessibilityPerformAction:))]
+                fn accessibility_perform_action(&self, action: &NSString) {
+                    if is_confirm_action(action) {
+                        if let Some(cx) = self.ivars().get() {
+                            let _ = cx.confirm();
+                        }
+                    } else {
+                        // SAFETY: NSTextField's own handling of other actions.
+                        let _: () = unsafe {
+                            msg_send![super(self), accessibilityPerformAction: action]
+                        };
+                    }
+                }
+
                 #[unsafe(method(becomeFirstResponder))]
                 fn become_first_responder(&self) -> bool {
                     // AppKit selects the whole text as the field takes the
@@ -1236,6 +1374,7 @@ define_field!(
 define_field!(
     SecureField,
     "NshSecureTextField",
+    cell = SecureFieldCell,
     NSSecureTextField,
     NSTextField,
     NSControl,
@@ -1521,6 +1660,33 @@ define_text_view!(
             // SAFETY: NSTextView's own method.
             unsafe { msg_send![super(self), validateUserInterfaceItem: item] }
         }
+
+        #[unsafe(method(isAccessibilitySelectorAllowed:))]
+        fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+            if selector == sel!(accessibilityPerformConfirm) {
+                self.ivars().get().is_some_and(Ctx::can_confirm)
+            } else {
+                // SAFETY: NSTextView's own answer.
+                unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+            }
+        }
+
+        #[unsafe(method(accessibilityPerformConfirm))]
+        fn accessibility_perform_confirm(&self) -> bool {
+            self.ivars().get().is_some_and(Ctx::confirm)
+        }
+
+        #[unsafe(method(accessibilityPerformAction:))]
+        fn accessibility_perform_action(&self, action: &NSString) {
+            if is_confirm_action(action) {
+                if let Some(cx) = self.ivars().get() {
+                    let _ = cx.confirm();
+                }
+            } else {
+                // SAFETY: NSTextView's own handling of other actions.
+                let _: () = unsafe { msg_send![super(self), accessibilityPerformAction: action] };
+            }
+        }
     }
 );
 
@@ -1775,6 +1941,33 @@ define_text_view!(
             // SAFETY: NSTextView's own method.
             unsafe { msg_send![super(self), validateUserInterfaceItem: item] }
         }
+
+        #[unsafe(method(isAccessibilitySelectorAllowed:))]
+        fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+            if selector == sel!(accessibilityPerformConfirm) {
+                field_ctx(self).is_some_and(|cx| cx.can_confirm())
+            } else {
+                // SAFETY: NSTextView's own answer.
+                unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+            }
+        }
+
+        #[unsafe(method(accessibilityPerformConfirm))]
+        fn accessibility_perform_confirm(&self) -> bool {
+            field_ctx(self).is_some_and(|cx| cx.confirm())
+        }
+
+        #[unsafe(method(accessibilityPerformAction:))]
+        fn accessibility_perform_action(&self, action: &NSString) {
+            if is_confirm_action(action) {
+                if let Some(cx) = field_ctx(self) {
+                    let _ = cx.confirm();
+                }
+            } else {
+                // SAFETY: NSTextView's own handling of other actions.
+                let _: () = unsafe { msg_send![super(self), accessibilityPerformAction: action] };
+            }
+        }
     }
 );
 
@@ -1783,13 +1976,56 @@ fn editor_surface(editor: &FieldEditor) -> Option<Rc<Surface>> {
     field_ctx(editor)?.surface.upgrade()
 }
 
+/// The input context of an `NshTextField` or `NshSecureTextField`.
+fn field_ctx_of(object: &AnyObject) -> Option<Ctx> {
+    if let Some(field) = object.downcast_ref::<TextField>() {
+        field.ivars().get().cloned()
+    } else if let Some(field) = object.downcast_ref::<SecureField>() {
+        field.ivars().get().cloned()
+    } else {
+        None
+    }
+}
+
 /// The input of the field `editor` edits (its delegate, while it edits).
 fn field_ctx(editor: &FieldEditor) -> Option<Ctx> {
     let delegate = editor.delegate()?;
     let object: &AnyObject = ProtocolObject::as_ref(&*delegate);
-    object
-        .downcast_ref::<TextField>()
-        .and_then(|field| field.ivars().get().cloned())
+    field_ctx_of(object)
+}
+
+/// The input of the field that owns `cell`.
+fn cell_ctx(cell: &NSCell) -> Option<Ctx> {
+    // SAFETY: `controlView` is an AppKit getter on the main thread.
+    let view = unsafe { cell.controlView() }?;
+    field_ctx_of(&view)
+}
+
+/// Whether `action` is AppKit's semantic `AXConfirm` action.
+fn is_confirm_action(action: &NSString) -> bool {
+    // SAFETY: immutable AppKit accessibility action constant.
+    action == unsafe { NSAccessibilityConfirmAction }
+}
+
+/// Filters `AXConfirm` from `actions` when `allowed` is false, or ensures it
+/// is advertised when `allowed` is true.
+fn confirm_actions(
+    actions: Option<Retained<NSArray<NSString>>>,
+    allowed: bool,
+) -> Retained<NSArray<NSString>> {
+    // SAFETY: immutable AppKit accessibility action constant.
+    let confirm = unsafe { NSAccessibilityConfirmAction };
+    let mut out: Vec<Retained<NSString>> = actions
+        .map(|list| {
+            list.iter()
+                .filter(|action| allowed || &**action != confirm)
+                .collect()
+        })
+        .unwrap_or_default();
+    if allowed && !out.iter().any(|action| &**action == confirm) {
+        out.push(Retained::from(confirm));
+    }
+    NSArray::from_retained_slice(&out)
 }
 
 /// A paste into the field `editor` edits: [`Ctx::pasting`].
@@ -1797,30 +2033,150 @@ fn field_editor_pasting(editor: &FieldEditor, pasteboard: &NSPasteboard) -> bool
     field_ctx(editor).is_none_or(|cx| cx.pasting(pasteboard))
 }
 
-define_class!(
-    /// The cell of a single-line input's field: its field editor is NSH's
-    /// ([`FieldEditor`]), one per window as AppKit's own, which reports
-    /// pastes. AppKit makes the cells (`cellClass`): no ivars.
-    #[unsafe(super(objc2_app_kit::NSTextFieldCell, objc2_app_kit::NSActionCell, objc2_app_kit::NSCell, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "NshFieldCell"]
-    struct FieldCell;
+/// Defines a single-line field cell (`NSTextFieldCell` or
+/// `NSSecureTextFieldCell`) that routes `AXConfirm` to [`Ctx::confirm`].
+macro_rules! define_field_cell {
+    ($name:ident, $objc:literal, { $($extra:tt)* }, $($super:path),+) => {
+        define_class!(
+            #[unsafe(super($($super),+))]
+            #[thread_kind = MainThreadOnly]
+            #[name = $objc]
+            struct $name;
 
-    unsafe impl NSObjectProtocol for FieldCell {}
+            unsafe impl NSObjectProtocol for $name {}
 
-    impl FieldCell {
+            impl $name {
+                $($extra)*
+
+                #[unsafe(method_id(accessibilityActionNames))]
+                fn accessibility_action_names(&self) -> Retained<NSArray<NSString>> {
+                    // SAFETY: NSTextFieldCell's own accessibility action names.
+                    let actions: Option<Retained<NSArray<NSString>>> =
+                        unsafe { msg_send![super(self), accessibilityActionNames] };
+                    let allowed = cell_ctx(self).is_some_and(|cx| cx.can_confirm());
+                    confirm_actions(actions, allowed)
+                }
+
+                #[unsafe(method(isAccessibilitySelectorAllowed:))]
+                fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+                    if selector == sel!(accessibilityPerformConfirm) {
+                        cell_ctx(self).is_some_and(|cx| cx.can_confirm())
+                    } else {
+                        // SAFETY: NSCell's own answer.
+                        unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+                    }
+                }
+
+                #[unsafe(method(accessibilityPerformConfirm))]
+                fn accessibility_perform_confirm(&self) -> bool {
+                    cell_ctx(self).is_some_and(|cx| cx.confirm())
+                }
+
+                #[unsafe(method(accessibilityPerformAction:))]
+                fn accessibility_perform_action(&self, action: &NSString) {
+                    if is_confirm_action(action) {
+                        if let Some(cx) = cell_ctx(self) {
+                            let _ = cx.confirm();
+                        }
+                    } else {
+                        // SAFETY: NSTextFieldCell's own handling of other actions.
+                        let _: () = unsafe {
+                            msg_send![super(self), accessibilityPerformAction: action]
+                        };
+                    }
+                }
+            }
+        );
+    };
+}
+
+define_field_cell!(
+    FieldCell,
+    "NshFieldCell",
+    {
         #[unsafe(method_id(fieldEditorForView:))]
         fn field_editor_for_view(&self, view: &NSView) -> Option<Retained<NSTextView>> {
             let mtm = MainThreadMarker::from(self);
             view.window().map(|window| field_editor(mtm, &window))
         }
-    }
+    },
+    NSTextFieldCell,
+    objc2_app_kit::NSActionCell,
+    NSCell,
+    NSObject
+);
+
+define_field_cell!(
+    SecureFieldCell,
+    "NshSecureFieldCell",
+    {},
+    NSSecureTextFieldCell,
+    NSTextFieldCell,
+    objc2_app_kit::NSActionCell,
+    NSCell,
+    NSObject
 );
 
 thread_local! {
     /// The field editors of the windows, by window.
     static FIELD_EDITORS: RefCell<Vec<(objc2::rc::Weak<objc2_app_kit::NSWindow>, Retained<NSTextView>)>> =
         const { RefCell::new(Vec::new()) };
+}
+
+/// Reports the text an undo or redo changed in an input. AppKit's text
+/// views change their text without `textDidChange:` (nor a field's
+/// `controlTextDidChange:`) when the undo manager replays an edit, so JS
+/// would keep the text from before Command+Z. Observed once per process.
+fn observe_undo() {
+    thread_local! {
+        static OBSERVING: Cell<bool> = const { Cell::new(false) };
+    }
+    if OBSERVING.replace(true) {
+        return;
+    }
+    let block = RcBlock::new(|_: NonNull<NSNotification>| undo_replayed());
+    // SAFETY: immutable constants; undo managers post on the thread that
+    // undoes (here, the main one) and the observers are kept for the
+    // process (as the field editors and text views they report for).
+    unsafe {
+        let center = NSNotificationCenter::defaultCenter();
+        for name in [
+            NSUndoManagerDidUndoChangeNotification,
+            NSUndoManagerDidRedoChangeNotification,
+        ] {
+            let observer =
+                center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block);
+            std::mem::forget(observer);
+        }
+    }
+}
+
+/// After an undo or redo: the inputs being edited (the first responders of
+/// the windows) report their text if it is not what they reported last.
+fn undo_replayed() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    for window in NSApplication::sharedApplication(mtm).windows() {
+        let Some(responder) = window.firstResponder() else {
+            continue;
+        };
+        let cx = if let Some(editor) = responder.downcast_ref::<FieldEditor>() {
+            field_ctx(editor)
+        } else if let Some(area) = responder.downcast_ref::<TextArea>() {
+            area.ivars().get().cloned()
+        } else {
+            None
+        };
+        let Some(cx) = cx else { continue };
+        let Some(input) = cx.user_edit() else {
+            continue;
+        };
+        let text = input.editor.borrow().text();
+        if text != *input.known.borrow() {
+            cx.changed();
+        }
+    }
 }
 
 /// `window`'s field editor for inputs (made the first time).
@@ -1841,6 +2197,7 @@ fn field_editor(mtm: MainThreadMarker, window: &objc2_app_kit::NSWindow) -> Reta
         // SAFETY: the class is a subclass of NSTextView.
         let editor: Retained<NSTextView> = unsafe { Retained::cast_unchecked(editor) };
         editor.setFieldEditor(true);
+        observe_undo();
         editors.push((objc2::rc::Weak::from(window), editor.clone()));
         editor
     })
@@ -2574,6 +2931,7 @@ fn new_editor(
         view.setRichText(false);
         view.setImportsGraphics(false);
         view.setAllowsUndo(true);
+        observe_undo();
         view.setTextContainerInset(CGSize::new(0.0, 0.0));
         // SAFETY: the text view's own container.
         if let Some(container) = unsafe { view.textContainer() } {

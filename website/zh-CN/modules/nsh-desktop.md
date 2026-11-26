@@ -200,6 +200,7 @@ let Some(doc) = open_window(
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`：系统标题栏，或应用自己的标题栏（[见下](#自定义标题栏)）。`controlsOffset`（`{ x, y }`）设置隐藏标题栏中 macOS 红绿灯的位置。 |
 | | `frame` | `"default"`，或 `"none"`：没有标题栏和边框，由应用绘制全部内容。 |
 | 尺寸 | `minSize`、`maxSize` | 用户能调整到的最小和最大内容尺寸，`{ width, height }`，单位为点；`null` 清除。 |
+| | `aspectRatio` | 用户调整大小时内容保持的比例：宽除以高（`16 / 9`），用户拖动边或角时视频、画布始终铺满窗口。`null` 清除。只限制用户的调整：`setBounds`、`sizeToContent` 和最大化不受它约束；设置后窗口保持当前尺寸，直到用户调整。Windows 和 macOS 支持（GPUI 应用只有 macOS）；Linux 暂不支持（[见下文](#宽高比)）。 |
 | | `sizeToContent` | `true`、`"width"` 或 `"height"`：窗口跟随内容布局后的尺寸，原生完成，不经过 JS。 |
 | 行为 | `resizable`、`movable`、`minimizable`、`maximizable`、`closable` | 用户能对它做什么。应用的请求不受它们限制。 |
 | | `focusable` | 它接受键盘焦点。 |
@@ -217,6 +218,22 @@ let Some(doc) = open_window(
 
 平台的窗口没有的属性会被保留，在那里不起作用：Linux 上由窗口管理器放置窗口和安排层叠，因此位置、层级和 `taskbar` 由它决定。
 
+### 宽高比
+
+`aspectRatio` 约束的是内容区域，不是窗口外框：标题栏和边框另算。视频播放器知道视频比例后设置一次即可：
+
+```tsx
+<Window id="player" aspectRatio={video.width / video.height} minSize={{ width: 320, height: 180 }}>
+```
+
+| 平台 | 用户看到的效果 |
+|---|---|
+| macOS | AppKit 的 `contentAspectRatio`：拖动任何边或角都保持比例。 |
+| Windows | 在 `WM_SIZING` 里修正拖动的矩形：拖左右边按宽度定高度，拖上下边按高度定宽度，拖角按宽度。用户按住的边始终跟着指针。`minSize` 和 `maxSize` 仍然有效；比例和它们冲突时以它们为准。 |
+| Linux | 暂不生效。GTK 4 没有对应的调用；Wayland 在交互式调整时根本没有宽高比约束（尺寸由合成器决定），X11 上 GDK 4 每次排版窗口（包括拖动中的每一步）都会整个重写 `WM_NORMAL_HINTS`，不带宽高比字段，另外写进去的比例会在用户拖动时被冲掉。可以让内容加黑边显示，或者在 `onBoundsChange` 里修正尺寸。 |
+| GPUI 应用（Windows、Linux） | 不生效：调整大小的过程由 GPUI 控制。 |
+| iOS、Android、Web、终端 | 没有窗口，不生效。 |
+
 ### currentWindow
 
 ```ts
@@ -230,7 +247,7 @@ function focusedWindow(): WindowRef | null;
 ```tsx
 function SaveButton() {
   const win = currentWindow(); // 渲染时
-  return <Button onPress={() => save().then(() => win.close())}>Save</Button>;
+  return <Button onPress={() => save().then(() => win.close())}><Text>Save</Text></Button>;
 }
 ```
 

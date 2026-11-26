@@ -16,6 +16,8 @@ mod access;
 mod app_directory;
 mod cache;
 mod error;
+#[cfg_attr(not(feature = "shader"), path = "gpu_off.rs")]
+pub mod gpu;
 // Where shader frames go: read back, or on surfaces the backend shows.
 #[cfg(feature = "shader")]
 mod frames;
@@ -91,7 +93,9 @@ pub use storage::{FileStorage, resolve_data_dir, support_dir};
 pub use crate::{
     cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
-    host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
+    host_channel::{
+        HostCall, HostChannel, HostReply, HostSender, HostSenderClosed, OpenUrlRequest,
+    },
 };
 use crate::{
     host_channel::HostRefusal,
@@ -122,6 +126,19 @@ const IDLE_GC_QUIET: Duration = Duration::from_millis(300);
 
 /// The longest time between idle collections, quiet or not.
 const IDLE_GC_LONGEST: Duration = Duration::from_secs(5);
+
+/// The longest time between idle collections while display frames come
+/// one after another (an animation, a frame callback every frame): a
+/// collection there costs frames, one per [frame budget] it takes, so it
+/// waits for the frames to stop (then [`IDLE_GC_QUIET`]) up to this long.
+/// Detached subtrees keep their views until then.
+///
+/// [frame budget]: nsh_core::time::FRAME
+const IDLE_GC_LONGEST_ANIMATING: Duration = Duration::from_secs(30);
+
+/// How long after a display frame frames still count as continuous: a few
+/// frames at 60 Hz, so a frame skipped under load does not end it.
+const ANIMATING_GAP: Duration = Duration::from_millis(100);
 
 /// The shortest time between two deliveries of mouse motion: a frame at
 /// 120 Hz. Mice report moves far more often (up to 1000 Hz), and a handler
@@ -982,7 +999,8 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
             }
             // Follow redirects here so `Range` and `Accept-Encoding` survive
             // cross-origin redirects (e.g. GitHub Releases -> asset CDN) on
-            // every platform stack and every hop stays HTTPS (or loopback).
+            // every platform stack and every hop stays HTTPS (or loopback), or
+            // on the origin of a plain-HTTP feed (`updater_redirect_allowed`).
             request.follow_redirects = false;
             let task = self.network.fetch(request, events);
 
@@ -1020,8 +1038,11 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
                                 head.url.as_str()
                             };
                             let next = nsh_core::access::resolve_reference(base, location.trim());
-                            if !is_updater_url(&next) {
-                                break Err(format!("redirect to non-HTTPS URL {next:?}"));
+                            if !updater_redirect_allowed(base, &next) {
+                                break Err(format!(
+                                    "redirect to non-HTTPS URL {next:?} (plain HTTP stays on \
+                                     the feed's origin)"
+                                ));
                             }
                             redirect_to = Some(next);
                             break Ok(());
@@ -1155,6 +1176,23 @@ fn is_updater_url(url: &str) -> bool {
                 parts.host.as_str(),
                 "127.0.0.1" | "localhost" | "::1" | "[::1]"
             ))
+}
+
+/// Whether a response from `from` may redirect to `to`: HTTPS (or loopback)
+/// always; plain HTTP only from plain HTTP on the same origin. `nsh-updater`
+/// lets a request start on plain HTTP only for a feed the app opted in to
+/// (`packages.allowHttp`), and keeps what the feed names on its origin; this
+/// keeps its redirects there too, and never downgrades an HTTPS request.
+fn updater_redirect_allowed(from: &str, to: &str) -> bool {
+    if is_updater_url(to) {
+        return true;
+    }
+    let origin = |url| {
+        nsh_core::access::parse_url(url)
+            .filter(|parts| parts.scheme == "http")
+            .map(|parts| (parts.host, parts.port.unwrap_or(80)))
+    };
+    origin(from).is_some_and(|from| origin(to) == Some(from))
 }
 
 /// The platform's HTTP stack, used by JS `fetch`.
@@ -1596,6 +1634,9 @@ enum Message {
     /// The embedding app's event (`nsh/host`'s `host.on`): its name and
     /// data.
     HostEvent(String, nsh_core::JsonValue),
+    /// An event of one of this app's calls ([`HostSender`]): delivered as
+    /// [`Message::HostEvent`], but never kept for the next app.
+    CallerEvent(String, nsh_core::JsonValue),
     /// The embedding app's answer to call `.0` (`host.call`).
     HostReply(u64, Result<nsh_core::JsonValue, String>),
     /// The embedding app's answer to call `.0` the core made
@@ -2415,6 +2456,9 @@ struct Driver<M: TextEngine + 'static> {
     /// When a message or a due timer last gave the engine work
     /// ([`IDLE_GC_QUIET`]).
     last_active: Instant,
+    /// When the platform's last display frame ran on the engine
+    /// ([`IDLE_GC_LONGEST_ANIMATING`]).
+    last_display_frame: Option<Instant>,
     /// The queue of the JS calls Rust posts: its notify wakes the engine,
     /// as the core's task notify does ([`LocalEngine::set_wake`]).
     posts: nsh_core::element::Posts,
@@ -2704,6 +2748,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             stopped: false,
             last_gc: Instant::now(),
             last_active: Instant::now(),
+            last_display_frame: None,
             posts: posts.clone(),
             clock: config.clock.clone(),
             context: config.context.clone(),
@@ -2892,6 +2937,9 @@ impl<M: TextEngine + 'static> Driver<M> {
     /// Handles one message; false on shutdown.
     fn handle(&mut self, message: Message, rx: &Receiver<Message>) -> bool {
         self.last_active = Instant::now();
+        if matches!(message, Message::Frame) {
+            self.last_display_frame = Some(self.last_active);
+        }
         match message {
             Message::Advance(by, done) => {
                 let running = self.advance(by, rx, self.clock.moves_with_frames());
@@ -2997,11 +3045,13 @@ impl<M: TextEngine + 'static> Driver<M> {
 
     /// Whether nothing is left to run: no message queued, nothing due at
     /// the clock's time (a timer that keeps scheduling another at once
-    /// outlasts a flush's rounds) and no request in flight.
+    /// outlasts a flush's rounds), no request in flight and no `async fn`
+    /// call into Rust waiting for its answer.
     fn idle(&self, rx: &Receiver<Message>) -> bool {
         let now = self.clock.now();
         rx.is_empty()
             && self.state.net.idle()
+            && !self.state.core.async_calls_pending()
             && [self.due(), self.clock.next_alarm()]
                 .into_iter()
                 .flatten()
@@ -3163,9 +3213,18 @@ impl<M: TextEngine + 'static> Driver<M> {
 
     /// When the next idle collection may run: a second after the last, once
     /// the engine has been quiet for [`IDLE_GC_QUIET`] (or at the latest
-    /// [`IDLE_GC_LONGEST`] after the last).
+    /// [`IDLE_GC_LONGEST`] after the last, [`IDLE_GC_LONGEST_ANIMATING`]
+    /// while display frames come one after another).
     fn next_gc(&self) -> Instant {
-        let quiet = (self.last_active + IDLE_GC_QUIET).min(self.last_gc + IDLE_GC_LONGEST);
+        let animating = self
+            .last_display_frame
+            .is_some_and(|at| at.elapsed() < ANIMATING_GAP);
+        let longest = if animating {
+            IDLE_GC_LONGEST_ANIMATING
+        } else {
+            IDLE_GC_LONGEST
+        };
+        let quiet = (self.last_active + IDLE_GC_QUIET).min(self.last_gc + longest);
         (self.last_gc + IDLE_GC_INTERVAL).max(quiet)
     }
 
@@ -3176,10 +3235,16 @@ impl<M: TextEngine + 'static> Driver<M> {
             && self.state.committed_since_gc
             && Instant::now() >= self.next_gc()
         {
-            let start = self.state.trace.then(Instant::now);
+            let start = (self.state.trace || self.state.perf.is_some()).then(Instant::now);
             script.collect_garbage();
             if let Some(start) = start {
-                log::info!(target: "nsh::perf", "gc: {}µs", start.elapsed().as_micros());
+                let pause = start.elapsed();
+                if self.state.trace {
+                    log::info!(target: "nsh::perf", "gc: {}µs", pause.as_micros());
+                }
+                if let Some(monitor) = &self.state.perf {
+                    monitor.record_gc(pause);
+                }
             }
             // What the app holds, for the performance monitor: read here,
             // when the heap was just walked and nothing waits.
@@ -3704,6 +3769,19 @@ impl<M: TextEngine> State<M> {
         let mut commit = std::mem::take(&mut self.perf_commit);
         if commit.ops > 0 || commit.items > 0 {
             commit.js = busy.saturating_sub(commit.layout);
+            // Each record as the monitor takes it. Its percentiles span its
+            // last 120 records (`perf::CAPACITY`), whenever they were made:
+            // with this a trace can give them for a stretch of its own.
+            if self.trace {
+                log::info!(
+                    target: "nsh::perf",
+                    "record: js {}µs, layout {}µs, {} ops, {} items",
+                    commit.js.as_micros(),
+                    commit.layout.as_micros(),
+                    commit.ops,
+                    commit.items,
+                );
+            }
             monitor.record_commit(commit);
         }
     }
@@ -4601,7 +4679,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         // The components' listeners hear it, then JS's.
-        Message::HostEvent(name, data) => {
+        Message::HostEvent(name, data) | Message::CallerEvent(name, data) => {
             state.core.host_event(&name, &data);
             if let Some(script) = script {
                 script.host_event(&name, data);
@@ -5121,6 +5199,37 @@ mod updater_range_tests {
         assert!(!is_updater_url("http://example.com/a.tar.gz"));
         assert!(!is_updater_url("http://localhost.evil.dev/a.tar.gz"));
         assert!(!is_updater_url("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn plain_http_redirects_stay_on_the_feed_origin() {
+        let feed = "http://10.0.0.2:8080/updates/latest.json";
+        assert!(updater_redirect_allowed(
+            feed,
+            "http://10.0.0.2:8080/other/latest.json"
+        ));
+        assert!(updater_redirect_allowed(
+            feed,
+            "https://cdn.example/latest.json"
+        ));
+        assert!(updater_redirect_allowed(
+            "http://10.0.0.2/a",
+            "http://10.0.0.2:80/b"
+        ));
+        assert!(!updater_redirect_allowed(
+            feed,
+            "http://10.0.0.2/latest.json"
+        ));
+        assert!(!updater_redirect_allowed(
+            feed,
+            "http://10.0.0.3:8080/latest.json"
+        ));
+        assert!(!updater_redirect_allowed(feed, "file:///etc/passwd"));
+        // Never from HTTPS down to plain HTTP, even on the same host.
+        assert!(!updater_redirect_allowed(
+            "https://10.0.0.2/latest.json",
+            "http://10.0.0.2/latest.json"
+        ));
     }
 
     struct NoopTask;

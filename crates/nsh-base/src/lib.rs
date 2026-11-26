@@ -171,11 +171,11 @@ pub use crate::{
     },
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableCellClass,
-        DataTableClasses, DataTableColumn, DataTableColumnGroup, DataTableColumnMove,
-        DataTableColumnPress, DataTableContextMenu, DataTableDump, DataTableElement,
-        DataTableEvent, DataTableHeaderCell, DataTablePart, DataTablePress, DataTableProps,
-        DataTableRange, DataTableRows, DataTableSelection, DataTableSort, DataTableSortDirection,
-        DataTableStyles, DataTableTarget, data_table,
+        DataTableCellPosition, DataTableCellRange, DataTableClasses, DataTableColumn,
+        DataTableColumnGroup, DataTableColumnMove, DataTableColumnPress, DataTableContextMenu,
+        DataTableDump, DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart,
+        DataTablePress, DataTableProps, DataTableRange, DataTableRows, DataTableSelection,
+        DataTableSort, DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
     },
     date_picker::{
         DatePicker, DatePickerElement, DatePickerEvent, DatePickerProps, DatePickerValue,
@@ -250,8 +250,9 @@ pub use crate::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
         TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi, TextViewClasses,
         TextViewCodeAction, TextViewCodeActionEvent, TextViewElement, TextViewEvent,
-        TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart, TextViewParts,
-        TextViewProps, TextViewSelectionEvent, TextViewStyles, TextViewTaskPressEvent, text_view,
+        TextViewImageContext, TextViewImageLink, TextViewLinkPressEvent, TextViewLinks,
+        TextViewMath, TextViewPart, TextViewParts, TextViewProps, TextViewSelectionEvent,
+        TextViewStyles, TextViewTaskPressEvent, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{

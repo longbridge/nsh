@@ -287,8 +287,7 @@ pub(crate) struct Surface {
     ticking: Cell<usize>,
     /// How many of the frame callbacks have only cosmetic work left (a
     /// scroll indicator fading out, keyframes repeating forever): what
-    /// [`Surface::animating`] does not count.
-    #[cfg(feature = "dev")]
+    /// [`Surface::moving`] and [`Surface::animating`] do not count.
     cosmetic_frames: Cell<usize>,
     /// The model of a test session's app (`nsh test --target`).
     #[cfg(feature = "dev")]
@@ -379,6 +378,8 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     /// The GPU device and the shader views rendering ([`crate::shader`]).
     pub(crate) shaders: crate::shader::Shaders,
+    /// The GPU views ([`crate::gpu_view`]).
+    pub(crate) gpu: RefCell<crate::gpu_view::SurfaceGpu>,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -439,7 +440,6 @@ impl Surface {
             frame_callbacks: RefCell::default(),
             background_frames: Cell::new(0),
             ticking: Cell::new(0),
-            #[cfg(feature = "dev")]
             cosmetic_frames: Cell::new(0),
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
@@ -476,6 +476,7 @@ impl Surface {
             main_window: Default::default(),
             window: Default::default(),
             shaders: Default::default(),
+            gpu: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         // CoreText's first use loads fonts and caches (tens of
@@ -595,9 +596,9 @@ impl Surface {
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
         self.background_frames.set(0);
-        #[cfg(feature = "dev")]
         self.cosmetic_frames.set(0);
         crate::shader::clear(self);
+        crate::gpu_view::clear(self);
     }
 
     /// Calls `f` with the engine's control, if an app runs.
@@ -857,7 +858,10 @@ impl Surface {
                     f();
                 }
             }
-            Message::Resized(..) => self.resize_late.set(false),
+            Message::Resized(id, size) => {
+                self.resize_late.set(false);
+                crate::window::laid_out(self, id, size);
+            }
             Message::Run(task) => task.run(),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`
@@ -948,18 +952,20 @@ impl Surface {
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
-        let (finished, moved) = {
+        let (finished, mut moved) = {
             let mut anim = self.anim.borrow_mut();
             anim.write(&self.mounter.borrow());
             let mut moved = Vec::new();
             anim.write_components(
-                |id| crate::native::has_component(self, id),
+                |id| crate::native::has_component(self, id) || crate::gpu_view::has(self, id),
                 |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
             );
             (std::mem::take(&mut anim.finished), moved)
         };
         // Shaders whose animated uniforms moved render from the next frame.
         crate::shader::wake(self);
+        // GPU views' renderers take theirs on the render thread.
+        crate::gpu_view::animated(self, &mut moved);
         // No surface state borrowed while the app's components run.
         crate::native::component_animated(self, moved);
         crate::scroll::pin_animated_sticky(self);
@@ -999,17 +1005,22 @@ impl Surface {
         });
     }
 
-    /// Whether something on the surface moves or is about to: batches
-    /// waiting, a frame JS asked for, the animation graph, the platform's
-    /// own animations (transitions, navigation, scroll glides, keyframes),
-    /// or a mouse button held (a drag, a gesture). Costly one-time work
-    /// waits for none of it ([`when_idle`]).
+    /// Whether something on the surface moves and will stop, or is about
+    /// to: batches waiting, a frame JS asked for, the animation graph's
+    /// animations that end, the platform's own animations (transitions,
+    /// navigation, scroll glides, keyframes that end), or a mouse button
+    /// held (a drag, a gesture). Costly one-time work waits for it
+    /// ([`when_idle`]). What repeats forever (a spinner's keyframes, a
+    /// looping animated value) or only fades (a scroll indicator) is not
+    /// counted: it never stops, so waiting for it would only delay the
+    /// work (a web view's first load by [`crate::native`]'s `LOAD_WAIT`
+    /// each time, a warm-up for good).
     pub(crate) fn moving(&self) -> bool {
         !self.queued.borrow().is_empty()
             || self.js_frame.get()
-            || self.anim.borrow().animating()
+            || self.anim.borrow().finishing()
             || self.frame_callbacks.borrow().len() + self.ticking.get()
-                > self.background_frames.get()
+                > self.background_frames.get() + self.cosmetic_frames.get()
             || objc2_app_kit::NSEvent::pressedMouseButtons() != 0
     }
 
@@ -1028,14 +1039,9 @@ impl Surface {
     /// repeating forever, a spinner, which never end) or no longer is; it
     /// ends with `on` false.
     pub(crate) fn cosmetic_frame(&self, on: bool) {
-        #[cfg(feature = "dev")]
-        {
-            let n = self.cosmetic_frames.get();
-            self.cosmetic_frames
-                .set(if on { n + 1 } else { n.saturating_sub(1) });
-        }
-        #[cfg(not(feature = "dev"))]
-        let _ = on;
+        let n = self.cosmetic_frames.get();
+        self.cosmetic_frames
+            .set(if on { n + 1 } else { n.saturating_sub(1) });
     }
 
     /// Whether a native animation runs: the graph's (not one looping
@@ -1314,7 +1320,8 @@ impl Surface {
         self.keeper.set(Some(at));
         let key = self.key;
         let late = if testing { TEST_FRAME } else { LATE };
-        let ms = ((at + late - now).max(0.0) * 1000.0).ceil() as u64;
+        let scheduled = self.last_tick.get();
+        let ms = keeper_wait(at, scheduled, now, late);
         after(ms, move || {
             let Some(surface) = find(key) else { return };
             // An earlier deadline took its place and schedules on.
@@ -1322,7 +1329,7 @@ impl Surface {
                 return;
             }
             surface.keeper.set(None);
-            if surface.last_tick.get() < at {
+            if keeper_runs_frame(at, scheduled, surface.last_tick.get()) {
                 let now = objc2_quartz_core::CACurrentMediaTime();
                 let period = now - surface.last_tick.get();
                 surface.frame(now, period, false);
@@ -1572,9 +1579,48 @@ pub(crate) fn quiet<R>(f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// How many milliseconds the timer that keeps deadline `at` waits
+/// ([`Surface::keep_deadline`]): until `late` after it. A deadline the last
+/// frame (at `last_tick`) did not move past is due already, and the frame
+/// that ran then did not end it: the timer waits `late` after that frame,
+/// not 0 ms, so a deadline left in the past (its window closed, nothing
+/// steps it) cannot reschedule itself in a busy loop (#3392).
+fn keeper_wait(at: f64, last_tick: f64, now: f64, late: f64) -> u64 {
+    let due = at.max(last_tick);
+    ((due + late - now).max(0.0) * 1000.0).ceil() as u64
+}
+
+/// Whether the timer that kept deadline `at`, scheduled when the last frame
+/// had run at `scheduled`, runs a frame when it fires and the last frame ran
+/// at `last_tick`: when no frame ran since the deadline came due, or none
+/// ran since it was scheduled. A deadline already past when it was
+/// scheduled still gets a frame, which steps what set it, instead of the
+/// timer skipping and rescheduling it forever while no window draws
+/// (#3392).
+fn keeper_runs_frame(at: f64, scheduled: f64, last_tick: f64) -> bool {
+    last_tick < at || last_tick <= scheduled
+}
+
 #[cfg(test)]
 mod tests {
-    use super::frame_rate_range;
+    use super::{frame_rate_range, keeper_runs_frame, keeper_wait};
+
+    #[test]
+    fn a_deadline_left_in_the_past_does_not_spin_its_timer() {
+        // A deadline ahead: wait until `late` after it.
+        assert!((550..=551).contains(&keeper_wait(10.0, 9.0, 9.5, 0.05)));
+        assert!(keeper_runs_frame(10.0, 9.0, 9.0));
+        // The display link drew a frame after the deadline came due: the
+        // timer leaves it to that frame.
+        assert!(!keeper_runs_frame(10.0, 9.0, 10.01));
+        // A deadline long past that the last frame did not end (#3392):
+        // the timer waits `late` after that frame instead of 0 ms...
+        assert!((49..=50).contains(&keeper_wait(5.0, 10.0, 10.001, 0.05)));
+        // ...and runs a frame when it fires, if none ran since.
+        assert!(keeper_runs_frame(5.0, 10.0, 10.0));
+        // Each round then waits again: never a 0 ms loop.
+        assert!(keeper_wait(5.0, 10.05, 10.051, 0.05) > 0);
+    }
 
     fn range(rate: Option<f32>, max: f32) -> [f32; 3] {
         let r = frame_rate_range(rate, max);

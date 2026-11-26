@@ -70,7 +70,7 @@ pub(crate) const COMPONENTS: &[Component] = &[
         what: "iOS runtimes (`--target ios`, `catalyst`, `nsh package --target ios`)",
         paths: &["runtime/ios"],
         per_host: true,
-        hosts: Some(&["macos-arm64"]),
+        hosts: Some(&["macos-arm64", "macos-x86_64"]),
     },
     Component {
         name: "web",
@@ -544,7 +544,11 @@ mod tests {
             Component::named("web").unwrap().asset("linux-x86_64"),
             "nsh-web.tar.gz"
         );
-        assert!(!Component::named("ios").unwrap().for_host("linux-x86_64"));
+        let ios = Component::named("ios").unwrap();
+        assert!(!ios.for_host("linux-x86_64"));
+        assert!(ios.for_host("macos-arm64"));
+        assert!(ios.for_host("macos-x86_64"));
+        assert_eq!(ios.asset("macos-x86_64"), "nsh-ios-macos-x86_64.tar.gz");
         assert!(Component::named("nope").is_err());
     }
 

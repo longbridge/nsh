@@ -378,6 +378,13 @@ fn clamp(p: Offset, (min, max): (Offset, Offset)) -> Offset {
     )
 }
 
+/// Where an offset `p` at rest goes back to: within `limits`, or `None`
+/// when it is already there (to half a point).
+fn rest_at(p: Offset, (min, max): (Offset, Offset)) -> Option<Offset> {
+    let to = clamp(p, (min, max));
+    ((to.x - p.x).abs() > 0.5 || (to.y - p.y).abs() > 0.5).then_some(to)
+}
+
 /// `p` moved by `d`, stopping at the limits; past them (the refresh space)
 /// it only moves back.
 fn stop_at_edges(p: Offset, d: Offset, (min, max): (Offset, Offset)) -> Offset {
@@ -1184,7 +1191,6 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
         };
         (s.live.phase, pos(s), limits(&state))
     };
-    let hi = Offset::new(max.x.max(min.x), max.y.max(min.y));
     match phase {
         Phase::Animate {
             from,
@@ -1268,8 +1274,11 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
             set_phase(view, Phase::Idle);
             emit(surface, view, EventKind::ScrollEnd);
         }
-        Phase::Idle if p.x > hi.x + 0.5 || p.y > hi.y + 0.5 => {
-            moved_to(surface, view, Offset::new(p.x.min(hi.x), p.y.min(hi.y)));
+        // Nothing moves it: an offset past either end goes back.
+        Phase::Idle => {
+            if let Some(to) = rest_at(p, (min, max)) {
+                moved_to(surface, view, to);
+            }
         }
         _ => {}
     }
@@ -1760,7 +1769,11 @@ pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size<Points>)
 }
 
 /// `ScrollBy`: the core keeps the visible content in place (items above
-/// the viewport changed size); not clamped, the core knows its content.
+/// the viewport changed size); not clamped, the core knows its content
+/// (a `ScrollContent` later in the batch may make room for it). At rest,
+/// an offset it leaves past either end goes back on the next frame
+/// ([`tick`]): the offset reported is within the content, so the core
+/// would never correct a view resting before its start (#3235).
 pub(crate) fn scroll_by(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
     let (p, d) = {
         let mut state = view.state_mut();
@@ -1820,6 +1833,17 @@ pub(crate) fn scroll_by(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32)
     };
     if d != Offset::default() {
         moved_to(surface, view, p + d);
+        let outside = {
+            let state = view.state();
+            state
+                .scroll
+                .as_ref()
+                .is_some_and(|s| s.live.phase == Phase::Idle)
+                && rest_at(p + d, limits(&state)).is_some()
+        };
+        if outside {
+            ensure_ticking(surface, view);
+        }
     }
     report(surface, view);
 }
@@ -2798,6 +2822,34 @@ fn reveal_with(surface: &Rc<Surface>, target: &NshView, rect_in: impl Fn(&NshVie
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A view at rest goes back within its limits from past either end:
+    /// a `ScrollBy` that left a list 144 pt before its start comes back
+    /// to it, as one past its end does (#3235); within them (to half a
+    /// point, and the refresh space above the top while it refreshes) it
+    /// stays.
+    #[test]
+    fn a_view_at_rest_goes_back_from_past_either_end() {
+        let limits = (Offset::new(0.0, 0.0), Offset::new(0.0, 600.0));
+        assert_eq!(
+            rest_at(Offset::new(0.0, -144.0), limits),
+            Some(Offset::new(0.0, 0.0))
+        );
+        assert_eq!(
+            rest_at(Offset::new(0.0, 700.0), limits),
+            Some(Offset::new(0.0, 600.0))
+        );
+        assert_eq!(rest_at(Offset::new(0.0, 200.0), limits), None);
+        assert_eq!(rest_at(Offset::new(0.0, -0.4), limits), None);
+        let refreshing = (Offset::new(0.0, -60.0), Offset::new(0.0, 600.0));
+        assert_eq!(rest_at(Offset::new(0.0, -60.0), refreshing), None);
+        // Content shorter than the viewport rests at its start.
+        let short = (Offset::new(0.0, 0.0), Offset::new(0.0, -100.0));
+        assert_eq!(
+            rest_at(Offset::new(0.0, -50.0), short),
+            Some(Offset::new(0.0, 0.0))
+        );
+    }
 
     /// A scroll view of `content` points in a 300 x 200 viewport.
     fn movable_with(content: (f32, f32), horizontal: bool, enabled: bool) -> bool {

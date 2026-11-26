@@ -482,7 +482,7 @@ fn a_mouse_drag_selects_in_a_selectable_view() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 6);
+    assert_eq!(results.len(), 7);
 }
 
 #[test]
@@ -712,7 +712,7 @@ fn input_targets_report_document_values_and_do_not_edit_covering_fields() {
     };
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/input-target");
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
-    assert_eq!(results.len(), 3);
+    assert_eq!(results.len(), 5);
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
 }

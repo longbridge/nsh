@@ -41,7 +41,11 @@
 
 use std::ops::Range;
 
-use crate::geometry::{Bounds, Point, Points, point, size};
+use crate::{
+    AttributedText,
+    geometry::{Bounds, Point, Points, point, size},
+    text::escape_html,
+};
 
 /// A place in the texts of an area: a text (its index in document order)
 /// and a UTF-16 offset in it.
@@ -90,6 +94,17 @@ pub trait SelectionTexts {
             .collect()
     }
 
+    /// Text `i`'s runs, when the backend has them: what
+    /// [`SelectionModel::html`] takes bold, italic and links from. `None` by
+    /// default (a backend whose texts live on the platform's side), and a
+    /// copy is then plain text only. Hidden: only the platforms' copy reads
+    /// it so far.
+    #[doc(hidden)]
+    fn attributed(&self, i: usize) -> Option<&AttributedText> {
+        let _ = i;
+        None
+    }
+
     /// Text `i`'s content box.
     fn frame(&self, i: usize) -> Bounds<Points>;
 
@@ -115,6 +130,16 @@ pub trait SelectionTexts {
     fn continues(&self, i: usize) -> bool {
         let _ = i;
         false
+    }
+
+    /// What a copy puts before text `i` when the selection takes it from
+    /// its start: the generated marker drawn beside it that selection
+    /// leaves out (a list item's `•` or `2.`, `userSelect: "none"`), so a
+    /// copied list keeps its markers as a browser's copy does. `None` by
+    /// default.
+    fn marker(&self, i: usize) -> Option<&str> {
+        let _ = i;
+        None
     }
 
     /// The box around what the characters `range` of text `i` cover, in
@@ -558,14 +583,95 @@ impl SelectionModel {
     /// a text that continues the one before it
     /// ([`SelectionTexts::continues`]) joined to it with nothing between,
     /// other texts on one row (their frames overlap vertically) joined by a
-    /// tab, the others by a line break; an empty text inside the selection
-    /// counts as a text, so a blank line stays in the copy.
+    /// tab, the others by a line break, or by a blank line when a gap of
+    /// at least [`BLOCK_BREAK`] lies between two single-text rows (two
+    /// paragraphs, two messages; a table's rows stay a line apart); a text taken from its start gets its marker
+    /// ([`SelectionTexts::marker`]) before it. An empty text inside the
+    /// selection counts as a text, so a blank line stays in the copy.
     pub fn text(&self, texts: &impl SelectionTexts) -> String {
+        let rows = self.rows(texts, |i, range, marker| {
+            let mut part = String::new();
+            if let Some(marker) = marker {
+                part.push_str(marker);
+                part.push(' ');
+            }
+            part.push_str(&texts.copied(i, range));
+            part
+        });
         let mut out = String::new();
+        for (n, (gap, cells)) in rows.iter().enumerate() {
+            if n > 0 {
+                out.push('\n');
+                if block_break(&rows, n, *gap) {
+                    out.push('\n');
+                }
+            }
+            out.push_str(&cells.join("\t"));
+        }
+        out
+    }
+
+    /// The selection as an HTML fragment, for the `text/html` flavor of a
+    /// copy beside [`Self::text`]: the same parts, rows and markers, each
+    /// text's part as [`AttributedText::copied_html`] gives it (bold,
+    /// italic and links kept), the rows a blank line apart in [`Self::text`]
+    /// in `<p>`s of their own and the others a `<br>` apart. `None` when
+    /// nothing selected is bold, italic or a link (a plain copy stays
+    /// plain text), or no selected text has runs
+    /// ([`SelectionTexts::attributed`]). Hidden: only the platforms' copy
+    /// reads it so far.
+    #[doc(hidden)]
+    pub fn html(&self, texts: &impl SelectionTexts) -> Option<String> {
+        let mut formatted = false;
+        let rows = self.rows(texts, |i, range, marker| {
+            let mut part = String::new();
+            if let Some(marker) = marker {
+                escape_html(&mut part, marker);
+                part.push(' ');
+            }
+            match texts.attributed(i) {
+                Some(text) => {
+                    let (html, styled) = text.copied_html(range);
+                    formatted |= styled;
+                    part.push_str(&html);
+                }
+                None => escape_html(&mut part, &texts.copied(i, range)),
+            }
+            part
+        });
+        if !formatted {
+            return None;
+        }
+        let mut out = String::from("<meta charset=\"utf-8\"><p>");
+        for (n, (gap, cells)) in rows.iter().enumerate() {
+            if n > 0 {
+                out.push_str(if block_break(&rows, n, *gap) {
+                    "</p><p>"
+                } else {
+                    "<br>"
+                });
+            }
+            out.push_str(&cells.join("\t"));
+        }
+        out.push_str("</p>");
+        Some(out)
+    }
+
+    /// The selection's parts in rows ([`Self::text`]), each row with
+    /// whether a block gap lies above it: `part` gives text `i`'s selected
+    /// `range`, with the marker before it when the selection takes it from
+    /// its start.
+    fn rows(
+        &self,
+        texts: &impl SelectionTexts,
+        mut part: impl FnMut(usize, Range<u32>, Option<&str>) -> String,
+    ) -> Vec<(bool, Vec<String>)> {
+        // Rows of cells, each with whether a block gap lies above it.
+        let mut rows: Vec<(bool, Vec<String>)> = Vec::new();
         let mut previous: Option<(usize, Bounds<Points>)> = None;
         let ranges = self.ranges(texts);
         let (Some(&(first, _)), Some(&(last, _))) = (ranges.first(), ranges.last()) else {
-            return out;
+            return rows;
         };
         let mut ranges = ranges.into_iter().peekable();
         for i in first..=last {
@@ -577,16 +683,33 @@ impl SelectionModel {
                 None => continue,
             };
             let frame = texts.frame(i);
-            if let Some((before, previous)) = previous
-                && (before + 1 != i || !continues(texts, i))
-            {
-                let same_row = previous.top() < frame.bottom() && frame.top() < previous.bottom();
-                out.push(if same_row { '\t' } else { '\n' });
+            let marker = if range.start == 0 && !range.is_empty() {
+                texts.marker(i)
+            } else {
+                None
+            };
+            let part = part(i, range, marker);
+            match previous {
+                Some((before, _)) if before + 1 == i && continues(texts, i) => {
+                    if let Some(cell) = rows.last_mut().and_then(|r| r.1.last_mut()) {
+                        cell.push_str(&part);
+                    }
+                }
+                Some((_, previous))
+                    if previous.top() < frame.bottom() && frame.top() < previous.bottom() =>
+                {
+                    if let Some(row) = rows.last_mut() {
+                        row.1.push(part);
+                    }
+                }
+                Some((_, previous)) => {
+                    rows.push((frame.top() - previous.bottom() >= BLOCK_BREAK, vec![part]))
+                }
+                None => rows.push((false, vec![part])),
             }
             previous = Some((i, frame));
-            out.push_str(&texts.copied(i, range));
         }
-        out
+        rows
     }
 
     /// The box around what is selected in `texts`, in their coordinates:
@@ -1077,6 +1200,36 @@ fn unit_at(
             )
         }
     }
+}
+
+/// The vertical gap between two texts from which a copy puts a blank line
+/// between them, as between two paragraphs: wider than the spacing of a
+/// list's items or a text's lines, narrower than a paragraph's.
+pub const BLOCK_BREAK: Points = Points(8.0);
+
+/// The marker of a text whose frame is `frame`, given the last text that
+/// selection leaves out before it (`chrome`, its content and frame): that
+/// text when it is a short marker drawn on the text's first row, to its
+/// left (a list item's `•`, `2.` or `a)`). A backend listing an area's
+/// texts calls it with the unselectable text it passed last.
+pub fn marker_of(
+    chrome: Option<&(String, Bounds<Points>)>,
+    frame: Bounds<Points>,
+) -> Option<String> {
+    let (text, at) = chrome?;
+    let text = text.trim();
+    let short = !text.is_empty() && text.chars().count() <= 4 && !text.contains('\n');
+    let beside = at.right() <= frame.left() + Points(1.0)
+        && at.top() < frame.top() + Points(24.0)
+        && frame.top() < at.bottom();
+    (short && beside).then(|| text.to_string())
+}
+
+/// Whether row `n` of a copy's [`SelectionModel::rows`] starts a new block
+/// (a blank line before it): a block gap lies above it (`gap`) and it and
+/// the row before are single texts. A table's rows stay a line apart.
+fn block_break(rows: &[(bool, Vec<String>)], n: usize, gap: bool) -> bool {
+    gap && rows[n].1.len() == 1 && rows[n - 1].1.len() == 1
 }
 
 /// Whether text `i` continues the text before it (never the first).
@@ -1757,7 +1910,10 @@ mod tests {
             model.ranges(&texts),
             vec![(0, 2..11), (1, 0..21), (2, 0..3)]
         );
-        assert_eq!(model.text(&texts), "llo world\nSecond line\nmore text\nLas");
+        assert_eq!(
+            model.text(&texts),
+            "llo world\n\nSecond line\nmore text\n\nLas"
+        );
         assert!(
             !model.drag(&texts, at(24.0, 105.0)),
             "the same point changes nothing"
@@ -1829,7 +1985,7 @@ mod tests {
         assert_eq!(model.bounds(), Some((pos(0, 0), pos(2, 4))));
         assert_eq!(
             model.text(&texts),
-            "Hello world\nSecond line\nmore text\nLast"
+            "Hello world\n\nSecond line\nmore text\n\nLast"
         );
     }
 
@@ -1892,7 +2048,7 @@ mod tests {
         assert_eq!(model.bounds(), Some((pos(1, 0), pos(1, 21))));
         model.drag(&texts, at(8.0, 105.0));
         assert_eq!(model.bounds(), Some((pos(1, 0), pos(2, 4))));
-        assert_eq!(model.text(&texts), "Second line\nmore text\nLast");
+        assert_eq!(model.text(&texts), "Second line\nmore text\n\nLast");
         model.drag(&texts, at(8.0, 5.0));
         assert_eq!(model.bounds(), Some((pos(0, 0), pos(1, 21))));
     }
@@ -1938,10 +2094,156 @@ mod tests {
         assert_eq!(model.bounds(), Some((pos(0, 0), pos(0, 2))));
         assert!(model.move_handle(&texts, Handle::Start, at(8.0, 45.0)));
         assert_eq!(model.bounds(), Some((pos(0, 2), pos(1, 1))));
-        assert_eq!(model.text(&texts), "llo world\nS");
+        assert_eq!(model.text(&texts), "llo world\n\nS");
         // The start handle passed the end: it is the end now.
         assert!(model.move_handle(&texts, Handle::End, at(24.0, 5.0)));
         assert_eq!(model.bounds(), Some((pos(0, 2), pos(0, 3))));
+    }
+
+    /// Texts with runs ([`SelectionTexts::attributed`]), one per row,
+    /// the rows `.1` apart, with an optional marker each.
+    struct Rich(Vec<(AttributedText, Option<&'static str>)>, f32);
+
+    impl SelectionTexts for Rich {
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        fn content(&self, i: usize) -> &str {
+            &self.0[i].0.text
+        }
+
+        fn copied(&self, i: usize, range: Range<u32>) -> String {
+            self.0[i].0.copied_text(range)
+        }
+
+        fn attributed(&self, i: usize) -> Option<&AttributedText> {
+            Some(&self.0[i].0)
+        }
+
+        fn marker(&self, i: usize) -> Option<&str> {
+            self.0[i].1
+        }
+
+        fn frame(&self, i: usize) -> Bounds<Points> {
+            bounds(
+                point(px(0.0), px(i as f32 * (20.0 + self.1))),
+                size(px(400.0), px(20.0)),
+            )
+        }
+
+        fn offset_at(&self, _: usize, _: Point<Points>) -> u32 {
+            0
+        }
+    }
+
+    fn rich(parts: &[(&str, u16, bool, Option<&str>)]) -> AttributedText {
+        let mut t = AttributedText::default();
+        for &(s, weight, italic, href) in parts {
+            let start = t.len_utf16();
+            t.push(
+                s,
+                crate::ResolvedTextStyle {
+                    font_weight: weight,
+                    italic,
+                    ..Default::default()
+                },
+            );
+            if let Some(href) = href {
+                t.link_hrefs
+                    .push(crate::text::LinkHref::new(t.links.len() as u32, href));
+                t.links.push(crate::text::TextLink {
+                    start,
+                    end: t.len_utf16(),
+                    node: 0,
+                    events: Default::default(),
+                    focus_stop: true,
+                });
+            }
+        }
+        t
+    }
+
+    #[test]
+    fn html_keeps_bold_italic_and_links() {
+        let texts = Rich(
+            vec![
+                (rich(&[("Title", 700, false, None)]), None),
+                (
+                    rich(&[
+                        ("See ", 400, false, None),
+                        ("the <docs>", 400, false, Some("https://x.y/?a=1&b=\"2\"")),
+                        (" and ", 400, false, None),
+                        ("this", 600, true, None),
+                    ]),
+                    None,
+                ),
+                (rich(&[("one & two", 400, true, None)]), Some("\u{2022}")),
+            ],
+            12.0,
+        );
+        let mut model = SelectionModel::new();
+        assert!(model.select_all(&texts));
+        assert_eq!(
+            model.text(&texts),
+            "Title\n\nSee the <docs> and this\n\n\u{2022} one & two"
+        );
+        assert_eq!(
+            model.html(&texts).as_deref(),
+            Some(
+                "<meta charset=\"utf-8\"><p><b>Title</b></p><p>See \
+                 <a href=\"https://x.y/?a=1&amp;b=&quot;2&quot;\">the &lt;docs&gt;</a> and \
+                 <b><i>this</i></b></p><p>\u{2022} <i>one &amp; two</i></p>"
+            )
+        );
+    }
+
+    #[test]
+    fn html_of_plain_text_is_none() {
+        let texts = Rich(
+            vec![
+                (rich(&[("one", 400, false, None)]), None),
+                (rich(&[("two\nthree", 400, false, None)]), None),
+            ],
+            0.0,
+        );
+        let mut model = SelectionModel::new();
+        assert!(model.select_all(&texts));
+        assert_eq!(model.text(&texts), "one\ntwo\nthree");
+        assert_eq!(model.html(&texts), None);
+        // Line breaks inside a text and rows without a gap are `<br>`s.
+        let texts = Rich(
+            vec![
+                (rich(&[("one", 700, false, None)]), None),
+                (rich(&[("two\nthree", 400, false, None)]), None),
+            ],
+            0.0,
+        );
+        assert_eq!(
+            model.html(&texts).as_deref(),
+            Some("<meta charset=\"utf-8\"><p><b>one</b><br>two<br>three</p>")
+        );
+    }
+
+    #[test]
+    fn copied_html_skips_hidden_runs_and_uses_copy_texts() {
+        let bold = crate::ResolvedTextStyle {
+            font_weight: 700,
+            ..Default::default()
+        };
+        let mut t = AttributedText::default();
+        t.push("a", bold);
+        t.push("hidden", bold.hide());
+        t.copy_texts
+            .push(crate::AttachmentCopyText::new(t.len_utf16(), "$x<1$"));
+        t.push_attachment(crate::geometry::size_pt(8.0, 8.0), bold);
+        t.push_attachment(crate::geometry::size_pt(8.0, 8.0), bold);
+        let len = t.len_utf16();
+        assert_eq!(
+            t.copied_html(0..len),
+            ("<b>a$x&lt;1$</b>".to_string(), true)
+        );
+        assert_eq!(t.copied_html(1..7), (String::new(), false));
     }
 
     #[test]
@@ -2211,7 +2513,7 @@ mod tests {
         );
         assert!(model.texts_changed(&more));
         assert_eq!(model.bounds(), Some((pos(2, 0), pos(3, 2))));
-        assert_eq!(model.text(&more), "Second line\nmore text\nLa");
+        assert_eq!(model.text(&more), "Second line\nmore text\n\nLa");
         // The text of an end goes: the selection goes too.
         let gone = Keyed(
             Fake::new(&[
@@ -2355,7 +2657,7 @@ mod tests {
         assert!(model.extend(&texts, Movement::Character, Direction::Forward));
         assert_eq!(model.focus(), Some(pos(1, 0)));
         assert!(model.extend(&texts, Movement::Character, Direction::Forward));
-        assert_eq!(model.text(&texts), "ld\nS");
+        assert_eq!(model.text(&texts), "ld\n\nS");
         // Back past the anchor: the anchor stays.
         for _ in 0..6 {
             model.extend(&texts, Movement::Character, Direction::Backward);

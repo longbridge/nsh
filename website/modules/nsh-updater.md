@@ -59,7 +59,7 @@ never rejects.
 
 ```tsx
 promptForUpdate({ quiet: true }); // at startup
-<Button onPress={() => promptForUpdate()}>Check for Updates…</Button>;
+<Button onPress={() => promptForUpdate()}><Text>Check for Updates…</Text></Button>;
 ```
 
 The prompt's text is English. The app's name comes from `nsh.json`'s `"name"`.
@@ -195,7 +195,10 @@ build: each package names the lowest runtime it runs on, and older apps are not 
 ### checkForPackage
 
 ```ts
-function checkForPackage(options?: { locale?: string | null }): Promise<PackageUpdate | null>;
+function checkForPackage(options?: {
+  locale?: string | null;
+  url?: string | null;
+}): Promise<PackageUpdate | null>;
 
 interface PackageUpdate {
   version: string;
@@ -209,6 +212,12 @@ Fetches the manifest as `checkForUpdate` does and resolves the package it offers
 running one (the running package's, else the build the app shipped with) and this runtime runs it. It resolves `null`
 when there is none, the app trusts no package roots, or it runs where apps do not update (the web, `nsh run`). It
 rejects as `checkForUpdate` does.
+
+`url` checks that manifest instead, for an app built with `"packages": { "source": "runtime" }`
+([A feed chosen at run time](../docs/ota-updates.md#a-feed-chosen-at-run-time)). The signatures are checked against the
+keys in `nsh.json` as for any source, and `downloadPackage` downloads what this check found. It rejects for an app
+without `"source": "runtime"`, for a URL that is not HTTPS (or plain HTTP with `"allowHttp": true`), and for a URL with
+a user name or password. An app with `"source": "runtime"` and no `github` or `url` must pass `url`.
 
 ### downloadPackage
 
@@ -343,6 +352,8 @@ file; with it, unsigned manifests are refused. `channels` names other manifests 
 | `channels` | object | Channel name (letters, digits, `-`, `_`, `.`) to the HTTPS URL of its manifest, for `checkForUpdate({ channel })`. Requires `publicKey` |
 | `publicKey` | string | The Ed25519 key that signs the manifests (`latest.json.sig`). Required with `url` and `channels` |
 | `packages.roots` | string[] | Root public keys (`nsh keygen`'s `root.pub`) whose certified release keys sign the app's [OTA packages](#ota-updates). Without it the app runs no packages |
+| `packages.source` | `"runtime"` | The app's code names the package manifest at each check: `checkForPackage({ url })`. Requires `publicKey`; `github` and `url` become optional |
+| `packages.allowHttp` | boolean | With `source: "runtime"`: the feed may be plain HTTP. Its signature, notes, package and redirects stay on its origin |
 
 `nsh package` checks the keys and adds them, with the app's `build`, to the package, so the source is fixed when the
 app is built. `version` must be

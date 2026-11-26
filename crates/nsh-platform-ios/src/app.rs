@@ -57,6 +57,10 @@ pub struct AppOptions {
     /// Logs the performance monitor's readings once a second
     /// ([`SurfaceOptions::fps`]).
     pub fps: bool,
+    /// The app's channel with the apps it runs (`nsh/host`): their launch
+    /// parameters, events to them and handlers of their calls and posts
+    /// ([`SurfaceOptions::host`]). A new one by default.
+    pub host: nsh_engine::HostChannel,
 }
 
 /// Whether `path` is inside the app's own bundle (which the system verifies
@@ -288,6 +292,7 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
             // not a module embedded in another app.
             limits: nsh_engine::Limits::standalone(),
             handoff: nsh_platform_apple::handoff::declared(),
+            host: options.host,
             ..SurfaceOptions::default()
         },
     );

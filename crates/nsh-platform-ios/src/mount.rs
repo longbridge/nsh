@@ -621,6 +621,8 @@ struct Slot {
     image_options: nsh_core::ImageOptions,
     /// The placeholder's load in flight.
     placeholder_key: Option<String>,
+    /// The video poster's load in flight.
+    poster_key: Option<String>,
     /// The image (not its placeholder) is shown.
     image_shown: bool,
     /// Interaction states the core wants reported (`tailwind::state`).
@@ -686,6 +688,7 @@ impl Slot {
             image_key: None,
             image_options: nsh_core::ImageOptions::default(),
             placeholder_key: None,
+            poster_key: None,
             image_shown: false,
             tracked: 0,
             states: 0,
@@ -842,6 +845,8 @@ pub(crate) struct Mounter {
     fps: Option<std::rc::Rc<crate::fps::Fps>>,
     /// Shader views and the GPU device they render with.
     shaders: crate::shader::Shaders,
+    /// GPU views and the display link they render on.
+    gpu: crate::gpu::SurfaceGpu,
     /// Texts whose color transitions.
     text_colors: crate::interaction::TextColors,
     /// The `transitionShader`s of pages and dialogs.
@@ -929,6 +934,7 @@ impl Mounter {
             soft_edges: Vec::new(),
             frame_link: crate::animation::frame_link(&target_for_link),
             shaders,
+            gpu: crate::gpu::SurfaceGpu::new(&target_for_link),
             text_colors: crate::interaction::TextColors::new(&target_for_link),
             nav_shaders: rustc_hash::FxHashMap::default(),
             leaving_screens: rustc_hash::FxHashMap::default(),
@@ -1486,6 +1492,7 @@ impl Mounter {
                 if was_screen {
                     self.release_root_effect();
                 }
+                self.gpu.deleted(id);
                 self.nav_shaders.remove(&id);
                 if let Some((root, window)) = restore {
                     self.target.restore_root_focus(root, window);
@@ -1584,6 +1591,7 @@ impl Mounter {
                 if self.shaders.has(id) {
                     self.layout_shader(id);
                 }
+                self.layout_gpu(id);
             }
             MountItem::TrackStates { id, states } => self.track_states(id, states),
             MountItem::Overflow { id, extent } => {
@@ -1865,6 +1873,14 @@ impl Mounter {
                     self.nav_shaders.remove(&id);
                 }
             },
+            MountItem::GpuView { id, source } => {
+                let scale = self.display_scale();
+                if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+                    self.gpu.set(id, s.native.view(), &s.style, scale, source);
+                    // Bindings that came before it, for the new renderer.
+                    self.gpu.rebound(id, &s.bindings, &self.animator);
+                }
+            }
             MountItem::Shader { id, layer } => {
                 let scale = self.display_scale();
                 let was_screen = self.shaders.draws_screen(id);
@@ -1934,6 +1950,10 @@ impl Mounter {
                     {
                         host.forget();
                         host.push(&s.bindings, &self.animator);
+                    }
+                    // A GPU view's renderer too.
+                    if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+                        self.gpu.rebound(id, &s.bindings, &self.animator);
                     }
                     return true;
                 }
@@ -2050,12 +2070,13 @@ impl Mounter {
                 }
             }
             MountItem::ComponentPropSlots { id, names } => {
-                if let Some(Slot {
-                    native: Native::Component(host),
-                    ..
-                }) = self.slot_mut(id)
+                if !self.gpu.prop_slots(id, &names)
+                    && let Some(Slot {
+                        native: Native::Component(host),
+                        ..
+                    }) = self.slot_mut(id)
                 {
-                    host.slots = names;
+                    host.bound.slots = names;
                     host.forget();
                 }
             }
@@ -2067,10 +2088,11 @@ impl Mounter {
                 }
             }
             MountItem::ComponentProps { id, props } => {
-                if let Some(Slot {
-                    native: Native::Component(host),
-                    ..
-                }) = self.slot_mut(id)
+                if !self.gpu.props(id, &props)
+                    && let Some(Slot {
+                        native: Native::Component(host),
+                        ..
+                    }) = self.slot_mut(id)
                     && let Some(component) = host.component.as_mut()
                 {
                     for (name, value) in &props {
@@ -3202,10 +3224,11 @@ impl Mounter {
                 self.pending_images.push(id);
             }
         }
-        // Its corners clip the shader.
+        // Its corners clip the shader, or a GPU view's frames.
         if self.shaders.has(id) {
             self.layout_shader(id);
         }
+        self.layout_gpu(id);
     }
 
     /// Restyles with Core Animation's implicit animations on.
@@ -3493,9 +3516,10 @@ impl Mounter {
     }
 
     /// The surface moved to a window (or out of one): the shaders in it
-    /// take the pictures they missed.
+    /// take the pictures they missed, the GPU views render.
     pub(crate) fn window_changed(&mut self) {
         self.shaders.revisit();
+        self.gpu.reveal();
         self.restore_root_focus();
     }
 
@@ -3504,6 +3528,7 @@ impl Mounter {
     pub(crate) fn traits_changed(&mut self) {
         let scale = self.display_scale();
         self.shaders.rescale(scale);
+        self.gpu.rescale(scale);
         if scale == self.image_scale {
             return;
         }
@@ -3708,6 +3733,30 @@ impl Mounter {
                     (Ok(decoded), Some(uri)) => view.set_image(uri.into(), decoded.image.clone()),
                     (Err(message), _) => log::warn!("canvas image failed: {message}"),
                     _ => {}
+                }
+                continue;
+            }
+            let video_poster = match self.slot(id) {
+                Some(s)
+                    if s.poster_key.as_deref() == Some(key)
+                        && matches!(&s.native, Native::Video(_)) =>
+                {
+                    match &s.native {
+                        Native::Video(v) => Some(v.poster_mode()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some(mode) = video_poster {
+                if let Some(s) = self.slot_mut(id) {
+                    s.poster_key = None;
+                    if let (Native::Video(v), Ok(decoded)) = (&mut s.native, &result) {
+                        v.show_poster(decoded.image.clone(), mode);
+                    }
+                }
+                if let Err(message) = &result {
+                    log::warn!("video poster failed: {message}");
                 }
                 continue;
             }
@@ -4642,8 +4691,9 @@ impl Mounter {
         animated: bool,
     ) {
         // A page shown again is back in the window: the shaders in it take
-        // the pictures they missed.
+        // the pictures they missed, the GPU views render.
         self.shaders.revisit();
+        self.gpu.reveal();
         let Some(screen) = controller.downcast_ref::<crate::navigation::ScreenController>() else {
             return;
         };
@@ -4663,6 +4713,7 @@ impl Mounter {
     /// swipe) are reported so the app removes them.
     pub(crate) fn stack_did_show(&mut self, id: NodeId) {
         self.shaders.revisit();
+        self.gpu.reveal();
         if self.splits.contains_key(&id) {
             self.compact_did_show(id);
         } else {
@@ -5370,11 +5421,49 @@ impl Mounter {
     /// Properties of a web view or video.
     fn set_native_props(&mut self, id: NodeId, props: nsh_core::NativeProps) {
         use nsh_core::NativeProps as P;
-        let Some(s) = self.slot_mut(id) else { return };
-        match (&mut s.native, props) {
-            (Native::Web(v), P::WebView(p)) => v.configure(*p),
-            (Native::Video(v), P::Video(p)) => v.configure(*p),
-            _ => {}
+        let mut poster = None;
+        {
+            let Some(s) = self.slot_mut(id) else { return };
+            match (&mut s.native, props) {
+                (Native::Web(v), P::WebView(p)) => v.configure(*p),
+                (Native::Video(v), P::Video(p)) => {
+                    v.configure(*p);
+                    poster = v.take_poster_request();
+                }
+                _ => {}
+            }
+        }
+        if let Some(uri) = poster {
+            self.load_video_poster(id, &uri);
+        }
+    }
+
+    /// Loads video `id`'s poster at the video's display size.
+    fn load_video_poster(&mut self, id: NodeId, uri: &str) {
+        let (size, mode) = {
+            let Some(s) = self.slot(id) else { return };
+            let Native::Video(v) = &s.native else { return };
+            (v.view.bounds().size, v.poster_mode())
+        };
+        let scale = self.display_scale();
+        let max_pixels = (size.width.max(size.height) * scale).ceil() as u32;
+        let key = crate::image::ImageLoader::key(uri, max_pixels, Default::default());
+        match self
+            .images
+            .request(id, uri, None, max_pixels, scale, Default::default())
+        {
+            crate::image::Request::Ready(decoded) => {
+                if let Some(s) = self.slot_mut(id)
+                    && let Native::Video(v) = &mut s.native
+                {
+                    v.show_poster(decoded.image, mode);
+                }
+            }
+            crate::image::Request::Pending => {
+                if let Some(s) = self.slot_mut(id) {
+                    s.poster_key = Some(key);
+                }
+            }
         }
     }
 
@@ -6012,6 +6101,11 @@ impl Mounter {
         self.shaders.frame();
     }
 
+    /// The GPU views' display link fired.
+    pub(crate) fn gpu_frame(&mut self) {
+        self.gpu.frame(&self.control);
+    }
+
     /// The GPU device the shaders asked for opened (`None`: there is none,
     /// which the app hears: `shadersAvailable()`).
     pub(crate) fn shaders_opened(&mut self, renderer: Option<nsh_engine::shader::Renderer>) {
@@ -6030,6 +6124,17 @@ impl Mounter {
         let scale = self.display_scale();
         if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
             self.shaders.layout(id, &s.style, scale);
+        }
+    }
+
+    /// GPU view `id` (if it is one) follows its frame and corners.
+    fn layout_gpu(&mut self, id: NodeId) {
+        if !self.gpu.has(id) {
+            return;
+        }
+        let scale = self.display_scale();
+        if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+            self.gpu.resized(id, &s.style, scale);
         }
     }
 
@@ -6264,6 +6369,10 @@ impl Mounter {
 
     fn follow_scroll(&mut self, id: NodeId, offset: CGPoint) {
         self.pin_sticky(id);
+        // Shader and GPU views scrolled back into sight render what fell
+        // due.
+        self.shaders.revisit();
+        self.gpu.reveal();
         if self.shaders.pictured()
             && let Some(s) = self.views.get(id as usize).and_then(Option::as_ref)
         {
@@ -6377,6 +6486,12 @@ impl Mounter {
                 if pictured {
                     self.shaders.ui_changed(s.native.view());
                 }
+            }
+        }
+        // GPU views' renderers get their bound props' changes.
+        for &id in &self.animated {
+            if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+                self.gpu.animated(id, &s.bindings, animator);
             }
         }
         // Components get their bound props' changes (no view borrowed while

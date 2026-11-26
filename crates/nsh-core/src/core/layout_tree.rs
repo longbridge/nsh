@@ -477,7 +477,13 @@ impl<C> LayoutTree<C> {
 
     /// Detaches `child` from `parent`.
     pub(crate) fn remove_child(&mut self, parent: NodeId, child: NodeId) {
-        self.nodes[key(parent)].children.retain(|&c| c != child);
+        // Once: a child is in its parent once. (`retain` would look at
+        // and move every child after it one by one, for each child moved
+        // in a long list.)
+        let children = &mut self.nodes[key(parent)].children;
+        if let Some(at) = children.iter().position(|&c| c == child) {
+            children.remove(at);
+        }
         self.nodes[key(child)].parent = None;
         self.mark_dirty(parent);
     }

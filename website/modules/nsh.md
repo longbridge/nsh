@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), the [share sheet](#share), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
+`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), the [share sheet](#share), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [GPU views](#gpuview), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -2428,6 +2428,9 @@ notifications and those other native code scheduled go to the handler Rust code 
 `press`. On Linux a press reaches
 only the running app: one left on screen after the app exits does nothing.
 
+On Windows, pressing a notification brings a focusable app window to the foreground, preferring an unminimized window and restoring a minimized one if none is open on screen.
+Hidden windows stay hidden, and the app still receives `press` when there is no window to activate.
+
 ### Notifications.permission
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
@@ -3648,6 +3651,83 @@ nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 
 > [!NOTE]
 > Props, events and command arguments cross to the native side as JSON. Registered components and functions are the host app's own code: NSH's [sandbox limits and capabilities](../docs/sandbox-and-capabilities.md) do not apply to what they do.
+
+## gpuView
+
+`gpuView` gives you a component whose box your own Rust code draws with [wgpu](https://wgpu.rs), on every frame it needs one: a drawing of hundreds of thousands of lines, a 3D model, a simulation, at the display's rate. The renderer runs on a render thread, never in JS and never on the main thread, and its frames are shown under the view's children like a background, clipped to its rounded corners, scrolled and overlapped like any view.
+
+```ts
+function gpuView<P extends object = {}, E extends object = {}>(
+  name: string,
+  spec: NativeComponentSpec<P, E>,
+): (props: GpuViewProps<P, E>) => JSX.Element;
+
+type GpuViewProps<P, E> = ViewProps & P & NativeEventHandlers<E>;
+```
+
+`name` is a renderer your app's Rust crate registers; `spec` lists its props and events as [`nativeComponent`](#nativecomponent)'s does. Each prop is sent to the renderer when it changes, and a prop bound to an animated value moves it on every frame without JS. Children are drawn over the renderer's frame.
+
+The renderer implements `GpuRenderer` from the `nsh-gpu` crate, which re-exports `wgpu`. It builds its pipelines once in `prepare`, takes its props in `set_prop`, and encodes a frame into `frame.target()` in `render`. A frame is rendered when a prop, the view's size or its scale changed, and on every display frame while `animating()` returns `true`. `frame.emit(name, data)` sends an event: `pick` reaches `onPick`.
+
+```tsx tabs
+import { gpuView } from "nsh";
+
+const Spinner = gpuView<{ speed: number }, { pick: { x: number; y: number } }>("app/spinner", {
+  props: ["speed"],
+  events: ["pick"],
+});
+
+<Spinner speed={2} onPick={(e) => console.log(e.x, e.y)} style={{ height: 240, borderRadius: 12 }} />;
+```
+
+```rust tabs
+use nsh_core::{JsonValue, prelude::*};
+use nsh_gpu::{GpuFrame, GpuRegistry, GpuRenderer, wgpu};
+
+#[derive(Default)]
+struct Spinner {
+    speed: f64,
+}
+
+impl GpuRenderer for Spinner {
+    fn set_prop(&mut self, name: &str, value: Option<&JsonValue>) {
+        if name == "speed" {
+            self.speed = value.and_then(JsonValue::as_f64).unwrap_or(1.0);
+        }
+    }
+
+    fn animating(&self) -> bool {
+        true
+    }
+
+    fn render(&mut self, frame: &mut GpuFrame<'_>) {
+        let t = frame.time().as_secs_f64() * self.speed;
+        let target = frame.target().clone();
+        frame.encoder().begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color { r: t.sin() * 0.5 + 0.5, g: 0.3, b: 0.6, a: 1.0 }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+    }
+}
+
+#[native_module("app/scenes")]
+fn scenes(registry: &mut Registry) {
+    registry.gpu_renderer("app/spinner", Spinner::default);
+}
+```
+
+Rust UI places one with `gpu_view().renderer(Spinner::default)` (or `.renderer_named("app/spinner")`), sets props with `.prop(name, value)`, binds them with `.bind_animated_prop(name, &value)` and hears events with `.on_native_event(…)`.
+
+The frame is `frame.width()` × `frame.height()` pixels of `frame.format()`, 8-bit RGBA or BGRA: clear it first, and write sRGB-encoded colors with premultiplied alpha, as CSS colors. The device is shared by the views of a window: a high-performance GPU, with all of its features and limits. Where no GPU is available, or nothing is registered under `name`, the view draws only its own style and children. GPU views draw on Linux, macOS and iOS today; the other platforms show their style and children while their support lands.
 
 ## Accessibility
 

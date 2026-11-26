@@ -56,7 +56,10 @@ use nsh_core::{
 use rustc_hash::FxHashMap;
 use unicode_bidi::{Level, ParagraphBidiInfo};
 
+use tiny_skia as sk;
+
 use crate::{
+    decor::shape::Pt,
     render::DrawCx,
     view::{NshView, ViewState},
 };
@@ -2316,8 +2319,24 @@ type Painted = (
     Option<gpui::Hsla>,
 );
 
-/// Paints `glyphs`.
-fn paint_glyphs(cx: &mut DrawCx<'_>, mut glyphs: Vec<Painted>) {
+/// A glyph to paint: origin (view coordinates), font, glyph, size
+/// (points), color (`None` for an emoji, painted in its own colors).
+type Placed = (f32, f32, FontId, GlyphId, f32, Option<gpui::Hsla>);
+
+/// Paints `glyphs`: as GPUI's glyph sprites, which stay upright, unless the
+/// transform turns, flips, skews or projects them, which fills the outlines of
+/// those whose font's file gives them as paths ([`fill_outlines`]).
+fn paint_glyphs(cx: &mut DrawCx<'_>, glyphs: Vec<Placed>) {
+    let glyphs = if cx.unflipped() {
+        glyphs
+    } else {
+        fill_outlines(cx, glyphs)
+    };
+    let k = cx.transform_scale();
+    let mut glyphs: Vec<Painted> = glyphs
+        .into_iter()
+        .map(|(x, y, font, id, size, color)| (cx.map(x, y), font, id, px(size * k), color))
+        .collect();
     // GPUI clips glyphs to rectangles only: under a rounded or rotated
     // clip, a glyph shows when its middle (above the baseline) does.
     if cx.has_clip_polygon() {
@@ -2345,6 +2364,111 @@ fn paint_glyphs(cx: &mut DrawCx<'_>, mut glyphs: Vec<Painted>) {
     });
 }
 
+/// Fills the outlines of `glyphs` (not emoji) through the transform, so
+/// they turn, skew and project with the view as its other content does;
+/// returns those whose font's file gives no outline (emoji, a font GPUI
+/// fell back to, any before the system's fonts are found), which are
+/// painted upright at their origins.
+fn fill_outlines(cx: &mut DrawCx<'_>, glyphs: Vec<Placed>) -> Vec<Placed> {
+    let system = cx.app.text_system().clone();
+    // Device pixels a point of the text covers.
+    let px_per_pt = cx.scale * cx.transform_scale();
+    let mut rest = Vec::new();
+    let mut contours: Vec<Vec<Pt>> = Vec::new();
+    let mut color: Option<gpui::Hsla> = None;
+    for glyph in glyphs {
+        let (x, y, font, id, size, c) = glyph;
+        let Some(c) = c else {
+            rest.push(glyph);
+            continue;
+        };
+        let Some((outline, upem)) = crate::canvas::glyph_outline(&system, font, id.0 as u16) else {
+            rest.push(glyph);
+            continue;
+        };
+        // Glyphs of one color are one path.
+        if let Some(was) = color
+            && was != c
+        {
+            cx.fill_polygons(&contours, was, gpui::FillRule::NonZero);
+            contours.clear();
+        }
+        color = Some(c);
+        let k = size / upem.max(1) as f32;
+        flatten(
+            &outline,
+            |ux, uy| (x + ux * k, y - uy * k),
+            px_per_pt,
+            &mut contours,
+        );
+    }
+    if let Some(c) = color {
+        cx.fill_polygons(&contours, c, gpui::FillRule::NonZero);
+    }
+    rest
+}
+
+/// Adds the contours of `path` (mapped by `to` to view coordinates) to
+/// `out` as polygons, curves in steps of a few device pixels
+/// (`px_per_pt`).
+fn flatten(path: &sk::Path, to: impl Fn(f32, f32) -> Pt, px_per_pt: f32, out: &mut Vec<Vec<Pt>>) {
+    let mut contour: Vec<Pt> = Vec::new();
+    let mut last: Pt = (0.0, 0.0);
+    // Steps for a curve whose control points span `len` points: its
+    // flattening error falls with the square of the steps.
+    let steps = |len: f32| ((len * px_per_pt / 2.0).sqrt().ceil() as usize).clamp(1, 24);
+    let dist = |a: Pt, b: Pt| (b.0 - a.0).hypot(b.1 - a.1);
+    let end = |contour: &mut Vec<Pt>, out: &mut Vec<Vec<Pt>>| {
+        if contour.len() >= 3 {
+            out.push(std::mem::take(contour));
+        } else {
+            contour.clear();
+        }
+    };
+    for segment in path.segments() {
+        match segment {
+            sk::PathSegment::MoveTo(p) => {
+                end(&mut contour, out);
+                last = to(p.x, p.y);
+                contour.push(last);
+            }
+            sk::PathSegment::LineTo(p) => {
+                last = to(p.x, p.y);
+                contour.push(last);
+            }
+            sk::PathSegment::QuadTo(c, p) => {
+                let (c, p) = (to(c.x, c.y), to(p.x, p.y));
+                let n = steps(dist(last, c) + dist(c, p));
+                for i in 1..=n {
+                    let t = i as f32 / n as f32;
+                    let u = 1.0 - t;
+                    contour.push((
+                        u * u * last.0 + 2.0 * u * t * c.0 + t * t * p.0,
+                        u * u * last.1 + 2.0 * u * t * c.1 + t * t * p.1,
+                    ));
+                }
+                last = p;
+            }
+            sk::PathSegment::CubicTo(c1, c2, p) => {
+                let (c1, c2, p) = (to(c1.x, c1.y), to(c2.x, c2.y), to(p.x, p.y));
+                let n = steps(dist(last, c1) + dist(c1, c2) + dist(c2, p));
+                for i in 1..=n {
+                    let t = i as f32 / n as f32;
+                    let u = 1.0 - t;
+                    let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+                    contour.push((
+                        a * last.0 + b * c1.0 + c * c2.0 + d * p.0,
+                        a * last.1 + b * c1.1 + c * c2.1 + d * p.1,
+                    ));
+                }
+                last = p;
+            }
+            sk::PathSegment::Close => end(&mut contour, out),
+        }
+    }
+    end(&mut contour, out);
+}
+
 /// Draws a text view's text shadow (view coordinates set on `cx`): before
 /// the view's content is clipped to its bounds, as a shadow spreads past
 /// them.
@@ -2363,7 +2487,6 @@ pub(crate) fn draw_shadow(cx: &mut DrawCx<'_>, state: &ViewState) {
         drawn.content.origin.x.0 + shadow.offset_x.0,
         drawn.content.origin.y.0 + shadow.offset_y.0,
     );
-    let k = cx.transform_scale();
     // GPUI blurs no glyphs: a blurred shadow is the glyphs painted on
     // rings out to the blur's radius, each faint, which spreads them as a
     // blur does.
@@ -2388,8 +2511,14 @@ pub(crate) fn draw_shadow(cx: &mut DrawCx<'_>, state: &ViewState) {
     let mut glyphs = Vec::with_capacity(layout.glyphs.len() * offsets.len());
     for &(dx, dy) in &offsets {
         for g in layout.shown_glyphs(&drawn.text) {
-            let o = cx.map(ox + dx + g.x, oy + dy + g.y);
-            glyphs.push((o, g.font, g.id, px(g.size * k), Some(color)));
+            glyphs.push((
+                ox + dx + g.x,
+                oy + dy + g.y,
+                g.font,
+                g.id,
+                g.size,
+                Some(color),
+            ));
         }
     }
     paint_glyphs(cx, glyphs);
@@ -2431,7 +2560,6 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     if layout.boxes.is_empty() {
         return;
     }
-    let k = cx.transform_scale();
     let default = ResolvedTextStyle::default();
     let style = |index: u32| {
         text.spans
@@ -2446,7 +2574,6 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
         .or_else(|| state.live.as_ref()?.text_color());
     let mut glyphs = Vec::with_capacity(layout.glyphs.len());
     for g in layout.shown_glyphs(text) {
-        let o = cx.map(ox + g.x, oy + g.y);
         let color = if g.emoji {
             None
         } else {
@@ -2456,7 +2583,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
             }
             Some(cx.color(c))
         };
-        glyphs.push((o, g.font, g.id, px(g.size * k), color));
+        glyphs.push((ox + g.x, oy + g.y, g.font, g.id, g.size, color));
     }
     paint_glyphs(cx, glyphs);
     decorate(cx, text, layout, ox, oy, animated);
@@ -2631,15 +2758,13 @@ pub(crate) fn draw_silhouette(
     if cx.culled() || color.is_transparent() {
         return;
     }
-    let k = cx.transform_scale();
     let (ox, oy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
     let tint = Some(cx.color(color));
     let mut glyphs = Vec::with_capacity(layout.glyphs.len() * offsets.len());
     // Emoji draw in their own colors: they cast no silhouette.
     for g in layout.shown_glyphs(&drawn.text).filter(|g| !g.emoji) {
         for &(dx, dy) in offsets {
-            let o = cx.map(ox + g.x + dx, oy + g.y + dy);
-            glyphs.push((o, g.font, g.id, px(g.size * k), tint));
+            glyphs.push((ox + g.x + dx, oy + g.y + dy, g.font, g.id, g.size, tint));
         }
     }
     paint_glyphs(cx, glyphs);

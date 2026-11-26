@@ -509,6 +509,68 @@ pub(super) enum NewChild {
     Kept(SharedString),
 }
 
+/// The keyed old elements of a parent by key ([`Core::match_children`]),
+/// indexed the first time one is looked up: a few elements are searched in
+/// order, many once, so a long keyed list moved or reversed is matched in
+/// linear time. Old elements are only ever taken (`None`) while matching,
+/// so the index stays valid.
+#[derive(Default)]
+pub(super) struct OldKeys {
+    /// The first old element of each key.
+    first: FxHashMap<SharedString, usize>,
+    /// The next old element of the same key after each one (`usize::MAX`
+    /// for none).
+    next: Vec<usize>,
+    indexed: bool,
+}
+
+impl OldKeys {
+    /// Up to this many old elements are searched rather than indexed.
+    const SEARCHED: usize = 16;
+
+    /// The first old element of key `key` left in `old` that is `ok`.
+    fn find(
+        &mut self,
+        old: &[Option<Expanded>],
+        key: &SharedString,
+        ok: impl Fn(&Expanded) -> bool,
+    ) -> Option<usize> {
+        let is = |o: &Option<Expanded>| {
+            o.as_ref()
+                .is_some_and(|o| o.key.as_ref() == Some(key) && ok(o))
+        };
+        if old.len() <= Self::SEARCHED {
+            return old.iter().position(is);
+        }
+        if !self.indexed {
+            self.indexed = true;
+            self.next = vec![usize::MAX; old.len()];
+            // From the end, so each key's first is the earliest.
+            for (at, o) in old.iter().enumerate().rev() {
+                if let Some(k) = o.as_ref().and_then(|o| o.key.as_ref())
+                    && let Some(next) = self.first.insert(k.clone(), at)
+                {
+                    self.next[at] = next;
+                }
+            }
+        }
+        // Those taken go from the front (duplicate keys taken in order are
+        // not walked again).
+        let first = self.first.get_mut(key)?;
+        while *first != usize::MAX && old[*first].is_none() {
+            *first = self.next[*first];
+        }
+        let mut at = *first;
+        while at != usize::MAX {
+            if is(&old[at]) {
+                return Some(at);
+            }
+            at = self.next[at];
+        }
+        None
+    }
+}
+
 /// Whether a slot's place only places it: no styles, props, listeners or
 /// children of its own (what fills it then needs no node around it).
 fn is_plain(el: &ElNode) -> bool {
@@ -1142,6 +1204,13 @@ fn same(a: &Option<std::rc::Rc<ClassList>>, b: &Option<std::rc::Rc<ClassList>>) 
     }
 }
 
+impl Components {
+    /// The GPU renderer the sets registered as `name`.
+    pub(super) fn gpu_renderer(&self, name: &str) -> Option<crate::gpu::GpuSource> {
+        self.registry.registered_gpu_renderer(name).cloned()
+    }
+}
+
 impl<M: TextEngine> Core<M> {
     /// The components this core can render (from `nsh-base` and the
     /// like), and the design tokens their sets bring
@@ -1744,6 +1813,13 @@ impl<M: TextEngine> Core<M> {
         self.components.executor.quitting.get() > 0
     }
 
+    /// Whether a JS call of an `async fn` into Rust (a native module's, a
+    /// class's) has not answered yet: its answer comes from elsewhere (a
+    /// request made in Rust, another thread), which nothing else counts.
+    pub fn async_calls_pending(&self) -> bool {
+        self.components.executor.calls.get() > 0
+    }
+
     /// Runs the closures that waited for the app's answer to the events
     /// handed to JS before this commit ([`crate::element::after_answer`]),
     /// each under its owner; one whose owner went is dropped unrun.
@@ -1958,6 +2034,10 @@ impl<M: TextEngine> Core<M> {
                 child,
                 before,
             } if self.is_host(parent) => {
+                // A raw text run (`<Button>Open</Button>`) has no node
+                // until a use needs one: the view places it, so it does.
+                let run = self.runs.contains_key(&child);
+                self.materialize_run(child)?;
                 self.key(child)?;
                 let inst = self.components.instances.get_mut(&parent).expect("host");
                 let was_empty = inst.js_children.is_empty();
@@ -1983,7 +2063,18 @@ impl<M: TextEngine> Core<M> {
                             parent: p,
                             child,
                             before: at.and(before).or(anchor),
-                        })?
+                        })?;
+                        if run
+                            && self
+                                .key(p)
+                                .is_ok_and(|k| self.nodes[k as usize].kind != Kind::Text)
+                        {
+                            let text = self.key(child).map_or("", |k| &self.nodes[k as usize].text);
+                            log::warn!(
+                                target: "js",
+                                "text in a component's children is not shown: text shows in a <Text> (`<Text>{text}</Text>`)"
+                            );
+                        }
                     }
                     Placement::Nested(nested, anchor) => {
                         let anchor = self.anchor_node(anchor);
@@ -2302,12 +2393,15 @@ impl<M: TextEngine> Core<M> {
             RustCall::Task(start) => match caught(start) {
                 Ok(future) => {
                     let executor = Rc::downgrade(&self.components.executor);
+                    let pending =
+                        crate::element::quit::Pending::new(&self.components.executor.calls);
                     // A task of the root: it never goes away.
                     crate::element::task::spawn_raw(
                         &self.components.executor,
                         ROOT_ID,
                         Box::pin(async move {
                             let result = crate::element::module::catching(future).await;
+                            drop(pending);
                             match executor.upgrade() {
                                 Some(executor) if call != 0 => {
                                     executor.act(Action::Return(call, result));
@@ -3974,6 +4068,9 @@ impl<M: TextEngine> Core<M> {
         // follow each other as they did, and are then found without a
         // search of all the old ones for each.
         let mut after_kept = 0;
+        // The keyed old elements by key, for the rows and elements not
+        // where they were (a reversed list: each would search them all).
+        let mut keys = OldKeys::default();
         for child in new {
             let (owner, el) = match child {
                 NewChild::Made(owner, el) => (owner, el),
@@ -3986,7 +4083,7 @@ impl<M: TextEngine> Core<M> {
                     let at = if old.get(after_kept).is_some_and(is) {
                         Some(after_kept)
                     } else {
-                        old.iter().position(is)
+                        keys.find(&old, &key, |_| true)
                     };
                     match at.and_then(|at| {
                         after_kept = at + 1;
@@ -4008,6 +4105,7 @@ impl<M: TextEngine> Core<M> {
                     &mut out,
                     &mut placeholder,
                     &mut cursor,
+                    &mut keys,
                 );
             };
             match owner {
@@ -4051,6 +4149,7 @@ impl<M: TextEngine> Core<M> {
         out: &mut Vec<Expanded>,
         placeholder: &mut Option<usize>,
         cursor: &mut usize,
+        keys: &mut OldKeys,
     ) {
         // A slot a view fills: placed as it is (`Filled`), or in a node of
         // this view's own when the view gives it anything, which lays its
@@ -4214,10 +4313,7 @@ impl<M: TextEngine> Core<M> {
                 let component = matches!(part, Part::Component(_));
                 let matches = |o: &Expanded| !component && o.tag == el.tag && o.part == part;
                 let at = match &el.key {
-                    Some(k) => old.iter().position(|o| {
-                        o.as_ref()
-                            .is_some_and(|o| o.key.as_ref() == Some(k) && matches(o))
-                    }),
+                    Some(k) => keys.find(old, k, matches),
                     None => {
                         let at = old[(*cursor).min(old.len())..]
                             .iter()
@@ -8317,9 +8413,27 @@ impl<M: TextEngine> Core<M> {
         safe
     }
 
+    /// Whether `key` or a view around it already stands clear of the
+    /// software keyboard (`Prop::ClearsKeyboard`, a bottom sheet the
+    /// keyboard lifts): the keyboard takes nothing more from it.
+    fn clears_keyboard(&self, key: super::Key) -> bool {
+        let mut key = key;
+        loop {
+            let node = &self.nodes[key as usize];
+            if node.clears_keyboard {
+                return true;
+            }
+            if node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
+    }
+
     /// What `env` (a node's `env()` terms) comes to for `key` now: the
     /// insets of the root view it renders in ([`Self::insets_of`]) and the
-    /// software keyboard's height.
+    /// software keyboard's height, 0 where a view around it stands clear
+    /// of the keyboard already ([`Self::clears_keyboard`]).
     pub(super) fn env_insets(
         &self,
         key: super::Key,
@@ -8332,6 +8446,9 @@ impl<M: TextEngine> Core<M> {
                 return Points::ZERO;
             };
             if var == EnvVar::KeyboardInsetHeight {
+                if self.clears_keyboard(key) {
+                    return Points::ZERO;
+                }
                 return self
                     .components
                     .environment

@@ -83,7 +83,9 @@ rustc-hash.workspace = true
 tiny-skia.workspace = true
 fontdb.workspace = true
 serde_json.workspace = true
-ttf-parser.workspace = true
+# San Francisco (macOS's UI font) varies each glyph by more tuples than
+# ttf-parser keeps on the stack: without the heap its outlines are not read.
+ttf-parser = { workspace = true, features = ["gvar-alloc"] }
 unicode-bidi.workspace = true
 unicode-linebreak.workspace = true
 anyhow.workspace = true

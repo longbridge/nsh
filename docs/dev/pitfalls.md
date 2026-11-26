@@ -151,6 +151,9 @@ Things that were found the hard way. Read the section of the area you change bef
   become the first responder and take typed text. Without it a hidden input (the `Editor`'s sink at its caret) takes
   the touches of whatever lies under it. A JS responder that blocks also cancels the `PressRecognizer`s of the views
   around it (`set_js_responder`): they keep tracking a finger a descendant took, and its lift was a press on them.
+- **UIKit repeats a held Delete only while the input has text** (`hasText`) before its caret: in an empty input the
+  keyboard deletes once. A sink (no caret and transparent text, `is_sink`: an editor's, which holds the text itself)
+  answers `hasText` YES whatever it holds, and the `RichEditor` keeps the text before its caret in its sink.
 
 - **Retained navigation tabs hide the stack's container or an ancestor, not the navigation controller's view**:
   check the entire ancestor chain before a stack updates a shared system tab bar, including from transition
@@ -242,6 +245,10 @@ Things that were found the hard way. Read the section of the area you change bef
   range the text never had (`NSMutableRLEArray` out of bounds). Inserting other text from the delegate during that
   paste crashes the same way. An input with `maxLength` therefore pastes by itself (`input::paste_text`): it clips the
   text, asks the delegate and calls `insertText:`, whose undo is right.
+- **An input method's marked range and caret are drawn in the input's tint whatever its colors**: an editor's sink
+  (transparent text, `caret={false}`, whose `caretRectForPosition:` is empty) showed UIKit's blue marked range and
+  caret at the editor's caret while composing pinyin. An input that draws no caret and no text is tinted clear
+  (`input.rs`, `is_sink`); an app's `caret={false}` input with visible text keeps its tint for the selection.
 - **UIKit passes nil where `UITextInput` declares a position or range nonnull** (a secondary click on selectable text
   with nothing selected moves a nil position): a method a class defines with `define_class!` takes these as `Option`,
   since a `&T` is a null reference then and objc2's debug-build nil check on messaging it aborts the app.
@@ -1046,6 +1053,11 @@ Things that were found the hard way. Read the section of the area you change bef
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of
   22 emoji was laid out 88 px too wide. Emoji clusters are measured in the DOM (`text.rs`, `emoji_excess`).
+- **Canvas `measureText` hints a font at a pixel ratio of 1, the DOM at the screen's**: a hinted font rounds its
+  advances to device pixels, so at 1.25 or 1.5 the DOM draws it narrower or wider than canvas measures it. NSimSun,
+  Chrome's `monospace` and its fallback for Han on Chinese Windows, measures 7 px per character at 13px and draws 6.5
+  at DPR 1.5 (Chrome 158 on Windows, `--force-device-scale-factor`), so runs of code stood up to 9 px apart. Canvas measures at
+  the font size times the ratio and scales back (`measureWidth` in `nsh.js`), which gives the DOM's width.
 - **A field paints an input method's marks on its composing text whatever its colors**: an editor's sink (transparent
   text, no caret, 1 px wide) showed a bar at the caret while composing (Chrome 156, `Input.imeSetComposition`). A
   field that shows nothing is `opacity: 0` (`encode/input.rs`, `shows_nothing`); it keeps the focus and the input

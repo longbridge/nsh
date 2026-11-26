@@ -147,7 +147,7 @@ pub struct Renderer {
 /// instance alone takes some 200 ms to open (Direct3D 12's: a few). Then
 /// every backend at once, as before, for a machine whose only Direct3D 12
 /// adapter is the software one ([`takes`]).
-fn backend_order() -> Vec<wgpu::Backends> {
+pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(all(target_os = "linux", not(target_os = "android"))) {
         vec![wgpu::Backends::GL, wgpu::Backends::PRIMARY]
     } else if cfg!(windows) {
@@ -165,7 +165,7 @@ fn backend_order() -> Vec<wgpu::Backends> {
 /// adapter on Haswell's integrated GPUs and in many virtual machines) only
 /// from the last entry, which offers every backend, so that a hardware
 /// adapter of another one sorts ahead of it.
-fn takes(device_type: wgpu::DeviceType, last_entry: bool) -> bool {
+pub(crate) fn takes(device_type: wgpu::DeviceType, last_entry: bool) -> bool {
     last_entry || !cfg!(windows) || device_type != wgpu::DeviceType::Cpu
 }
 

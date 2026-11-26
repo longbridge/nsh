@@ -2450,26 +2450,22 @@ impl Headless {
     }
 
     /// The step `clear(<selector>)`: empties the input `selector` names, as
-    /// selecting all and deleting does: one `onKeyPress` of `Backspace` and
-    /// an edit to nothing.
+    /// the native drivers do: Select All, then Backspace, both through the
+    /// keyboard. A plain input's whole text goes in one `onKeyPress` of
+    /// `Backspace` and an edit to nothing; a view that keeps its own
+    /// selection (`Editor`) selects and deletes its whole document through
+    /// its bindings of those keys, not just what its keyboard sink holds.
     pub fn clear(&mut self, selector: &str) -> Result<(), String> {
         let id = self.input_step(selector, format!("clear({selector})"))?;
         self.input_with(InputModality::Keyboard);
-        self.key_press(id, "Backspace");
-        if let Some(input) = self.screen.input_mut(id)
-            && !input.text.is_empty()
-        {
-            input.text.clear();
-            input.selected_all = false;
-            input.count += 1;
-            let payload = EventPayload::Text {
-                text: String::new(),
-                count: input.count,
-            };
-            self.engine
-                .control()
-                .dispatch_event(id, EventKind::ChangeText, payload);
-            self.report_selection(id);
+        // Each key on the screen as the last left it: the focus' own
+        // bindings (an `Editor`'s) are mounted once the focus settles.
+        for key in ["mod+a", "backspace"] {
+            self.settle();
+            if self.screen.focused() != Some(id) {
+                break;
+            }
+            self.send_key(key)?;
         }
         self.done()
     }
@@ -2673,6 +2669,9 @@ impl Headless {
                 pressure: nsh_core::TouchPoint::default_pressure(phase, true),
                 tilt_x: 0.0,
                 tilt_y: 0.0,
+                coalesced: Vec::new(),
+                eraser: false,
+                barrel: false,
             }],
             modifiers: self.held,
             activated: None,
@@ -2745,6 +2744,15 @@ impl Headless {
         if !input.config.select_text_on_focus {
             return;
         }
+        self.select_all(id);
+    }
+
+    /// Input `id`'s whole text is selected (Select All, or `selectTextOnFocus`),
+    /// reported as the platforms report a selection.
+    pub(crate) fn select_all(&mut self, id: NodeId) {
+        let Some(input) = self.screen.input_mut(id) else {
+            return;
+        };
         input.selected_all = true;
         let end = input.text.encode_utf16().count() as f64;
         self.send(

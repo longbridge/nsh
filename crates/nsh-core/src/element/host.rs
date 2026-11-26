@@ -244,6 +244,13 @@ host_element! {
 }
 
 host_element! {
+    /// A view whose box a renderer of the app's own draws with the GPU,
+    /// under its children (`<gpuview>`, TS: `gpuView` of `nsh`), made by
+    /// [`gpu_view`] ([`crate::gpu`]).
+    GpuView
+}
+
+host_element! {
     /// Its children on top of the root view it is in (`<overlay>`, TS:
     /// `Overlay` of `nsh`), made by [`overlay`]: the surface, or the dialog
     /// around it; outside its parent's layout and clipping, while it stays
@@ -253,6 +260,7 @@ host_element! {
 
 impl ParentElement for Overlay {}
 impl ParentElement for ShaderView {}
+impl ParentElement for GpuView {}
 impl ParentElement for Scroll {}
 impl ParentElement for Stack {}
 impl ParentElement for Screen {}
@@ -690,6 +698,14 @@ pub fn video(url: impl IntoReactive<String>) -> Video {
     Video(ElNode::new(Tag::Video)).bind_prop(url, |url: String| {
         Prop::Native(NativeProp::Source(WebSource::Uri(url.into())))
     })
+}
+
+/// A view whose box a renderer of the app's own draws with the GPU, under
+/// its children: give it the renderer with `nsh-gpu`'s `GpuViewExt::renderer`
+/// (or one a UI set registered, [`GpuView::renderer_named`]) and its props
+/// with [`GpuView::prop`]. Without a renderer it draws nothing of its own.
+pub fn gpu_view() -> GpuView {
+    GpuView(ElNode::new(Tag::GpuView))
 }
 
 /// The embedder's native component registered as `name`.
@@ -1826,6 +1842,14 @@ impl WebView {
 }
 
 impl Video {
+    /// An image (a URL or `asset:/` URI) shown while the video loads,
+    /// until its first frame is ready.
+    pub fn poster(self, url: impl IntoReactive<String>) -> Self {
+        self.bind_prop(url, |url: String| {
+            Prop::Native(NativeProp::Poster(Some(url.into())))
+        })
+    }
+
     /// Paused.
     pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
         self.bind_prop(paused, |paused: bool| {
@@ -1943,6 +1967,53 @@ impl NativeView {
     }
 
     /// It emitted an event.
+    pub fn on_native_event<M>(self, listener: impl IntoListener<NativeEvent, M>) -> Self {
+        self.listen(
+            EventKind::NativeEvent,
+            listener.into_listener(),
+            events::native,
+        )
+    }
+}
+
+impl GpuView {
+    /// Its renderer (`nsh-gpu` makes the source: `GpuViewExt::renderer`).
+    pub fn source(self, source: crate::gpu::GpuSource) -> Self {
+        self.set(Prop::GpuRenderer(Some(source)))
+    }
+
+    /// The renderer a UI set registered as `name`
+    /// ([`super::Registry::gpu_renderer_source`]), as TSX's `gpuView(name)`
+    /// names it.
+    pub fn renderer_named(self, name: &str) -> Self {
+        self.set(Prop::Component(name.into()))
+    }
+
+    /// Its renderer's prop `name` (any JSON value), handed to the renderer
+    /// before its next frame; a bound one is handed again when it changes.
+    pub fn prop(self, name: &str, value: impl IntoReactive<JsonValue>) -> Self {
+        let name: Arc<str> = name.into();
+        self.bind_prop(value, move |value| {
+            Prop::ComponentProp(name.clone(), Some(value))
+        })
+    }
+
+    /// Binds its renderer's prop `name` to an animated value: the platform
+    /// hands the renderer the value (a number or a color) on every frame it
+    /// changes, with no engine work per frame. A value set with
+    /// [`Self::prop`] under that name waits until the binding goes.
+    pub fn bind_animated_prop(mut self, name: &str, value: &impl super::Animated) -> Self {
+        if let Some(node) = value.animated_node().live() {
+            set(
+                &mut self.0,
+                Prop::ComponentPropBinding(name.into(), Some(node.id())),
+            );
+            self.0.attrs.rare_mut().bound.push(node);
+        }
+        self
+    }
+
+    /// Its renderer emitted an event.
     pub fn on_native_event<M>(self, listener: impl IntoListener<NativeEvent, M>) -> Self {
         self.listen(
             EventKind::NativeEvent,

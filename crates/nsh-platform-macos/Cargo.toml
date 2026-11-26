@@ -94,6 +94,8 @@ nsh-testing = { workspace = true, features = ["agent"], optional = true }
 [dev-dependencies]
 # Exercise standalone engine replacement through a real development session.
 nsh-dev = { workspace = true, features = ["server"] }
+# A GPU view's renderer (`tests/native/gpu_view.rs`).
+nsh-gpu.workspace = true
 
 [[test]]
 name = "accessibility"
@@ -105,4 +107,8 @@ harness = false
 
 [[test]]
 name = "draw_on_show"
+harness = false
+
+[[test]]
+name = "live_resize_text"
 harness = false

@@ -132,6 +132,15 @@ mod mac {
                 .unwrap_or(NSSize::new(NO_LIMIT, NO_LIMIT));
             w.setContentMaxSize(s);
         });
+        // Content width / height kept through the user's resizes; AppKit
+        // holds a ratio or resize increments, the later set winning, so
+        // increments of one point clear it.
+        on(&a.aspect_ratio, |r| match r {
+            Some(r) if r.is_finite() && r > 0.0 => {
+                w.setContentAspectRatio(NSSize::new(f64::from(r), 1.0))
+            }
+            _ => w.setContentResizeIncrements(NSSize::new(1.0, 1.0)),
+        });
     }
 
     /// Its frame drawn dark or light (`None`: the system's).

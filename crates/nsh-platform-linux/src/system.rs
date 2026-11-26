@@ -505,6 +505,11 @@ pub(crate) fn environment_applied(surface: &Surface) {
     root.add_css_class(add);
     // The app's windows of its own follow it.
     crate::window::schemes_applied(surface);
+    if let Some((start, end)) = crate::chrome::window_controls(surface) {
+        let dark = crate::window::main_dark(surface);
+        crate::window::controls_scheme(&start, dark);
+        crate::window::controls_scheme(&end, dark);
+    }
     // The menu bar's menus are outside the root.
     if let Some(slot) = crate::chrome::menu_bar_slot(surface) {
         slot.remove_css_class(remove);
@@ -960,7 +965,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         // The app's address: this platform keeps none.
         | Command::SetAppUrl(_)
         | Command::PushAppUrl(_) => {}
-        other => log::debug!("linux: command {other:?} is not supported"),
+        other => nsh_core::platform::warn_unsupported("linux", &other),
     }
 }
 
@@ -1568,7 +1573,7 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
 
 /// `Clipboard.write`: `text` and `html` offered together, the HTML as
 /// `text/html` and the text in GDK's text formats.
-fn set_clipboard_html(text: &str, html: &str) {
+pub(crate) fn set_clipboard_html(text: &str, html: &str) {
     let Some(display) = gdk::Display::default() else {
         return;
     };

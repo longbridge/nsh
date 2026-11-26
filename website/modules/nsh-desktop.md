@@ -200,6 +200,7 @@ Each platform shows a kind as its own windows of that role: an `NSPanel` on macO
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`: the system's title bar, or a title bar of the app's own ([below](#a-title-bar-of-your-own)). `controlsOffset` (`{ x, y }`) places macOS's traffic lights in a hidden title bar. |
 | | `frame` | `"default"`, or `"none"`: no title bar or border, the app draws everything. |
 | Size | `minSize`, `maxSize` | The least and largest content size the user may give it, `{ width, height }` in points; `null` clears it. |
+| | `aspectRatio` | The shape the user's resizes keep the content at: width divided by height (`16 / 9`), so a video or a canvas fills the window as the user drags an edge or a corner. `null` clears it. It limits only the user's resizes: `setBounds`, `sizeToContent` and maximizing do not keep it, and the window keeps its current size until the user resizes it. Windows and macOS keep it (in GPUI apps, macOS only); Linux does not yet ([below](#aspect-ratio)). |
 | | `sizeToContent` | `true`, `"width"` or `"height"`: the window follows its content's laid-out size, natively, without JS on the path. |
 | Behavior | `resizable`, `movable`, `minimizable`, `maximizable`, `closable` | What the user may do with it. The app's requests are not limited by them. |
 | | `focusable` | It takes the keyboard focus. |
@@ -217,6 +218,22 @@ Each platform shows a kind as its own windows of that role: an `NSPanel` on macO
 
 An attribute a platform's windows do not have is kept and has no effect there: the window manager on Linux places and stacks windows itself, so positions, levels and `taskbar` are its.
 
+### Aspect ratio
+
+`aspectRatio` holds the content, not the frame, at its ratio: the title bar and borders come on top. A video player sets the video's ratio once it knows it:
+
+```tsx
+<Window id="player" aspectRatio={video.width / video.height} minSize={{ width: 320, height: 180 }}>
+```
+
+| Platform | What the user sees |
+|---|---|
+| macOS | AppKit's `contentAspectRatio`: every edge and corner keeps the ratio as the user drags. |
+| Windows | The drag's rectangle is fixed in `WM_SIZING`: a side edge sets the height from the width, the top or bottom edge sets the width from the height, a corner follows its width. The edge the user holds stays under the pointer. `minSize` and `maxSize` still apply; a ratio they cannot meet gives way to them. |
+| Linux | No effect yet. GTK 4 has no call for it; Wayland has no aspect ratio for a resize at all (the compositor picks the size), and on X11 GDK 4 rewrites the whole `WM_NORMAL_HINTS` property, without an aspect field, each time it lays the window out, which includes every step of a drag, so a ratio set beside it would vanish while the user resizes. Draw the content letterboxed, or correct the size in `onBoundsChange` if you must. |
+| GPUI apps (Windows, Linux) | No effect: GPUI owns the window's resize loop. |
+| iOS, Android, Web, terminal | No windows: no effect. |
+
 ### currentWindow
 
 ```ts
@@ -230,7 +247,7 @@ function focusedWindow(): WindowRef | null;
 ```tsx
 function SaveButton() {
   const win = currentWindow(); // while rendering
-  return <Button onPress={() => save().then(() => win.close())}>Save</Button>;
+  return <Button onPress={() => save().then(() => win.close())}><Text>Save</Text></Button>;
 }
 ```
 

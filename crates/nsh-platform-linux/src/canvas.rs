@@ -194,6 +194,7 @@ pub(crate) fn reveal() {
         shown
     });
     for view in shown {
+        log::debug!("canvas {:?}: in sight, drawn", view.state().id);
         if let Some(c) = view.state().canvas.as_ref() {
             c.hidden.set(false);
         }
@@ -504,9 +505,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, view: &NshView, state: &ViewState, 
     );
     if let Some(pan) = canvas.pan {
         if !in_sight(view) {
-            if !canvas.hidden.replace(true) {
-                HIDDEN.with(|h| h.borrow_mut().push(view.downgrade()));
-            }
+            hide(view, canvas);
             return;
         }
         let started = crate::fps::measuring().then(nsh_core::time::Instant::now);
@@ -533,8 +532,11 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, view: &NshView, state: &ViewState, 
         .as_ref()
         .is_some_and(|r| r.scale == scale && r.surface.width() == pw && r.surface.height() == ph);
     if (!fits || canvas.dirty.get() != Damage::None) && !in_sight(view) {
-        if !canvas.hidden.replace(true) {
-            HIDDEN.with(|h| h.borrow_mut().push(view.downgrade()));
+        hide(view, canvas);
+        // What it showed until now stays: a canvas misjudged out of sight
+        // for a frame shows its last pixels, not nothing, until revealed.
+        if let Some(raster) = &*raster {
+            append_tiles(snapshot, raster);
         }
         return;
     }
@@ -566,11 +568,37 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, view: &NshView, state: &ViewState, 
         }
     }
     if let Some(raster) = &*raster {
-        let s = scale as f32;
-        for (texture, area) in raster.tiles.iter().zip(tiles((pw, ph))) {
-            let [x, y, w, h] = area.map(|v| v as f32 / s);
-            snapshot.append_texture(texture, &graphene::Rect::new(x, y, w, h));
-        }
+        append_tiles(snapshot, raster);
+    }
+}
+
+/// Appends `raster`'s tiles at the size it was drawn at.
+fn append_tiles(snapshot: &gtk::Snapshot, raster: &Raster) {
+    let s = raster.scale as f32;
+    let size = (raster.surface.width(), raster.surface.height());
+    for (texture, area) in raster.tiles.iter().zip(tiles(size)) {
+        let [x, y, w, h] = area.map(|v| v as f32 / s);
+        snapshot.append_texture(texture, &graphene::Rect::new(x, y, w, h));
+    }
+}
+
+/// Puts canvas `view`, out of sight with something to draw, in [`HIDDEN`]
+/// and asks its window for a frame: [`reveal`] runs only in a frame's
+/// layout, and an idle window starts none, so a canvas judged out of sight
+/// in the last frame of a change (a selection re-tinting an icon) would
+/// otherwise wait for whatever moves next.
+fn hide(view: &NshView, canvas: &CanvasState) {
+    if canvas.hidden.replace(true) {
+        return;
+    }
+    log::debug!(
+        "canvas {:?}: out of sight at {:?}, drawn when it shows",
+        view.state().id,
+        view.state().frame
+    );
+    HIDDEN.with(|h| h.borrow_mut().push(view.downgrade()));
+    if let Some(clock) = view.frame_clock() {
+        clock.request_phase(gdk::FrameClockPhase::LAYOUT);
     }
 }
 
@@ -3014,5 +3042,93 @@ mod tests {
             s.data().map(|d| d.to_vec()).unwrap()
         };
         assert!(pixels(target) == pixels(surface(at)));
+    }
+
+    /// A square filled with `color`, the size of a 40-point canvas.
+    fn square(color: u32) -> Arc<Drawing> {
+        Arc::new(Drawing {
+            ops: vec![
+                CanvasOp::FillStyle(Paint::Color(Color(color))),
+                CanvasOp::FillRect([
+                    Num::Const(0.0),
+                    Num::Const(0.0),
+                    Num::Const(40.0),
+                    Num::Const(40.0),
+                ]),
+            ],
+            ..Drawing::default()
+        })
+    }
+
+    #[test]
+    fn a_canvas_redrawn_out_of_sight_keeps_its_pixels_and_shows_the_new_ones_once_in_sight() {
+        use nsh_core::{MountItem, ROOT_ID, ViewKind};
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            surface.root.state_mut().frame = crate::gtk_test::frame(0.0, 0.0, 200.0, 200.0);
+            let id = 9007;
+            crate::gtk_test::apply(
+                &surface,
+                &[
+                    MountItem::Create {
+                        id,
+                        kind: ViewKind::Canvas,
+                    },
+                    MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                    MountItem::Frame {
+                        id,
+                        frame: crate::gtk_test::frame(10.0, 10.0, 40.0, 40.0),
+                    },
+                ],
+            );
+            let view = crate::gtk_test::view(&surface, id);
+            let _window = crate::gtk_test::show(&surface);
+            assert!(crate::gtk_test::wait_until(
+                || view.is_mapped() && view.width() > 0
+            ));
+            crate::canvas::set(&surface, &view, square(0xff0000ff));
+            let painted = |view: &NshView| {
+                let snapshot = gtk::Snapshot::new();
+                draw(&snapshot, view, &view.state(), 1.0);
+                snapshot.to_node().is_some()
+            };
+            assert!(painted(&view));
+            assert!(
+                view.state()
+                    .canvas
+                    .as_ref()
+                    .unwrap()
+                    .raster
+                    .borrow()
+                    .is_some()
+            );
+            // Moved out of the window and re-tinted: not drawn, but what it
+            // showed stays (no blank frame while misjudged out of sight).
+            crate::gtk_test::apply(
+                &surface,
+                &[MountItem::Frame {
+                    id,
+                    frame: crate::gtk_test::frame(500.0, 10.0, 40.0, 40.0),
+                }],
+            );
+            assert!(crate::gtk_test::wait_until(|| !in_sight(&view)));
+            crate::canvas::set(&surface, &view, square(0x00ff00ff));
+            assert!(painted(&view), "the last pixels are kept");
+            let hidden = |view: &NshView| view.state().canvas.as_ref().unwrap().hidden.get();
+            assert!(hidden(&view));
+            // Back in sight: a later frame draws the new drawing.
+            crate::gtk_test::apply(
+                &surface,
+                &[MountItem::Frame {
+                    id,
+                    frame: crate::gtk_test::frame(10.0, 10.0, 40.0, 40.0),
+                }],
+            );
+            assert!(crate::gtk_test::wait_until(|| !hidden(&view)));
+        });
     }
 }

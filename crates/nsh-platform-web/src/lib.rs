@@ -678,8 +678,10 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.audio = env.audio;
         e.shaders = env.shaders;
         app.control.set_environment(app.environment);
-        // The DOM draws emoji as wide as the pixel ratio makes them.
-        if rescaled && app.text.emoji_measured() {
+        // Text is measured as the DOM draws it at the pixel ratio
+        // (`measureWidth` in `nsh.js`): a hinted font's widths and emoji
+        // change with it.
+        if rescaled {
             app.text.clear_caches();
             app.control.fonts_changed();
         }
@@ -1611,7 +1613,8 @@ pub unsafe extern "C" fn nsh_canvas_image(
 }
 
 /// Touches, as JSON `{ phase, time, points: [{ id, target, path, pageX,
-/// pageY, x, y, changed, pointerType, pressure, tiltX, tiltY }] }` (`phase`: 0 start, 1 move, 2 end, 3
+/// pageY, x, y, changed, pointerType, pressure, tiltX, tiltY, eraser, barrel, coalesced: [{
+/// pageX, pageY, pressure, tiltX, tiltY, time }] }] }` (`phase`: 0 start, 1 move, 2 end, 3
 /// cancel).
 ///
 /// # Safety
@@ -1637,38 +1640,60 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
         .map(|points| {
             points
                 .iter()
-                .map(|p| nsh_core::TouchPoint {
-                    id: f(p, "id") as u32,
-                    target: f(p, "target") as u32,
-                    path: p
-                        .get("path")
-                        .and_then(|p| p.as_array())
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_u64())
-                                .map(|v| v as u32)
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    page: point(Points(f(p, "pageX") as f32), Points(f(p, "pageY") as f32)),
-                    location: point(Points(f(p, "x") as f32), Points(f(p, "y") as f32)),
-                    changed: p.get("changed").and_then(|v| v.as_bool()).unwrap_or(true),
-                    pointer_type: p
-                        .get("pointerType")
-                        .and_then(|v| v.as_str())
-                        .and_then(nsh_core::PointerType::from_name)
-                        .unwrap_or(nsh_core::PointerType::Touch),
-                    pressure: p.get("pressure").and_then(|v| v.as_f64()).map_or_else(
-                        || {
-                            nsh_core::TouchPoint::default_pressure(
-                                phase,
-                                p.get("changed").and_then(|v| v.as_bool()).unwrap_or(true),
-                            )
-                        },
-                        |v| v.clamp(0.0, 1.0) as f32,
-                    ),
-                    tilt_x: f(p, "tiltX") as f32,
-                    tilt_y: f(p, "tiltY") as f32,
+                .map(|p| {
+                    let mut touch = nsh_core::TouchPoint {
+                        id: f(p, "id") as u32,
+                        target: f(p, "target") as u32,
+                        path: p
+                            .get("path")
+                            .and_then(|p| p.as_array())
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|v| v.as_u64())
+                                    .map(|v| v as u32)
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        page: point(Points(f(p, "pageX") as f32), Points(f(p, "pageY") as f32)),
+                        location: point(Points(f(p, "x") as f32), Points(f(p, "y") as f32)),
+                        changed: p.get("changed").and_then(|v| v.as_bool()).unwrap_or(true),
+                        pointer_type: p
+                            .get("pointerType")
+                            .and_then(|v| v.as_str())
+                            .and_then(nsh_core::PointerType::from_name)
+                            .unwrap_or(nsh_core::PointerType::Touch),
+                        pressure: p.get("pressure").and_then(|v| v.as_f64()).map_or_else(
+                            || {
+                                nsh_core::TouchPoint::default_pressure(
+                                    phase,
+                                    p.get("changed").and_then(|v| v.as_bool()).unwrap_or(true),
+                                )
+                            },
+                            |v| v.clamp(0.0, 1.0) as f32,
+                        ),
+                        tilt_x: f(p, "tiltX") as f32,
+                        tilt_y: f(p, "tiltY") as f32,
+                        coalesced: Vec::new(),
+                        eraser: p.get("eraser").and_then(|v| v.as_bool()).unwrap_or(false),
+                        barrel: p.get("barrel").and_then(|v| v.as_bool()).unwrap_or(false),
+                    };
+                    for c in p
+                        .get("coalesced")
+                        .and_then(|c| c.as_array())
+                        .into_iter()
+                        .flatten()
+                    {
+                        touch.push_coalesced(
+                            point(Points(f(c, "pageX") as f32), Points(f(c, "pageY") as f32)),
+                            c.get("pressure")
+                                .and_then(|v| v.as_f64())
+                                .map_or(touch.pressure, |v| v.clamp(0.0, 1.0) as f32),
+                            f(c, "tiltX") as f32,
+                            f(c, "tiltY") as f32,
+                            f(c, "time"),
+                        );
+                    }
+                    touch
                 })
                 .collect()
         })

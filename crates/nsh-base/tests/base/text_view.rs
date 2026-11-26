@@ -576,20 +576,64 @@ fn WideCustomImages() -> impl IntoElement {
                  Text ![Inline](https://example.com/c.png) after\n\n\
                  | A | B |\n|---|---|\n| ![Cell](https://example.com/f.png) | x |",
             )
-            .render_image(|image: &nsh_base::text_view::Image| {
-                if image.alt == "Inline" {
-                    view().test_id("card:Inline").w(px(20.0)).h(px(10.0))
-                } else if image.alt == "Full" {
-                    view().test_id("card:Full").w_full().h(px(40.0))
-                } else if image.alt == "Cell" {
-                    view().test_id("card:Cell").w(px(60.0)).h(px(20.0))
-                } else if image.alt == "Small" {
-                    view().test_id("card:Small").w(px(100.0)).h(px(40.0))
-                } else {
-                    wide_card(image)
-                }
-            }),
+            .render_image(
+                |InContext(image, _): &InContext<
+                    nsh_base::text_view::Image,
+                    nsh_base::TextViewImageContext,
+                >| {
+                    if image.alt == "Inline" {
+                        view().test_id("card:Inline").w(px(20.0)).h(px(10.0))
+                    } else if image.alt == "Full" {
+                        view().test_id("card:Full").w_full().h(px(40.0))
+                    } else if image.alt == "Cell" {
+                        view().test_id("card:Cell").w(px(60.0)).h(px(20.0))
+                    } else if image.alt == "Small" {
+                        view().test_id("card:Small").w(px(100.0)).h(px(40.0))
+                    } else {
+                        wide_card(image)
+                    }
+                },
+            ),
     )
+}
+
+/// The same image alone and in a link: the app's `renderImage` tells
+/// them apart by the link beside the image.
+#[component]
+fn LinkedCustomImages() -> impl IntoElement {
+    text_view()
+        .markdown(
+            "Alone: ![badge](https://example.com/badge.svg)\n\n\
+             In a link: [![badge](https://example.com/badge.svg)](https://example.com/run \"Run\")",
+        )
+        .render_image(
+            |InContext(image, context): &InContext<
+                nsh_base::text_view::Image,
+                nsh_base::TextViewImageContext,
+            >| {
+                let id = match &context.link {
+                    Some(link) => format!(
+                        "image:{} in {} ({})",
+                        image.alt,
+                        link.url,
+                        link.title.as_deref().unwrap_or("")
+                    ),
+                    None => format!("image:{}", image.alt),
+                };
+                view().test_id(&id).w(px(20.0)).h(px(20.0))
+            },
+        )
+}
+
+#[test]
+fn an_apps_image_in_a_link_gets_the_link() {
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        LinkedCustomImages,
+    >()))
+    .unwrap();
+    app.wait_for("id:image:badge").unwrap();
+    app.wait_for("id:image:badge in https://example.com/run (Run)")
+        .unwrap();
 }
 
 /// A wide image of the document's own, on its own.
@@ -1572,8 +1616,13 @@ fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
         .find_map(|t| t.strip_prefix("Selected: "))
         .unwrap_or_default()
         .to_owned();
+    // Whole list items copy with their markers (#3284); markers never
+    // leak as tabs or mid-line fragments.
+    assert!(!sel.contains('\t'), "got {sel:?}");
     assert!(
-        !sel.contains('•') && !sel.contains('◦') && !sel.contains('\t'),
+        sel.lines().all(|l| !(l.contains('•') || l.contains('◦'))
+            || l.starts_with('•')
+            || l.starts_with('◦')),
         "got {sel:?}"
     );
     let md = app
@@ -1843,5 +1892,267 @@ fn a_quotes_typed_part_style_wins_over_its_theme_color() {
             Color(0xff00_00ff),
             "typed: {typed}"
         );
+    }
+}
+
+/// `ParseContext::conversion_id`: one id for every callback of a
+/// conversion, another for each conversion.
+mod conversion_ids {
+    use std::{
+        cell::{Cell, RefCell},
+        collections::{BTreeMap, HashMap, HashSet},
+        rc::Rc,
+        sync::{Arc, Mutex},
+    };
+
+    use nsh_base::{
+        MarkdownExtension, MarkdownPlugin, MarkdownPlugins,
+        text_view::{
+            Block, ConversionId, CustomNode, Inline, ParseContext, Parser, mdast::Node, text_view,
+        },
+    };
+    use nsh_core::prelude::*;
+    use nsh_engine::EngineConfig;
+    use nsh_testing::Headless;
+
+    /// The callbacks a plugin saw: the node's source and the conversion.
+    type Seen = Arc<Mutex<Vec<(String, ConversionId)>>>;
+
+    /// Notes every node offered; reads a quote's blocks itself, and an
+    /// inline code's text with a parser of its own (a conversion inside a
+    /// callback).
+    struct Note(Seen);
+
+    impl Note {
+        fn note(&self, node: &Node, cx: &ParseContext<'_>) {
+            let source = cx.node_source(node).unwrap_or_default().to_owned();
+            self.0.lock().unwrap().push((source, cx.conversion_id()));
+        }
+    }
+
+    impl MarkdownPlugin for Note {
+        fn name(&self) -> &str {
+            "note-conversions"
+        }
+
+        fn block(&self, node: &Node, cx: &mut ParseContext<'_>) -> Option<Block> {
+            self.note(node, cx);
+            let Node::Blockquote(quote) = node else {
+                return None;
+            };
+            let children = cx.blocks(&quote.children);
+            Some(Block::Custom(
+                CustomNode::new("quote").with_children(children),
+            ))
+        }
+
+        fn inline(&self, node: &Node, cx: &mut ParseContext<'_>) -> Option<Inline> {
+            self.note(node, cx);
+            let Node::InlineCode(code) = node else {
+                return None;
+            };
+            let inner = Parser::new()
+                .plugin(Note(self.0.clone()))
+                .markdown(&code.value);
+            Some(Inline::Custom(
+                CustomNode::new("nested").with_children(inner.blocks),
+            ))
+        }
+    }
+
+    const SOURCE: &str = "Intro **bold**[^a].\n\n:::note\n\nInside *it*.\n\n:::\n\n> Quoted _text_.\n\n- An item\n\n[^a]: A *footnote*.\n";
+
+    fn parser(seen: &Seen) -> Parser {
+        Parser::new()
+            .extension(MarkdownExtension::container("note", "note"))
+            .plugin(Note(seen.clone()))
+    }
+
+    /// The ids of `seen`, each with the sources it saw, in order.
+    fn by_id(seen: &Seen) -> BTreeMap<String, Vec<String>> {
+        let mut out = BTreeMap::<String, Vec<String>>::new();
+        for (source, id) in seen.lock().unwrap().iter() {
+            out.entry(format!("{id:?}"))
+                .or_default()
+                .push(source.clone());
+        }
+        out
+    }
+
+    #[test]
+    fn every_callback_of_a_conversion_has_its_id() {
+        let seen = Seen::default();
+        parser(&seen).markdown(SOURCE);
+        let seen = seen.lock().unwrap();
+        let first = seen[0].1;
+        assert!(seen.iter().all(|(_, id)| *id == first), "{seen:#?}");
+        // Inside a container, in a quote's blocks the plugin read, in a
+        // footnote.
+        for part in ["*it*", "_text_", "*footnote*", "An item"] {
+            assert!(seen.iter().any(|(s, _)| s == part), "{part}: {seen:#?}");
+        }
+    }
+
+    #[test]
+    fn each_conversion_has_an_id_of_its_own() {
+        let seen = Seen::default();
+        let parser = parser(&seen);
+        // The same source, at the same address.
+        parser.markdown(SOURCE);
+        let count = seen.lock().unwrap().len();
+        parser.markdown(SOURCE);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2 * count);
+        assert_ne!(seen[0].1, seen[count].1);
+        assert!(seen[..count].iter().all(|(_, id)| *id == seen[0].1));
+        assert!(seen[count..].iter().all(|(_, id)| *id == seen[count].1));
+    }
+
+    #[test]
+    fn a_conversion_inside_a_callback_has_its_own_id() {
+        let seen = Seen::default();
+        parser(&seen).markdown("Before `**inner**` after *outer*.");
+        let seen = seen.lock().unwrap();
+        let outer = seen[0].1;
+        // The paragraph and the strong text of the inline code's text.
+        let inner: Vec<_> = seen.iter().filter(|(s, _)| s == "**inner**").collect();
+        assert_eq!(inner.len(), 2, "{seen:#?}");
+        assert_ne!(inner[0].1, outer);
+        assert_eq!(inner[0].1, inner[1].1);
+        // The outer conversion goes on with its id.
+        let after = seen.iter().find(|(s, _)| s == "*outer*").unwrap();
+        assert_eq!(after.1, outer);
+    }
+
+    #[test]
+    fn a_long_text_read_in_parts_is_one_conversion() {
+        let seen = Seen::default();
+        // Long enough to be read a part at a time; no container or
+        // definition, which have it read whole.
+        let long = "A paragraph with *emphasis*.\n\n".repeat(4000);
+        Parser::new().plugin(Note(seen.clone())).markdown(&long);
+        let ids = by_id(&seen);
+        assert_eq!(ids.len(), 1);
+        let seen = ids.values().next().unwrap();
+        assert_eq!(seen.iter().filter(|s| *s == "*emphasis*").count(), 4000);
+    }
+
+    /// The plugin of the user docs: abbreviations (`*[HTML]: HyperText
+    /// Markup Language` lines anywhere in the text) worked out once per
+    /// conversion, consulted for every text node.
+    type Terms = Rc<HashMap<String, String>>;
+
+    #[derive(Default)]
+    struct Abbreviations {
+        last: RefCell<Option<(ConversionId, Terms)>>,
+        /// How many times the source was read for them.
+        reads: Rc<Cell<usize>>,
+    }
+
+    impl Abbreviations {
+        fn of(&self, cx: &ParseContext<'_>) -> Terms {
+            let mut last = self.last.borrow_mut();
+            if let Some((id, terms)) = &*last
+                && *id == cx.conversion_id()
+            {
+                return terms.clone();
+            }
+            self.reads.set(self.reads.get() + 1);
+            let terms: Terms = Rc::new(
+                cx.source()
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("*[")?.split_once("]: "))
+                    .map(|(term, title)| (term.to_owned(), title.to_owned()))
+                    .collect(),
+            );
+            *last = Some((cx.conversion_id(), terms.clone()));
+            terms
+        }
+    }
+
+    impl MarkdownPlugin for Abbreviations {
+        fn name(&self) -> &str {
+            "abbreviations"
+        }
+
+        /// The lines that define them are not shown.
+        fn block(&self, node: &Node, cx: &mut ParseContext<'_>) -> Option<Block> {
+            let source = cx.node_source(node)?;
+            (matches!(node, Node::Paragraph(_)) && source.lines().all(|l| l.starts_with("*[")))
+                .then(|| Block::Custom(CustomNode::new("abbreviations")))
+        }
+
+        /// A text that is an abbreviation is one, with its title.
+        fn inline(&self, node: &Node, cx: &mut ParseContext<'_>) -> Option<Inline> {
+            let Node::Text(text) = node else {
+                return None;
+            };
+            let terms = self.of(cx);
+            let title = terms.get(text.value.trim())?;
+            Some(Inline::Custom(
+                CustomNode::new("abbr")
+                    .with_text(text.value.clone())
+                    .with_attribute("title", title.clone()),
+            ))
+        }
+    }
+
+    #[test]
+    fn a_plugin_works_out_the_source_once_per_conversion() {
+        let plugin = Abbreviations::default();
+        let reads = plugin.reads.clone();
+        let parser = Parser::new().plugin(plugin);
+        let source = "*HTML* and *CSS*, then *HTML* again.\n\n- *CSS*\n- *JS*\n\n*[HTML]: HyperText Markup Language\n*[CSS]: Cascading Style Sheets\n";
+        let document = parser.markdown(source);
+        assert_eq!(reads.get(), 1);
+        let abbrs = format!("{document:?}").matches("\"abbr\"").count();
+        assert_eq!(abbrs, 4);
+        // The same text again, and another: read again each time, never
+        // with what an earlier conversion found.
+        parser.markdown(source);
+        assert_eq!(reads.get(), 2);
+        let other = parser.markdown("*HTML*\n\n*[HTML]: Hypertext\n");
+        assert_eq!(reads.get(), 3);
+        assert!(format!("{other:?}").contains("Hypertext"));
+        assert!(!format!("{other:?}").contains("HyperText Markup"));
+    }
+
+    static SHARED: Mutex<Option<Seen>> = Mutex::new(None);
+
+    /// Two views of the same text, given at the same address, sharing a
+    /// plugin.
+    #[component]
+    fn TwoViews() -> impl IntoElement {
+        let seen = SHARED.lock().unwrap().clone().unwrap();
+        provide_context(MarkdownPlugins::new().with(Note(seen)));
+        view()
+            .child(text_view().markdown("Shared *text*."))
+            .child(text_view().markdown("Shared *text*."))
+    }
+
+    #[test]
+    fn views_sharing_a_plugin_read_in_conversions_of_their_own() {
+        let seen = Seen::default();
+        *SHARED.lock().unwrap() = Some(seen.clone());
+        let mut app =
+            Headless::start(EngineConfig::new(nsh_testing::windowed_root::<TwoViews>())).unwrap();
+        app.wait_for("Shared text.").unwrap();
+        // One conversion saw one view's nodes only.
+        let one = {
+            let seen = Seen::default();
+            Parser::new()
+                .plugin(Note(seen.clone()))
+                .markdown("Shared *text*.");
+            seen.lock()
+                .unwrap()
+                .iter()
+                .map(|(s, _)| s.clone())
+                .collect::<Vec<_>>()
+        };
+        let ids = by_id(&seen);
+        assert!(ids.len() >= 2, "{ids:#?}");
+        assert!(ids.values().all(|s| *s == one), "{ids:#?}");
+        let distinct: HashSet<_> = ids.keys().collect();
+        assert_eq!(distinct.len(), ids.len());
     }
 }

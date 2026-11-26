@@ -29,7 +29,7 @@ GStreamer 插件；不支持 `rate`（始终以 1× 播放），`onEnd` 只对�
 在 [Windows](./windows.md) 上，Web 视图是位于子窗口中的 WebView2 控件，跟随它的视图移动：它会被父视图和圆角裁剪，但绘制在它上方的
 NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（Windows 11 自带，Windows 10 上随 Edge 安装），否则显示占位视图；
 不支持 HTML 的 `baseUrl`、`scrollable` 和 `allowsBackForwardNavigationGestures`。视频是普通内容（像其他视图一样被裁剪、
-变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器；`rate` 可用，没有封面图（poster），开启 `controls` 时控制栏始终显示。
+变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器；`rate` 可用，开启 `controls` 时控制栏始终显示。
 
 ## WebView
 
@@ -82,7 +82,7 @@ pub fn App() -> impl IntoElement {
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自己的脚本之前运行。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
-| `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
+| `scrollable` | `boolean` | `true` | 用户可以滚动页面。关闭时页面仍会收到触摸，它自己的拖动处理（滑块、拖拽排序）照常工作，脚本也仍可滚动它。 |
 | `userAgent` | `string` | | 浏览器的 user agent 字符串。 |
 | `incognito` | `boolean` | `false` | 页面的网站数据只与网页视图同存亡，各平台的做法见[下文](#网站数据)。在网页视图创建时读取。 |
 | `zoomable` | `boolean` | `false` | 用户可以双指缩放页面，也可以超出页面 viewport 的缩放限制：Android 上是内置缩放（不显示缩放按钮），iOS 上忽略 viewport 的缩放限制，macOS 上是放大。关闭时保持各平台自己的行为（Android 和 macOS 不缩放，iOS 在 viewport 允许的范围内缩放，Windows 可以缩放）。在网页视图创建时读取。 |
@@ -606,6 +606,7 @@ pub fn player() -> impl IntoElement {
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `src` | `string` | | 视频的 URL。 |
+| `poster` | `string` | | 视频加载时显示的图片，直到第一帧就绪。 |
 | `paused` | `boolean` | `false` | 暂停播放。 |
 | `muted` | `boolean` | `false` | 静音。 |
 | `volume` | `number` | `1` | 0..1。 |

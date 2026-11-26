@@ -24,8 +24,10 @@
 //! rectangles (translations and scales) are GPUI's quads, exact; under a
 //! rotation, skew or perspective they are filled as paths whose points are
 //! mapped one by one ([`DrawCx::fill_contours`]), so they turn and project
-//! with the view; glyphs are placed at their mapped origins, upright, and
-//! images are turned by `image::turn`.
+//! with the view, as are glyphs, filled as their outlines (from the
+//! font's file, as canvas text is: `text::fill_outlines`); glyphs without
+//! one (emoji, a font whose file is not found) are placed at their mapped
+//! origins, upright, and images are turned by `image::turn`.
 //!
 //! Clips are rectangles in window coordinates (GPUI's content masks),
 //! intersected as they nest. A clip that is rounded or not axis-aligned
@@ -157,6 +159,14 @@ impl<'a> DrawCx<'a> {
     pub(crate) fn axis_aligned(&self) -> bool {
         let [_, b, c, _, _, _] = self.transform.affine();
         self.transform.is_affine() && b.abs() < 1e-6 && c.abs() < 1e-6
+    }
+
+    /// True when the transform keeps glyphs as GPUI draws them: axis-
+    /// aligned, and neither axis flipped (a turn by 180° or a negative
+    /// scale is axis-aligned, but turns them over).
+    pub(crate) fn unflipped(&self) -> bool {
+        let [a, _, _, d, _, _] = self.transform.affine();
+        self.axis_aligned() && a > 0.0 && d > 0.0
     }
 
     /// The scale of the transform (the larger of its axes'): sizes that
@@ -462,10 +472,23 @@ impl<'a> DrawCx<'a> {
             return;
         }
         let c = self.color(color);
-        let mut builder =
-            gpui::PathBuilder::fill().with_style(gpui::PathStyle::Fill(gpui::FillOptions {
-                fill_rule: gpui::FillRule::EvenOdd,
-            }));
+        self.fill_polygons(contours, c, gpui::FillRule::EvenOdd);
+    }
+
+    /// Fills the contours (current coordinates) with `c` (a color the
+    /// pass's filters and opacity are already applied to) by `rule`, cut
+    /// to the clip.
+    pub(crate) fn fill_polygons(
+        &mut self,
+        contours: &[Vec<shape::Pt>],
+        c: Hsla,
+        rule: gpui::FillRule,
+    ) {
+        if self.culled() {
+            return;
+        }
+        let mut builder = gpui::PathBuilder::fill()
+            .with_style(gpui::PathStyle::Fill(gpui::FillOptions { fill_rule: rule }));
         let mut any = false;
         for contour in contours {
             if contour.len() < 3 {

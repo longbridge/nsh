@@ -84,6 +84,125 @@ mount(App);
     )
 }
 
+/// Squares 40 × 40 turned by 0°, 30° and 180° (a row each), each with a
+/// "T": a text view, one underlined, one with a text shadow, and a canvas's
+/// `fillText` (longbridge/nsh#3255: the glyphs stayed upright, and at 180°
+/// a text view's were not drawn).
+fn turned_text_app() -> String {
+    r##"
+import { mount, Canvas, Text, View } from "nsh";
+
+function Box(p: { left: number; top: number; angle: number; text?: object; canvas?: boolean }) {
+  return (
+    <View
+      style={{ position: "absolute", left: p.left, top: p.top, width: 40, height: 40, alignItems: "center", justifyContent: "center", backgroundColor: "#38bdf8", transform: `rotate(${p.angle}deg)` }}
+    >
+      {p.canvas ? (
+        <Canvas
+          style={{ width: 40, height: 40 }}
+          draw={(cx) => {
+            cx.fillStyle = "#000000";
+            cx.font = "bold 28px sans-serif";
+            cx.textAlign = "center";
+            cx.textBaseline = "middle";
+            cx.fillText("T", 20, 20);
+          }}
+        />
+      ) : (
+        <Text style={{ color: "#000000", fontSize: 28, fontWeight: "bold", ...p.text }}>T</Text>
+      )}
+    </View>
+  );
+}
+
+function App() {
+  return (
+    <View style={{ flex: 1, backgroundColor: "#ffffff" }}>
+      {[0, 30, 180].flatMap((angle, row) => [
+        <Box left={10} top={10 + row * 60} angle={angle} />,
+        <Box left={65} top={10 + row * 60} angle={angle} text={{ textDecorationLine: "underline" }} />,
+        <Box left={120} top={10 + row * 60} angle={angle} text={{ textShadow: "3px 3px rgb(255,255,255)" }} />,
+        <Box left={175} top={10 + row * 60} angle={angle} canvas />,
+      ])}
+    </View>
+  );
+}
+mount(App);
+"##
+    .into()
+}
+
+/// Dark pixels in the top and bottom halves of the 40 × 40 square at
+/// `(x, y)` (window points).
+fn ink(shot: &image::RgbaImage, scale: f32, (x, y): (f32, f32)) -> (u32, u32) {
+    let (x0, y0, side) = (
+        (x * scale) as u32,
+        (y * scale) as u32,
+        (40.0 * scale) as u32,
+    );
+    let (mut top, mut bottom) = (0, 0);
+    for py in y0..y0 + side {
+        for px in x0..x0 + side {
+            let p = shot.get_pixel(px, py).0;
+            if u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2]) < 150 {
+                if py < y0 + side / 2 {
+                    top += 1;
+                } else {
+                    bottom += 1;
+                }
+            }
+        }
+    }
+    (top, bottom)
+}
+
+/// Text turns with its view: a "T" upright has its ink at the top, turned
+/// by 180° at the bottom, in text views and canvases alike.
+fn turned_text(cx: &mut HeadlessAppContext, output: Option<&Path>) {
+    let window = open(cx, &turned_text_app());
+    // (left, top, upright, what).
+    let squares = [
+        ((10.0, 10.0), true, "an upright text view"),
+        ((175.0, 10.0), true, "an upright canvas"),
+        // (Not the underlined one: its underline, turned, is at the top.)
+        ((10.0, 130.0), false, "a text view turned by 180°"),
+        ((175.0, 130.0), false, "a canvas turned by 180°"),
+    ];
+    let start = Instant::now();
+    loop {
+        draw(cx, window);
+        let shot = cx.capture_screenshot(window.into()).unwrap();
+        let scale = shot.width() as f32 / 240.0;
+        let min = (20.0 * scale * scale) as u32;
+        let wrong: Vec<String> = squares
+            .iter()
+            .filter_map(|&(at, upright, what)| {
+                let (top, bottom) = ink(&shot, scale, at);
+                let (head, foot) = if upright {
+                    (top, bottom)
+                } else {
+                    (bottom, top)
+                };
+                // The bar of a "T" has more ink than its stem.
+                (head < min || 2 * head < 3 * foot).then(|| {
+                    format!("{what}: {top} dark pixels in the top half, {bottom} in the bottom")
+                })
+            })
+            .collect();
+        // The system's fonts (the glyphs' outlines) are found by a worker.
+        if wrong.is_empty() || start.elapsed() > Duration::from_secs(15) {
+            if let Some(output) = output {
+                let path = output.join("turned-text.png");
+                shot.save(&path).unwrap();
+                println!("render: turned text screenshot: {}", path.display());
+            }
+            assert!(wrong.is_empty(), "{}", wrong.join("; "));
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// The pixel at window point `(x, y)` of a screenshot `scale` pixels a
 /// point.
 fn pixel(shot: &image::RgbaImage, scale: f32, (x, y): (f32, f32)) -> [u8; 3] {
@@ -241,6 +360,8 @@ fn main() {
         );
         println!("render: turned images and icons turn with their views: ok");
     }
+    turned_text(&mut cx, output.as_deref());
+    println!("render: text turns with its view: ok");
     shows(
         &mut cx,
         &zoom_app(false, false),

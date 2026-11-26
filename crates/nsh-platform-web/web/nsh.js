@@ -973,6 +973,26 @@ function measureContext() {
   return canvas.getContext("2d");
 }
 
+/**
+ * The width of `text` in CSS `font` as the DOM draws it, measured in `cx`.
+ * Canvas text places glyphs as at a pixel ratio of 1, the DOM at the page's:
+ * a hinted font rounds its advances to device pixels, so at 1.25 or 1.5 the
+ * DOM draws it narrower or wider than canvas measures it (NSimSun, Chrome's
+ * `monospace` on Chinese Windows, at 13px: 6.5 against 7 per character).
+ * Laid out at canvas widths, its runs then stand apart or overlap. At the
+ * ratio's font size, and scaled back, canvas measures the DOM's width.
+ */
+function measureWidth(cx, font, text) {
+  const ratio = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  if (ratio === 1) {
+    cx.font = font;
+    return cx.measureText(text).width;
+  }
+  // `css_font` puts the size first: `[italic ]<weight> <size>px <family>`.
+  cx.font = font.replace(/(\d*\.?\d+)px/, (_, size) => `${size * ratio}px`);
+  return cx.measureText(text).width / ratio;
+}
+
 /** The span `measureNumericText` measures in (one for the page's players). */
 let numericSpan = null;
 
@@ -1331,15 +1351,13 @@ class Player {
             this.measureUses = 0;
             this.measure = measureContext();
           }
-          this.measure.font = this.str(fp, fl);
-          return this.measure.measureText(this.str(tp, tl)).width;
+          return measureWidth(this.measure, this.str(fp, fl), this.str(tp, tl));
         },
         measure_numeric_text: (fp, fl, np, nl, tp, tl) => {
           const font = this.str(fp, fl), text = this.str(tp, tl);
           const width = measureNumericText(font, this.str(np, nl), text);
           if (width != null) return width;
-          this.measure.font = font;
-          return this.measure.measureText(text).width;
+          return measureWidth(this.measure, font, text);
         },
         text_cluster_boxes: (fp, fl, np, nl, spacing, tp, tl, rp, op, count) => {
           const input = new Uint32Array(this.wasm.memory.buffer, rp, count * 2);
@@ -7498,11 +7516,19 @@ class Player {
     this.webNavigation(el, "onLoad", false);
   }
 
-  op_video([, id, src, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
+  op_video([, id, src, poster, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
     const el = this.view(id);
     const video = el?._video;
     if (!video) return;
     const url = src ? this.asset(src) : "";
+    // The poster shows until the first frame is ready (`loadeddata`), as
+    // on the other platforms, not until playback starts as `<video>`'s own.
+    const posterUrl = poster ? this.asset(poster) : "";
+    if (posterUrl !== el._poster || url !== el._src) {
+      el._poster = posterUrl;
+      if (posterUrl && (url !== el._src || video.readyState < 2)) video.poster = posterUrl;
+      else video.removeAttribute("poster");
+    }
     // `paused` is acted on when it changes (or for a new source): `play()`
     // on a video that ended starts it over, and one its controls paused
     // would play on, whenever another prop (the volume, say) changed.
@@ -7559,6 +7585,7 @@ class Player {
     });
     video.addEventListener("loadedmetadata", () =>
       emit("onLoad", { duration: video.duration || 0, width: video.videoWidth, height: video.videoHeight }));
+    video.addEventListener("loadeddata", () => video.removeAttribute("poster"));
     video.addEventListener("playing", () => {
       buffer(false);
       stopProgress();
@@ -10469,7 +10496,10 @@ class Player {
         changed: id === changedId,
         pointerType: p.pointerType,
         pressure: p.pressure, tiltX: p.tiltX, tiltY: p.tiltY,
+        eraser: !!p.eraser, barrel: !!p.barrel,
+        coalesced: id === changedId ? p.coalesced ?? [] : [],
       });
+      if (id === changedId) p.coalesced = [];
     }
     if (!points.length) return;
     // The keys held when the changed pointer went down, as its press's.
@@ -10538,6 +10568,7 @@ class Player {
       x, y, layer, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       pointerType: e.pointerType,
       pressure: e.pressure, tiltX: e.tiltX || 0, tiltY: e.tiltY || 0,
+      ...penButtons(e),
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       ...(isField ? { press: null } : link ? { press: link } : this.pickPress(chain)),
       // What presses report: the modifier keys at the press and its clicks.
@@ -10688,6 +10719,12 @@ class Player {
     p.pressure = e.pressure;
     p.tiltX = e.tiltX || 0;
     p.tiltY = e.tiltY || 0;
+    Object.assign(p, penButtons(e));
+    // The samples the browser merged into this move, but its own.
+    p.coalesced = (e.getCoalescedEvents?.() ?? []).slice(0, -1).map((c) => {
+      const [cx, cy] = this.point(c, p.layer);
+      return { pageX: cx, pageY: cy, pressure: c.pressure, tiltX: c.tiltX || 0, tiltY: c.tiltY || 0, time: c.timeStamp };
+    });
     this.track(p, now);
     const tx = x - p.startX;
     const ty = y - p.startY;
@@ -11049,4 +11086,11 @@ class Player {
     if (t.el._gestures?.rotation) this.call((w) => w.nsh_transform_gesture(t.el._id, 1, 2, rotation));
     this.pointers.clear();
   }
+}
+
+/** A pen's eraser end (the DOM's eraser button, `buttons & 32`) and held
+ * barrel button (`buttons & 2`) in pointer event `e`. */
+function penButtons(e) {
+  const pen = e.pointerType === "pen";
+  return { eraser: pen && (e.buttons & 32) !== 0, barrel: pen && (e.buttons & 2) !== 0 };
 }
