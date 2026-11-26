@@ -3734,9 +3734,9 @@ impl<M: TextEngine> State<M> {
         let mut commit = std::mem::take(&mut self.perf_commit);
         if commit.ops > 0 || commit.items > 0 {
             commit.js = busy.saturating_sub(commit.layout);
-            // Each record as the monitor takes it. Its percentiles span its
-            // last 120 records (`perf::CAPACITY`), whenever they were made:
-            // with this a trace can give them for a stretch of its own.
+            // Each record as the monitor takes it. Its percentiles span the
+            // last few seconds (`perf::COMMIT_WINDOW`): with this a trace
+            // can give them for a stretch of its own.
             if self.trace {
                 log::info!(
                     target: "nsh::perf",
