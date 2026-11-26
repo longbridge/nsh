@@ -141,6 +141,8 @@ fn main() {
                 shader_content::run();
             } else if mount::bench_only() {
                 mount::bench_alone();
+            } else if std::env::var_os("NSH_LEAF_BENCH_ONLY").is_some() {
+                mount::leaf_bench();
             } else if std::env::var_os("NSH_MENU_LABELS_CHECK_ONLY").is_some() {
                 window_press::run();
                 menu_labels::run();

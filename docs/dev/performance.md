@@ -1483,6 +1483,34 @@ native hierarchy. At 8,600 rows it showed no improvement: release 3903.0 → 396
 use the append path. These are not first-paint timings. GPU/power and engine trace item counts
 were not measured; interactive-priority execution was unavailable in this session.
 
+## macOS leaf list clear and reorder
+
+Measured on an Apple silicon Mac (jason-macmini-lb) on 2026-11-26, debug, `7f72e2385`
+against the change that compacts a parent's leaf list once per batch and orders it from its
+layers when read. `NSH_LEAF_BENCH_ONLY=1` (`tests/native/mount.rs`, `leaf_bench`) mounts n texts
+with no listener (#2066 leaves: layers in their parent's leaf layer, no `NSView` in the
+hierarchy) in one plain view, then reverses them, adds one in front and clears them; each step
+is timed until the leaf layers show it. Three runs per size, medians, run through the hub's
+interactive launcher (normal priority). Main thread CPU in milliseconds, wall time in brackets.
+
+| Leaves | Step | Before main CPU (wall) | After main CPU (wall) |
+| --- | --- | --- | --- |
+| 1,000 | clear | 9.5 (14.8) | 6.5 (11.8) |
+| 4,000 | clear | 79.3 (133.3) | 29.5 (83.1) |
+| 8,000 | clear | 275.6 (471.2) | 75.3 (272.6) |
+| 1,000 | reverse | 44.2 (58.7) | 37.4 (51.3) |
+| 4,000 | reverse | 273.2 (457.6) | 158.0 (340.5) |
+| 8,000 | reverse | 842.4 (1538.3) | 372.8 (1064.5) |
+| 8,000 | mount | 627.7 (773.9) | 620.9 (764.1) |
+| 8,000 | prepend | 80.0 (97.2) | 79.5 (97.1) |
+
+Before, each leaf that left scanned and shifted its parent's list (`retain`) and each insert
+searched it for `before`: clearing or reordering n leaves was O(n²) on the main thread. Clear is
+now linear on the main thread. What remains of reverse grows with n² outside the platform: a
+`sample` of the 8,000-leaf reverse shows the engine's keyed `match_children` (`Iterator::position`
+over the old children per key). Only the platform changed, so the mount batches and their item
+counts are the same before and after.
+
 ## Windows painter culling
 
 Measured on Windows 11 on 2026-11-13, release, Intel Core Ultra X9 388H, Intel Arc B390 at 60 Hz;
