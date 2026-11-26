@@ -29,6 +29,7 @@ pub mod file_dialog;
 pub mod file_type;
 pub mod filesystem;
 pub mod geometry;
+pub mod gpu;
 mod grid;
 pub mod host_channel;
 pub mod i18n;

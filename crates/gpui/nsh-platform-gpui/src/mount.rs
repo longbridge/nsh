@@ -330,6 +330,9 @@ impl Mounter {
             MountItem::ShaderTransition { .. }
             | MountItem::ShaderInput { .. }
             | MountItem::NavShader { .. } => {}
+            // GPU views draw nothing on this backend yet
+            // (`docs/dev/gpu-views.md`).
+            MountItem::GpuView { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = &self.get(*id) {
                     let fill = layer

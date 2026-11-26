@@ -16,6 +16,8 @@ mod access;
 mod app_directory;
 mod cache;
 mod error;
+#[cfg_attr(not(feature = "shader"), path = "gpu_off.rs")]
+pub mod gpu;
 // Where shader frames go: read back, or on surfaces the backend shows.
 #[cfg(feature = "shader")]
 mod frames;

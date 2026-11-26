@@ -2889,6 +2889,115 @@ fn native_components_get_their_name_props_and_size() {
     );
 }
 
+/// A GPU view named from JS gets its registered renderer's source with its
+/// creation, and its props as a native component's.
+#[test]
+fn a_gpu_view_gets_its_registered_renderer_and_props() {
+    let mut c = core();
+    let source = crate::gpu::GpuSource::new(1_u8);
+    let mut registry = crate::element::Registry::new();
+    registry.gpu_renderer_source("test/scene", source.clone());
+    c.set_components(registry);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::GpuView,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Component("test/scene".into()),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ComponentProp("exposure".into(), Some(serde_json::json!(1.5))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let at = |pred: &dyn Fn(&MountItem) -> bool| batch.items.iter().position(pred);
+    let create = at(&|i| {
+        matches!(
+            i,
+            MountItem::Create {
+                id: 2,
+                kind: ViewKind::View
+            }
+        )
+    })
+    .unwrap();
+    let gpu = at(&|i| matches!(i, MountItem::GpuView { id: 2, source: Some(s) } if *s == source))
+        .expect("the renderer reaches the platform");
+    let props = at(&|i| matches!(i, MountItem::ComponentProps { id: 2, .. })).unwrap();
+    assert!(create < gpu && gpu < props);
+    // Not a native component: no component name is sent.
+    assert!(at(&|i| matches!(i, MountItem::Component { .. })).is_none());
+
+    // Another renderer: the view's props are sent again, for it.
+    let other = crate::gpu::GpuSource::new(2_u8);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::GpuRenderer(Some(other.clone())),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    let gpu = batch
+        .items
+        .iter()
+        .position(|i| matches!(i, MountItem::GpuView { id: 2, source: Some(s) } if *s == other))
+        .expect("the new renderer");
+    let props = batch
+        .items
+        .iter()
+        .position(|i| {
+            matches!(i, MountItem::ComponentProps { id: 2, props }
+                if props.iter().any(|(k, _)| &**k == "exposure"))
+        })
+        .expect("its props again");
+    assert!(gpu < props);
+}
+
+/// A GPU view naming no registered renderer is a plain view: nothing tells
+/// the platform of a renderer.
+#[test]
+fn a_gpu_view_of_an_unknown_renderer_draws_nothing() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::GpuView,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Component("test/missing".into()),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::GpuView {
+            source: Some(_),
+            ..
+        }
+    )));
+}
+
 #[test]
 fn a_native_component_gets_its_accent_color_as_a_prop() {
     // `accentColor` (or `accent-*`) on a native component reaches it as its

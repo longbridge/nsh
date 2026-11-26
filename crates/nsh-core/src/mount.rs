@@ -989,6 +989,17 @@ pub enum MountItem {
         /// The program and its uniforms.
         layer: Option<Arc<crate::shader::ShaderLayer>>,
     },
+    /// The renderer of a GPU view (`None`: none, or a name no UI set
+    /// registered: it draws nothing), sent after its `Create` and when it
+    /// changes. Its own props come as [`MountItem::ComponentProps`] and
+    /// [`MountItem::ComponentPropSlots`], as a native component's
+    /// ([`crate::gpu`]).
+    GpuView {
+        /// The view.
+        id: NodeId,
+        /// What makes its renderer.
+        source: Option<crate::gpu::GpuSource>,
+    },
     /// A shader transition starts: its `value` changed. It comes first in
     /// its batch, so the platform takes the picture of what the view (the
     /// surface, for a screen transition) shows before the batch's other
@@ -1163,6 +1174,7 @@ impl MountItem {
             | M::ScrollContent { id, .. }
             | M::Canvas { id, .. }
             | M::Shader { id, .. }
+            | M::GpuView { id, .. }
             | M::ViewProps { id, .. }
             | M::Input { id, .. }
             | M::InputValue { id, .. }

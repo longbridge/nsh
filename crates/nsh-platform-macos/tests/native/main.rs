@@ -30,6 +30,8 @@ mod fitting_input;
 mod focus_selection;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
+#[cfg(all(target_os = "macos", feature = "shader"))]
+mod gpu_view;
 #[cfg(target_os = "macos")]
 mod hover_cursor;
 #[cfg(target_os = "macos")]
@@ -138,6 +140,9 @@ fn main() {
                 modal_focus::run();
             } else if std::env::var_os("NSH_NAVIGATION_UNMOUNT_CHECK_ONLY").is_some() {
                 navigation_unmount::run();
+            } else if std::env::var_os("NSH_GPU_VIEW_CHECK_ONLY").is_some() {
+                #[cfg(feature = "shader")]
+                gpu_view::run();
             } else if std::env::var_os("NSH_SHADER_CONTENT_CHECK_ONLY").is_some() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
@@ -244,6 +249,8 @@ fn main() {
                 hover_cursor::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
+                #[cfg(feature = "shader")]
+                gpu_view::run();
                 canvas_bounds::run();
                 canvas_bounds::run_scale();
                 mask_corners::run();

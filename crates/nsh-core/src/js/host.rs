@@ -121,7 +121,7 @@ pub fn element_bits(tag: crate::Tag) -> u32 {
             Tag::WebView => on::WEBVIEW,
             Tag::Video => on::VIDEO,
             Tag::InputAccessory => on::INPUT_ACCESSORY,
-            Tag::View => on::VIEW,
+            Tag::View | Tag::GpuView => on::VIEW,
             Tag::Shader => on::VIEW | on::SHADER,
             Tag::ShaderEffect => on::VIEW | on::SHADER | on::EFFECT,
             Tag::ShaderTransition => on::VIEW | on::SHADER | on::TRANSITION,

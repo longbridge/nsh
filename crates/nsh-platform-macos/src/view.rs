@@ -181,6 +181,9 @@ pub(crate) struct ViewState {
     pub(crate) canvas: Option<Box<crate::canvas::CanvasState>>,
     /// What a shader draws under the children ([`crate::shader`]).
     pub(crate) shader: Option<Box<crate::shader::ShaderState>>,
+    /// What a GPU view's renderer draws under the children
+    /// ([`crate::gpu_view`]).
+    pub(crate) gpu: Option<Box<crate::gpu_view::GpuState>>,
     /// Text field (input views).
     pub(crate) input: Option<std::rc::Rc<crate::text_input::InputState>>,
     /// Inputs in this subtree, including this view: their drawing needs
@@ -220,6 +223,7 @@ impl ViewState {
             image: None,
             canvas: None,
             shader: None,
+            gpu: None,
             input: None,
             input_count: usize::from(kind == ViewKind::Input),
             natives: Vec::new(),

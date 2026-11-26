@@ -152,6 +152,7 @@ Notes:
 | Status bar | `.status_bar(StatusBarStyle::Light)` on `nav_page()` or `dialog()` | `statusBar={{ foreground: "light" }}` on `NavPage` or `Dialog` |
 | Target-gated Rust | `#[cfg(target_os = "macos")]`, `#[cfg(target_arch = "wasm32")]` | - |
 | A view of the OS | `native(name)`, registered with `#[native_components(macos)]` | `nativeComponent(name, spec)` |
+| A view drawn with wgpu (2D/3D) | `gpu_view().renderer(make)`; `registry.gpu_renderer(name, make)` (`nsh-gpu`) | `gpuView(name, spec)` |
 
 - Desktop means macOS, Windows, Linux, and browsers in the desktop idiom. Mobile means iOS, Android, Mac Catalyst and browsers in the phone or tablet idiom.
 - Gate layout and input on `platform.desktop`. Gate windows and `Menu` calls on `isAvailable` from `nsh/desktop`, which is false in browsers.
