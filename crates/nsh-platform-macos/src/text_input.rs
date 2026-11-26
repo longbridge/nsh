@@ -84,8 +84,9 @@ use objc2_app_kit::{
     NSMutableParagraphStyle, NSParagraphStyle, NSParagraphStyleAttributeName, NSPasteboard,
     NSResponder, NSScrollElasticity, NSScrollView, NSSecureTextField, NSSecureTextFieldCell,
     NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldCell,
-    NSTextFieldDelegate, NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate,
-    NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
+    NSTextFieldDelegate, NSTextInputClient, NSTextStorage, NSTextStorageDelegate,
+    NSTextStorageEditActions, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView,
+    NSWritingDirection,
 };
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGPath;
@@ -2479,6 +2480,30 @@ define_class!(
 
     unsafe impl NSTextFieldDelegate for InputDelegate {}
 
+    unsafe impl NSTextStorageDelegate for InputDelegate {
+        #[unsafe(method(textStorage:willProcessEditing:range:changeInLength:))]
+        fn storage_will_process_editing(
+            &self,
+            storage: &NSTextStorage,
+            actions: NSTextStorageEditActions,
+            range: NSRange,
+            _delta: isize,
+        ) {
+            if !actions.contains(NSTextStorageEditActions::EditedCharacters) || range.length == 0 {
+                return;
+            }
+            // AppKit replays attributed substrings. Fix only the restored text,
+            // before layout, even if another input now has the focus.
+            if let Some(input) = self.ivars().input.upgrade()
+                && input.undo_manager.borrow().as_ref().is_some_and(|m| m.isUndoing() || m.isRedoing())
+                && let Editor::Area { view, .. } = &*input.editor.borrow()
+                && let Some(style) = view.defaultParagraphStyle()
+            {
+                apply_storage_paragraph(storage, range, &style);
+            }
+        }
+    }
+
     unsafe impl NSTextDelegate for InputDelegate {
         #[unsafe(method(textDidChange:))]
         fn text_did_change(&self, _notification: &NSNotification) {
@@ -3154,6 +3179,15 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
             view: text,
             storage,
         } => {
+            let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
+            let style = paragraph(line, align, direction);
+            // Ordinary typing needs no storage delegate until an undo record
+            // can contain a paragraph style older than the current one.
+            if input.undo_manager.borrow().is_some()
+                && text.defaultParagraphStyle().as_deref() != Some(&*style)
+            {
+                storage.setDelegate(Some(ProtocolObject::from_ref(&*input.delegate)));
+            }
             // A built-in bar of the app's takes the indicator's place; the
             // text still scrolls with the wheel, the keys and the caret.
             scroller.setHasVerticalScroller(config.scrollbar_visible);
@@ -3179,8 +3213,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
             text.setAutomaticTextReplacementEnabled(
                 correct && NSSpellChecker::isAutomaticTextReplacementEnabled(),
             );
-            let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
-            apply_paragraph(text, storage, &paragraph(line, align, direction));
+            apply_paragraph(text, storage, &style);
             // The space above the first line and below the last.
             text.setTextContainerInset(CGSize::new(0.0, line.inset));
             let label = &input.placeholder;
@@ -3398,28 +3431,26 @@ fn apply_paragraph(text: &NSTextView, storage: &NSTextStorage, style: &NSParagra
         typing.insert(NSParagraphStyleAttributeName, style);
         text.setTypingAttributes(&typing);
     }
-    let len = storage.length();
-    if len > 0 {
-        let whole = NSRange::new(0, len);
-        let mut effective = NSRange::new(0, 0);
-        // SAFETY: index 0 is within the non-empty storage and `effective` is a
-        // valid out-pointer.
-        let matches = unsafe {
-            storage.attribute_atIndex_effectiveRange(
-                NSParagraphStyleAttributeName,
-                0,
-                &mut effective,
-            )
-        }
-        .is_some_and(|current| effective == whole && style.isEqual(Some(&current)));
-        if !matches {
-            // SAFETY: `whole` covers the storage and `style` is a valid
-            // `NSParagraphStyle`.
-            unsafe {
-                storage.beginEditing();
-                storage.addAttribute_value_range(NSParagraphStyleAttributeName, style, whole);
-                storage.endEditing();
-            }
+    apply_storage_paragraph(storage, NSRange::new(0, storage.length()), style);
+}
+
+fn apply_storage_paragraph(storage: &NSTextStorage, range: NSRange, style: &NSParagraphStyle) {
+    if range.length == 0 {
+        return;
+    }
+    // Other attributes (e.g. a fallback font) may split a single paragraph
+    // style into several runs. Compare the range of this attribute alone.
+    let mut effective = NSRange::new(0, 0);
+    // SAFETY: `range` is the whole storage or the edited range supplied by AppKit.
+    unsafe {
+        let current = storage.attribute_atIndex_longestEffectiveRange_inRange(
+            NSParagraphStyleAttributeName,
+            range.location,
+            &mut effective,
+            range,
+        );
+        if effective != range || !style.isEqual(current.as_deref()) {
+            storage.addAttribute_value_range(NSParagraphStyleAttributeName, style, range);
         }
     }
 }
@@ -4414,6 +4445,35 @@ mod tests {
         assert_eq!(line.fragment, 16.0);
         assert_eq!(line.spacing, 0.0);
         assert_eq!(line.inset, 0.0);
+    }
+
+    #[test]
+    fn matching_paragraph_style_across_other_attributes_does_not_edit_storage() {
+        let storage = NSTextStorage::new();
+        storage.replaceCharactersInRange_withString(NSRange::new(0, 0), &NSString::from_str("abc"));
+        let all = NSRange::new(0, storage.length());
+        let style = paragraph(
+            LineBox::new(22.0, 17.0),
+            NSTextAlignment::Left,
+            NSWritingDirection::Natural,
+        );
+        apply_storage_paragraph(&storage, all, &style);
+        // SAFETY: a foreground color on the middle character of "abc".
+        unsafe {
+            storage.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                &NSColor::redColor(),
+                NSRange::new(1, 1),
+            );
+        }
+        storage.beginEditing();
+        apply_storage_paragraph(&storage, all, &style);
+        let edits = storage.editedMask();
+        storage.endEditing();
+        assert!(
+            edits.is_empty(),
+            "unchanged paragraph was rewritten: {edits:?}"
+        );
     }
 
     #[test]

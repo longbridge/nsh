@@ -22,10 +22,12 @@ use nsh_platform_macos::{
     },
     objc2_app_kit::{
         NSAccessibility, NSApplication, NSBackingStoreType, NSParagraphStyle,
-        NSParagraphStyleAttributeName, NSScrollView, NSTextView, NSView, NSWindow,
-        NSWindowStyleMask,
+        NSParagraphStyleAttributeName, NSScrollView, NSTextInputClient, NSTextView, NSView,
+        NSWindow, NSWindowStyleMask,
     },
-    objc2_foundation::{NSArray, NSDate, NSPoint, NSRange, NSRect, NSRunLoop, NSSize, NSString},
+    objc2_foundation::{
+        NSArray, NSDate, NSNotFound, NSPoint, NSRange, NSRect, NSRunLoop, NSSize, NSString,
+    },
 };
 
 const INITIAL_TEXT: &str = "alpha beta gamma delta epsilon zeta eta theta iota";
@@ -110,14 +112,13 @@ fn until(what: &str, done: impl Fn() -> bool) {
 /// Inserts `text` at `index` through `NSTextInputClient`, as user typing does.
 fn insert_at(view: &NSTextView, index: usize, text: &str) {
     view.setSelectedRange(NSRange::new(index, 0));
-    // SAFETY: `insertText:replacementRange:` is part of `NSTextInputClient` on `NSTextView`.
-    let _: () = unsafe {
-        msg_send![
-            view,
-            insertText: &*NSString::from_str(text),
-            replacementRange: NSRange::new(isize::MAX as usize, 0)
-        ]
-    };
+    // SAFETY: a plain string replacing the selection (NSNotFound).
+    unsafe {
+        view.insertText_replacementRange(
+            &NSString::from_str(text),
+            NSRange::new(NSNotFound as usize, 0),
+        );
+    }
 }
 
 /// Returns the laid-out top y-coordinate of each visual line fragment in `view`
@@ -297,11 +298,14 @@ pub(super) fn run() {
 
     // 3. Updating lineHeight dynamically restyles existing text and keeps the
     //    new line height when typing at index 0.
-    LINE_HEIGHT.store(LINE_HEIGHT_B.to_bits(), Ordering::SeqCst);
-    until("updated lineHeight not applied", || {
-        let ys = line_ys(&prefilled);
-        ys.len() >= 2 && ((ys[1] - ys[0]) - f64::from(LINE_HEIGHT_B)).abs() < 0.5
-    });
+    let restyle = |height: f32| {
+        LINE_HEIGHT.store(height.to_bits(), Ordering::SeqCst);
+        until("updated lineHeight not applied", || {
+            let ys = line_ys(&prefilled);
+            ys.len() >= 2 && ((ys[1] - ys[0]) - f64::from(height)).abs() < 0.5
+        });
+    };
+    restyle(LINE_HEIGHT_B);
     assert!(window.makeFirstResponder(Some(&prefilled)));
     settle();
     insert_at(&prefilled, 0, "!");
@@ -310,6 +314,38 @@ pub(super) fn run() {
     assert_line_step(
         "prefilled after lineHeight update and typing at index 0",
         &after_restyle,
+        f64::from(LINE_HEIGHT_B),
+    );
+
+    // An undo record holds an attributed substring from before the restyle.
+    let before_replace = prefilled.string();
+    prefilled.breakUndoCoalescing();
+    // SAFETY: a plain string replacing the entire current UTF-16 range.
+    unsafe {
+        prefilled.insertText_replacementRange(
+            &NSString::from_str(INITIAL_TEXT),
+            NSRange::new(0, before_replace.length()),
+        );
+    }
+    prefilled.breakUndoCoalescing();
+    settle();
+    let manager = prefilled.undoManager().unwrap();
+    assert!(window.makeFirstResponder(Some(&empty)));
+    restyle(LINE_HEIGHT_A);
+    manager.undo();
+    assert_eq!(prefilled.string(), before_replace);
+    assert_line_step(
+        "undo after restyle",
+        &line_ys(&prefilled),
+        f64::from(LINE_HEIGHT_A),
+    );
+    // The redo record was captured at A; restore it after switching back to B.
+    restyle(LINE_HEIGHT_B);
+    manager.redo();
+    assert_eq!(prefilled.string().to_string(), INITIAL_TEXT);
+    assert_line_step(
+        "redo after restyle",
+        &line_ys(&prefilled),
         f64::from(LINE_HEIGHT_B),
     );
 

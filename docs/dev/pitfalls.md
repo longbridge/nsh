@@ -796,6 +796,12 @@ Things that were found the hard way. Read the section of the area you change bef
   sinks, wraps a line per character and soon holds such text. `TextArea` answers its visible part instead
   (`text_input.rs`).
 
+- **`NSTextView::setDefaultParagraphStyle:` updates neither `typingAttributes` nor existing `textStorage` attributes**:
+  a multiline input sets all three so typing into an empty view or at index 0 keeps its line height. Undo and redo
+  restore attributed substrings: after a restyle, reapply the current paragraph style to the restored range before
+  layout. A font or color change can split the effective range even when the paragraph style is unchanged; compare
+  its `longestEffectiveRange` before writing (`text_input.rs`).
+
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
   (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.
@@ -1074,11 +1080,6 @@ Things that were found the hard way. Read the section of the area you change bef
   the text (15 pt system font, 24 pt lines: `NSTextInsertionIndicator` 24 tall, text 18 tall at the fragment's bottom). A
   fragment of the font's height with `lineSpacing`, and half of it as the container's inset, gives a caret as tall as
   the text and text in the middle of the same 24 pt lines (`LineBox`).
-- **`NSTextView::setDefaultParagraphStyle:` updates neither `typingAttributes` nor existing `textStorage` attributes**:
-  typing into an empty multiline input or at index 0 (where there is no preceding character to inherit attributes from)
-  falls back to `typingAttributes` and resets the whole paragraph's line height to AppKit's default; changing
-  `lineHeight`, alignment or writing direction on existing text likewise leaves old attributes in storage until
-  reapplied (`text_input.rs`, `apply_paragraph`).
 
 ## Testing on simulators and emulators
 
