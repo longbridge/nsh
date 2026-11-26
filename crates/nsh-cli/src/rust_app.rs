@@ -2079,6 +2079,19 @@ const NSH_CRATES: &[&str] = &[
     "nsh-platform-windows",
     "nsh-platform-web",
     "nsh-platform-gpui",
+    "nsh-gpui-host",
+    "nsh-platform-tui",
+    "nsh-i18n",
+    "nsh-updater",
+    "nsh-tui-host",
+    "nsh-ios-host",
+    "nsh-ios-app",
+    "nsh-linux-host",
+    "nsh-linux-app",
+    "nsh-macos-host",
+    "nsh-macos-app",
+    "nsh-windows-host",
+    "nsh-windows-app",
 ];
 
 /// The dependencies of the app's crate `c` on nsh's crates, as `cargo
@@ -2783,8 +2796,21 @@ panic = \"abort\"
                 self.app_components(android, "nsh", "android"),
             ),
         )?;
+        self.follow_nsh_patches(ws);
         self.unify_features(ws);
         Ok(())
+    }
+
+    /// Has the lock of the generated workspace `ws` take nsh's crates from
+    /// the patches its manifest has for them ([`crate::nsh_lock`]), when it
+    /// has any: built against a checkout, or a nightly with nshm.
+    fn follow_nsh_patches(&self, ws: &Path) {
+        let patched = self.nsh.source().is_some()
+            || matches!(self.nsh, Nsh::Nightly(_)) && !self.modules.is_empty();
+        if patched {
+            let names: Vec<&str> = NSH_CRATES.iter().chain(OWN_NSHM).copied().collect();
+            crate::nsh_lock::follow_patches(ws, &names, VERSION);
+        }
     }
 
     /// The dependency on `<ws>/hack` ([`Self::unify_features`]).
@@ -3468,6 +3494,7 @@ opt-level = \"s\"
             true,
         )?;
         self.write_host(&ws, "gpui-host", "nsh-gpui-host", "development host")?;
+        self.follow_nsh_patches(&ws);
         Ok(ws)
     }
 
@@ -3485,6 +3512,7 @@ opt-level = \"s\"
             false,
         )?;
         self.write_tui_host(&ws)?;
+        self.follow_nsh_patches(&ws);
         Ok(ws)
     }
 
@@ -3527,7 +3555,12 @@ opt-level = \"s\"
             .map(|c| c.package.as_str())
             .collect();
         if self.nsh.source().is_some() {
-            changing.extend(NSH_CRATES);
+            changing.extend(
+                NSH_CRATES
+                    .iter()
+                    .filter(|name| gpui || !matches!(**name, "nsh-platform-gpui" | "nsh-gpui-host"))
+                    .copied(),
+            );
             changing.extend(
                 self.crates
                     .iter()
@@ -3559,7 +3592,7 @@ opt-level = \"s\"
         let nsh_crates = NSH_CRATES
             .iter()
             .chain(OWN_NSHM)
-            .filter(|name| gpui || **name != "nsh-platform-gpui");
+            .filter(|name| gpui || !matches!(**name, "nsh-platform-gpui" | "nsh-gpui-host"));
         if let Some(source) = self.nsh.source() {
             manifest.push_str("\n[patch.crates-io]\n");
             manifest.push_str(&crates_io);
@@ -4842,6 +4875,38 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{AppCrate, Link, Nsh, RootConfig, RustApp};
+
+    /// An app may depend on any crate nsh publishes; one missing from
+    /// `NSH_CRATES` is left on crates.io when nsh's crates are patched to a
+    /// checkout or a nightly, and its newer release then asks for a newer
+    /// `nsh-base` than the patched one.
+    #[test]
+    fn every_published_nsh_crate_is_patched() {
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut published = Vec::new();
+        for dir in [checkout.join("crates"), checkout.join("crates/gpui")] {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Ok(manifest) = std::fs::read_to_string(entry.path().join("Cargo.toml")) else {
+                    continue;
+                };
+                if name.starts_with("nsh-")
+                    && name != "nsh-cli"
+                    && !manifest.contains("publish = false")
+                {
+                    published.push(name);
+                }
+            }
+        }
+        published.sort();
+        let mut patched: Vec<String> = super::NSH_CRATES
+            .iter()
+            .chain(super::OWN_NSHM)
+            .map(|name| name.to_string())
+            .collect();
+        patched.sort();
+        assert_eq!(published, patched);
+    }
 
     /// Serialises the tests that set [`super::RUNNER_FEATURES`].
     static RUNNER_FEATURES_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
