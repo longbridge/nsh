@@ -413,8 +413,8 @@ fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
 /// by the shell (on another virtual desktop).
 fn window_shown(window: HWND) -> bool {
     // SAFETY: plain calls on a window handle.
-    unsafe { IsWindowVisible(window).as_bool() && !IsIconic(window).as_bool() }
-    &&!crate::presence::cloaked(window)
+    (unsafe { IsWindowVisible(window).as_bool() && !IsIconic(window).as_bool() })
+        && !crate::presence::cloaked(window)
 }
 
 /// The app's state with its window `shown` (not minimized, hidden or on
