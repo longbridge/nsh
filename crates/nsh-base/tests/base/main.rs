@@ -49,6 +49,8 @@ mod slider;
 mod split_view;
 mod submenu;
 mod switch;
+#[cfg(feature = "highlight")]
+mod syntax_set;
 mod tabs;
 #[cfg(feature = "term")]
 mod term;

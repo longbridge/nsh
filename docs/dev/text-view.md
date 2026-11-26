@@ -209,6 +209,10 @@ millisecond more. So the engine thread parses only what is cheap:
   `nsh package --target web` publishes it as `nsh-syntaxes.<digest>.bin` and names it in the page's `data`). The
   first block with a language asks for it (`syntax::load_async`, `nsh_core::runtime_data`), the page fetches it once
   and every block waiting is highlighted when it arrives. A page that cannot serve it keeps code plain (one warning).
+- Apps get the same syntaxes for highlighting of their own (`nsh_base::syntax_set`, `load_syntax_set`), so an app
+  never embeds a second copy: on the web that copy would be in the module every page downloads first. Loading goes
+  through the same path as the built-in highlighting (one load shared by every caller), and an app redraws when it
+  finishes, as a code block does.
 
 `bench_highlight` (ignored: `cargo test --release -p nsh-base bench_highlight -- --ignored --nocapture`) prints these
 numbers.

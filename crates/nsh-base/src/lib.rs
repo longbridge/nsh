@@ -118,6 +118,8 @@ pub use crate::emoji_picker::{
     EmojiPickerApi, EmojiPickerElement, EmojiPickerEvent, EmojiPickerProps, EmojiSkinTone,
     emoji_picker,
 };
+#[cfg(feature = "highlight")]
+pub use crate::syntax::{load_syntax_set, syntax_set};
 #[cfg(feature = "term")]
 pub use crate::term::{
     Terminal, TerminalApi, TerminalColor, TerminalCursor, TerminalElement, TerminalEmulator,

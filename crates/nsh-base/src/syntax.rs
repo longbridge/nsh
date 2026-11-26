@@ -1,7 +1,9 @@
 //! What `TextView`'s code blocks and the `Editor` share of syntax
 //! highlighting: the kinds of token and their colors, Allsum's reading
 //! palette, and (feature `highlight`) syntect's syntaxes, the lookup of a
-//! language's syntax and the mapping of TextMate scopes to tokens.
+//! language's syntax and the mapping of TextMate scopes to tokens. Apps get
+//! the same syntaxes (`syntax_set`, `load_syntax_set`) for highlighting
+//! of their own.
 //!
 //! Syntect names what it matched with TextMate scopes
 //! (`keyword.control.rust`, `string.quoted.double`). Those map to a few
@@ -16,6 +18,8 @@ use nsh_core::{element::StyleRefinement, prelude::*};
 pub(crate) use self::syntect_syntaxes::load_async;
 #[cfg(feature = "highlight")]
 pub(crate) use self::syntect_syntaxes::{Parse, find_syntax, loaded, plain, scope_token, syntaxes};
+#[cfg(feature = "highlight")]
+pub use self::syntect_syntaxes::{load_syntax_set, syntax_set};
 
 /// What a span of code is, colored alike (as Allsum's `--hl-*` tokens
 /// color highlight.js's classes).
@@ -205,6 +209,64 @@ mod syntect_syntaxes {
             }
         }
         true
+    }
+
+    /// The syntaxes `TextView`'s code blocks, the `Editor` and `DiffView`
+    /// highlight with, for an app that highlights code of its own: bat's
+    /// set (two-face's), whose syntaxes expect each line with its line
+    /// break (`LinesWithEndings`).
+    ///
+    /// The native runtimes carry them: the first call loads them (about a
+    /// millisecond; [`load_syntax_set`] does it off the engine thread) and
+    /// every call returns them. The web runtime fetches them from its page
+    /// when something first needs them: `None` until then, so code shows
+    /// plain and is highlighted again once [`load_syntax_set`] has them.
+    pub fn syntax_set() -> Option<&'static SyntaxSet> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Some(syntaxes())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            SYNTAXES.get()
+        }
+    }
+
+    /// Loads the syntaxes of [`syntax_set`] without holding up the engine
+    /// thread: on a blocking thread, or on the web from its page, after
+    /// the frame that shows the code plain. Every caller shares one load
+    /// with `TextView`, the `Editor` and `DiffView`; at once when they are
+    /// loaded already. `None` when the page has no syntaxes or cannot
+    /// read them (code stays plain).
+    ///
+    /// An app highlights what it showed plain when this answers, as the
+    /// built-in highlighting does:
+    ///
+    /// ```ignore
+    /// spawn(async move {
+    ///     if nsh_base::load_syntax_set().await.is_some() {
+    ///         highlighted.set(highlight(&code));
+    ///     }
+    /// });
+    /// ```
+    pub async fn load_syntax_set() -> Option<&'static SyntaxSet> {
+        if let Some(set) = SYNTAXES.get() {
+            return Some(set);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // `SYNTAXES` deserializes once; a caller that comes while it
+            // does waits for that.
+            let _ = nsh_core::prelude::blocking(|| {
+                syntaxes();
+            })
+            .await;
+            Some(syntaxes())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            load_async().await.then(syntaxes)
+        }
     }
 
     /// Whether the syntaxes are loaded ([`syntaxes`] returns at once).

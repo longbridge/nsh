@@ -773,6 +773,31 @@ fn chat() -> impl IntoElement {
 `my_syntect::ranges` stands for the app's glue to its highlighter and `messages` for the app's view of the chat.
 `renderCodeBlock`, when given, shows the code block in place of all of this.
 
+An app that highlights code of its own with syntect (an editor of its own, a file preview) can use the syntaxes
+`TextView` uses instead of carrying another copy: `syntax_set()` returns them, and `load_syntax_set()` loads them
+without holding up the app. The native runtimes have them at once; the web fetches them from the page the first
+time something needs them, so until then `syntax_set()` is `None` and the app shows its code plain, then highlights
+it again when `load_syntax_set()` answers, as `TextView`'s code blocks do. `syntect` is the app's own dependency, in
+the version `nsh-base` uses.
+
+```rust
+use nsh_core::prelude::*;
+
+fn colored(code: Signal<String>) -> impl IntoElement {
+    let loaded = signal(nsh_base::syntax_set().is_some());
+    if !loaded.get_untracked() {
+        spawn(async move { loaded.set(nsh_base::load_syntax_set().await.is_some()) });
+    }
+    // Plain until the syntaxes are there.
+    dynamic(move || match (loaded.get(), nsh_base::syntax_set()) {
+        (true, Some(set)) => my_syntect::spans(set, &code.get()),
+        _ => text(code.get()).into_element(),
+    })
+}
+```
+
+`my_syntect::spans` stands for the app's glue again: its code in spans colored by the syntaxes.
+
 ### Typed part styles
 
 `TextViewParts` styles parts with typed styles instead of class strings, for Rust views: each `TextViewPart` (one per
