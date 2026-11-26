@@ -664,13 +664,13 @@ fn parse_key(text: &str, key: &str) -> Result<Key, ShortcutError> {
 /// the item has no label of its own).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
 pub enum MenuRole {
-    /// The about panel (macOS).
+    /// The about panel (macOS); elsewhere the app hears it and shows its own.
     About,
-    /// Hides the app (macOS).
+    /// Hides the app (macOS); minimizes the window on Windows and Linux.
     Hide,
-    /// Hides the other apps (macOS).
+    /// Hides the other apps (macOS only; left out elsewhere, with a warning).
     HideOthers,
-    /// Shows all apps (macOS).
+    /// Shows all apps (macOS only; left out elsewhere, with a warning).
     ShowAll,
     /// Quits the app.
     Quit,
