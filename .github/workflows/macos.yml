@@ -10,6 +10,8 @@ name: macOS
 # every three hours when it moved.
 
 on:
+  merge_group:
+    types: [checks_requested]
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
