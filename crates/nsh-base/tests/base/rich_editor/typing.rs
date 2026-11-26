@@ -576,6 +576,47 @@ fn on_ios_a_commit_after_two_caret_moves_goes_in_whole() {
     see(&mut app, "Sel 3-3");
 }
 
+/// On macOS the sink holds the end of the text before the caret, 8 bytes
+/// at most and whole characters: what an input method reads to put a space
+/// between Chinese and Latin text, and no more (the sink is a point wide,
+/// so each character of it is a line, and the candidates open where its
+/// text ends). What the input method then commits or deletes there goes
+/// into the document at the caret.
+#[test]
+fn on_macos_the_sink_holds_the_characters_before_the_caret() {
+    let mut app = start_on(paragraphs(&["one", "hello 你好"]), Os::MacOs, true);
+    focus(&mut app);
+    keys(&mut app, &["right", "right", "right"]);
+    see(&mut app, "Sel 4-4");
+    assert_eq!(sink(&app).as_deref(), Some("one"));
+    // At a block's start there is nothing before the caret.
+    keys(&mut app, &["right"]);
+    see(&mut app, "Sel 6-6");
+    assert_eq!(sink(&app).as_deref(), Some(""));
+    // "hello 你好" is 12 bytes: the last 8.
+    keys(&mut app, &["end"]);
+    see(&mut app, "Sel 14-14");
+    assert_eq!(sink(&app).as_deref(), Some("o 你好"));
+    // An input method that saw "好" before the caret commits " a".
+    sink_text(&mut app, "o 你好 a");
+    see(&mut app, &doc("one|hello 你好 a"));
+    see(&mut app, "Sel 16-16");
+    sink_text(&mut app, "o 你好 ");
+    see(&mut app, &doc("one|hello 你好 "));
+    see(&mut app, "Sel 15-15");
+}
+
+/// The 8 bytes the macOS sink holds end at the caret and start at a
+/// character's boundary: never half a character.
+#[test]
+fn on_macos_the_sink_holds_whole_characters() {
+    let mut app = start_on(paragraphs(&["一二三四"]), Os::MacOs, true);
+    focus(&mut app);
+    keys(&mut app, &["end"]);
+    see(&mut app, "Sel 5-5");
+    assert_eq!(sink(&app).as_deref(), Some("三四"));
+}
+
 // Placeholder and read-only.
 
 #[test]
@@ -637,6 +678,49 @@ fn a_read_only_editor_ignores_typing_and_deleting() {
     app.wait(Duration::from_millis(200)).unwrap();
     see(&mut app, &doc("ab"));
     see(&mut app, "Types paragraph");
+}
+
+#[test]
+fn a_read_only_editor_reports_typed_text_once_without_changing_it() {
+    let mut app = start_configured(paragraphs(&["ab"]), None, false);
+    let _ = app.type_text("id:editor", "x");
+    see(&mut app, "Heard 1");
+    app.wait(Duration::from_millis(200)).unwrap();
+    see(&mut app, "Heard 1");
+    see(&mut app, &doc("ab"));
+}
+
+#[test]
+fn a_read_only_editor_reports_no_deleting() {
+    let mut app = start_configured(paragraphs(&["ab"]), None, false);
+    let _ = app.type_text("id:editor", "x");
+    see(&mut app, "Heard 1");
+    sink_text(&mut app, "");
+    app.wait(Duration::from_millis(200)).unwrap();
+    see(&mut app, "Heard 1");
+    see(&mut app, &doc("ab"));
+}
+
+#[test]
+fn a_read_only_editor_reports_an_input_methods_commit_once() {
+    let mut app = start_configured(paragraphs(&["ab"]), None, false);
+    let _ = app.type_text("id:editor", "");
+    compose(&mut app, true, "ni");
+    sink_text(&mut app, "ni");
+    see(&mut app, "Heard 0");
+    sink_text(&mut app, "你");
+    compose(&mut app, false, "");
+    see(&mut app, "Heard 1");
+    see(&mut app, &doc("ab"));
+}
+
+#[test]
+fn an_editable_editor_reports_no_readonly_input() {
+    let mut app = start_configured(paragraphs(&[""]), None, true);
+    app.type_text("id:editor", "x").unwrap();
+    see(&mut app, &doc("x"));
+    app.wait(Duration::from_millis(200)).unwrap();
+    see(&mut app, "Heard 0");
 }
 
 #[test]
@@ -716,13 +800,15 @@ fn Configured(props: ConfiguredProps) -> impl IntoElement {
         }
     };
     let shown = signal(read());
+    let heard = signal(0usize);
     let (on_change, on_select) = (read.clone(), read);
     let mut editor = rich_editor()
         .editor(session)
         .editable(props.editable)
         .size_full()
         .on_change(move |_: &_| shown.set(on_change()))
-        .on_selection_change(move |_: &_| shown.set(on_select()));
+        .on_selection_change(move |_: &_| shown.set(on_select()))
+        .on_readonly_input(move || heard.update(|n| *n += 1));
     if let Some(p) = props.placeholder.clone() {
         editor = editor.placeholder(SharedString::from(p));
     }
@@ -737,6 +823,7 @@ fn Configured(props: ConfiguredProps) -> impl IntoElement {
         .child(text(move || format!("Doc {:?}", shown.get().0)))
         .child(text(move || format!("Types {}", shown.get().1)))
         .child(text(move || format!("Sel {}", shown.get().2)))
+        .child(text(move || format!("Heard {}", heard.get())))
 }
 
 fn start_configured(doc: Value, placeholder: Option<&str>, editable: bool) -> Headless {

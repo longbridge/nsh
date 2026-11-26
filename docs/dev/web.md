@@ -244,7 +244,9 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 through wasm-bindgen (`crates/nsh-cli/src/bindgen.rs`) is split the same way, before wasm-bindgen runs
 (`web::link`): wasm-bindgen rewrites the module it reads, and its output could not be split, so it runs on the main
 module alone. What wasm-bindgen reads or rewrites stays in the main module, and the CLI checks that its output still
-has what the side modules import from it. A Rust app's such runtime leaves out the gates the app never needs
+has what the side modules import from it. A Rust app's runtime, with wasm-bindgen or without, splits off the gates
+of the `nsh/base` parts and of shaders (`web::rust_on_demand`), which the page loads the first time the app makes a
+component of the part by name or shows a shader, not before it starts. It leaves out the gates the app never needs
 before it is split (`prune::unused_gates`), rather than publishing side modules no page loads: when no code
 reachable from its other exports makes a component by name (`ComponentElement::by_name`, found by the symbol
 `nsh_core::element::__private::BY_NAME_MARKER` names: the stand-in `make` of such an element, kept by a test in

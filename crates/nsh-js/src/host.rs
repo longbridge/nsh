@@ -1586,6 +1586,22 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 o.set("pressure", p.pressure)?;
                 o.set("tiltX", p.tilt_x)?;
                 o.set("tiltY", p.tilt_y)?;
+                o.set("eraser", p.eraser)?;
+                o.set("barrel", p.barrel)?;
+                let coalesced = rquickjs::Array::new(cx.clone())?;
+                for (j, c) in p.coalesced.iter().enumerate() {
+                    let s = rquickjs::Object::new(cx.clone())?;
+                    s.set("pageX", c.page.x.0)?;
+                    s.set("pageY", c.page.y.0)?;
+                    s.set("locationX", c.location.x.0)?;
+                    s.set("locationY", c.location.y.0)?;
+                    s.set("pressure", c.pressure)?;
+                    s.set("tiltX", c.tilt_x)?;
+                    s.set("tiltY", c.tilt_y)?;
+                    s.set("timestamp", c.timestamp)?;
+                    coalesced.set(j, s)?;
+                }
+                o.set("coalesced", coalesced)?;
                 o.set("timestamp", touch.timestamp)?;
                 points.set(i, o)?;
             }

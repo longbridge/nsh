@@ -1204,6 +1204,13 @@ fn same(a: &Option<std::rc::Rc<ClassList>>, b: &Option<std::rc::Rc<ClassList>>) 
     }
 }
 
+impl Components {
+    /// The GPU renderer the sets registered as `name`.
+    pub(super) fn gpu_renderer(&self, name: &str) -> Option<crate::gpu::GpuSource> {
+        self.registry.registered_gpu_renderer(name).cloned()
+    }
+}
+
 impl<M: TextEngine> Core<M> {
     /// The components this core can render (from `nsh-base` and the
     /// like), and the design tokens their sets bring

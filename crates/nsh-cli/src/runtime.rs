@@ -47,6 +47,22 @@ use std::{
 
 use anyhow::{Context as _, bail};
 
+/// The Rust target of the iOS simulator on this machine: the simulator runs
+/// the processor of the Mac, so an Intel Mac's is x86_64. Which CLI runs here
+/// decides, as a distribution is installed for the machine's own processor.
+pub(crate) const IOS_SIMULATOR_TRIPLE: &str = if cfg!(target_arch = "x86_64") {
+    "x86_64-apple-ios"
+} else {
+    "aarch64-apple-ios-sim"
+};
+
+/// The Rust target of Mac Catalyst on this machine, by its processor.
+pub(crate) const MAC_CATALYST_TRIPLE: &str = if cfg!(target_arch = "x86_64") {
+    "x86_64-apple-ios-macabi"
+} else {
+    "aarch64-apple-ios-macabi"
+};
+
 /// A runtime platform directory and its cargo target triple.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Platform {
@@ -99,8 +115,8 @@ impl Platform {
     pub(crate) fn triple(self) -> Option<&'static str> {
         match self {
             Platform::IphoneOs => Some("aarch64-apple-ios"),
-            Platform::IphoneSimulator => Some("aarch64-apple-ios-sim"),
-            Platform::MacCatalyst => Some("aarch64-apple-ios-macabi"),
+            Platform::IphoneSimulator => Some(IOS_SIMULATOR_TRIPLE),
+            Platform::MacCatalyst => Some(MAC_CATALYST_TRIPLE),
             // Packaged off Windows: cross-built ([`cross_build`]).
             Platform::Windows if !cfg!(windows) => Some(WINDOWS_TRIPLE),
             Platform::Linux

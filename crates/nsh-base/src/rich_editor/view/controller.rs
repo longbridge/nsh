@@ -203,9 +203,19 @@ impl Sink {
 /// Whether the sink holds the text before the caret ([`Rv::sink_context`])
 /// rather than nothing: UIKit's keyboard repeats a held Delete (and speeds
 /// up to words) only over text it sees before the input's caret; in an
-/// empty input it deletes once.
+/// empty input it deletes once. On macOS, input methods that put a space
+/// between Chinese and Latin text read the character before the caret
+/// from it.
 fn sink_holds_context() -> bool {
-    os() == Os::Ios
+    matches!(os(), Os::Ios | Os::MacOs)
+}
+
+/// How much of the text before the caret the sink holds ([`SINK_CONTEXT`]):
+/// on macOS a character or two, what an input method reads, and no more:
+/// the sink is a point wide, so each character it holds is a line of it,
+/// and the candidates open where its text ends.
+fn sink_context_limit() -> usize {
+    if os() == Os::MacOs { 8 } else { SINK_CONTEXT }
 }
 
 /// The view's controller. Cloned into the closures that need it.
@@ -1014,6 +1024,12 @@ impl Rv {
             (edit, sink.composition.is_some())
         };
         self.sink_value.set(text.to_owned());
+        // Reported here, not in `text_input`: a soft keyboard's text reaches
+        // the editor only through the sink, and `text_input` also takes the
+        // app's own `insertText`, which is not the user typing.
+        if !edit.inserted.is_empty() && !self.editable() {
+            self.cx.emit(RichEditorEvent::ReadonlyInput);
+        }
         for _ in 0..edit.backspaces {
             self.key(&KeyEvent::new("Backspace"));
         }
@@ -1195,7 +1211,7 @@ impl Rv {
         }
         let line = inline_text(at.parent());
         let before = utf16_slice(&line, 0, head - at.start(at.depth));
-        let mut cut = before.len().saturating_sub(SINK_CONTEXT);
+        let mut cut = before.len().saturating_sub(sink_context_limit());
         while !before.is_char_boundary(cut) {
             cut += 1;
         }

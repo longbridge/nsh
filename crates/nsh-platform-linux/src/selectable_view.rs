@@ -147,6 +147,10 @@ impl SelectionTexts for Texts {
         self.items[i].text.copied_text(range)
     }
 
+    fn attributed(&self, i: usize) -> Option<&AttributedText> {
+        Some(&self.items[i].text)
+    }
+
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.items[i].frame
     }
@@ -717,21 +721,34 @@ fn key_in(surface: &Rc<Surface>, id: NodeId, key: gdk::Key, modifiers: gdk::Modi
 
 /// The selected text of area `id`, as a copy gives it.
 fn selected_text(surface: &Surface, id: NodeId) -> Option<(NshView, String)> {
+    selected(surface, id, false).map(|(area, text, _)| (area, text))
+}
+
+/// The selected text of area `id` and, with `html`, its HTML
+/// (`SelectionModel::html`: with bold, italic or links).
+fn selected(
+    surface: &Surface,
+    id: NodeId,
+    html: bool,
+) -> Option<(NshView, String, Option<String>)> {
     let area = view_of(surface, id)?;
     let texts = collect(&area);
-    let text = {
+    let (text, html) = {
         let areas = surface.selection.areas.borrow();
         let model = &areas.get(&id)?.model;
         if model.is_empty() {
             return None;
         }
-        model.text(&texts)
+        (
+            model.text(&texts),
+            html.then(|| model.html(&texts)).flatten(),
+        )
     };
     // A selection of hidden characters only copies nothing.
     if text.is_empty() {
         return None;
     }
-    Some((area, text))
+    Some((area, text, html))
 }
 
 /// Whether selectable view `area` has a selection to copy.
@@ -741,8 +758,11 @@ pub(crate) fn has_selection(surface: &Surface, area: &NshView) -> bool {
 
 /// Copies area `id`'s selection to the clipboard.
 fn copy(surface: &Rc<Surface>, id: NodeId) {
-    if let Some((area, text)) = selected_text(surface, id) {
-        area.clipboard().set_text(&text);
+    match selected(surface, id, true) {
+        // Bold, italic and links are kept in a rich text editor.
+        Some((_, text, Some(html))) => crate::system::set_clipboard_html(&text, &html),
+        Some((area, text, None)) => area.clipboard().set_text(&text),
+        None => {}
     }
 }
 

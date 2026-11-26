@@ -1201,6 +1201,9 @@ macOS SDKs are 26 or newer. Building against the newer SDK enables iOS 26's syst
 Liquid Glass; the deployment target stays iOS 15.0. After building, `.github/ci/ios-build-versions.py` checks
 the four device, simulator and Catalyst runtimes' actual `LC_BUILD_VERSION` before packaging: the SDK must
 be 26 or newer and the minimum OS must remain 15.0. It reads the binaries without modifying them.
+The Intel job (`macos-15-intel`, Xcode 16.4: Xcode 26 does not run on Intel Macs) builds only the simulator
+and Catalyst runtimes for x86_64 (`x86_64-apple-ios`, `x86_64-apple-ios-macabi`) and checks they have the iOS 18
+SDK or newer; it has no device runner and no embedding SDK.
 
 `.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon, with the iOS and Mac Catalyst
 runtimes and the iOS SDK, and Intel), Linux and Windows (x86_64 and arm64), each with the desktop runtime and the GPUI
@@ -1210,7 +1213,7 @@ and terminal development hosts of its machine. The components the same on every 
 directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on Windows) with the CLI and that machine's runtime only. The
 embedding SDKs are archives of their own (`nsh-embed-ios.zip`, `nsh-embed-android.zip`), and `nsh component pack`
 moves every other runtime into its component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and
-`nsh-web.tar.gz` from x86_64 Linux's build, `nsh-ios-macos-arm64.tar.gz`, `nsh-gpui-<platform>.tar.gz`,
+`nsh-web.tar.gz` from x86_64 Linux's build, `nsh-ios-macos-arm64.tar.gz`, `nsh-ios-macos-x86_64.tar.gz`, `nsh-gpui-<platform>.tar.gz`,
 `nsh-tui-<platform>.tar.gz`), each with a `.sha256`.
 The release builds them with thin LTO over 16 codegen units (`CARGO_PROFILE_RELEASE_*` in the workflow) rather than
 the profile's fat LTO over one, which linked each executable single-threaded for up to 25 minutes; `web` keeps fat LTO.
@@ -1302,13 +1305,13 @@ requests only when `website/`, the skills, the tasks examples or `nsh-platform-w
 
 ### Benchmarks
 
-The Benchmarks workflow runs nsh-engine's `bench_calls`, `bench_components` and `bench_handles` (ignored tests in
-`crates/nsh-engine/tests/engine`) for a pull request and for its merge base on `main`, on one self-hosted runner. It
-alternates the two builds for five rounds, keeps each metric's fastest value, and updates one comment on the pull request
-with the table. A metric more than 10% slower (and more than 2ns) fails the check. Running one build against itself on
-that runner moves every metric by 3% at most. Run the same comparison locally with
-`scripts/bench-compare.py run BASE_BIN HEAD_BIN --json out.json` and `scripts/bench-compare.py table out.json`, from
-`crates/nsh-engine`. `bench_gallery_scroll` stays out: it sleeps between frames and takes seconds.
+CI does not run benchmarks: they need a quiet machine for a long time, and the runners are shared. When a change may
+affect performance, compare it with `main` locally. Build nsh-engine's test binary on both sides with
+`cargo test --release -p nsh-engine --test engine --no-run`, then from `crates/nsh-engine` run
+`scripts/bench-compare.py run BASE_BIN HEAD_BIN --json out.json` and `scripts/bench-compare.py table out.json`. It
+alternates the two builds for five rounds over `bench_calls`, `bench_components` and `bench_handles` (ignored tests in
+`crates/nsh-engine/tests/engine`), keeps each metric's fastest value, and marks a metric more than 10% (and more than
+2ns) slower. `bench_gallery_scroll` stays out: it sleeps between frames and takes seconds.
 
 ### Homebrew publishing setup and recovery
 

@@ -1,5 +1,6 @@
 //! Render functions a component takes (an `Option<Renderer<T>>` prop): in
-//! JS a function `(value: T) => JSX.Element` the app passes, in Rust a
+//! JS a function `(value: T) => JSX.Element` the app passes (of an
+//! `InContext<A, B>`: `(value: A, context: B) => JSX.Element`), in Rust a
 //! closure. The component asks it for content where it places it, with a
 //! key and a value: `props.render_code.get().map(|r| r.render(key, code))`.
 //!
@@ -265,6 +266,9 @@ pub trait RenderValue: 'static {
     fn render_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError>;
     /// Whether `other` is an equal value of the same type.
     fn same(&self, other: &dyn RenderValue) -> bool;
+    /// Whether JS passes the value (an array) to the function as its
+    /// arguments ([`JsValue::RENDER_SPREAD`]: an [`super::InContext`]'s).
+    fn spread(&self) -> bool;
     /// The value, to downcast.
     fn as_any(&self) -> &dyn Any;
 }
@@ -276,6 +280,10 @@ impl<T: JsValue + PartialEq + 'static> RenderValue for T {
 
     fn same(&self, other: &dyn RenderValue) -> bool {
         other.as_any().downcast_ref::<T>() == Some(self)
+    }
+
+    fn spread(&self) -> bool {
+        T::RENDER_SPREAD
     }
 
     fn as_any(&self) -> &dyn Any {

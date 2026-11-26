@@ -178,43 +178,11 @@ pub(crate) fn package(
         let has_emoji =
             plan.main.iter().any(|g| g == EMOJI_GATE) || plan.lazy().contains(&EMOJI_GATE);
         let exports = prune::exports(&linkable)?;
-        let (mut keep, mut lazy) = if shared {
+        let (keep, lazy) = if shared {
             shared_split(&exports)
         } else {
-            let rust_part = |name: &str| built.rust_root && rust_on_demand(name);
-            let keep: Vec<&str> = exports
-                .iter()
-                .map(String::as_str)
-                .filter(|name| {
-                    !is_gate(name) || (!rust_part(name) && plan.main.iter().any(|g| g == name))
-                })
-                .collect();
-            let mut lazy: Vec<&str> = plan
-                .lazy()
-                .into_iter()
-                .filter(|gate| exports.iter().any(|e| e == gate))
-                .collect();
-            lazy.extend(exports.iter().map(String::as_str).filter(|n| rust_part(n)));
-            (keep, lazy)
+            app_split(built, &plan, &linkable, &exports)?
         };
-        // A Rust app's runtime that calls JS through wasm-bindgen is split
-        // without the gates the app never needs, and the code only they
-        // reach, rather than with side modules no page loads. Only such a
-        // runtime, which was pruned this way when it was published whole:
-        // leaving them out of every Rust app's runtime belongs with
-        // loading its part gates on demand, a change of its own.
-        if built.rust_root && bindgen.is_some() {
-            let unused = prune::unused_gates(&linkable)?;
-            if !unused.is_empty() {
-                ui::debug(format!(
-                    "web runtime: left out the gates the app does not need: {}",
-                    unused.join(", ")
-                ));
-                let used = |name: &&str| !unused.iter().any(|u| u == name);
-                keep.retain(used);
-                lazy.retain(used);
-            }
-        }
         let (split, glue) = link(&linkable, &keep, &lazy, bindgen.as_ref())?;
         for side in &split.sides {
             let file = side_file_name(&side.gates);
@@ -225,14 +193,7 @@ pub(crate) fn package(
             sides.insert(side.name.clone(), side_entry(side, &url));
         }
         chunk_sides = plan.chunk_sides(&published);
-        // What the entry needs that the main module does not have: none
-        // but in a shared runtime, whose main module has no gate.
-        entry_sides = plan
-            .main
-            .iter()
-            .filter(|gate| published.contains(*gate))
-            .cloned()
-            .collect();
+        entry_sides = plan.entry_sides(&published, built.rust_root);
         // A runtime published whole has the typesetter in its main module.
         let has_math = published.contains(MATH_GATE)
             || (split.sides.is_empty() && exports.iter().any(|e| e == MATH_GATE));
@@ -424,6 +385,48 @@ fn shared_split(exports: &[String]) -> (Vec<&str>, Vec<&str>) {
         .partition(|name| is_gate(name));
     lazy.sort_unstable();
     (keep, lazy)
+}
+
+/// What a runtime linked for `built` (not a shared one) by `plan` keeps in
+/// its main module and splits off, of `exports`, those of `linkable`:
+/// every export but the gates, and the gates of `plan.main`; each gate a
+/// chunk loads later is lazy ([`GatePlan::lazy`]).
+///
+/// A Rust app's runtime splits off the gates it loads on demand
+/// ([`rust_on_demand`]) whatever the plan, and leaves out those the app
+/// never needs, with the code only they reach ([`prune::unused_gates`]),
+/// rather than publishing side modules no page loads.
+fn app_split<'a>(
+    built: &Built,
+    plan: &GatePlan,
+    linkable: &[u8],
+    exports: &'a [String],
+) -> anyhow::Result<(Vec<&'a str>, Vec<&'a str>)> {
+    let rust_part = |name: &str| built.rust_root && rust_on_demand(name);
+    let mut keep: Vec<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !is_gate(name) || (!rust_part(name) && plan.main.iter().any(|g| g == name)))
+        .collect();
+    let mut lazy: Vec<&str> = plan
+        .lazy()
+        .into_iter()
+        .filter_map(|gate| exports.iter().find(|e| *e == gate).map(String::as_str))
+        .collect();
+    lazy.extend(exports.iter().map(String::as_str).filter(|n| rust_part(n)));
+    if built.rust_root {
+        let unused = prune::unused_gates(linkable)?;
+        if !unused.is_empty() {
+            ui::debug(format!(
+                "web runtime: left out the gates the app does not need: {}",
+                unused.join(", ")
+            ));
+            let used = |name: &&str| !unused.iter().any(|u| u == name);
+            keep.retain(used);
+            lazy.retain(used);
+        }
+    }
+    Ok((keep, lazy))
 }
 
 /// The URLs of side modules `names` of the page's `sides`, each after the
@@ -987,6 +990,20 @@ impl GatePlan {
             set.insert(MATH_GATE);
         }
         set.into_iter().collect()
+    }
+
+    /// The page's `entrySides`: the gates of `main` that have a side module
+    /// of those `published`, which the page loads before the app starts.
+    /// None but in a shared runtime, whose main module has no gate, and
+    /// none in a Rust app's runtime (`rust_root`): the gates it splits off
+    /// ([`rust_on_demand`]) load when the app first makes a component of
+    /// their part by name or first shows a shader.
+    fn entry_sides(&self, published: &BTreeSet<String>, rust_root: bool) -> Vec<String> {
+        self.main
+            .iter()
+            .filter(|gate| published.contains(*gate) && !(rust_root && rust_on_demand(gate)))
+            .cloned()
+            .collect()
     }
 
     /// The page's map, chunk id -> the side modules (named by their gates)
@@ -2031,6 +2048,54 @@ mod tests {
         // What the engine runs from the start stays in the main module.
         assert!(!rust_on_demand("nsh_std_zlib"));
         assert!(!rust_on_demand(&ui_set_gate("app/charts")));
+    }
+
+    #[test]
+    fn a_rust_app_loads_a_part_when_it_first_makes_one_of_its_components() {
+        let marker = nsh_core::element::__private::BY_NAME_MARKER;
+        let wasm = prune::tests::module_named(
+            "nsh_part_plot",
+            &format!("nsh_core::element::component::{marker}"),
+        );
+        let exports = prune::exports(&wasm).unwrap();
+        let built = crate::build::rust_root();
+        // Not known what a Rust app uses: every gate is the entry's.
+        let plan = GatePlan::of(&built);
+        assert!(plan.main.iter().any(|g| g == "nsh_part_plot"));
+        let (keep, lazy) = app_split(&built, &plan, &wasm, &exports).unwrap();
+        assert_eq!(keep, ["a"]);
+        assert_eq!(lazy, ["nsh_part_plot"]);
+        // Its side modules wait for their first use, not for the start.
+        let published = BTreeSet::from(["nsh_part_plot".to_owned(), SHADER_GATE.to_owned()]);
+        assert!(plan.entry_sides(&published, true).is_empty());
+        // Another app's entry gates with side modules (a shared runtime's)
+        // load before it starts.
+        assert_eq!(
+            plan.entry_sides(&published, false),
+            ["nsh_part_plot", SHADER_GATE]
+        );
+    }
+
+    #[test]
+    fn a_rust_app_leaves_out_the_gates_it_never_needs() {
+        // No component made by name. The runtime calls no JS through
+        // wasm-bindgen, which makes no difference.
+        let wasm =
+            prune::tests::module_named("nsh_part_plot", "nsh_core::element::component::missing_x");
+        let exports = prune::exports(&wasm).unwrap();
+        let built = crate::build::rust_root();
+        let plan = GatePlan::of(&built);
+        let (keep, lazy) = app_split(&built, &plan, &wasm, &exports).unwrap();
+        assert_eq!(keep, ["a"]);
+        assert!(lazy.is_empty());
+
+        // Another app's runtime keeps the gates its plan has.
+        let mut tsx = crate::build::rust_root();
+        tsx.rust_root = false;
+        let plan = GatePlan::of(&tsx);
+        let (keep, lazy) = app_split(&tsx, &plan, &wasm, &exports).unwrap();
+        assert_eq!(keep, ["nsh_part_plot", "a"]);
+        assert!(lazy.is_empty());
     }
 
     #[test]

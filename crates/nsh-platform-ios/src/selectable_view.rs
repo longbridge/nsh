@@ -40,7 +40,7 @@ use nsh_core::{
     AttributedText, Bounds, Color, EventKind, EventPayload, NodeId, PayloadValue, Point, Points,
     geometry::{bounds, point, px, size},
     selection::{
-        Handle, KeptRows, SelectionModel, SelectionTexts, TextPosition, autoscroll_step,
+        Handle, KeptRows, SelectionModel, SelectionTexts, TextPosition, autoscroll_step, marker_of,
         reading_order, reorder,
     },
 };
@@ -90,6 +90,8 @@ struct Entry {
     frame: Bounds<Points>,
     /// It continues the text before it (`ViewProps::continues_text`).
     continues: bool,
+    /// The list marker beside it (`selection::marker_of`).
+    marker: Option<String>,
 }
 
 /// The texts of an area as the model sees them.
@@ -118,6 +120,10 @@ impl SelectionTexts for AreaTexts {
 
     fn copied(&self, i: usize, range: std::ops::Range<u32>) -> String {
         self.entries[i].text.copied_text(range)
+    }
+
+    fn attributed(&self, i: usize) -> Option<&AttributedText> {
+        Some(&self.entries[i].text)
     }
 
     fn frame(&self, i: usize) -> Bounds<Points> {
@@ -157,12 +163,17 @@ impl SelectionTexts for AreaTexts {
     fn continues(&self, i: usize) -> bool {
         self.entries[i].continues
     }
+
+    fn marker(&self, i: usize) -> Option<&str> {
+        self.entries[i].marker.as_deref()
+    }
 }
 
 impl AreaTexts {
     /// The texts of `area`'s subtree, in document order.
     fn list(area: &UIView) -> Self {
-        fn walk(view: &UIView, area: &UIView, out: &mut Vec<Entry>) {
+        type Chrome = Option<(String, Bounds<Points>)>;
+        fn walk(view: &UIView, area: &UIView, out: &mut Vec<Entry>, chrome: &mut Chrome) {
             // In reading order: a virtual list's recycled cells are mounted
             // in no particular order.
             let start = out.len();
@@ -183,24 +194,29 @@ impl AreaTexts {
                     let Some(content) = text.attributed() else {
                         continue;
                     };
-                    if content.selectable == Some(false) {
-                        continue;
-                    }
                     let Some(rect) = text.content_box() else {
                         continue;
                     };
                     let r = text.convertRect_toView(rect, Some(area));
+                    let frame = bounds(
+                        pt(r.origin),
+                        size(px(r.size.width as f32), px(r.size.height as f32)),
+                    );
+                    if content.selectable == Some(false) {
+                        // A list marker, maybe: the next text's copy starts
+                        // with it.
+                        *chrome = Some((content.text.to_string(), frame));
+                        continue;
+                    }
                     out.push(Entry {
                         continues: text.continues_text(),
                         view: text.retain(),
+                        marker: marker_of(chrome.take().as_ref(), frame),
                         text: content,
-                        frame: bounds(
-                            pt(r.origin),
-                            size(px(r.size.width as f32), px(r.size.height as f32)),
-                        ),
+                        frame,
                     });
                 } else {
-                    walk(&child, area, out);
+                    walk(&child, area, out, chrome);
                 }
                 runs.push((frame, from..out.len()));
             }
@@ -209,7 +225,7 @@ impl AreaTexts {
             }
         }
         let mut entries = Vec::new();
-        walk(area, area, &mut entries);
+        walk(area, area, &mut entries, &mut None);
         Self {
             area: Some(area.retain()),
             entries,
@@ -419,12 +435,16 @@ define_class!(
 
         #[unsafe(method(copy:))]
         fn copy(&self, _sender: Option<&AnyObject>) {
-            let text = {
+            let (text, html) = {
                 let texts = self.ivars().texts.borrow();
-                self.ivars().model.borrow().text(&*texts)
+                let model = self.ivars().model.borrow();
+                (model.text(&*texts), model.html(&*texts))
             };
-            if !text.is_empty() {
-                crate::system::set_clipboard(&text);
+            // Bold, italic and links go as HTML too, for rich text editors.
+            match html {
+                _ if text.is_empty() => {}
+                Some(html) => crate::system::set_clipboard_html(&text, &html),
+                None => crate::system::set_clipboard(&text),
             }
         }
 

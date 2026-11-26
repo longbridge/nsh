@@ -54,6 +54,9 @@ enum Message {
     /// A function the app runs on the main thread
     /// ([`MountSink::run_on_main_thread`]), after the batches before it.
     Run(MainThreadTask),
+    /// The engine laid root `id` out at a size ([`MountSink::root_resized`]),
+    /// after the batch that came of it.
+    RootResized(NodeId, Size<Points>),
 }
 
 thread_local! {
@@ -111,6 +114,10 @@ impl MountSink for Sink {
 
     fn run_on_main_thread(&self, task: MainThreadTask) {
         self.send(Message::Run(task));
+    }
+
+    fn root_resized(&self, id: NodeId, size: Size<Points>) {
+        self.send(Message::RootResized(id, size));
     }
 }
 
@@ -212,6 +219,8 @@ pub(crate) struct Surface {
     /// The performance monitor, while it measures ([`crate::fps`]).
     fps: RefCell<Option<Rc<crate::fps::Fps>>>,
     pub(crate) fps_overlay: RefCell<glib::WeakRef<gtk::Overlay>>,
+    /// The GPU views and their render thread ([`crate::gpu`]).
+    pub(crate) gpu: RefCell<crate::gpu::SurfaceGpu>,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -306,6 +315,7 @@ impl Surface {
             selection: Default::default(),
             fps: RefCell::new(None),
             fps_overlay: RefCell::default(),
+            gpu: RefCell::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -315,8 +325,16 @@ impl Surface {
             }
         });
         reveal_on_frames(root.upcast_ref());
-        root.connect_realize(|root| {
+        // GPU views that came into sight are drawn in the frame that shows them.
+        let weak = Rc::downgrade(&surface);
+        root.connect_realize(move |root| {
             if let Some(clock) = root.frame_clock() {
+                let weak = weak.clone();
+                clock.connect_layout(move |_| {
+                    if let Some(surface) = weak.upgrade() {
+                        crate::gpu::reveal(&surface);
+                    }
+                });
                 crate::fps::log_first_frame(&clock);
             }
         });
@@ -604,6 +622,7 @@ impl Surface {
                     }
                 }
                 Message::Run(task) => task.run(),
+                Message::RootResized(id, size) => crate::window::laid_out(self, id, size),
             }
         }
         if applied {
@@ -649,11 +668,13 @@ impl Surface {
             anim.write(&self.mounter.borrow());
             let mut moved = Vec::new();
             anim.write_components(
-                |id| crate::native::has_component(self, id),
+                |id| crate::native::has_component(self, id) || crate::gpu::has(self, id),
                 |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
             );
             (std::mem::take(&mut anim.finished), moved)
         };
+        let mut moved = moved;
+        crate::gpu::animated(self, &mut moved);
         // No surface state borrowed while the app's components run.
         crate::native::component_animated(self, moved);
         crate::scroll::pin_animated_sticky(self);
