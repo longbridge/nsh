@@ -857,7 +857,13 @@ final class InputBox extends FrameLayout implements Node {
             text = text.substring(0, end).replace('\n', ' ');
         }
         int a = Math.max(0, edit.getSelectionStart()), b = Math.max(0, edit.getSelectionEnd());
-        content.replace(Math.min(a, b), Math.max(a, b), text);
+        int start = Math.min(a, b), end = Math.max(a, b), before = content.length();
+        content.replace(start, end, text);
+        // The caret after what went in (as much as `maxLength` let in), as a paste leaves it: replacing a selection
+        // that starts at the replaced range would otherwise leave the new text selected, and the next insert would
+        // replace it.
+        int caret = Math.max(start, Math.min(content.length(), end + content.length() - before));
+        edit.setSelection(caret);
         // An edit ends the EditText's toolbar, as its own paste does.
         finishTextActions();
     }

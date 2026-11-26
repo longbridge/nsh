@@ -279,7 +279,10 @@ final class TestAgent {
             android.text.Editable content = edit.getText();
             int start = Math.max(0, Math.min(edit.getSelectionStart(), edit.getSelectionEnd()));
             int end = Math.max(0, Math.max(edit.getSelectionStart(), edit.getSelectionEnd()));
+            int before = content.length();
             content.replace(start, end, text);
+            // The caret after the pasted text, as the field's own paste leaves it.
+            edit.setSelection(Math.max(start, Math.min(content.length(), end + content.length() - before)));
             return true;
         });
         return done != null && done;
