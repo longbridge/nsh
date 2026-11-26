@@ -181,7 +181,7 @@ view()
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | A context menu was asked for over the view: the secondary button, the keyboard in the browser or a screen reader on macOS and Windows ([context menus](./index.md#context-menus)). |
 | `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[], mimeTypes: string[] }` (`FileDragEvent`) | A local-file drag entered the active desktop destination with its offered file list and their types. |
 | `onFileDragLeave` | `.on_file_drag_leave` | none | A local-file drag left the active desktop destination. |
-| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the destination (desktops, iOS and Android). |
+| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[], pagePosition? }` (`FileDropEvent`) | Local files or directories were dropped on the destination (desktops, iOS, Android and the Web). |
 | `onLayout` | `.on_layout` | `{ bounds }` (`Bounds<Points>`) | The frame relative to the parent changed. |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | A drag bound with `pan` started / ended; `cancelled` is true when the system cancels it. |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | A pinch bound with `pinch` started / ended. |
@@ -198,6 +198,11 @@ non-ASCII characters. Parse the URL to obtain a filesystem path rather than remo
 `mimeTypes[i]` is the MIME type of `uris[i]` by its file name (`image/png` for `a.png`), and `""` when the name
 names none, a directory for instance, as the DOM's `File.type`. It is the same on every platform, and no file is read
 to give it.
+
+`onFileDrop` also gives `pagePosition`: where the files were let go, in the same coordinates as a mouse event's
+`pagePosition` (the window's root view, in points), so an editor can put what it makes of them at the drop point
+rather than at its caret. AppKit, GTK, Win32, iOS, Android and the Web give it; on the GPUI backend it is absent
+(`None` in Rust).
 
 Use the entry list to preview filenames, counts or kinds before release ("Release to add 2 images"). It contains metadata only; validate the files
 again at drop time. AppKit resolves Finder file references to path URLs. GTK reports entry when its asynchronous
