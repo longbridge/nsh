@@ -509,6 +509,68 @@ pub(super) enum NewChild {
     Kept(SharedString),
 }
 
+/// The keyed old elements of a parent by key ([`Core::match_children`]),
+/// indexed the first time one is looked up: a few elements are searched in
+/// order, many once, so a long keyed list moved or reversed is matched in
+/// linear time. Old elements are only ever taken (`None`) while matching,
+/// so the index stays valid.
+#[derive(Default)]
+pub(super) struct OldKeys {
+    /// The first old element of each key.
+    first: FxHashMap<SharedString, usize>,
+    /// The next old element of the same key after each one (`usize::MAX`
+    /// for none).
+    next: Vec<usize>,
+    indexed: bool,
+}
+
+impl OldKeys {
+    /// Up to this many old elements are searched rather than indexed.
+    const SEARCHED: usize = 16;
+
+    /// The first old element of key `key` left in `old` that is `ok`.
+    fn find(
+        &mut self,
+        old: &[Option<Expanded>],
+        key: &SharedString,
+        ok: impl Fn(&Expanded) -> bool,
+    ) -> Option<usize> {
+        let is = |o: &Option<Expanded>| {
+            o.as_ref()
+                .is_some_and(|o| o.key.as_ref() == Some(key) && ok(o))
+        };
+        if old.len() <= Self::SEARCHED {
+            return old.iter().position(is);
+        }
+        if !self.indexed {
+            self.indexed = true;
+            self.next = vec![usize::MAX; old.len()];
+            // From the end, so each key's first is the earliest.
+            for (at, o) in old.iter().enumerate().rev() {
+                if let Some(k) = o.as_ref().and_then(|o| o.key.as_ref())
+                    && let Some(next) = self.first.insert(k.clone(), at)
+                {
+                    self.next[at] = next;
+                }
+            }
+        }
+        // Those taken go from the front (duplicate keys taken in order are
+        // not walked again).
+        let first = self.first.get_mut(key)?;
+        while *first != usize::MAX && old[*first].is_none() {
+            *first = self.next[*first];
+        }
+        let mut at = *first;
+        while at != usize::MAX {
+            if is(&old[at]) {
+                return Some(at);
+            }
+            at = self.next[at];
+        }
+        None
+    }
+}
+
 /// Whether a slot's place only places it: no styles, props, listeners or
 /// children of its own (what fills it then needs no node around it).
 fn is_plain(el: &ElNode) -> bool {
@@ -4006,6 +4068,9 @@ impl<M: TextEngine> Core<M> {
         // follow each other as they did, and are then found without a
         // search of all the old ones for each.
         let mut after_kept = 0;
+        // The keyed old elements by key, for the rows and elements not
+        // where they were (a reversed list: each would search them all).
+        let mut keys = OldKeys::default();
         for child in new {
             let (owner, el) = match child {
                 NewChild::Made(owner, el) => (owner, el),
@@ -4018,7 +4083,7 @@ impl<M: TextEngine> Core<M> {
                     let at = if old.get(after_kept).is_some_and(is) {
                         Some(after_kept)
                     } else {
-                        old.iter().position(is)
+                        keys.find(&old, &key, |_| true)
                     };
                     match at.and_then(|at| {
                         after_kept = at + 1;
@@ -4040,6 +4105,7 @@ impl<M: TextEngine> Core<M> {
                     &mut out,
                     &mut placeholder,
                     &mut cursor,
+                    &mut keys,
                 );
             };
             match owner {
@@ -4083,6 +4149,7 @@ impl<M: TextEngine> Core<M> {
         out: &mut Vec<Expanded>,
         placeholder: &mut Option<usize>,
         cursor: &mut usize,
+        keys: &mut OldKeys,
     ) {
         // A slot a view fills: placed as it is (`Filled`), or in a node of
         // this view's own when the view gives it anything, which lays its
@@ -4246,10 +4313,7 @@ impl<M: TextEngine> Core<M> {
                 let component = matches!(part, Part::Component(_));
                 let matches = |o: &Expanded| !component && o.tag == el.tag && o.part == part;
                 let at = match &el.key {
-                    Some(k) => old.iter().position(|o| {
-                        o.as_ref()
-                            .is_some_and(|o| o.key.as_ref() == Some(k) && matches(o))
-                    }),
+                    Some(k) => keys.find(old, k, matches),
                     None => {
                         let at = old[(*cursor).min(old.len())..]
                             .iter()
