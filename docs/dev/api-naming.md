@@ -72,6 +72,9 @@ go elsewhere under these rules rather than into them.
   `RichEditor.onCompositionChange({ composing })` uses `Input`'s composition name for the view's boolean state
   transitions. The editor owns the transient marked text; apps observe the start/end state through the session's
   existing `composing` value, with the event emitted after the state settles.
+  `RichEditor.onReadonlyInput()` (Rust `RichEditorEvent::ReadonlyInput`) is Monaco's
+  `onDidAttemptReadOnlyEdit` named after the act, with the state word `readonly` (below) rather than Monaco's
+  `readOnly`; like Monaco's it carries no payload, since the text never enters the document.
 - **Press, not click**: `onPress`, `onPressDown`, `onPressUp`, `onLongPress` (below, Button). `gpui-base` itself says
   *press* for pointer-independent activation (`DialogChangeReason::TriggerPress`, `close_on_backdrop_press`).
 - **States**: `disabled` blocks interaction, `readonly` allows selecting but not editing, `selected` is membership /
@@ -355,6 +358,8 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
 | (new) wry's `WebViewBuilder::with_incognito(bool)` (the web views of GPUI Kit's `gpui-webview`) | `incognito` (`false`), Rust `.incognito(bool)` | States | wry's name, which Tauri's and other web view APIs share: a state of the web view, read when it is made (Rust takes a value, not a signal). A boolean, not a storage mode: a named persistent store would be a prop of its own, which `incognito` composes with |
 | (new) wry's `WebViewBuilder::with_asynchronous_custom_protocol(name, handler)`, WebKit's `setURLSchemeHandler:forURLScheme:` | Rust `.url_scheme(scheme, handler)`; `WebResourceRequest` (`url()`, `method()`, `is_cancelled()`, `respond(WebResource)`, `fail()`), `WebResource { mime_type, bytes }` | Where names come from | WebKit's and RFC 3986's word, "scheme" (wry's "protocol" is the same thing); the request is answered once, from any thread, as wry's responder is. Rust only for now: the bytes are the app's Rust data |
+| **GPU views** | | | |
+| (new) | `gpuView(name, spec)` (`GpuViewProps<P, E>`); Rust `gpu_view()` with `.renderer(make)` / `.renderer_named(name)`, `.prop`, `.bind_animated_prop`, `.on_native_event`; `nsh-gpu`'s `GpuRenderer`, `GpuFrame`, `GpuContext`, `GpuEvent`, `GpuRegistry::gpu_renderer(name, make)` | `nativeComponent(name, spec)` | Shaped as `nativeComponent`, whose props and events it shares; `Gpu` as in WebGPU's `GPUDevice` and `GpuView`, the element it makes. `renderer` names what the app writes, as wgpu's examples and Bevy's render code call it; `prepare` / `render` follow wgpu's examples' `init` / `render` split, `prepare` because the device is given, not made |
 | **NavPage** | | | |
 | `headerShown` | `headerVisible` (default `true`) | States | `header` is the page's slot; as `headerBackVisible`, which stays |
 | **TextView** (`nsh/base`) | | | |

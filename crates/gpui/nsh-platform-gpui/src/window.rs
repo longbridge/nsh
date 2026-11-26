@@ -442,6 +442,22 @@ pub(crate) fn focused(surface: &Surface, cx: &App) -> Option<NodeId> {
         .map(|w| w.id)
 }
 
+/// The window of the app's own a picture of "the app's window" shows: the
+/// one with the keyboard focus, else the last opened that shows; `None`
+/// when no window of the app's own shows.
+#[cfg(feature = "dev")]
+pub(crate) fn shown_front(surface: &Surface, cx: &App) -> Option<NodeId> {
+    focused(surface, cx).or_else(|| {
+        surface
+            .windows
+            .borrow()
+            .iter()
+            .rev()
+            .find(|w| w.shown.get() && !w.hidden.get() && w.handle.get().is_some())
+            .map(|w| w.id)
+    })
+}
+
 /// Window `id`'s state as it would be reported now ([`ROOT_ID`]: the main
 /// window's); `None` while it is not open.
 #[cfg(feature = "dev")]

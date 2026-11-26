@@ -64,7 +64,11 @@ drop, and `uris` empty.
 - On the GPUI backend the first enter comes with the platform's first move
   report after the drag enters the window, not with the entry itself: the
   layer that receives the drag appears with the drag's next frame.
-- The operation is Copy. Delivery means the user dropped the URI list, not that
+- The operation is Copy. AppKit also takes the generic operation when the
+  source offers no copy, as chat apps and similar sources do when they drag
+  a picture as image data; such pictures, and promised files, drop as their
+  contents (`files`; see "File drag metadata" in `macos.md`). A move or a
+  link is refused. Delivery means the user dropped the URI list, not that
   the application accepted or read the files. No transfer starts automatically.
 
 ## Implementation sequence

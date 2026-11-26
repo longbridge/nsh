@@ -867,8 +867,24 @@ pub(crate) fn batch_applied(surface: &Rc<Surface>) {
     }
 }
 
+/// The engine laid root `id` out at `size`, and applied the batch that
+/// came of it: a window still opening at that size has its first frame,
+/// even when its content was in the commit that opened it and nothing
+/// changed since (no batch follows to show it).
+pub(crate) fn laid_out(surface: &Rc<Surface>, id: NodeId, size: Size<Points>) {
+    let ready = surface
+        .windows
+        .borrow()
+        .get(&id)
+        .is_some_and(|w| w.pending.is_some() && w.reported == Some(size));
+    if ready {
+        show_first(surface, id);
+    }
+}
+
 /// Whether a window of the app's own is still opening, hidden until its
-/// first frame ([`batch_applied`], or [`FIRST_FRAME`] after it opened).
+/// first frame ([`batch_applied`] or [`laid_out`], or [`FIRST_FRAME`]
+/// after it opened).
 /// Its views are not drawn until it shows, so they have no place on screen
 /// to act on: the test agent waits for it (`nsh_testing::agent::Native::opening`).
 #[cfg(any(feature = "dev", test))]
@@ -2621,7 +2637,8 @@ mod tests {
     }
 
     /// A window of the app's own is opening until the commit after the one
-    /// that opened it is mounted, or until its wait for that runs out.
+    /// that opened it is mounted, or the engine laid it out at its size,
+    /// or until its wait for that runs out.
     #[test]
     fn a_new_window_is_opening_until_its_first_frame() {
         crate::gtk_test::run(|| {
@@ -2635,14 +2652,26 @@ mod tests {
             assert!(opening(&surface));
             batch_applied(&surface);
             assert!(!opening(&surface));
-            // Without another commit, it shows after `FIRST_FRAME`.
+            // Without another commit, it shows once the engine laid it
+            // out at its size, not at a size it no longer has.
             let second = NshView::new(41, nsh_core::ViewKind::View);
             open(&surface, &second, &OpenWindow::default());
+            batch_applied(&surface);
+            assert!(opening(&surface));
+            let size = surface.windows.borrow()[&41].reported.expect("sized");
+            laid_out(&surface, 41, Size::new(Points(1.0), Points(1.0)));
+            assert!(opening(&surface));
+            laid_out(&surface, 41, size);
+            assert!(!opening(&surface));
+            // Nor that, it shows after `FIRST_FRAME`.
+            let third = NshView::new(42, nsh_core::ViewKind::View);
+            open(&surface, &third, &OpenWindow::default());
             batch_applied(&surface);
             assert!(opening(&surface));
             assert!(crate::gtk_test::wait_until(|| !opening(&surface)));
             assert!(removed(&surface, &view));
             assert!(removed(&surface, &second));
+            assert!(removed(&surface, &third));
         });
     }
 

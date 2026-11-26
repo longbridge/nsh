@@ -165,6 +165,10 @@ pub(crate) struct ViewState {
     pub(crate) fade: f32,
     /// A modal retained only for its exit animation, outside keyboard navigation.
     pub(crate) modal_exiting: bool,
+    /// Hidden by navigation (a screen under the top one, a header item
+    /// other than the `header`), whatever its style says
+    /// ([`NshView::sync_hidden`]).
+    pub(crate) nav_hidden: bool,
     /// Scroll state (scroll views). Boxed, as the image, canvas and
     /// shader states: few views have one, and every view's state is
     /// allocated with its AppKit view.
@@ -177,6 +181,9 @@ pub(crate) struct ViewState {
     pub(crate) canvas: Option<Box<crate::canvas::CanvasState>>,
     /// What a shader draws under the children ([`crate::shader`]).
     pub(crate) shader: Option<Box<crate::shader::ShaderState>>,
+    /// What a GPU view's renderer draws under the children
+    /// ([`crate::gpu_view`]).
+    pub(crate) gpu: Option<Box<crate::gpu_view::GpuState>>,
     /// Text field (input views).
     pub(crate) input: Option<std::rc::Rc<crate::text_input::InputState>>,
     /// Inputs in this subtree, including this view: their drawing needs
@@ -199,6 +206,7 @@ impl ViewState {
     pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         ViewState {
             modal_exiting: false,
+            nav_hidden: false,
             id,
             kind,
             frame: Bounds::default(),
@@ -215,6 +223,7 @@ impl ViewState {
             image: None,
             canvas: None,
             shader: None,
+            gpu: None,
             input: None,
             input_count: usize::from(kind == ViewKind::Input),
             natives: Vec::new(),
@@ -455,9 +464,27 @@ pub(crate) struct Ivars {
     /// itself is in no view hierarchy: a leaf ([`NshView::leaf_eligible`]).
     /// Weak: the parent holds its leaves ([`Ivars::leaves`]).
     leaf_parent: RefCell<Option<objc2::rc::Weak<ViewObj>>>,
-    /// Its children that are leaves, bottom to top. A view has either these
-    /// or child views, never both, so the layer order is the child order.
+    /// The address of [`Ivars::leaf_parent`] (0: none), compared without
+    /// loading the weak reference ([`NshView::compact_leaves`]).
+    leaf_of: Cell<usize>,
+    /// Its children that are leaves. A view has either these or child
+    /// views, never both, so the layer order is the child order. Between
+    /// reads it may hold [`Ivars::gone_leaves`] leaves that left it and be
+    /// out of that order: read it after [`NshView::compact_leaves`] and
+    /// [`NshView::order_leaves`] (bottom to top).
     leaves: RefCell<Vec<Retained<ViewObj>>>,
+    /// How many of [`Ivars::leaves`] left it since it was last compacted.
+    /// Taking each out as it leaves scans and shifts the list, so clearing
+    /// thousands of leaves cost O(n²); they go in one pass instead.
+    gone_leaves: Cell<usize>,
+    /// [`Ivars::leaves`] may not be in the order of their layers
+    /// ([`NshView::order_leaves`]).
+    leaves_unordered: Cell<bool>,
+    /// The view whose [`Ivars::leaves`] list it (0: none; its address), and
+    /// that view: it stays listed there after it leaves until the list is
+    /// compacted.
+    listed_in: Cell<usize>,
+    listed_by: RefCell<Option<objc2::rc::Weak<ViewObj>>>,
     /// The plain layer its leaves' layers are in, in its container's layer.
     /// AppKit takes a view's layer out of a view-backed layer that has no
     /// such subview, but leaves a layer of no view alone.
@@ -594,7 +621,7 @@ define_class!(
         #[unsafe(method(prepareForDragOperation:))]
         fn prepare_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
             self.input_surface().is_some_and(|surface| {
-                crate::file_drop::update(&surface, sender) == NSDragOperation::Copy
+                !crate::file_drop::update(&surface, sender).is_empty()
             })
         }
 
@@ -848,6 +875,14 @@ define_class!(
         #[unsafe(method(mouseExited:))]
         fn mouse_exited(&self, event: &NSEvent) {
             self.pointer(event);
+        }
+
+        /// Which end of the pen comes near the tablet (its eraser).
+        #[unsafe(method(tabletProximity:))]
+        fn tablet_proximity(&self, event: &NSEvent) {
+            crate::input::pen_proximity(event);
+            // SAFETY: NSResponder's own handling (passes it up).
+            let _: () = unsafe { msg_send![super(self), tabletProximity: event] };
         }
 
         // The root sets NSH's cursor; other views pass it up to it.
@@ -1825,6 +1860,21 @@ thread_local! {
     static SCRIPTED: RefCell<Option<Retained<NSEvent>>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// The views leaves left since the last batch ended
+    /// ([`NshView::compact_leaves`]).
+    static GONE_LEAVES: RefCell<Vec<NshView>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Compacts the leaf lists of the views leaves left (at the end of a batch):
+/// the leaves deleted are let go of then, not when the list is next read.
+pub(crate) fn compact_gone_leaves() {
+    let parents = GONE_LEAVES.take();
+    for parent in parents {
+        parent.compact_leaves();
+    }
+}
+
 /// The type of the event the test agent hands its window now.
 pub(crate) fn scripted_type() -> Option<NSEventType> {
     SCRIPTED.with_borrow(|e| e.as_ref().map(|e| e.r#type()))
@@ -1904,7 +1954,12 @@ impl NshView {
             waiting: Cell::new(0),
             sharpened: Cell::new(0.0),
             leaf_parent: RefCell::new(None),
+            leaf_of: Cell::new(0),
             leaves: RefCell::new(Vec::new()),
+            gone_leaves: Cell::new(0),
+            leaves_unordered: Cell::new(false),
+            listed_in: Cell::new(0),
+            listed_by: RefCell::new(None),
             leaf_host: RefCell::new(None),
         });
         // SAFETY: NSView's designated initializer.
@@ -2017,6 +2072,7 @@ impl NshView {
             ),
             None => self.ns().addSubview(&c),
         }
+        self.compact_leaves();
         if self.ivars().leaves.borrow().is_empty() {
             for child in children {
                 c.addSubview(child.ns());
@@ -2891,6 +2947,8 @@ impl NshView {
     /// Its children that are leaves ([`NshView::leaf_eligible`]), bottom
     /// to top.
     pub(crate) fn leaf_children(&self) -> Vec<NshView> {
+        self.compact_leaves();
+        self.order_leaves();
         self.ivars()
             .leaves
             .borrow()
@@ -2980,22 +3038,49 @@ impl NshView {
         let (Some(parent_layer), Some(layer)) = (parent.leaf_host(), self.ns().layer()) else {
             return self.insert_view(parent, before);
         };
-        {
-            let mut leaves = parent.ivars().leaves.borrow_mut();
-            let at = before
-                .and_then(|b| {
-                    leaves
-                        .iter()
-                        .position(|l| Retained::as_ptr(l) == Retained::as_ptr(&b.0))
-                })
-                .unwrap_or(leaves.len());
-            match leaves.get(at).and_then(|b| b.layer()) {
-                Some(b) => parent_layer.insertSublayer_below(&layer, Some(&b)),
-                None => parent_layer.addSublayer(&layer),
+        // The layer order is the child order: the list is put in it when
+        // read ([`NshView::order_leaves`]), not searched for `before` here,
+        // which made reordering n leaves O(n²).
+        let below = before
+            .and_then(|b| b.ns().layer())
+            .filter(|b| b.superlayer().as_deref() == Some(&*parent_layer));
+        match &below {
+            Some(b) => {
+                parent_layer.insertSublayer_below(&layer, Some(b));
+                parent.ivars().leaves_unordered.set(true);
             }
-            leaves.insert(at, self.0.clone());
+            None => parent_layer.addSublayer(&layer),
+        }
+        let this = Retained::as_ptr(&parent.0) as usize;
+        let listed = self.ivars().listed_in.get();
+        if listed == this {
+            // Back in the list it left and still is in: no second entry,
+            // and its entry is where it was.
+            parent.ivars().leaves_unordered.set(true);
+            let gone = parent.ivars().gone_leaves.get();
+            parent.ivars().gone_leaves.set(gone.saturating_sub(1));
+        } else {
+            if listed != 0 {
+                // Still listed by the parent it left: taken out of that
+                // list first, or coming back to it would list it twice.
+                if let Some(old) = self
+                    .ivars()
+                    .listed_by
+                    .borrow()
+                    .as_ref()
+                    .and_then(|p| p.load())
+                {
+                    NshView(old).compact_leaves();
+                }
+            }
+            parent.ivars().leaves.borrow_mut().push(self.0.clone());
+            self.ivars().listed_in.set(this);
+            *self.ivars().listed_by.borrow_mut() = Some(objc2::rc::Weak::from_retained(&parent.0));
         }
         *self.ivars().leaf_parent.borrow_mut() = Some(objc2::rc::Weak::from_retained(&parent.0));
+        self.ivars()
+            .leaf_of
+            .set(Retained::as_ptr(&parent.0) as usize);
         parent.adjust_waiting(self.ivars().waiting.get(), true);
         // What AppKit's `viewDidMoveToSuperview` / `viewDidMoveToWindow`
         // do for a view.
@@ -3031,7 +3116,7 @@ impl NshView {
         !self.is_leaf_layer()
             && self.kind() == ViewKind::View
             && self.state().natives.is_empty()
-            && (!self.ivars().leaves.borrow().is_empty()
+            && (self.has_leaves()
                 || !self
                     .container()
                     .subviews()
@@ -3046,7 +3131,7 @@ impl NshView {
     /// leaves.
     fn leaf_eligible(&self) -> bool {
         if self.kind() != ViewKind::Text
-            || !self.ivars().leaves.borrow().is_empty()
+            || self.has_leaves()
             || self.container().subviews().count() != 0
         {
             return false;
@@ -3075,12 +3160,79 @@ impl NshView {
         self.ivars().leaf_parent.borrow().is_some()
     }
 
+    /// Whether it has leaves: its list holds more than those that left it
+    /// (a move within it makes one leave and come back).
+    fn has_leaves(&self) -> bool {
+        self.ivars().leaves.borrow().len() > self.ivars().gone_leaves.get()
+    }
+
+    /// Takes the leaves that left it out of its list, in one pass.
+    pub(crate) fn compact_leaves(&self) {
+        if self.ivars().gone_leaves.replace(0) == 0 {
+            return;
+        }
+        let this = Retained::as_ptr(&self.0) as usize;
+        let mut gone = Vec::new();
+        self.ivars().leaves.borrow_mut().retain(|l| {
+            let stays = l.ivars().leaf_of.get() == this;
+            if !stays {
+                l.ivars().listed_in.set(0);
+                l.ivars().listed_by.borrow_mut().take();
+                gone.push(l.clone());
+            }
+            stays
+        });
+        // Freed (if this was their last owner) with the list not borrowed.
+        drop(gone);
+    }
+
+    /// Puts [`Ivars::leaves`] in the order of their layers, bottom to top,
+    /// once leaves went in below others or moved: one pass, not one
+    /// search a move.
+    fn order_leaves(&self) {
+        if !self.ivars().leaves_unordered.replace(false) {
+            return;
+        }
+        let Some(host) = self.ivars().leaf_host.borrow().clone() else {
+            return;
+        };
+        // SAFETY: a main-thread read of the host's sublayers.
+        let Some(layers) = (unsafe { host.sublayers() }) else {
+            return;
+        };
+        let mut leaves = self.ivars().leaves.borrow_mut();
+        let mut by_layer = std::collections::HashMap::with_capacity(leaves.len());
+        // A leaf always has a layer; one without (none should be) is kept,
+        // on top, rather than lost.
+        let mut rest = Vec::new();
+        for leaf in leaves.drain(..) {
+            match leaf.layer() {
+                Some(layer) => {
+                    by_layer.insert(Retained::as_ptr(&layer) as usize, leaf);
+                }
+                None => rest.push(leaf),
+            }
+        }
+        for layer in layers.iter() {
+            if let Some(leaf) = by_layer.remove(&(Retained::as_ptr(&layer) as usize)) {
+                leaves.push(leaf);
+            }
+        }
+        leaves.extend(by_layer.into_values());
+        leaves.extend(rest);
+    }
+
     /// Makes its leaves child views again, in their order.
     pub(crate) fn materialize_leaves(&self) {
+        self.compact_leaves();
+        self.order_leaves();
         let leaves = std::mem::take(&mut *self.ivars().leaves.borrow_mut());
         for leaf in leaves {
             let leaf = NshView(leaf);
             leaf.ivars().leaf_parent.borrow_mut().take();
+            leaf.ivars().leaf_of.set(0);
+            leaf.ivars().listed_in.set(0);
+            leaf.ivars().listed_by.borrow_mut().take();
             self.adjust_waiting(leaf.ivars().waiting.get(), false);
             if let Some(layer) = leaf.ns().layer() {
                 layer.removeFromSuperlayer();
@@ -3104,12 +3256,15 @@ impl NshView {
     pub(crate) fn unparent(&self) {
         let leaf_parent = self.ivars().leaf_parent.borrow_mut().take();
         if let Some(parent) = leaf_parent {
+            self.ivars().leaf_of.set(0);
             if let Some(parent) = parent.load().map(NshView) {
-                parent
-                    .ivars()
-                    .leaves
-                    .borrow_mut()
-                    .retain(|l| Retained::as_ptr(l) != Retained::as_ptr(&self.0));
+                // Left in its list until the list is next read or the
+                // batch ends ([`NshView::compact_leaves`]).
+                let gone = parent.ivars().gone_leaves.get();
+                parent.ivars().gone_leaves.set(gone + 1);
+                if gone == 0 {
+                    GONE_LEAVES.with_borrow_mut(|parents| parents.push(parent.clone()));
+                }
                 parent.adjust_waiting(self.ivars().waiting.get(), false);
             }
             if let Some(layer) = self.ns().layer() {
@@ -3297,11 +3452,35 @@ impl NshView {
             && !self.ns().isHidden()
     }
 
+    /// Hides or shows the `NSView` as its style and navigation say: hidden
+    /// while it is `visibility: hidden` or navigation hides it, as the iOS
+    /// backend hides its `UIView`. A view whose layer alone is hidden stays
+    /// live to AppKit (the responder chain, hosted views, tracking areas)
+    /// and to [`crate::sight`], which would draw what changes in it. The
+    /// subtree keeps its frames (a scroll view its offset) and draws what
+    /// changed once it shows. AppKit shows the layer with the view, so it
+    /// is placed again ([`Self::set_layer_geometry`] hides the layer of a
+    /// view whose style still hides it).
+    pub(crate) fn sync_hidden(&self) {
+        let hidden = {
+            let s = self.state();
+            s.style.hidden || s.nav_hidden
+        };
+        if self.ns().isHidden() == hidden {
+            return;
+        }
+        // `viewDidHide` / `viewDidUnhide` tell `sight` it moved.
+        self.ns().setHidden(hidden);
+        if !hidden {
+            self.place();
+        }
+    }
+
     /// Whether the keyboard may reach it, as the headless driver's Tab
     /// stops are views it shows: it has an area, and neither it nor a view
-    /// around it is `visibility: hidden`. Neither `display: none` (an empty
-    /// frame on each view it holds) nor `visibility: hidden` (hidden
-    /// layers) hides an NSView, so AppKit's key view loop still holds them.
+    /// around it is `visibility: hidden`. `display: none` (an empty frame
+    /// on each view it holds) hides no NSView, so AppKit's key view loop
+    /// still holds them.
     pub(crate) fn seen_by_keys(&self) -> bool {
         let size = self.state().frame.size;
         if size.width <= Points(0.0) || size.height <= Points(0.0) {

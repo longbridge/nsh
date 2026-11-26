@@ -97,6 +97,10 @@ canvas::hit::point_in_path(slot)                                 # a generic num
 canvas::hit::point_in_stroke(slot)                               # a generic number (a JS value, a recorded slot)
 canvas::render::RenderRequest.scale                              # pixels per point, a ratio
 canvas::render::RenderOptions.scale                              # pixels per point, a ratio
+ops::CoalescedSample.pressure                                    # a pressure, 0..1 as the DOM PointerEvent's
+ops::CoalescedSample.tilt_x                                      # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::CoalescedSample.tilt_y                                      # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::CoalescedSample.timestamp                                   # time
 ops::Command::RenderCanvas.scale                                 # pixels per point, a ratio
 core::Core::scroll_listener ->                                   # time and a zoom scale factor (the sizes it gives are typed)
 core::Core::set_font_scale(scale)                                # a font scale factor
@@ -217,6 +221,10 @@ ops::TouchPoint.pressure                                         # a pressure, 0
 ops::TouchPoint.tilt_x                                           # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
 ops::TouchPoint.tilt_y                                           # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
 ops::TouchPoint::default_pressure ->                             # a pressure, 0..1 as the DOM PointerEvent's
+ops::TouchPoint::push_coalesced(pressure)                        # a pressure, 0..1 as the DOM PointerEvent's
+ops::TouchPoint::push_coalesced(tilt_x)                          # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::TouchPoint::push_coalesced(tilt_y)                          # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::TouchPoint::push_coalesced(timestamp)                       # time
 platform::Environment.font_scale                                 # a font scale factor
 platform::Environment.keyboard_duration                          # time
 platform::Environment.pixel_ratio                                # device pixels per point

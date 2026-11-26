@@ -2068,6 +2068,7 @@ const NSH_CRATES: &[&str] = &[
     "nsh-package",
     "nsh-js",
     "nsh-engine",
+    "nsh-gpu",
     "nsh-testing",
     "nsh-bundler",
     "nsh-dev",

@@ -1568,7 +1568,7 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
 
 /// `Clipboard.write`: `text` and `html` offered together, the HTML as
 /// `text/html` and the text in GDK's text formats.
-fn set_clipboard_html(text: &str, html: &str) {
+pub(crate) fn set_clipboard_html(text: &str, html: &str) {
     let Some(display) = gdk::Display::default() else {
         return;
     };

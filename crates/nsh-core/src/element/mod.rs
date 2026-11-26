@@ -168,11 +168,11 @@ pub use self::{
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
-        CanvasArg, CanvasPaint, CanvasView, Input, InputAccessoryView, IntoUniform, Modal,
+        CanvasArg, CanvasPaint, CanvasView, GpuView, Input, InputAccessoryView, IntoUniform, Modal,
         NativeView, Orientation, Overlay, Painter, Screen, Scroll, ShaderView, Stack, Svg, Uniform,
-        Video, WebView, canvas, input, input_accessory_view, native, overlay, screen_effect,
-        screen_transition, scroll, shader, shader_effect, shader_transition, svg, video, web_view,
-        web_view_html,
+        Video, WebView, canvas, gpu_view, input, input_accessory_view, native, overlay,
+        screen_effect, screen_transition, scroll, shader, shader_effect, shader_transition, svg,
+        video, web_view, web_view_html,
     },
     js::{JsClass, JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
     json_host::from_json,
@@ -207,7 +207,10 @@ pub use self::{
         DialogReply, ImageSize, Task,
     },
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},
-    value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
+    value::{
+        InContext, JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes,
+        render_params_of, ts_of,
+    },
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
     watch::OrderWatch,
 };

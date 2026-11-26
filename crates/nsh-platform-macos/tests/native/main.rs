@@ -15,6 +15,8 @@
 #[cfg(target_os = "macos")]
 mod canvas_bounds;
 #[cfg(target_os = "macos")]
+mod clamped_scroll;
+#[cfg(target_os = "macos")]
 mod deleted_scroll;
 #[cfg(target_os = "macos")]
 mod download_redirect;
@@ -28,6 +30,8 @@ mod fitting_input;
 mod focus_selection;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
+#[cfg(all(target_os = "macos", feature = "shader"))]
+mod gpu_view;
 #[cfg(target_os = "macos")]
 mod hover_cursor;
 #[cfg(target_os = "macos")]
@@ -97,6 +101,8 @@ mod tray_owner;
 #[cfg(target_os = "macos")]
 mod web_file_input;
 #[cfg(target_os = "macos")]
+mod web_load_wait;
+#[cfg(target_os = "macos")]
 mod window_alert;
 #[cfg(target_os = "macos")]
 mod window_dialog;
@@ -138,11 +144,16 @@ fn main() {
                 modal_focus::run();
             } else if std::env::var_os("NSH_NAVIGATION_UNMOUNT_CHECK_ONLY").is_some() {
                 navigation_unmount::run();
+            } else if std::env::var_os("NSH_GPU_VIEW_CHECK_ONLY").is_some() {
+                #[cfg(feature = "shader")]
+                gpu_view::run();
             } else if std::env::var_os("NSH_SHADER_CONTENT_CHECK_ONLY").is_some() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
             } else if mount::bench_only() {
                 mount::bench_alone();
+            } else if std::env::var_os("NSH_LEAF_BENCH_ONLY").is_some() {
+                mount::leaf_bench();
             } else if std::env::var_os("NSH_MENU_LABELS_CHECK_ONLY").is_some() {
                 window_press::run();
                 menu_labels::run();
@@ -201,10 +212,14 @@ fn main() {
             } else if std::env::var_os("NSH_KEYBOARD_CHECK_ONLY").is_some() {
                 window_press::run();
                 keyboard::run();
+            } else if std::env::var_os("NSH_CLAMPED_SCROLL_CHECK_ONLY").is_some() {
+                clamped_scroll::run();
             } else if std::env::var_os("NSH_DELETED_SCROLL_CHECK_ONLY").is_some() {
                 deleted_scroll::run();
             } else if std::env::var_os("NSH_DOWNLOAD_REDIRECT_CHECK_ONLY").is_some() {
                 download_redirect::run();
+            } else if std::env::var_os("NSH_WEB_LOAD_WAIT_CHECK_ONLY").is_some() {
+                web_load_wait::run();
             } else if std::env::var_os("NSH_INPUT_WHEEL_CHAIN_CHECK_ONLY").is_some() {
                 input_wheel_chain::run();
             } else if std::env::var_os("NSH_SELECTION_AUTOSCROLL_CHECK_ONLY").is_some() {
@@ -243,6 +258,8 @@ fn main() {
                 hover_cursor::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
+                #[cfg(feature = "shader")]
+                gpu_view::run();
                 canvas_bounds::run();
                 canvas_bounds::run_scale();
                 mask_corners::run();
@@ -269,8 +286,10 @@ fn main() {
                 scaled_input::run();
                 zoom::run();
                 deleted_scroll::run();
+                clamped_scroll::run();
                 scroll_indicator_layout::run();
                 download_redirect::run();
+                web_load_wait::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();

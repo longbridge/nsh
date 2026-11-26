@@ -767,20 +767,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             );
         }
         Command::SetClipboardItem(item) => {
-            let units: Vec<u16> = item.text.encode_utf16().chain(Some(0)).collect();
-            let text: Vec<u8> = units.iter().flat_map(|u| u.to_le_bytes()).collect();
-            let unicode = u32::from(windows::Win32::System::Ole::CF_UNICODETEXT.0);
-            let mut formats = vec![(unicode, text)];
-            if let Some(html) = &item.html {
-                let mut html = clipboard::cf_html(html).into_bytes();
-                html.push(0);
-                formats.push((html_format(), html));
-            }
-            let formats: Vec<(u32, &[u8])> = formats
-                .iter()
-                .map(|(kind, bytes)| (*kind, bytes.as_slice()))
-                .collect();
-            let written = set_clipboard_formats(&formats);
+            let written = set_clipboard_item(&item.text, item.html.as_deref());
             if !written {
                 log::debug!("windows: cannot set the clipboard");
             }
@@ -2239,6 +2226,25 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
 
 // ---------------------------------------------------------------------------
 // The clipboard
+
+/// Puts `text` (Unicode text) and, when given, `html` (`HTML Format`) on
+/// the clipboard together.
+pub(crate) fn set_clipboard_item(text: &str, html: Option<&str>) -> bool {
+    let units: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+    let text: Vec<u8> = units.iter().flat_map(|u| u.to_le_bytes()).collect();
+    let unicode = u32::from(windows::Win32::System::Ole::CF_UNICODETEXT.0);
+    let mut formats = vec![(unicode, text)];
+    if let Some(html) = html {
+        let mut html = clipboard::cf_html(html).into_bytes();
+        html.push(0);
+        formats.push((html_format(), html));
+    }
+    let formats: Vec<(u32, &[u8])> = formats
+        .iter()
+        .map(|(kind, bytes)| (*kind, bytes.as_slice()))
+        .collect();
+    set_clipboard_formats(&formats)
+}
 
 /// Puts `text` on the clipboard (Unicode text).
 pub(crate) fn set_clipboard_text(text: &str) -> bool {

@@ -21,6 +21,7 @@ on:
       - "crates/nsh-core/**"
       - "crates/nsh-dev/**"
       - "crates/nsh-engine/**"
+      - "crates/nsh-gpu/**"
       - "crates/nsh-i18n/**"
       - "crates/nsh-js/**"
       - "crates/nsh-linux-app/**"
@@ -135,6 +136,7 @@ jobs:
           run crates/nsh-testing/tests/testing/input-target/App.test.tsx --filter 'shared prefix'
           run crates/nsh-testing/tests/testing/input-target/gpui/Editor.test.tsx
           run crates/nsh-testing/tests/testing/input-target/gpui/Input.test.tsx
+          run crates/nsh-testing/tests/testing/input-target/gpui/Dialog.test.tsx
 
   check:
     needs: changed

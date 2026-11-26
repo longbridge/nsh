@@ -640,6 +640,49 @@ fn a_read_only_editor_ignores_typing_and_deleting() {
 }
 
 #[test]
+fn a_read_only_editor_reports_typed_text_once_without_changing_it() {
+    let mut app = start_configured(paragraphs(&["ab"]), None, false);
+    let _ = app.type_text("id:editor", "x");
+    see(&mut app, "Heard 1");
+    app.wait(Duration::from_millis(200)).unwrap();
+    see(&mut app, "Heard 1");
+    see(&mut app, &doc("ab"));
+}
+
+#[test]
+fn a_read_only_editor_reports_no_deleting() {
+    let mut app = start_configured(paragraphs(&["ab"]), None, false);
+    let _ = app.type_text("id:editor", "x");
+    see(&mut app, "Heard 1");
+    sink_text(&mut app, "");
+    app.wait(Duration::from_millis(200)).unwrap();
+    see(&mut app, "Heard 1");
+    see(&mut app, &doc("ab"));
+}
+
+#[test]
+fn a_read_only_editor_reports_an_input_methods_commit_once() {
+    let mut app = start_configured(paragraphs(&["ab"]), None, false);
+    let _ = app.type_text("id:editor", "");
+    compose(&mut app, true, "ni");
+    sink_text(&mut app, "ni");
+    see(&mut app, "Heard 0");
+    sink_text(&mut app, "你");
+    compose(&mut app, false, "");
+    see(&mut app, "Heard 1");
+    see(&mut app, &doc("ab"));
+}
+
+#[test]
+fn an_editable_editor_reports_no_readonly_input() {
+    let mut app = start_configured(paragraphs(&[""]), None, true);
+    app.type_text("id:editor", "x").unwrap();
+    see(&mut app, &doc("x"));
+    app.wait(Duration::from_millis(200)).unwrap();
+    see(&mut app, "Heard 0");
+}
+
+#[test]
 fn a_read_only_editor_still_moves_the_caret() {
     let mut app = start_configured(paragraphs(&["ab"]), None, false);
     let _ = app.type_text("id:editor", "");
@@ -716,13 +759,15 @@ fn Configured(props: ConfiguredProps) -> impl IntoElement {
         }
     };
     let shown = signal(read());
+    let heard = signal(0usize);
     let (on_change, on_select) = (read.clone(), read);
     let mut editor = rich_editor()
         .editor(session)
         .editable(props.editable)
         .size_full()
         .on_change(move |_: &_| shown.set(on_change()))
-        .on_selection_change(move |_: &_| shown.set(on_select()));
+        .on_selection_change(move |_: &_| shown.set(on_select()))
+        .on_readonly_input(move || heard.update(|n| *n += 1));
     if let Some(p) = props.placeholder.clone() {
         editor = editor.placeholder(SharedString::from(p));
     }
@@ -737,6 +782,7 @@ fn Configured(props: ConfiguredProps) -> impl IntoElement {
         .child(text(move || format!("Doc {:?}", shown.get().0)))
         .child(text(move || format!("Types {}", shown.get().1)))
         .child(text(move || format!("Sel {}", shown.get().2)))
+        .child(text(move || format!("Heard {}", heard.get())))
 }
 
 fn start_configured(doc: Value, placeholder: Option<&str>, editable: bool) -> Headless {

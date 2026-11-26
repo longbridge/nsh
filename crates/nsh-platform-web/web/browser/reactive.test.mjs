@@ -906,6 +906,22 @@ test("Rust renderer getters retain their error boundary owner", { skip: !path },
   dispose(); close();
 });
 
+test("a Rust renderer of a pair gets the pair as two arguments", { skip: !path }, async () => {
+  const { api, values, components, close } = await fixture();
+  const Component = components.make({ name: "Fixture", id: 0, props: [], events: [], methods: [], hostProps: [] }, () => {});
+  const calls = [];
+  let node, dispose;
+  api.root(stop => {
+    dispose = stop;
+    node = Component({ cell: (...args) => { calls.push(args); return null; } });
+  });
+  const id = values.nodeIds.get(node);
+  components.render(id, "cell", "a", { src: "x" }, false);
+  components.render(id, "cell", "b", [{ src: "x" }, { link: { url: "u" } }], true);
+  assert.deepEqual(calls, [[{ src: "x" }], [{ src: "x" }, { link: { url: "u" } }]]);
+  dispose(); close();
+});
+
 test("cleanup returns its callback and permits an unowned registration", { skip: !path }, async () => {
   const { api, close } = await fixture();
   let calls = 0;
@@ -938,7 +954,7 @@ test("native touch payloads keep each point's pointer type, pressure and tilt", 
     const pointers = [["mouse", 0.5, 0, 0], ["pen", 0.25, 30, -15], ["touch", 0.5, 0, 0]];
     assert.deepEqual(f.touchEvents(), pointers.map(([pointerType, pressure, tiltX, tiltY]) => ({
       phase: "move", timestamp: 10, activated: undefined,
-      points: [{ identifier: 1, target: 2, path: [2, 1], pageX: 30, pageY: 40, locationX: 3, locationY: 4, changed: true, timestamp: 10, pointerType, pressure, tiltX, tiltY }],
+      points: [{ identifier: 1, target: 2, path: [2, 1], pageX: 30, pageY: 40, locationX: 3, locationY: 4, changed: true, timestamp: 10, pointerType, pressure, tiltX, tiltY, eraser: false, barrel: false, coalesced: [] }],
     })));
   } finally { f.close(); }
 });

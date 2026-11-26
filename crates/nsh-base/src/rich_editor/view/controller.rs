@@ -1014,6 +1014,12 @@ impl Rv {
             (edit, sink.composition.is_some())
         };
         self.sink_value.set(text.to_owned());
+        // Reported here, not in `text_input`: a soft keyboard's text reaches
+        // the editor only through the sink, and `text_input` also takes the
+        // app's own `insertText`, which is not the user typing.
+        if !edit.inserted.is_empty() && !self.editable() {
+            self.cx.emit(RichEditorEvent::ReadonlyInput);
+        }
         for _ in 0..edit.backspaces {
             self.key(&KeyEvent::new("Backspace"));
         }

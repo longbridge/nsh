@@ -51,6 +51,7 @@ import BaseRichEditorAccessory from "./base-rich-editor-accessory";
 import BaseRichEditorComposition from "./base-rich-editor-composition";
 import BaseRichEditorKit from "./base-rich-editor-kit";
 import BaseRichEditorPasteHooks from "./base-rich-editor-paste-hooks";
+import BaseRichEditorReadonlyInput from "./base-rich-editor-readonly-input";
 import BaseRichEditorNodeView from "./base-rich-editor-node-view";
 import BaseRichEditorSession from "./base-rich-editor-session";
 import BaseRichEditorTables from "./base-rich-editor-tables";
@@ -124,6 +125,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-rich-editor-accessory": BaseRichEditorAccessory,
   "base-rich-editor-kit": BaseRichEditorKit,
   "base-rich-editor-paste-hooks": BaseRichEditorPasteHooks,
+  "base-rich-editor-readonly-input": BaseRichEditorReadonlyInput,
   "base-rich-editor-node-view": BaseRichEditorNodeView,
   "base-rich-editor-session": BaseRichEditorSession,
   "base-rich-editor-view": BaseRichEditorView,

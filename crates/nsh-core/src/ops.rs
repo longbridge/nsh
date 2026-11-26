@@ -81,6 +81,10 @@ pub enum Tag {
     /// TS: `ScreenTransition` of `nsh`), as a transition does for its
     /// children. It takes no space and has no children.
     ScreenTransition,
+    /// A view whose box a renderer of the app's own draws with the GPU,
+    /// under its children (`<gpuview>`, TS: `gpuView` of `nsh`;
+    /// [`crate::gpu`]).
+    GpuView,
 }
 
 impl Tag {
@@ -110,6 +114,7 @@ impl Tag {
             "shadertransition" => Tag::ShaderTransition,
             "screeneffect" => Tag::ScreenEffect,
             "screentransition" => Tag::ScreenTransition,
+            "gpuview" => Tag::GpuView,
             _ => return None,
         })
     }
@@ -428,9 +433,66 @@ pub struct TouchPoint {
     /// The pen's tilt toward the bottom of the surface, in degrees from
     /// -90 to 90 (the DOM's `tiltY`).
     pub tilt_y: f32,
+    /// The samples the platform merged into this event, oldest first, as
+    /// the DOM's `getCoalescedEvents()` without the last one: a pen moves
+    /// at 120-240 Hz, and when a frame is slow the system hands over only
+    /// its latest position (this point), with the ones before it here.
+    /// Empty when nothing was merged, and for points that did not move.
+    pub coalesced: Vec<CoalescedSample>,
+    /// The pen is used with its eraser end (or the platform's eraser
+    /// mode), as the DOM's eraser button (`buttons & 32`); `pointer_type`
+    /// stays [`PointerType::Pen`].
+    pub eraser: bool,
+    /// The pen's barrel (side) button is held, as the DOM's `buttons & 2`
+    /// for a pen.
+    pub barrel: bool,
+}
+
+/// A pointer sample merged into a [`TouchPoint`] (its
+/// [`coalesced`](TouchPoint::coalesced) list), in points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CoalescedSample {
+    /// Position in the surface.
+    pub page: Point<Points>,
+    /// Position in the point's `target`.
+    pub location: Point<Points>,
+    /// How hard the pointer pressed, as [`TouchPoint::pressure`].
+    pub pressure: f32,
+    /// The pen's tilt, as [`TouchPoint::tilt_x`].
+    pub tilt_x: f32,
+    /// The pen's tilt, as [`TouchPoint::tilt_y`].
+    pub tilt_y: f32,
+    /// When the device took the sample, in the clock of
+    /// [`TouchEvent::timestamp`].
+    pub timestamp: f64,
 }
 
 impl TouchPoint {
+    /// Appends a merged sample at `page` (surface points) to
+    /// [`coalesced`](Self::coalesced), its `location` placed as this
+    /// point's (the target's offset from the surface is the same).
+    pub fn push_coalesced(
+        &mut self,
+        page: Point<Points>,
+        pressure: f32,
+        tilt_x: f32,
+        tilt_y: f32,
+        timestamp: f64,
+    ) {
+        let location = Point {
+            x: Points(page.x.0 + self.location.x.0 - self.page.x.0),
+            y: Points(page.y.0 + self.location.y.0 - self.page.y.0),
+        };
+        self.coalesced.push(CoalescedSample {
+            page,
+            location,
+            pressure,
+            tilt_x,
+            tilt_y,
+            timestamp,
+        });
+    }
+
     /// The pressure of a pointer without pressure sensing in a `phase`
     /// event, `changed` telling whether the point is the one the event is
     /// about: 0.5 while down, 0 once lifted (the DOM's default).
@@ -1412,12 +1474,27 @@ impl EventPayload {
 
 impl TouchEvent {
     /// Folds a later move into this pending one: the later positions,
-    /// changed if either moved them, and either's activated pan.
+    /// changed if either moved them, and either's activated pan. A point
+    /// this one moved keeps its samples: they go before the later ones in
+    /// [`TouchPoint::coalesced`], with this event's own position.
     pub fn merge_move(&mut self, later: TouchEvent) {
         let mut later = later;
         for p in &mut later.points {
-            if let Some(old) = self.points.iter().find(|o| o.id == p.id) {
+            if let Some(old) = self.points.iter_mut().find(|o| o.id == p.id) {
                 p.changed |= old.changed;
+                if old.changed {
+                    let mut samples = std::mem::take(&mut old.coalesced);
+                    samples.push(CoalescedSample {
+                        page: old.page,
+                        location: old.location,
+                        pressure: old.pressure,
+                        tilt_x: old.tilt_x,
+                        tilt_y: old.tilt_y,
+                        timestamp: self.timestamp,
+                    });
+                    samples.append(&mut p.coalesced);
+                    p.coalesced = samples;
+                }
             }
         }
         later.activated = later.activated.or(self.activated);
@@ -3521,6 +3598,9 @@ pub enum Prop {
     ShaderSource(Option<Arc<str>>),
     /// A compiled shader, as Rust sets it (TS sets `source`).
     Shader(Option<crate::shader::Shader>),
+    /// A GPU view's renderer, as Rust sets it (`gpu_view().renderer(…)`;
+    /// TS names a registered one, [`Prop::Component`]); `None`: none.
+    GpuRenderer(Option<crate::gpu::GpuSource>),
     /// The element whose frame the view's follows along its parent's main
     /// axis, as Rust sets it (`View::follow`, `core/follow.rs`); `None`
     /// follows nothing.
@@ -4325,6 +4405,68 @@ pub enum Op {
 #[cfg(test)]
 mod tests {
     use super::EventKind;
+    use super::{TouchEvent, TouchPhase, TouchPoint};
+    use crate::geometry::{Point, Points};
+
+    fn pen_move(x: f32, pressure: f32, timestamp: f64) -> TouchEvent {
+        let page = Point {
+            x: Points(x),
+            y: Points(10.0),
+        };
+        let mut point = TouchPoint {
+            id: 1,
+            target: 2,
+            path: Vec::new(),
+            page,
+            location: Point {
+                x: Points(x - 5.0),
+                y: Points(0.0),
+            },
+            changed: true,
+            pointer_type: super::PointerType::Pen,
+            pressure,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
+            coalesced: Vec::new(),
+            eraser: false,
+            barrel: false,
+        };
+        // A sample the platform merged in, half a step back.
+        point.push_coalesced(
+            Point {
+                x: Points(x - 0.5),
+                y: Points(10.0),
+            },
+            pressure,
+            0.0,
+            0.0,
+            timestamp - 4.0,
+        );
+        TouchEvent {
+            phase: TouchPhase::Move,
+            timestamp,
+            points: vec![point],
+            activated: None,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Moves merged in one engine turn keep the pen's samples in order:
+    /// the earlier event's (its own position last), then the later one's.
+    #[test]
+    fn merged_moves_keep_their_samples() {
+        let mut pending = pen_move(20.0, 0.25, 100.0);
+        pending.merge_move(pen_move(30.0, 0.75, 108.0));
+        let point = &pending.points[0];
+        assert_eq!(point.page.x.0, 30.0);
+        let xs: Vec<f32> = point.coalesced.iter().map(|c| c.page.x.0).collect();
+        assert_eq!(xs, [19.5, 20.0, 29.5]);
+        let times: Vec<f64> = point.coalesced.iter().map(|c| c.timestamp).collect();
+        assert_eq!(times, [96.0, 100.0, 104.0]);
+        // `location` keeps the target's offset from the surface.
+        assert_eq!(point.coalesced[0].location.x.0, 14.5);
+        assert_eq!(point.coalesced[1].pressure, 0.25);
+    }
 
     /// Android reads an event's kind by its index in [`EventKind::ALL`], so
     /// `Native.java`'s codes must follow this order: a kind inserted here

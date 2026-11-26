@@ -162,6 +162,9 @@ impl Host for Runtime {
                         Value::string(prop)?,
                         Value::string(&key)?,
                         Value(value.render_js(&*self.bindings)?.into_raw().0[0] as u32),
+                        // Whether the value (an array) is the function's
+                        // arguments: an `InContext`'s.
+                        Value(if value.spread() { 3 } else { 2 }),
                     ];
                     // The function the component holds itself, else none
                     // (JS calls the prop's).

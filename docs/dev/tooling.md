@@ -1302,13 +1302,13 @@ requests only when `website/`, the skills, the tasks examples or `nsh-platform-w
 
 ### Benchmarks
 
-The Benchmarks workflow runs nsh-engine's `bench_calls`, `bench_components` and `bench_handles` (ignored tests in
-`crates/nsh-engine/tests/engine`) for a pull request and for its merge base on `main`, on one self-hosted runner. It
-alternates the two builds for five rounds, keeps each metric's fastest value, and updates one comment on the pull request
-with the table. A metric more than 10% slower (and more than 2ns) fails the check. Running one build against itself on
-that runner moves every metric by 3% at most. Run the same comparison locally with
-`scripts/bench-compare.py run BASE_BIN HEAD_BIN --json out.json` and `scripts/bench-compare.py table out.json`, from
-`crates/nsh-engine`. `bench_gallery_scroll` stays out: it sleeps between frames and takes seconds.
+CI does not run benchmarks: they need a quiet machine for a long time, and the runners are shared. When a change may
+affect performance, compare it with `main` locally. Build nsh-engine's test binary on both sides with
+`cargo test --release -p nsh-engine --test engine --no-run`, then from `crates/nsh-engine` run
+`scripts/bench-compare.py run BASE_BIN HEAD_BIN --json out.json` and `scripts/bench-compare.py table out.json`. It
+alternates the two builds for five rounds over `bench_calls`, `bench_components` and `bench_handles` (ignored tests in
+`crates/nsh-engine/tests/engine`), keeps each metric's fastest value, and marks a metric more than 10% (and more than
+2ns) slower. `bench_gallery_scroll` stays out: it sleeps between frames and takes seconds.
 
 ### Homebrew publishing setup and recovery
 

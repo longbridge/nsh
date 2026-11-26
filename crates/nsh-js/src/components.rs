@@ -434,6 +434,7 @@ pub(crate) fn deliver(cx: *mut JsContext, event: JsEvent) -> Result<(), JsValue>
             func,
         } => {
             let host_js = crate::classes::host_outside_calls(cx);
+            let value_spread = value.spread();
             let converted = catch_unwind(AssertUnwindSafe(|| {
                 value.render_js(&host_js).map(|v| v.into_raw())
             }));
@@ -458,8 +459,16 @@ pub(crate) fn deliver(cx: *mut JsContext, event: JsEvent) -> Result<(), JsValue>
                 return fn_render(cx, host, &format!("{prop}\u{1f}{key}"), value, &*func);
             }
             let data = render_data(cx, prop, &key);
+            let spread = if value_spread {
+                qjs::JS_TRUE
+            } else {
+                qjs::JS_FALSE
+            };
             // SAFETY: the object takes the value.
-            unsafe { qjs::JS_SetPropertyStr(cx, data, c"value".as_ptr(), value) };
+            unsafe {
+                qjs::JS_SetPropertyStr(cx, data, c"value".as_ptr(), value);
+                qjs::JS_SetPropertyStr(cx, data, c"spread".as_ptr(), spread);
+            }
             component_event(cx, host, RENDER, data)
         }
         JsEvent::Unrender { host, prop, key } => {
@@ -615,8 +624,7 @@ fn call_of(cx: *mut JsContext) -> Result<JsValue, JsValue> {
     if let Some(made) = state.call_of.get() {
         return Ok(made);
     }
-    const SOURCE: &str =
-        "(untrack) => (read) => () => { const [f, v] = read(); return untrack(() => f(v)); }\0";
+    const SOURCE: &str = "(untrack) => (read) => () => { const [f, v, s] = read(); return untrack(() => s ? f(...v) : f(v)); }\0";
     // SAFETY: a NUL-terminated script evaluated in the context.
     let make = Owned(cx, unsafe {
         qjs::JS_Eval(
@@ -1578,12 +1586,21 @@ impl Renders {
             return Ok(());
         }
         let value = Owned(ctx, get(ctx, data, "value"));
-        // The function as the prop holds it now, with the value.
+        let spread = Owned(ctx, get(ctx, data, "spread"));
+        // The function as the prop holds it now, with the value (and
+        // whether the value is its arguments: an `InContext`'s).
         let call = Owned(
             ctx,
-            crate::web::js::new_array(ctx, vec![V::dup(ctx, f.1), V::dup(ctx, value.1)])
-                .map_err(|_| qjs::JS_EXCEPTION)?
-                .take(),
+            crate::web::js::new_array(
+                ctx,
+                vec![
+                    V::dup(ctx, f.1),
+                    V::dup(ctx, value.1),
+                    V::dup(ctx, spread.1),
+                ],
+            )
+            .map_err(|_| qjs::JS_EXCEPTION)?
+            .take(),
         );
         let slot = format!("{prop}\u{1f}{key}");
         let entry = Owned(ctx, get(ctx, self.renders, &slot));

@@ -233,6 +233,13 @@ pub enum RichEditorEvent {
     /// updated; a cancel can end composition without a document change.
     #[args(composing)]
     CompositionChange(bool),
+    /// Text was typed while the editor cannot be edited; the document is
+    /// unchanged. One per change of the platform's text (a key, a soft
+    /// keyboard's word, an input method's commit), not for text the app
+    /// inserts. A keyboard that replaces a word it typed (autocorrect, a
+    /// picked suggestion) reports again, so this is a sign of typing, not a
+    /// count of characters.
+    ReadonlyInput,
 }
 
 /// The methods of a [`RichEditor`]'s ref.

@@ -1568,6 +1568,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_press(
     }
 }
 
+/// Floats per finger in `Native.touch`'s `coords`: pageX, pageY,
+/// locationX, locationY, pressure, tiltX, tiltY, kind, eraser, barrel.
+const TOUCH_STRIDE: usize = 10;
+
+/// Doubles per merged sample in `Native.touch`'s `samples`: the finger's
+/// index, pageX, pageY, pressure, tiltX, tiltY, time (uptime ms, the clock
+/// of the event's `time`).
+const SAMPLE_STRIDE: usize = 7;
+
 /// Touches for the JS responder system (see `Native.touch`).
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
@@ -1581,6 +1590,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
     path_lengths: jni::objects::JIntArray<'_>,
     paths: jni::objects::JIntArray<'_>,
     coords: JFloatArray<'_>,
+    samples: jni::objects::JDoubleArray<'_>,
     changed: jni::objects::JBooleanArray<'_>,
     time: jlong,
     activated: jint,
@@ -1602,11 +1612,16 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
         ints(&paths),
     );
     let n = ids.len();
-    let mut c = vec![0.0; n * 8];
+    let mut c = vec![0.0; n * TOUCH_STRIDE];
     let mut flags = vec![0u8; n];
+    let mut merged = vec![0.0; env.get_array_length(&samples).unwrap_or(0).max(0) as usize];
     if targets.len() != n
         || path_lengths.len() != n
+        || merged.len() % SAMPLE_STRIDE != 0
         || env.get_float_array_region(&coords, 0, &mut c).is_err()
+        || env
+            .get_double_array_region(&samples, 0, &mut merged)
+            .is_err()
         || env
             .get_boolean_array_region(&changed, 0, &mut flags)
             .is_err()
@@ -1614,8 +1629,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
         return;
     }
     let mut at = 0;
-    let points = (0..n)
+    let mut points: Vec<_> = (0..n)
         .map(|i| {
+            let c = &c[i * TOUCH_STRIDE..(i + 1) * TOUCH_STRIDE];
             let len = path_lengths[i].max(0) as usize;
             let path = paths
                 .get(at..at + len)
@@ -1626,10 +1642,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 id: ids[i] as u32,
                 target: targets[i] as NodeId,
                 path,
-                page: point(px(c[i * 8]), px(c[i * 8 + 1])),
-                location: point(px(c[i * 8 + 2]), px(c[i * 8 + 3])),
+                page: point(px(c[0]), px(c[1])),
+                location: point(px(c[2]), px(c[3])),
                 changed: flags[i] != 0,
-                pointer_type: match c[i * 8 + 7] as u8 {
+                pointer_type: match c[7] as u8 {
                     1 => nsh_core::PointerType::Pen,
                     2 => nsh_core::PointerType::Mouse,
                     _ => nsh_core::PointerType::Touch,
@@ -1638,13 +1654,27 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 pressure: if flags[i] != 0 && phase >= 2 {
                     0.0
                 } else {
-                    c[i * 8 + 4].clamp(0.0, 1.0)
+                    c[4].clamp(0.0, 1.0)
                 },
-                tilt_x: c[i * 8 + 5],
-                tilt_y: c[i * 8 + 6],
+                tilt_x: c[5],
+                tilt_y: c[6],
+                coalesced: Vec::new(),
+                eraser: c[8] != 0.0,
+                barrel: c[9] != 0.0,
             }
         })
         .collect();
+    for s in merged.chunks_exact(SAMPLE_STRIDE) {
+        if let Some(p) = points.get_mut(s[0] as usize) {
+            p.push_coalesced(
+                point(px(s[1] as f32), px(s[2] as f32)),
+                (s[3] as f32).clamp(0.0, 1.0),
+                s[4] as f32,
+                s[5] as f32,
+                s[6],
+            );
+        }
+    }
     if phase == 0 {
         host.input_with(nsh_core::platform::InputModality::Pointer);
     }
@@ -2034,6 +2064,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "error" => "error",
                 "text" => "text",
                 "has" => "has",
+                // `Mounter.backProgress`'s steps (`BackProgressEvent::from_payload`).
+                "phase" => "phase",
+                "progress" => "progress",
+                "edge" => "edge",
+                // `Mounter.java`'s clipboard image and files answers
+                // (`ClipboardAnswer::from_payload`).
+                "uri" => "uri",
+                "files" => "files",
+                "tooLarge" => "tooLarge",
                 "opened" => "opened",
                 "permission" => "permission",
                 "shown" => "shown",

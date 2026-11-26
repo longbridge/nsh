@@ -1413,6 +1413,9 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .num(ms)
                 .end();
         }
+        // GPU views draw nothing on this backend yet
+        // (`docs/dev/gpu-views.md`).
+        MountItem::GpuView { .. } => {}
         MountItem::Shader { id, layer } => {
             #[cfg(feature = "rust-parts")]
             crate::shader::note(item);

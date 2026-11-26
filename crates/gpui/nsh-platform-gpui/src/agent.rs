@@ -540,7 +540,19 @@ impl Native for GpuiNative {
     }
 
     fn screenshot(&self) -> Result<Vec<u8>, String> {
-        self.window_screenshot(ROOT_ID)
+        // The window the app shows: the targeted one, else the frontmost
+        // of the app's own. A desktop app's content is in a window of its
+        // own (its implicit `<Window>`), and the surface's own window shows
+        // none of it.
+        let target = self.target();
+        let window = if target != ROOT_ID {
+            target
+        } else {
+            self.in_app(|surface, cx| crate::window::shown_front(surface, cx))
+                .flatten()
+                .unwrap_or(ROOT_ID)
+        };
+        self.window_screenshot(window)
     }
 
     fn window_screenshot(&self, window: NodeId) -> Result<Vec<u8>, String> {

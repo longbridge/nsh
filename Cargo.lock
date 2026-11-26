@@ -3806,6 +3806,7 @@ dependencies = [
  "nsh-base",
  "nsh-bundler",
  "nsh-core",
+ "nsh-gpu",
  "nsh-i18n",
  "nsh-js",
  "nsh-package",
@@ -3853,6 +3854,15 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows",
+]
+
+[[package]]
+name = "nsh-gpu"
+version = "0.7.1"
+dependencies = [
+ "nsh-core",
+ "serde_json",
+ "wgpu",
 ]
 
 [[package]]
@@ -4043,6 +4053,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-gpu",
  "nsh-platform-apple",
  "nsh-testing",
  "objc2",
@@ -4073,6 +4084,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-gpu",
  "nsh-testing",
  "pango",
  "pangocairo",
@@ -4095,6 +4107,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-gpu",
  "nsh-platform-apple",
  "nsh-testing",
  "objc2",
