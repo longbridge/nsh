@@ -4779,11 +4779,11 @@ expect Doc: Notes
 # Drive the editor's native input as a soft keyboard does: a typed
 # character, then an input method's commit.
 event label:ReadonlyNotes onChange text=x
-expect Heard: x:false
+expect Heard: 1
 event label:ReadonlyNotes onCompositionChange composing=true text=ni
 event label:ReadonlyNotes onChange text=x你
 event label:ReadonlyNotes onCompositionChange composing=false text=""
-expect Heard: x:false 你:true
+expect Heard: 2
 expect Doc: Notes
 covers [events] RichEditor.onReadonlyInput
 

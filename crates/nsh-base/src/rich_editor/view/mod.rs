@@ -169,22 +169,6 @@ pub struct RichEditorPastedFiles {
     pub uris: Vec<String>,
 }
 
-/// Text typed into a `RichEditor` that cannot be edited (`editable` false,
-/// the editor's `editable` option / `setEditable(false)`, or a plugin's
-/// `editable`): the document keeps it out, the app hears it (to offer
-/// editing). A keyboard that replaces a word it typed (autocorrect, a picked
-/// suggestion) reports the new text again, so the reports are a sign of
-/// typing, not a copy of the text.
-#[derive(Debug, Clone, Default, PartialEq, JsObject)]
-#[non_exhaustive]
-pub struct RichEditorReadonlyInput {
-    /// The text, as the platform typed it in one change (a line break for a
-    /// software keyboard's return; a hardware Return arrives as a key).
-    pub text: String,
-    /// Whether an input method committed it at the end of a composition.
-    pub composed: bool,
-}
-
 /// A `RichEditor`'s selection, in document positions.
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[non_exhaustive]
@@ -252,9 +236,10 @@ pub enum RichEditorEvent {
     /// Text was typed while the editor cannot be edited; the document is
     /// unchanged. One per change of the platform's text (a key, a soft
     /// keyboard's word, an input method's commit), not for text the app
-    /// inserts.
-    #[args(event)]
-    ReadonlyInput(RichEditorReadonlyInput),
+    /// inserts. A keyboard that replaces a word it typed (autocorrect, a
+    /// picked suggestion) reports again, so this is a sign of typing, not a
+    /// count of characters.
+    ReadonlyInput,
 }
 
 /// The methods of a [`RichEditor`]'s ref.

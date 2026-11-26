@@ -46,7 +46,7 @@ mount(() => (
 
 `onCompositionChange({ composing })` 在此视图开始输入法组合输入时报告 `true`，结束时报告 `false`，取消也会报告结束。组合中的文本更新保持当前状态。回调执行时，会话的 `composing` 值和已提交文本已经更新，应用可以在组合输入期间保留编辑器视图，在结束时释放它。开始或取消组合输入可以保持文档及其修订号不变；`onChange` 报告文档修改。
 
-`onReadonlyInput({ text, composed })` 报告在不可编辑的编辑器（`editable={false}`、编辑器的 `editable: false` / `setEditable(false)`，或插件的 `editable`）里输入的文字，这些文字不会进入文档：硬件键盘输入的字符、软键盘的输入和输入法提交的文字（`composed: true`），每次变化报告一次。应用可以用它提示进入编辑，例如阅读视图在用户开始打字时切换到编辑。应用自己插入的文字、删除和粘贴不会报告。键盘替换已输入的词时（自动更正、选候选词）会再报告一次新词，所以这些报告只表示用户在打字，不能当作要保留的文字。
+`onReadonlyInput()` 在用户往不可编辑的编辑器（`editable={false}`、编辑器的 `editable: false` / `setEditable(false)`，或插件的 `editable`）里输入文字时触发，这些文字不会进入文档：硬件键盘输入的字符、软键盘的输入和输入法提交的文字，每次变化触发一次。应用可以用它提示进入编辑，例如阅读视图在用户开始打字时切换到编辑。应用自己插入的文字、删除和粘贴不会报告。键盘替换已输入的词时（自动更正、选候选词）会再触发一次，所以它只表示用户在打字，不能当作字数。
 
 ```tsx
 <RichEditor editor={editor} editable={false} onReadonlyInput={() => showEditHint()} />

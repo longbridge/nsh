@@ -21,7 +21,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
     RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorPastedFiles, RichEditorProps,
-    RichEditorReadonlyInput, RichEditorSelection,
+    RichEditorSelection,
     geometry::{DOC, Geometry, Hit, slot_id},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
@@ -979,11 +979,7 @@ impl Rv {
         // the editor only through the sink, and `text_input` also takes the
         // app's own `insertText`, which is not the user typing.
         if !edit.inserted.is_empty() && !self.editable() {
-            self.cx
-                .emit(RichEditorEvent::ReadonlyInput(RichEditorReadonlyInput {
-                    text: edit.inserted.clone(),
-                    composed,
-                }));
+            self.cx.emit(RichEditorEvent::ReadonlyInput);
         }
         for _ in 0..edit.backspaces {
             self.key(&KeyEvent::new("Backspace"));

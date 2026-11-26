@@ -72,9 +72,9 @@ go elsewhere under these rules rather than into them.
   `RichEditor.onCompositionChange({ composing })` uses `Input`'s composition name for the view's boolean state
   transitions. The editor owns the transient marked text; apps observe the start/end state through the session's
   existing `composing` value, with the event emitted after the state settles.
-  `RichEditor.onReadonlyInput({ text, composed })` (Rust `RichEditorEvent::ReadonlyInput`) is Monaco's
+  `RichEditor.onReadonlyInput()` (Rust `RichEditorEvent::ReadonlyInput`) is Monaco's
   `onDidAttemptReadOnlyEdit` named after the act, with the state word `readonly` (below) rather than Monaco's
-  `readOnly`; it carries the text so an app can tell typing from a line break or a commit.
+  `readOnly`; like Monaco's it carries no payload, since the text never enters the document.
 - **Press, not click**: `onPress`, `onPressDown`, `onPressUp`, `onLongPress` (below, Button). `gpui-base` itself says
   *press* for pointer-independent activation (`DialogChangeReason::TriggerPress`, `close_on_backdrop_press`).
 - **States**: `disabled` blocks interaction, `readonly` allows selecting but not editing, `selected` is membership /
