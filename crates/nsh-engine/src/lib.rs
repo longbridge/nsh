@@ -983,6 +983,9 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         from: u64,
         sink: nsh_core::runtime::UpdaterSink<'_>,
     ) -> Result<(), String> {
+        if let Some(get) = nsh_core::runtime::updater_transport() {
+            return get(url, from, sink);
+        }
         const MAX_REDIRECTS: usize = 20;
         let mut current = url.to_owned();
         for hops in 0..=MAX_REDIRECTS {
