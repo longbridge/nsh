@@ -937,7 +937,19 @@ runs; the screen was locked, so the display link ran at about 45 Hz, not the dis
 The gate, checked: with `--stall 150` startup is 744 ms (730–779) and the run fails with
 `FAIL startup 744 ms > baseline 576 ms + 100 ms`; without it, 584 ms passes.
 
-Linux: no baseline yet (to record on the Sway host with `--runs 5 --write`).
+Baseline, Linux (2026-11-26, Intel Core Ultra 7 270K Plus, Hyprland on Wayland, 60 Hz display, `nsh 0.7.1` (f78eace),
+5 runs at nice 0):
+
+| Scenario | Startup | Frame p95 / max | Gap p50 / p95 / max | Over one refresh |
+|---|---:|---:|---:|---:|
+| Launch | 596 ms (576–739) | | | |
+| Animation (3 loops) | | 1.96 / 2.36 ms | 16.7 / 17.2 / 18.7 ms | 0% |
+| List scroll (10,000 rows) | | 10.83 / 20.66 ms | 16.7 / 23.0 / 34.8 ms | 2% |
+
+The gate, checked: with `--stall 150` startup is 732 ms and the run fails with
+`FAIL startup 732 ms > baseline 596 ms + 100 ms`. On Linux the scroll scenario is already over the frame-cost budget:
+a plain run fails with `FAIL scroll: p95 main-thread frame 9.78 ms > 8.33 ms`, so the gate reports a real
+regression to fix, not noise.
 
 Not covered yet: the Rust app's startup (the #3365 probe, a Rust app whose window content is in the commit that
 opens it, timed 783 ms median after the fix against 962 ms before it on the same host, debug), and p99: the monitor's
