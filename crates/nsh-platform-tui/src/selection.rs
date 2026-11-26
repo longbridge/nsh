@@ -46,10 +46,18 @@ pub(crate) struct Selection {
     next: Option<Instant>,
     /// The scroll moved under the drag: extend it at `point` once laid out again.
     follow: bool,
-    /// The selectable view and selected text last reported to its
+    /// The selectable view, selected text and ends last reported to its
     /// `onSelectionChange` (kept when the selection clears).
-    reported: Option<(NodeId, String)>,
+    reported: Option<(NodeId, String, Option<Ends>)>,
 }
+
+/// A selection's ends as `SelectionModel::ends` gives them: each text's
+/// node and the offset in it, which the core places in list items.
+pub(crate) type Ends = [(u64, u32); 2];
+
+/// An `onSelectionChange` due: the selectable view, the selected text,
+/// where it starts and its ends.
+pub(crate) type Change = (NodeId, String, u32, Option<Ends>);
 
 /// How often a drag held past a scroll view's edge scrolls it, by as many
 /// Cells as the pointer is past the edge.
@@ -209,37 +217,40 @@ impl Selection {
     /// text of the selectable view with the selection when it changed, and
     /// `""` for one that lost a non-empty selection (unless it is gone).
     /// `geometry` is the last frame's.
-    pub(crate) fn changes(
-        &mut self,
-        tree: &Mounter,
-        geometry: &[Geometry],
-    ) -> Vec<(NodeId, String, u32)> {
+    pub(crate) fn changes(&mut self, tree: &Mounter, geometry: &[Geometry]) -> Vec<Change> {
         let mut out = Vec::new();
         let current = self.root.filter(|&root| {
             tree.get(root).is_some_and(|view| {
                 view.props.selectable_view && view.events.contains(EventKind::SelectionChange)
             })
         });
-        if let Some((id, text)) = &self.reported
+        if let Some((id, text, _)) = &self.reported
             && Some(*id) != current
         {
             if !text.is_empty() && tree.get(*id).is_some() {
-                out.push((*id, String::new(), 0));
+                out.push((*id, String::new(), 0, None));
             }
             self.reported = None;
         }
         if let Some(root) = current {
-            let (text, start) = if self.model.is_empty() {
-                (String::new(), 0)
+            let (text, start, ends) = if self.model.is_empty() {
+                (String::new(), 0, None)
             } else {
                 let texts = Texts::new(tree, geometry, root);
-                (self.model.text(&texts), self.model.start_offset(&texts))
+                (
+                    self.model.text(&texts),
+                    self.model.start_offset(&texts),
+                    self.model.ends(&texts),
+                )
             };
-            let last = self.reported.as_ref().map_or("", |(_, t)| t.as_str());
-            if text != last {
-                out.push((root, text.clone(), start));
+            let last = self
+                .reported
+                .as_ref()
+                .map_or(("", None), |(_, t, e)| (t.as_str(), *e));
+            if (text.as_str(), ends) != last {
+                out.push((root, text.clone(), start, ends));
             }
-            self.reported = Some((root, text));
+            self.reported = Some((root, text, ends));
         }
         out
     }

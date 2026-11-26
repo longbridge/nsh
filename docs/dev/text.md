@@ -135,6 +135,12 @@
   (`selectable_view.rs`, `SelectableView.java`): the shared Rust model runs on the UI thread over JNI, hit-testing
   through a Java callback; a long press selects a word (the long press haptic), then handles (the text handles' tick
   as an end moves) and a floating `ActionMode` (Copy, Select all, Share).
+- **Ends in list items**: `onSelectionChange`'s `anchor` and `focus` name the `List` item each end of a selectable
+  view's selection is in (`{ key, offset }`). Backends report each end as its text's node and the offset in it
+  (`SelectionModel::ends`, `selection::end_fields`); the core places them in the list cell around that text and the
+  copy of its item (`core/selection_ends.rs`, from `Core::locate_selection`), and the engine asks the runtime for the
+  item's key (`selection::name_items`, `nsh-js` `list::cell_key`, the same naming as `onViewableItemsChange`). An end
+  outside a list item, and a list the runtime does not know, leave the field out. The web does not report them yet.
 - **Selection menu**: `selectionMenu` on a selectable view (Rust `Element::selection_menu`, the host prop
   `Prop::SelectionMenu`, `ViewProps::selection_menu`) takes `nsh/desktop`'s `MenuItem`s, each running its `onSelect`;
   they go after the system's items, which always stay. The core keeps plain items and separators

@@ -1304,23 +1304,7 @@ fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
     let token = |index: i64, viewable: bool| -> JsValue {
         unsafe {
             let item = qjs::JS_GetPropertyInt64(cx, each, index);
-            let key = if qjs::JS_IsFunction(cx, key_of) {
-                let mut args = [item, qjs::JS_NewFloat64(index as f64)];
-                qjs::JS_Call(cx, key_of, UNDEFINED, 2, args.as_mut_ptr())
-            } else {
-                let mut k = get(cx, item, "key");
-                if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
-                    qjs::JS_FreeValue(cx, k);
-                    k = get(cx, item, "id");
-                }
-                if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
-                    qjs::JS_FreeValue(cx, k);
-                    k = qjs::JS_NewFloat64(index as f64);
-                }
-                let s = qjs::JS_ToString(cx, k);
-                qjs::JS_FreeValue(cx, k);
-                s
-            };
+            let key = named_key(cx, key_of, item, index);
             let o = qjs::JS_NewObject(cx);
             qjs::JS_SetPropertyStr(cx, o, c"item".as_ptr(), item);
             qjs::JS_SetPropertyStr(cx, o, c"key".as_ptr(), key);
@@ -1387,6 +1371,82 @@ fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
     }
 }
 
+/// The key item `item` at `index` goes by in the events that name items
+/// (`onViewableItemsChange`'s tokens, `onSelectionChange`'s ends): the
+/// list's `keyExtractor`'s (`key_of`), else the item's `key` or `id`, else
+/// its index, as a string. `item` is borrowed; the result is the caller's
+/// (an exception when `keyExtractor` throws).
+///
+/// # Safety
+///
+/// `key_of` and `item` are live values of `cx`.
+unsafe fn named_key(cx: *mut JsContext, key_of: JsValue, item: JsValue, index: i64) -> JsValue {
+    // SAFETY: the caller's live values; values got are freed or returned.
+    unsafe {
+        if qjs::JS_IsFunction(cx, key_of) {
+            let mut args = [item, qjs::JS_NewFloat64(index as f64)];
+            return qjs::JS_Call(cx, key_of, UNDEFINED, 2, args.as_mut_ptr());
+        }
+        let mut k = get(cx, item, "key");
+        if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
+            qjs::JS_FreeValue(cx, k);
+            k = get(cx, item, "id");
+        }
+        if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
+            qjs::JS_FreeValue(cx, k);
+            k = qjs::JS_NewFloat64(index as f64);
+        }
+        let s = qjs::JS_ToString(cx, k);
+        qjs::JS_FreeValue(cx, k);
+        s
+    }
+}
+
+/// The key of the item list `list`'s cell in `slot` shows ([`named_key`]):
+/// where a selection across the list's items starts and ends
+/// (`onSelectionChange`'s `anchor` and `focus`). `None` without such a
+/// cell, past the items, or when `keyExtractor` throws (the error is
+/// dropped: the event goes on without the end).
+pub(crate) fn cell_key(cx: *mut JsContext, list: NodeId, slot: u32) -> Option<String> {
+    let (props, items, index) = {
+        let map = lists(cx).map.borrow();
+        let d = map.get(&list)?;
+        let cell = d.cells.get(slot as usize)?.as_ref()?;
+        (d.props, d.items, cell.index)
+    };
+    let index = reactive::peek_number(cx, index).filter(|i| *i >= 0.0)? as i64;
+    // SAFETY: the list's values stay alive through the calls (no JS runs
+    // between that could drop the list); values got are freed.
+    unsafe {
+        let props = qjs::JS_DupValue(cx, props);
+        let each = reactive::untracked_with(cx, || {
+            qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut())
+        });
+        let key = if !qjs::JS_IsException(each) && index < length(cx, each) {
+            let key_of = get(cx, props, "keyExtractor");
+            let item = qjs::JS_GetPropertyInt64(cx, each, index);
+            let key = reactive::untracked_with(cx, || named_key(cx, key_of, item, index));
+            qjs::JS_FreeValue(cx, item);
+            qjs::JS_FreeValue(cx, key_of);
+            key
+        } else {
+            qjs::JS_DupValue(cx, each)
+        };
+        let named = if qjs::JS_IsException(key) {
+            qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
+            None
+        } else if qjs::JS_IsString(key) || qjs::JS_IsNumber(key) {
+            dom::string_arg(cx, key)
+        } else {
+            None
+        };
+        for v in [key, each, props] {
+            qjs::JS_FreeValue(cx, v);
+        }
+        named
+    }
+}
+
 /// `nsh`'s `List` (its tags compile to `nsh:rt`'s `list`, the same
 /// function).
 pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
@@ -1443,7 +1503,8 @@ export interface ListProps<T> extends Omit<ViewProps, "children" | "ref">, Scrol
    * Short content stays at the top. Takes precedence over initialScrollIndex. */
   initialScrollAtEnd?: boolean;
   /** The item's key: changes are matched by it, so a row that moves keeps its cell (default: the item's
-   * identity), and `onViewableItemsChange` tokens name the item by it (default: `item.key`, `item.id`, or the index). */
+   * identity), and `onViewableItemsChange` tokens and the `anchor` and `focus` of a selectable view's
+   * `onSelectionChange` name the item by it (default: `item.key`, `item.id`, or the index). */
   keyExtractor?: (item: T, index: number) => string;
   onViewableItemsChange?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
   style?: StyleProp<ViewStyle>;

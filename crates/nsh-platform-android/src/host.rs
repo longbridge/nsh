@@ -2091,6 +2091,11 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "action" => "action",
                 "target" => "target",
                 "value" => "value",
+                // `SelectableView.report`'s ends (`selection::END_FIELDS`).
+                "anchorNode" => "anchorNode",
+                "anchorNodeOffset" => "anchorNodeOffset",
+                "focusNode" => "focusNode",
+                "focusNodeOffset" => "focusNodeOffset",
                 _ => continue,
             };
             if let Some(v) = read(&mut env, i) {

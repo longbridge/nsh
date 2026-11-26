@@ -1809,14 +1809,19 @@ impl AppView {
             let changes = self.selection.changes(&self.tree, &self.geometry);
             if let Some(engine) = &self.surface.engine {
                 let control = engine.control();
-                for (id, text, start) in changes {
+                for (id, text, start, ends) in changes {
+                    let mut fields = vec![
+                        ("text", nsh_core::PayloadValue::Str(text)),
+                        ("start", nsh_core::PayloadValue::Number(f64::from(start))),
+                    ];
+                    // The core places them in list items.
+                    if let Some(ends) = ends {
+                        fields.extend(nsh_core::selection::end_fields(ends));
+                    }
                     control.dispatch_event(
                         id,
                         nsh_core::EventKind::SelectionChange,
-                        nsh_core::EventPayload::Map(vec![
-                            ("text", nsh_core::PayloadValue::Str(text)),
-                            ("start", nsh_core::PayloadValue::Number(f64::from(start))),
-                        ]),
+                        nsh_core::EventPayload::Map(fields),
                     );
                 }
             }

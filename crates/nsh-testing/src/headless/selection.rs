@@ -42,6 +42,9 @@ struct Selected {
     text: String,
     start: u32,
     bounds: Option<Bounds<Points>>,
+    /// The anchor's and the focus's text nodes and offsets
+    /// ([`SelectionModel::ends`]).
+    ends: Option<[(u64, u32); 2]>,
 }
 
 /// One text of a selectable view.
@@ -303,6 +306,7 @@ impl Headless {
                 text: selection.model.text(texts),
                 start: selection.model.start_offset(texts),
                 bounds: selection.model.selected_bounds(texts),
+                ends: selection.model.ends(texts),
             }
         };
         if selected == selection.reported {
@@ -320,6 +324,9 @@ impl Headless {
         ];
         if let Some(bounds) = selected.bounds {
             fields.push(("bounds", PayloadValue::Bounds(bounds)));
+        }
+        if let Some(ends) = selected.ends {
+            fields.extend(nsh_core::selection::end_fields(ends));
         }
         self.send(area, EventKind::SelectionChange, EventPayload::Map(fields));
     }

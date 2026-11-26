@@ -321,13 +321,16 @@ impl Active {
     }
 }
 
-/// What `onSelectionChange` reports: the selected text, where it starts and
-/// the box around it in the area.
+/// What `onSelectionChange` reports: the selected text, where it starts,
+/// the box around it in the area and its ends.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Selected {
     text: String,
     start: u32,
     bounds: Option<Bounds<Points>>,
+    /// The anchor's and the focus's text nodes and offsets
+    /// (`SelectionModel::ends`), which the core places in list items.
+    ends: Option<[(u64, u32); 2]>,
 }
 
 /// Reports the selected text of the area that has the selection to its
@@ -357,6 +360,7 @@ fn report(surface: &Surface) {
                 text: active.model.text(&texts),
                 start: active.model.start_offset(&texts),
                 bounds: active.model.selected_bounds(&texts),
+                ends: active.model.ends(&texts),
             }
         };
         if selected == active.reported {
@@ -376,6 +380,9 @@ fn send(surface: &Surface, (id, selected): (NodeId, Selected)) {
     ];
     if let Some(bounds) = selected.bounds {
         fields.push(("bounds", PayloadValue::Bounds(bounds)));
+    }
+    if let Some(ends) = selected.ends {
+        fields.extend(nsh_core::selection::end_fields(ends));
     }
     surface.event(id, EventKind::SelectionChange, EventPayload::Map(fields));
 }

@@ -95,7 +95,7 @@ fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {
 time the selection changes: `{ text, start, bounds, pageBounds }`, what Copy would take, where it starts in the view's whole text
 and the box around it in the view and in the root view it is in (on macOS and Windows; an `Overlay` anchored at
 `pageBounds` is a bar of actions above the selection), and `""` once nothing is selected (a press elsewhere,
-Escape, another view selecting). It reports only changes, of the text or of its box. In a selectable view inside another, the outer view
+Escape, another view selecting). It reports only changes, of the text, of its box or of its ends. In a selectable view inside another, the outer view
 reports, as it holds the one selection. A `selectable` [`TextView`](./text-view.md) reports its own the same way
 (`onSelectionChange`, `.on_selection_change(..)`). A chat uses it to quote the part of a reply the reader selected:
 
@@ -120,6 +120,27 @@ fn reply(markdown: SharedString, quote: Signal<String>) -> impl IntoElement {
         .child(nsh_base::text_view().markdown(markdown))
 }
 ```
+
+### Which list items it is in
+
+When the selectable view holds a [`List`](./list.md), the event also says which items the selection starts and ends in,
+as the list names them: `anchor` is where the selection started (the press) and `focus` where it goes now, each
+`{ key, offset }`. `key` is the item's key (`keyExtractor`, else the item's `key` or `id`, else its index, as in
+`onViewableItemsChange`), and `offset` is where the end is in that item's text, as a copy of the whole item gives it
+(UTF-16 units). A drag upward has its `focus` in an earlier item than its `anchor`. Two items with the same words stay
+apart, and so do items inserted above the selection or replaced while it lasts: each end names the item it is in now.
+An end outside a list item has no field. A transcript quotes the selected part of each message it spans:
+
+```tsx
+<View selectable onSelectionChange={({ text, anchor, focus }) => quote.set({ text, from: anchor, to: focus })}>
+  <List each={messages()} keyExtractor={(m) => m.id}>
+    {(m) => <TextView markdown={m().text} />}
+  </List>
+</View>
+```
+
+In Rust the same ends are `TextSelectionEvent::anchor` and `focus` (`TextSelectionEndpoint { key, offset }`). The web
+reports no ends yet.
 
 `ref.clearSelection()` on the selectable view, or on a view inside it, clears the selection as a press elsewhere does:
 the highlight goes and `onSelectionChange` hears `""`. A bar of actions over the selection calls it once its action is

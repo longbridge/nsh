@@ -91,6 +91,13 @@ pub trait Host {
     fn deliver(&self, event: JsEvent);
     /// Bind the reusable cells of a virtual list.
     fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]);
+    /// The key of the item a virtual list's cell (its slot) shows, as the
+    /// list's `keyExtractor` gives it: `onSelectionChange`'s `anchor` and
+    /// `focus`. `None` by default.
+    fn list_item_key(&self, list: NodeId, slot: u32) -> Option<String> {
+        let _ = (list, slot);
+        None
+    }
     /// Run callbacks posted by Rust, preserving their order.
     fn run_posted(&self);
     /// Whether callbacks remain queued.
@@ -279,6 +286,9 @@ impl Script {
     }
     pub(crate) fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
         self.0.bind_list(list, binds);
+    }
+    pub(crate) fn list_item_key(&self, list: NodeId, slot: u32) -> Option<String> {
+        self.0.list_item_key(list, slot)
     }
     // The web culls no content (`EngineConfig::content_culling` is off
     // there): its `<Each>` renders every row.

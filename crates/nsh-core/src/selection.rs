@@ -727,23 +727,27 @@ impl SelectionModel {
     /// [`Self::text`] gives once everything is selected), in UTF-16 code
     /// units: what maps it back to the document the texts show.
     pub fn start_offset(&self, texts: &impl SelectionTexts) -> u32 {
-        let Some((start, _)) = self.bounds() else {
-            return 0;
-        };
-        if texts.is_empty() || (start.text == 0 && start.offset == 0) {
-            return 0;
+        self.bounds()
+            .map_or(0, |(start, _)| copy_offset(texts, start))
+    }
+
+    /// The anchor and the focus, in the order the user made them (a drag
+    /// upward has its focus first): each as the key of its text
+    /// ([`SelectionTexts::key`], the text's view node) and the UTF-16
+    /// offset in it. `None` while nothing is selected. The core turns them
+    /// into the list items they are in (`onSelectionChange`'s `anchor` and
+    /// `focus`, [`end_fields`]).
+    pub fn ends(&self, texts: &impl SelectionTexts) -> Option<[(u64, u32); 2]> {
+        if self.is_empty() {
+            return None;
         }
-        let before = Self {
-            anchor: Some(TextPosition { text: 0, offset: 0 }),
-            focus: Some(start),
-            ..Self::default()
-        };
-        let mut len = utf16_len(&before.text(texts));
-        // A selection from the start of a text: the break before it.
-        if start.offset == 0 && len > 0 {
-            len += 1;
-        }
-        len
+        let (anchor, focus) = (self.anchor?, self.focus?);
+        (anchor.text < texts.len() && focus.text < texts.len()).then(|| {
+            [
+                (texts.key(anchor.text), anchor.offset),
+                (texts.key(focus.text), focus.offset),
+            ]
+        })
     }
 
     /// Puts the anchor at `pos` and selects the unit of `granularity`
@@ -777,6 +781,114 @@ impl SelectionModel {
         } else {
             self.anchor = Some(unit_start);
             self.focus = Some(end.max(unit_end));
+        }
+    }
+}
+
+/// Where `pos` is in the copy of all of `texts` (what
+/// [`SelectionModel::text`] gives once everything is selected), in UTF-16
+/// code units.
+pub fn copy_offset(texts: &impl SelectionTexts, pos: TextPosition) -> u32 {
+    if texts.is_empty() || (pos.text == 0 && pos.offset == 0) {
+        return 0;
+    }
+    let copied = |to: TextPosition| {
+        let before = SelectionModel {
+            anchor: Some(TextPosition { text: 0, offset: 0 }),
+            focus: Some(to),
+            ..SelectionModel::default()
+        };
+        utf16_len(&before.text(texts))
+    };
+    if pos.offset > 0 || pos.text >= texts.len() {
+        return copied(pos);
+    }
+    // The start of a text: where its part begins in a copy up to its end
+    // (after the break before it, a line, a blank line or a tab, and
+    // before its marker).
+    let end = utf16_len(texts.content(pos.text));
+    if end > 0 {
+        let own = SelectionModel {
+            anchor: Some(pos),
+            focus: Some(TextPosition::new(pos.text, end)),
+            ..SelectionModel::default()
+        };
+        return copied(TextPosition::new(pos.text, end)) - utf16_len(&own.text(texts));
+    }
+    // An empty text: a line after what comes before it.
+    match copied(pos) {
+        0 => 0,
+        len => len + 1,
+    }
+}
+
+/// The payload keys of a selectable view's `onSelectionChange` that carry
+/// [`SelectionModel::ends`] from a platform to the core: the anchor's and
+/// the focus's text node and the UTF-16 offset in it. The core replaces
+/// them with the list items they are in (`Core::locate_selection`).
+pub const END_FIELDS: [(&str, &str); 2] = [
+    ("anchorNode", "anchorNodeOffset"),
+    ("focusNode", "focusNodeOffset"),
+];
+
+/// [`SelectionModel::ends`] as the fields of a platform's
+/// `onSelectionChange` payload ([`END_FIELDS`]).
+pub fn end_fields(ends: [(u64, u32); 2]) -> [(&'static str, crate::PayloadValue); 4] {
+    let [(anchor, anchor_offset), (focus, focus_offset)] = ends;
+    let number = |n: u64| crate::PayloadValue::Number(n as f64);
+    [
+        (END_FIELDS[0].0, number(anchor)),
+        (END_FIELDS[0].1, number(u64::from(anchor_offset))),
+        (END_FIELDS[1].0, number(focus)),
+        (END_FIELDS[1].1, number(u64::from(focus_offset))),
+    ]
+}
+
+/// The payload keys of an end once the core placed it in a list item
+/// (`Core::locate_selection`): the list, the slot of the item's cell and
+/// the offset in the copy of the item. [`name_items`] puts the item's key
+/// in their place.
+#[doc(hidden)]
+pub const CELL_FIELDS: [(&str, &str, &str); 2] = [
+    ("anchorList", "anchorSlot", "anchorOffset"),
+    ("focusList", "focusSlot", "focusOffset"),
+];
+
+/// The payload keys of an end as listeners take it: the item's key (its
+/// list's `keyExtractor`) and the offset in the copy of the item
+/// ([`crate::element::TextSelectionEvent::anchor`]).
+#[doc(hidden)]
+pub const ITEM_FIELDS: [(&str, &str); 2] =
+    [("anchorKey", "anchorOffset"), ("focusKey", "focusOffset")];
+
+/// Names the list items of a selectable view's `onSelectionChange`
+/// payload ([`CELL_FIELDS`]) by their keys: `key_of` gives the key of the
+/// item a list's cell (its slot) shows, `None` for a list without a
+/// `keyExtractor`; an end without one is left out. The engine calls it
+/// with the runtime's lists.
+#[doc(hidden)]
+pub fn name_items(
+    payload: &mut crate::EventPayload,
+    mut key_of: impl FnMut(crate::NodeId, u32) -> Option<String>,
+) {
+    let crate::EventPayload::Map(fields) = payload else {
+        return;
+    };
+    for ((list, slot, offset), (key, _)) in CELL_FIELDS.into_iter().zip(ITEM_FIELDS) {
+        let number = |k: &str| {
+            fields.iter().find_map(|(name, v)| match v {
+                crate::PayloadValue::Number(n) if *name == k => Some(*n),
+                _ => None,
+            })
+        };
+        let (Some(l), Some(s)) = (number(list), number(slot)) else {
+            continue;
+        };
+        let named = key_of(l as crate::NodeId, s as u32);
+        fields.retain(|(name, _)| *name != list && *name != slot);
+        match named {
+            Some(named) => fields.push((key, crate::PayloadValue::Str(named))),
+            None => fields.retain(|(name, _)| *name != offset),
         }
     }
 }
@@ -1781,7 +1893,10 @@ fn clamp_position(texts: &impl SelectionTexts, pos: TextPosition) -> TextPositio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{bounds, point, px, size};
+    use crate::{
+        PayloadValue,
+        geometry::{bounds, point, px, size},
+    };
 
     /// Texts set in a monospace font: each character is 8pt wide, lines
     /// break at '\n' and are 20pt high.
@@ -2492,6 +2607,62 @@ mod tests {
         fn key(&self, i: usize) -> u64 {
             self.1[i]
         }
+    }
+
+    #[test]
+    fn the_ends_keep_the_order_the_user_made_them_in() {
+        let texts = Keyed(column(), vec![10, 20, 30]);
+        let mut model = SelectionModel::new();
+        assert_eq!(model.ends(&texts), None);
+        // A drag upward: from "Last" back into "Second line".
+        model.press(&texts, at(16.0, 105.0), 1, false);
+        assert_eq!(model.ends(&texts), None, "a caret has no ends");
+        model.drag(&texts, at(8.0, 45.0));
+        assert_eq!(model.ends(&texts), Some([(30, 2), (20, 1)]));
+        assert_eq!(
+            end_fields([(30, 2), (20, 1)]).map(|(k, _)| k),
+            [
+                "anchorNode",
+                "anchorNodeOffset",
+                "focusNode",
+                "focusNodeOffset"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_copy_offset_counts_the_breaks_a_copy_puts_between_texts() {
+        let texts = column();
+        // "Hello world" and a blank line (a block gap) before "Second".
+        assert_eq!(copy_offset(&texts, pos(0, 0)), 0);
+        assert_eq!(copy_offset(&texts, pos(1, 0)), 13);
+        assert_eq!(copy_offset(&texts, pos(1, 3)), 16);
+        assert_eq!(copy_offset(&texts, pos(2, 0)), 13 + 21 + 2);
+    }
+
+    #[test]
+    fn named_items_replace_the_cells_and_ends_without_a_key_are_left_out() {
+        let number = |n: f64| PayloadValue::Number(n);
+        let mut payload = crate::EventPayload::Map(vec![
+            ("text", PayloadValue::Str("x".into())),
+            ("anchorList", number(4.0)),
+            ("anchorSlot", number(1.0)),
+            ("anchorOffset", number(7.0)),
+            ("focusList", number(4.0)),
+            ("focusSlot", number(2.0)),
+            ("focusOffset", number(3.0)),
+        ]);
+        name_items(&mut payload, |list, slot| {
+            (list == 4 && slot == 1).then(|| "b".to_owned())
+        });
+        assert_eq!(
+            payload,
+            crate::EventPayload::Map(vec![
+                ("text", PayloadValue::Str("x".into())),
+                ("anchorOffset", number(7.0)),
+                ("anchorKey", PayloadValue::Str("b".into())),
+            ])
+        );
     }
 
     #[test]

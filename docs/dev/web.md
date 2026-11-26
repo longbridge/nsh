@@ -996,7 +996,8 @@ browsers' touches into what phones report:
   leaves them out, as `SelectionModel::text` does. The area's `onSelectionChange` (`areaSelectionChanged`, on the
   document's `selectionchange`) carries that text, where it starts and `bounds`, the box around the selected
   characters in the area as of the event (`selectionBounds`: the client rects of the selected parts of the runs a
-  copy takes, united, in the area's own points), to which the core adds `pageBounds`. It is reported when the text or
+  copy takes, united, in the area's own points), to which the core adds `pageBounds`. It carries no ends yet, so
+  `anchor` and `focus` (the list items the selection starts and ends in, `text.md`) stay out on the web. It is reported when the text or
   the box changed (the same text selected elsewhere); the layout moving the selected text after a batch is not
   looked for, which would read the page's layout after every batch.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in

@@ -98,7 +98,7 @@ struct PointerHit {
     inner: Point<Points>,
 }
 
-fn valid(r: &Bounds<Points>) -> bool {
+pub(super) fn valid(r: &Bounds<Points>) -> bool {
     !(r.origin.x.0.is_nan()
         || r.origin.y.0.is_nan()
         || r.size.width.0.is_nan()
@@ -585,11 +585,14 @@ impl<M: TextEngine> Core<M> {
     /// platform: adds `pageBounds`, its `bounds` (the selected text in the
     /// view) moved by where the view is in its root view, as
     /// [`Self::locate_caret`] does for a caret. A payload without `bounds`
-    /// (nothing selected, an input's selection) stays as it is.
+    /// (nothing selected, an input's selection) gets none. The ends of the
+    /// selection, which the platform reports as text nodes and offsets in
+    /// them, become the list items they are in (`selection_ends.rs`).
     pub fn locate_selection(&self, id: NodeId, payload: &mut EventPayload) {
         let EventPayload::Map(fields) = payload else {
             return;
         };
+        self.locate_selection_ends(fields);
         if fields.iter().any(|(k, _)| *k == "pageBounds") {
             return;
         }
