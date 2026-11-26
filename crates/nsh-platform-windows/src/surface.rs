@@ -199,18 +199,11 @@ pub(crate) struct Surface {
     /// once it is done (the request made inside `WM_PAINT` does not come
     /// back as another `WM_PAINT`).
     repaint: Cell<bool>,
-    /// The next frame draws the whole window ([`Surface::invalidate`]).
-    full_damage: Cell<bool>,
+    /// What changed since the last frame ([`Damage`]).
+    damage: Damage,
     /// The change stamp of the last request to draw the whole window
     /// ([`Surface::whole_change`]).
     whole_change: Cell<u64>,
-    /// Views that changed since the last frame
-    /// ([`Surface::invalidate_view`]).
-    dirty: RefCell<Vec<NshView>>,
-    /// Parts of views that changed since the last frame, in the view's own
-    /// coordinates ([`Surface::invalidate_view_rect`]): a canvas's animated
-    /// values, drawn again only there.
-    partial: RefCell<Vec<(NshView, Bounds<Points>)>>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
@@ -331,10 +324,8 @@ impl Surface {
             painting: Cell::new(false),
             repaint: Cell::new(false),
             // The first frame draws everything.
-            full_damage: Cell::new(true),
+            damage: Damage::default(),
             whole_change: Cell::new(0),
-            dirty: RefCell::default(),
-            partial: RefCell::default(),
             environment: Cell::new(environment),
             appearance: Cell::default(),
             host_environment: Cell::default(),
@@ -748,7 +739,7 @@ impl Surface {
     /// Asks for the whole window to be drawn again (once, however often
     /// asked before it is).
     pub(crate) fn invalidate(&self) {
-        self.full_damage.set(true);
+        self.damage.whole();
         self.whole_change.set(crate::view::next_change_stamp());
         self.request_paint();
         crate::app_window::invalidate_all(self);
@@ -766,20 +757,21 @@ impl Surface {
     /// Asks for `view` and its subtree to be drawn again: where it was
     /// drawn and where it draws now ([`Surface::take_damage`]).
     pub(crate) fn invalidate_view(&self, view: &NshView) {
-        if !self.full_damage.get() {
-            view.set_queued(true);
-            self.dirty.borrow_mut().push(view.clone());
-        }
+        self.damage.view(view);
         self.request_paint();
     }
 
     /// Asks for `rect` of `view` (in its own coordinates) to be drawn again:
     /// a canvas whose animated values changed paints only there.
     pub(crate) fn invalidate_view_rect(&self, view: &NshView, rect: Bounds<Points>) {
-        // A whole redraw of the view already on its way covers it.
-        if !self.full_damage.get() && !view.is_queued() {
-            self.partial.borrow_mut().push((view.clone(), rect));
-        }
+        self.damage.view_rect(view, rect);
+        self.request_paint();
+    }
+
+    /// Asks for `area` of the window (DIPs) to be drawn again: what is
+    /// drawn there besides the views (the caption buttons).
+    pub(crate) fn invalidate_area(&self, area: crate::view::WindowRect) {
+        self.damage.area(area);
         self.request_paint();
     }
 
@@ -805,51 +797,7 @@ impl Surface {
     /// changed views were painted and where they draw now. `None`: the
     /// whole window (asked for, or a change whose area is not known).
     pub(crate) fn take_damage(&self) -> Option<Vec<crate::view::WindowRect>> {
-        let dirty = std::mem::take(&mut *self.dirty.borrow_mut());
-        let partial = std::mem::take(&mut *self.partial.borrow_mut());
-        for view in &dirty {
-            view.set_queued(false);
-        }
-        if self.full_damage.replace(false) {
-            return None;
-        }
-        let mut rects = Vec::with_capacity(dirty.len() * 2 + partial.len());
-        for view in &dirty {
-            if let Some(old) = view.painted_subtree() {
-                rects.push(old);
-            }
-            let Some(world) = view.to_root() else {
-                // Out of the tree: only where it was.
-                continue;
-            };
-            if !world.is_affine() {
-                return None;
-            }
-            // Hosted items may draw outside their rectangles.
-            rects.push(
-                crate::render::drawn_area(view)
-                    .map(|area| crate::compose::map_bounds(&world.to_3x2(), &area))?,
-            );
-        }
-        // What changed in part of a view: where that part is now (a view
-        // that moved is in `dirty` whole, which covers it).
-        for (view, rect) in &partial {
-            let Some(world) = view.to_root() else {
-                continue;
-            };
-            if !world.is_affine() {
-                return None;
-            }
-            let area = crate::render::rect_f(
-                rect.origin.x.0,
-                rect.origin.y.0,
-                rect.size.width.0,
-                rect.size.height.0,
-            );
-            rects.push(crate::compose::map_bounds(&world.to_3x2(), &area));
-        }
-        // Asked to draw with nothing changed (the system's `WM_PAINT`).
-        (!rects.is_empty()).then_some(rects)
+        self.damage.take()
     }
 
     /// Draws the window (`WM_PAINT`).
@@ -1331,6 +1279,180 @@ pub(crate) fn composed_placed(
     }
     if let Some(composition) = composition {
         composition.arrange(&visuals, layers);
+    }
+}
+
+/// What changed in a window since its last frame: the main window's
+/// ([`Surface::take_damage`]) or a window of the app's own's
+/// ([`crate::app_window`]).
+pub(crate) struct Damage {
+    /// The next frame draws the whole window.
+    full: Cell<bool>,
+    /// Views that changed ([`Damage::view`]).
+    dirty: RefCell<Vec<NshView>>,
+    /// Parts of views that changed, in the view's own coordinates
+    /// ([`Damage::view_rect`]): a canvas's animated values, drawn again
+    /// only there.
+    partial: RefCell<Vec<(NshView, Bounds<Points>)>>,
+    /// Areas of the window (DIPs) that changed besides its views
+    /// ([`Damage::area`]).
+    areas: RefCell<Vec<crate::view::WindowRect>>,
+}
+
+impl Default for Damage {
+    /// The first frame is whole.
+    fn default() -> Self {
+        Self {
+            full: Cell::new(true),
+            dirty: RefCell::default(),
+            partial: RefCell::default(),
+            areas: RefCell::default(),
+        }
+    }
+}
+
+impl Damage {
+    /// The whole window changed.
+    pub(crate) fn whole(&self) {
+        self.full.set(true);
+    }
+
+    /// `view` and its subtree changed: where it was drawn and where it
+    /// draws now.
+    pub(crate) fn view(&self, view: &NshView) {
+        if !self.full.get() {
+            view.set_queued(true);
+            self.dirty.borrow_mut().push(view.clone());
+        }
+    }
+
+    /// `rect` of `view` (in its own coordinates) changed.
+    pub(crate) fn view_rect(&self, view: &NshView, rect: Bounds<Points>) {
+        // A whole redraw of the view already on its way covers it.
+        if !self.full.get() && !view.is_queued() {
+            self.partial.borrow_mut().push((view.clone(), rect));
+        }
+    }
+
+    /// `area` of the window (DIPs) changed.
+    pub(crate) fn area(&self, area: crate::view::WindowRect) {
+        if !self.full.get() {
+            self.areas.borrow_mut().push(area);
+        }
+    }
+
+    /// What changed, in the window's DIPs: where the changed views were
+    /// painted and where they draw now. `None`: the whole window (asked
+    /// for, or a change whose area is not known).
+    pub(crate) fn take(&self) -> Option<Vec<crate::view::WindowRect>> {
+        let dirty = std::mem::take(&mut *self.dirty.borrow_mut());
+        let partial = std::mem::take(&mut *self.partial.borrow_mut());
+        let areas = std::mem::take(&mut *self.areas.borrow_mut());
+        for view in &dirty {
+            view.set_queued(false);
+        }
+        if self.full.replace(false) {
+            return None;
+        }
+        let mut rects = areas;
+        rects.reserve(dirty.len() * 2 + partial.len());
+        for view in &dirty {
+            if let Some(old) = view.painted_subtree() {
+                rects.push(old);
+            }
+            let Some(world) = view.to_root() else {
+                // Out of the tree: only where it was.
+                continue;
+            };
+            if !world.is_affine() {
+                return None;
+            }
+            // Hosted items may draw outside their rectangles.
+            rects.push(
+                crate::render::drawn_area(view)
+                    .map(|area| crate::compose::map_bounds(&world.to_3x2(), &area))?,
+            );
+        }
+        // What changed in part of a view: where that part is now (a view
+        // that moved is in `dirty` whole, which covers it).
+        for (view, rect) in &partial {
+            let Some(world) = view.to_root() else {
+                continue;
+            };
+            if !world.is_affine() {
+                return None;
+            }
+            let area = crate::render::rect_f(
+                rect.origin.x.0,
+                rect.origin.y.0,
+                rect.size.width.0,
+                rect.size.height.0,
+            );
+            rects.push(crate::compose::map_bounds(&world.to_3x2(), &area));
+        }
+        // Asked to draw with nothing changed (the system's `WM_PAINT`).
+        (!rects.is_empty()).then_some(rects)
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::view::WindowRect;
+
+    fn rect(left: f32, top: f32, right: f32, bottom: f32) -> WindowRect {
+        WindowRect {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    #[test]
+    fn the_first_frame_is_whole() {
+        let damage = Damage::default();
+        assert!(damage.take().is_none());
+    }
+
+    #[test]
+    fn an_area_alone_is_drawn() {
+        let damage = Damage::default();
+        let _ = damage.take();
+        let area = rect(300.0, 0.0, 438.0, 32.0);
+        damage.area(area);
+        let rects = damage.take().expect("the area");
+        assert_eq!(rects.len(), 1);
+        assert_eq!(
+            (rects[0].left, rects[0].top, rects[0].right, rects[0].bottom),
+            (300.0, 0.0, 438.0, 32.0)
+        );
+        // Taken: nothing changed since.
+        assert!(damage.take().is_none(), "asked with nothing changed: whole");
+    }
+
+    #[test]
+    fn a_whole_redraw_covers_the_areas() {
+        let damage = Damage::default();
+        let _ = damage.take();
+        damage.area(rect(0.0, 0.0, 10.0, 10.0));
+        damage.whole();
+        damage.area(rect(20.0, 0.0, 30.0, 10.0));
+        assert!(damage.take().is_none());
+        damage.area(rect(0.0, 0.0, 10.0, 10.0));
+        assert_eq!(damage.take().map(|r| r.len()), Some(1));
+    }
+
+    #[test]
+    fn a_view_out_of_any_tree_adds_nothing() {
+        let damage = Damage::default();
+        let _ = damage.take();
+        let view = NshView::new(42, nsh_core::ViewKind::View);
+        damage.view(&view);
+        assert!(view.is_queued());
+        damage.area(rect(0.0, 0.0, 5.0, 5.0));
+        assert_eq!(damage.take().map(|r| r.len()), Some(1));
+        assert!(!view.is_queued(), "taken off the list");
     }
 }
 

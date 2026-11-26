@@ -373,7 +373,9 @@ backends' shape: frames shown over the compositor's rate (`DwmGetCompositionTimi
 shown frame and its phases (`tick`: the ticker's animations and frame callbacks; `drain`: batches applied as they
 arrived; `paint`: Direct2D drawing the tree, of which `canvas` is the canvases' recording and replay; `present`:
 `Present`, which queues the frame and is not counted as work), the engine's commits, its busy share, and
-the process' CPU (`GetProcessTimes`) and working set. While it measures, the ticker runs on every refresh: its ticks
+the process' CPU (`GetProcessTimes`) and working set, then how much of the window the frames drew: `drawn`, the mean
+share of its pixels per frame, and `whole`, how many frames drew all of it (a change whose area is not known, a
+composition, a backdrop). While it measures, the ticker runs on every refresh: its ticks
 close the frames. While nothing composes, only the frames deadlines run (`Surface::keep_deadline`) are measured. `examples/gallery/tools/perf.py` runs the gallery under it (`--target windows` is the default on
 Windows).
 
