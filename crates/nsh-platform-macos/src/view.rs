@@ -877,6 +877,14 @@ define_class!(
             self.pointer(event);
         }
 
+        /// Which end of the pen comes near the tablet (its eraser).
+        #[unsafe(method(tabletProximity:))]
+        fn tablet_proximity(&self, event: &NSEvent) {
+            crate::input::pen_proximity(event);
+            // SAFETY: NSResponder's own handling (passes it up).
+            let _: () = unsafe { msg_send![super(self), tabletProximity: event] };
+        }
+
         // The root sets NSH's cursor; other views pass it up to it.
         #[unsafe(method(cursorUpdate:))]
         fn cursor_update(&self, event: &NSEvent) {

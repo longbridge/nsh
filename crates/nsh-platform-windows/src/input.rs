@@ -438,7 +438,7 @@ impl Item {
 
 /// What a touch or pen contact last reported besides its position
 /// (`WM_POINTER*`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PenSample {
     /// A pen rather than a finger.
     pub(crate) pen: bool,
@@ -446,6 +446,27 @@ pub(crate) struct PenSample {
     pub(crate) pressure: Option<f32>,
     /// A pen's tilt in degrees (x, y).
     pub(crate) tilt: (f32, f32),
+    /// The pen's eraser end (or inverted pen) touches.
+    pub(crate) eraser: bool,
+    /// The pen's barrel button is held.
+    pub(crate) barrel: bool,
+    /// The samples the system merged into this message, oldest first, the
+    /// message's own one left out (`GetPointerPenInfoHistory`).
+    pub(crate) merged: Vec<MergedSample>,
+}
+
+/// A pen sample the system merged into a later `WM_POINTER*` message.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MergedSample {
+    /// Position in the surface (points).
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    /// As [`PenSample::pressure`].
+    pub(crate) pressure: Option<f32>,
+    /// As [`PenSample::tilt`].
+    pub(crate) tilt: (f32, f32),
+    /// When the device took it, in the clock of [`PointerEvent::time`].
+    pub(crate) time: f64,
 }
 
 thread_local! {
@@ -468,7 +489,7 @@ fn pen_sample(pointer: u32) -> Option<PenSample> {
         samples
             .iter()
             .find(|(id, _)| *id == pointer)
-            .map(|(_, s)| *s)
+            .map(|(_, s)| s.clone())
     })
 }
 
@@ -2051,7 +2072,8 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     Key::Touch(id) => pen_sample(id),
                     Key::Mouse => None,
                 };
-                TouchPoint {
+                let sample = sample.as_ref();
+                let mut touch = TouchPoint {
                     id: p.id,
                     target: p.target.id(),
                     // JS keeps a finger's path from its start.
@@ -2079,13 +2101,34 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     },
                     tilt_x: sample.map_or(0.0, |s| s.tilt.0),
                     tilt_y: sample.map_or(0.0, |s| s.tilt.1),
+                    coalesced: Vec::new(),
+                    eraser: sample.is_some_and(|s| s.eraser),
+                    barrel: sample.is_some_and(|s| s.barrel),
+                };
+                // The merged samples belong to the message being handled: a
+                // cancel follows another report of the same message.
+                if is_changed && phase != TouchPhase::Cancel {
+                    for m in sample.map_or(&[][..], |s| s.merged.as_slice()) {
+                        let pressure = m
+                            .pressure
+                            .unwrap_or_else(|| TouchPoint::default_pressure(phase, false));
+                        touch.push_coalesced(
+                            point(Points(m.x), Points(m.y)),
+                            pressure,
+                            m.tilt.0,
+                            m.tilt.1,
+                            m.time * 1000.0,
+                        );
+                    }
                 }
+                touch
             })
             .collect()
     };
     let event = TouchEvent {
         phase,
-        timestamp: changed.time,
+        // `PointerEvent::time` is in seconds, a touch's in milliseconds.
+        timestamp: changed.time * 1000.0,
         points,
         modifiers: changed.modifiers.core(),
         activated,

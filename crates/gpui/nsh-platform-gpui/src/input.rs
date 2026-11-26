@@ -2316,6 +2316,9 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     pressure: TouchPoint::default_pressure(phase, is_changed),
                     tilt_x: 0.0,
                     tilt_y: 0.0,
+                    coalesced: Vec::new(),
+                    eraser: false,
+                    barrel: false,
                 }
             })
             .collect()

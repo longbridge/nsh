@@ -1932,12 +1932,15 @@ fn cancel_all(surface: &Rc<Surface>) {
     }
 }
 
-/// A pen's state at the latest pointer event: pressure (0 to 1) and tilt
-/// in degrees, `None` for a mouse.
+/// A pen's state at the latest pointer event: pressure (0 to 1), tilt
+/// in degrees, whether its eraser end is used and its barrel button held;
+/// `None` for a mouse.
 #[derive(Clone, Copy)]
 struct Pen {
     pressure: f32,
     tilt: (f32, f32),
+    eraser: bool,
+    barrel: bool,
 }
 
 thread_local! {
@@ -1965,9 +1968,14 @@ fn pen_sample(event: &gdk::Event) {
                     | gdk::DeviceToolType::Brush
             )
         })
-        .map(|_| {
+        .map(|tool| {
             let axis = |a| event.axis(a).unwrap_or(0.0) as f32;
             Pen {
+                eraser: tool.tool_type() == gdk::DeviceToolType::Eraser,
+                // A stylus reports its side buttons as buttons 2 and 3.
+                barrel: event
+                    .modifier_state()
+                    .intersects(gdk::ModifierType::BUTTON2_MASK | gdk::ModifierType::BUTTON3_MASK),
                 pressure: event
                     .axis(gdk::AxisUse::Pressure)
                     .map_or(0.5, |v| v.clamp(0.0, 1.0) as f32),
@@ -2040,6 +2048,13 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     tilt_y: pen
                         .filter(|_| p.key == Key::Mouse)
                         .map_or(0.0, |pen| pen.tilt.1),
+                    coalesced: Vec::new(),
+                    eraser: pen
+                        .filter(|_| p.key == Key::Mouse)
+                        .is_some_and(|pen| pen.eraser),
+                    barrel: pen
+                        .filter(|_| p.key == Key::Mouse)
+                        .is_some_and(|pen| pen.barrel),
                 }
             })
             .collect()

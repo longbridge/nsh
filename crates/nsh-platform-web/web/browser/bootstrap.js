@@ -3987,7 +3987,7 @@
 			}
 		};
 		const point = (p) => {
-			const { identifier, target, pageX, pageY, locationX, locationY, timestamp, pointerType, pressure, tiltX, tiltY } = p;
+			const { identifier, target, pageX, pageY, locationX, locationY, timestamp, pointerType, pressure, tiltX, tiltY, eraser, barrel, coalesced } = p;
 			return {
 				identifier,
 				target,
@@ -3999,7 +3999,10 @@
 				pointerType,
 				pressure,
 				tiltX,
-				tiltY
+				tiltY,
+				eraser,
+				barrel,
+				coalesced
 			};
 		};
 		const dispatch = (touch) => reactive.batch(() => reactive.untracked(() => {

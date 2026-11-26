@@ -2431,16 +2431,30 @@ fn selection_up(surface: &Surface, view: &NshView) -> bool {
     }
 }
 
-/// A pen's state at the latest mouse event: pressure (0 to 1) and tilt
-/// in degrees, `None` for a mouse.
+/// A pen's state at the latest mouse event: pressure (0 to 1), tilt
+/// in degrees, its eraser end and barrel button, `None` for a mouse.
 #[derive(Clone, Copy)]
 struct Pen {
     pressure: f32,
     tilt: (f32, f32),
+    eraser: bool,
+    barrel: bool,
 }
 
 thread_local! {
     static PEN: std::cell::Cell<Option<Pen>> = const { std::cell::Cell::new(None) };
+    /// The pen in proximity of the tablet is its eraser end (only a
+    /// proximity event tells).
+    static ERASER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Keeps which end of the pen proximity `event` (a tablet-proximity event,
+/// or a mouse event of that subtype) brought near the tablet.
+pub(crate) fn pen_proximity(event: &NSEvent) {
+    ERASER.set(
+        event.isEnteringProximity()
+            && event.pointingDeviceType() == objc2_app_kit::NSPointingDeviceType::Eraser,
+    );
 }
 
 /// Keeps the pen state of mouse `event` of type `ty`: a tablet sends mouse
@@ -2459,6 +2473,11 @@ fn pen_sample(event: &NSEvent, ty: NSEventType) {
             | NSEventType::OtherMouseDragged
             | NSEventType::MouseMoved
     );
+    if ty == NSEventType::TabletProximity
+        || (mouse && event.subtype() == objc2_app_kit::NSEventSubtype::TabletProximity)
+    {
+        pen_proximity(event);
+    }
     if !mouse && ty != NSEventType::TabletPoint {
         return;
     }
@@ -2470,6 +2489,11 @@ fn pen_sample(event: &NSEvent, ty: NSEventType) {
                 pressure: event.pressure().clamp(0.0, 1.0),
                 // AppKit's tilt runs -1 to 1, positive y toward the bottom.
                 tilt: (tilt.x as f32 * 90.0, tilt.y as f32 * 90.0),
+                eraser: ERASER.get(),
+                barrel: event.buttonMask().intersects(
+                    objc2_app_kit::NSEventButtonMask::PenLowerSide
+                        | objc2_app_kit::NSEventButtonMask::PenUpperSide,
+                ),
             }
         });
     PEN.set(pen);
@@ -2522,6 +2546,9 @@ fn report(surface: &Surface, phase: TouchPhase, p: &Pointer, activated: Option<N
         ),
         tilt_x: pen.map_or(0.0, |pen| pen.tilt.0),
         tilt_y: pen.map_or(0.0, |pen| pen.tilt.1),
+        coalesced: Vec::new(),
+        eraser: pen.is_some_and(|pen| pen.eraser),
+        barrel: pen.is_some_and(|pen| pen.barrel),
     };
     let event = TouchEvent {
         phase,
