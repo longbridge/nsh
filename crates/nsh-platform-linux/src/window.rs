@@ -632,6 +632,8 @@ fn connect(surface: &Rc<Surface>, id: NodeId, window: &gtk::Window, view: &NshVi
     crate::key_focus::watch(surface, window);
     // The app's shortcuts, with the focus in its content first.
     crate::keymap::attach(surface, view);
+    // File drops into this window when any view listens to `onFileDrop`.
+    crate::file_drop::attach(surface, view);
     // The keyboard scrolls its scroll views.
     crate::scroll::watch_keys(surface, window, view);
     // The mouse's back button goes back in it, as Escape does.

@@ -3041,14 +3041,14 @@ fn touchpad_hold(surface: &Rc<Surface>, phase: gdk::TouchpadGesturePhase, x: f32
     true
 }
 
-/// The closest file-drop listener under the pointer, within its modal root.
-pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
-    let mut view = pick(&event_root(surface), x, y)?.view;
+/// The closest file-drop listener under `x`, `y` in `root`, within its modal root.
+pub(crate) fn file_drop_target_in(root: &NshView, x: f32, y: f32) -> Option<NshView> {
+    let mut view = pick(root, x, y)?.view;
     loop {
         if view.state().events.contains(EventKind::FileDrop) {
             return Some(view);
         }
-        if view.kind() == ViewKind::Modal || view.id() == ROOT_ID {
+        if view.kind() == ViewKind::Modal || view.id() == root.id() || view.id() == ROOT_ID {
             return None;
         }
         view = view.parent_view()?;
