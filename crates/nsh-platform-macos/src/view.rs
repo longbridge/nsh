@@ -1661,6 +1661,70 @@ fn foreign_mark(holder: &NSView) -> Option<&Cell<bool>> {
     holder.downcast_ref::<ViewObj>().map(|v| &v.ivars().foreign)
 }
 
+/// Whether `view`, already a subview of `container`, holds its window's
+/// keyboard focus: re-adding it to `container` would take the focus out
+/// of it (AppKit removes a view before adding it again).
+fn holds_focus(container: &NSView, view: &NSView) -> bool {
+    if superview(view).as_deref() != Some(container) {
+        return false;
+    }
+    let Some(responder) = view.window().and_then(|w| w.firstResponder()) else {
+        return false;
+    };
+    responder
+        .downcast_ref::<NSView>()
+        .is_some_and(|focused| focused.isDescendantOf(view))
+}
+
+/// Moves `view`, a subview of `container`, below `above` (to the top
+/// without one) by moving its siblings around it, so `view` never leaves
+/// `container` and keeps the keyboard focus (a press that raises the
+/// panel it focused, #3244). Siblings already in place stay.
+fn restack_around(container: &NSView, view: &NSView, above: Option<&NSView>) {
+    let siblings: Vec<Retained<NSView>> = container
+        .subviews()
+        .iter()
+        .filter(|v| !std::ptr::eq(&**v, view))
+        .collect();
+    let at = above
+        .and_then(|a| siblings.iter().position(|v| std::ptr::eq(&**v, a)))
+        .unwrap_or(siblings.len());
+    // Whether `lower` is directly below `upper` in `container`.
+    let adjacent = |lower: &NSView, upper: &NSView| {
+        let subviews = container.subviews();
+        let mut previous: Option<Retained<NSView>> = None;
+        for sub in subviews.iter() {
+            if std::ptr::eq(&*sub, upper) {
+                return previous.is_some_and(|p| std::ptr::eq(&*p, lower));
+            }
+            previous = Some(sub);
+        }
+        false
+    };
+    let mut upper: Retained<NSView> = Retained::from(view);
+    for sibling in siblings[..at].iter().rev() {
+        if !adjacent(sibling, &upper) {
+            container.addSubview_positioned_relativeTo(
+                sibling,
+                NSWindowOrderingMode::Below,
+                Some(&upper),
+            );
+        }
+        upper = sibling.clone();
+    }
+    let mut lower: Retained<NSView> = Retained::from(view);
+    for sibling in &siblings[at..] {
+        if !adjacent(&lower, sibling) {
+            container.addSubview_positioned_relativeTo(
+                sibling,
+                NSWindowOrderingMode::Above,
+                Some(&lower),
+            );
+        }
+        lower = sibling.clone();
+    }
+}
+
 /// The lowest subview of `holder` that is not ours ([`is_ours`]), the one
 /// an appended child goes below: what a scan of its subviews finds.
 ///
@@ -2856,13 +2920,17 @@ impl NshView {
             // rides directly above its own anchor, out of their way.
             None => first_foreign(&container).filter(|v| !parent.is_raised(v)),
         };
-        match above {
-            Some(above) => container.addSubview_positioned_relativeTo(
-                self.ns(),
-                NSWindowOrderingMode::Below,
-                Some(&above),
-            ),
-            None => container.addSubview(self.ns()),
+        if holds_focus(&container, self.ns()) {
+            restack_around(&container, self.ns(), above.as_deref());
+        } else {
+            match above {
+                Some(above) => container.addSubview_positioned_relativeTo(
+                    self.ns(),
+                    NSWindowOrderingMode::Below,
+                    Some(&above),
+                ),
+                None => container.addSubview(self.ns()),
+            }
         }
         parent.raise_natives();
         let inputs = self.state().input_count;

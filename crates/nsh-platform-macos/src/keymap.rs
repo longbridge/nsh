@@ -205,6 +205,18 @@ pub(crate) fn reloads(event: &NSEvent) -> bool {
 /// Shift+/ is `shift+/`), in lower case; on a layout that types no ASCII
 /// there, the US layout's character of the key, as menus match it.
 fn character(event: &NSEvent, shift: bool) -> Option<char> {
+    // A letter is the same key with Shift or without: the event's own
+    // letter, as without Shift. Applying no modifiers translates the key
+    // code again through the current layout, which for a key code from
+    // another layout (QWERTZ swaps Z and Y) is another letter.
+    let ignoring = event.charactersIgnoringModifiers();
+    if let Some(c) = ignoring
+        .as_ref()
+        .and_then(|s| s.to_string().chars().next())
+        .filter(char::is_ascii_alphabetic)
+    {
+        return Some(c.to_ascii_lowercase());
+    }
     let typed = if shift {
         event.charactersByApplyingModifiers(NSEventModifierFlags::empty())
     } else {
@@ -246,5 +258,43 @@ mod tests {
         assert_eq!(super::function_key_code(20), Some(90));
         assert_eq!(super::function_key_code(0), None);
         assert_eq!(super::function_key_code(21), None);
+    }
+
+    /// A key event whose key code types another letter on the current
+    /// layout (QWERTZ's Z is the US layout's Y, #3245): its letter is the
+    /// event's own, with Shift as without.
+    #[test]
+    fn a_letter_is_the_events_own_with_shift() {
+        use nsh_core::keymap::Key;
+        use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType};
+        use objc2_foundation::{NSPoint, NSString};
+
+        let event = |chars: &str, code: u16, flags: NSEventModifierFlags| {
+            let s = NSString::from_str(chars);
+            NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+                NSEventType::KeyDown,
+                NSPoint::new(0.0, 0.0),
+                flags,
+                0.0,
+                0,
+                None,
+                &s,
+                &s,
+                false,
+                code,
+            )
+            .expect("a key event")
+        };
+        let cmd = NSEventModifierFlags::Command;
+        let shift = NSEventModifierFlags::Shift;
+        // The US layout's Y key (16) typing Z, as on QWERTZ.
+        let redo = super::keystroke(&event("Z", 16, cmd | shift)).unwrap();
+        assert_eq!(redo.key, Key::Char('z'));
+        assert!(redo.modifiers.cmd && redo.modifiers.shift);
+        let undo = super::keystroke(&event("z", 16, cmd)).unwrap();
+        assert_eq!(undo.key, Key::Char('z'));
+        // Shift+/ is still `shift+/`, not `?`.
+        let slash = super::keystroke(&event("?", 44, shift)).unwrap();
+        assert_eq!(slash.key, Key::Char('/'));
     }
 }
