@@ -857,7 +857,10 @@ impl Surface {
                     f();
                 }
             }
-            Message::Resized(..) => self.resize_late.set(false),
+            Message::Resized(id, size) => {
+                self.resize_late.set(false);
+                crate::window::laid_out(self, id, size);
+            }
             Message::Run(task) => task.run(),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`

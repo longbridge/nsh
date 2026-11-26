@@ -54,6 +54,9 @@ enum Message {
     /// A function the app runs on the main thread
     /// ([`MountSink::run_on_main_thread`]), after the batches before it.
     Run(MainThreadTask),
+    /// The engine laid root `id` out at a size ([`MountSink::root_resized`]),
+    /// after the batch that came of it.
+    RootResized(NodeId, Size<Points>),
 }
 
 thread_local! {
@@ -111,6 +114,10 @@ impl MountSink for Sink {
 
     fn run_on_main_thread(&self, task: MainThreadTask) {
         self.send(Message::Run(task));
+    }
+
+    fn root_resized(&self, id: NodeId, size: Size<Points>) {
+        self.send(Message::RootResized(id, size));
     }
 }
 
@@ -604,6 +611,7 @@ impl Surface {
                     }
                 }
                 Message::Run(task) => task.run(),
+                Message::RootResized(id, size) => crate::window::laid_out(self, id, size),
             }
         }
         if applied {
