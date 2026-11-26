@@ -244,7 +244,11 @@ editor.run(command("toggleHeading", { level: 2 }));
 editor.run(command("toggleBold"));
 ```
 
-`StarterKit` 包含 `Document`、`Paragraph`、文本节点、`Heading`、`Blockquote`、`BulletList`、`OrderedList`、`ListItem`、`TaskList`、`TaskItem`、`CodeBlock`、`HardBreak`、`HorizontalRule`、`RichImage`（Tiptap 的 `Image`）、`Bold`、`Italic`、`Strike`、`Code`、`Underline`、`RichLink`（Tiptap 的 `Link`）、`Highlight`、`Subscript`、`Superscript`、`RichTextStyle`（Tiptap 的 `TextStyle`）、`TextAlign`、`History`、`TrailingNode`、`Typography` 和 `ListKeymap`。以某个扩展命名的选项设为 `false` 即不包含它，设为对象则配置它（`heading: { levels }`、`history: { depth }`、`textAlign: { types }`、`codeBlock: { enableTabIndentation }`）。每个类的 `configure(options)` 与 `extend({...})` 生成 `RichExtension`，它有 `name`、`type`、`priority` 和 `options`。每个编辑器还带有核心键位（Enter、Backspace、Delete、全选）。
+`StarterKit` 包含 `Document`、`Paragraph`、文本节点、`Heading`、`Blockquote`、`BulletList`、`OrderedList`、`ListItem`、`TaskList`、`TaskItem`、`CodeBlock`、`CodeBlockHighlight`、`HardBreak`、`HorizontalRule`、`RichImage`（Tiptap 的 `Image`）、`Bold`、`Italic`、`Strike`、`Code`、`Underline`、`RichLink`（Tiptap 的 `Link`）、`Highlight`、`Subscript`、`Superscript`、`RichTextStyle`（Tiptap 的 `TextStyle`）、`TextAlign`、`History`、`TrailingNode`、`Typography` 和 `ListKeymap`。以某个扩展命名的选项设为 `false` 即不包含它，设为对象则配置它（`heading: { levels }`、`history: { depth }`、`textAlign: { types }`、`codeBlock: { enableTabIndentation }`）。每个类的 `configure(options)` 与 `extend({...})` 生成 `RichExtension`，它有 `name`、`type`、`priority` 和 `options`。每个编辑器还带有核心键位（Enter、Backspace、Delete、全选）。
+
+写明语言的代码块（` ```rust `、`toggleCodeBlock({ language: "rust" })`）会按 `TextView` 给围栏代码着色的方式着色，语法库和配色都相同：这由 `CodeBlockHighlight` 负责，相当于 Tiptap 的 `CodeBlockLowlight`，只是不用传入高亮器。`StarterKit.configure({ codeBlockHighlight: false })` 让代码不着色。在长代码块里打字不用等着色：颜色在引擎线程之外算出，稍后显示。Web 上语法库在第一次需要时从页面下载一次，与 `TextView` 共用，不在首屏下载里。没有开启平台的 feature `highlight` 时，代码不着色。
+
+Rust 里是 `kit::code_block_highlight()`，包含在 `kit::starter_kit()` 和 `starter::plugins` 里。
 
 每个扩展都加入 Tiptap 的命令，由 `command(name, args)` 运行：`toggleBold`、`setItalic`、`unsetStrike`、`toggleHeading({ level })`、`setParagraph`、`toggleBlockquote`、`toggleBulletList`、`toggleOrderedList`、`toggleTaskList`、`toggleCodeBlock({ language })`、`setHardBreak`、`setHorizontalRule`、`setImage({ src })`、`toggleHighlight({ color })`、`setTextAlign("center")`、`unsetTextAlign`，以及下文的链接、字数统计与建议命令。图片的 `src` 与 `Image` 接受的相同（URL、文件路径或 `file:` URL、`data:` URI）；不设 `width` 和 `height` 时按原始尺寸显示，只设其一时按该边和图片的宽高比显示。
 

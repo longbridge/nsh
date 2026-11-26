@@ -299,6 +299,14 @@ The [modules reference](../modules/index.md) documents each one. Importing a mod
 
 NSH needs nothing from npm, but the bundler resolves bare imports from a `node_modules` directory if you install packages with a package manager. Packages resolve their browser builds, because the runtime provides web APIs (`fetch`, streams, `URL`, `TextEncoder`, ...) and not Node's (`fs`, `Buffer`, `process`). Packages that touch the DOM do not work: there is none.
 
+The bundler looks for `node_modules` in the directories above the importing file. An import it cannot resolve fails the build, naming the file that imports it. A TSX [nshm](./nshm.md) is installed outside the app, in `~/.nsh/nshms`, so a package it imports is not found there. Install the package in the app and point the import at the package's file with `resolve.alias`; the package's own imports then resolve from the app's `node_modules`:
+
+```json
+"resolve": { "alias": { "@internationalized/date": "./node_modules/@internationalized/date/dist/import.mjs" } }
+```
+
+An alias names a file, not a package directory, and each subpath the nshm imports needs its own entry.
+
 A package whose browser build uses the DOM often has another build for workers or React Native. `resolve.conditions` picks the export conditions packages resolve with, in place of the default `["browser"]`: `import`, `require`, `module` and `default` always apply, and without `browser` packages resolve through their `module` and `main` fields. `resolve.alias` replaces an import: by a path relative to `nsh.json` (`./` or `../`), another package, or `false` for an empty module. TypeScript (`nsh check`, editors) types the import as written: a name that is not an installed package gets its types from a `.d.ts` file of the app.
 
 ```json
