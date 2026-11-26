@@ -6264,6 +6264,8 @@ impl Mounter {
 
     fn follow_scroll(&mut self, id: NodeId, offset: CGPoint) {
         self.pin_sticky(id);
+        // Shader views scrolled back into sight render what fell due.
+        self.shaders.revisit();
         if self.shaders.pictured()
             && let Some(s) = self.views.get(id as usize).and_then(Option::as_ref)
         {

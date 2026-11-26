@@ -12,8 +12,9 @@
 //! view has a frame to render or collect ([`ShaderView::wants_frame`]: its
 //! uniforms or size changed, or it reads `nsh.time`); each tick renders at
 //! the screen's scale and a frame that comes back becomes the sublayer's
-//! contents. A view outside any window renders nothing until it is back in
-//! one.
+//! contents. A view out of sight ([`crate::sight::shown`]: outside any
+//! window, hidden, or clipped away by an ancestor, as a row scrolled out of
+//! its list) renders nothing until it shows again.
 //!
 //! Effects and transitions ([`ShaderRole`]) draw their children through
 //! the shader: the children are in a view of their own
@@ -524,9 +525,12 @@ impl Shaders {
             if !state.due() {
                 continue;
             }
-            // Out of every window: rendered once it is back in one, which
-            // wakes the link ([`Shaders::revisit`]); its pictures stay due.
-            if state.host.window().is_none() {
+            // Out of sight (out of every window, hidden, or clipped away by
+            // an ancestor: a row scrolled out of its list): not rendered.
+            // Its pictures stay due; the link keeps asking while it wants
+            // frames, so it renders once it shows again, and a view out of
+            // every window is woken by [`Shaders::revisit`].
+            if !crate::sight::shown(&state.host) {
                 wants |= state.view.wants_frame();
                 continue;
             }
