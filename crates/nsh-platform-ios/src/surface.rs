@@ -61,6 +61,7 @@ struct MainThreadSink {
     mounter: SharedMounter,
     on_error: SharedErrorHandler,
     on_hot_failed: SharedHandler,
+    standalone: bool,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -78,6 +79,19 @@ impl MountSink for MainThreadSink {
                 mounter.apply(batch);
             }
         });
+    }
+
+    fn resized(&self, size: Size<Points>) {
+        if self.standalone {
+            // A resize can settle without emitting any new frames.
+            let mounter = self.mounter.clone();
+            DispatchQueue::main().exec_async(move || {
+                let mtm = MainThreadMarker::new().expect("main queue runs on the main thread");
+                if let Some(mounter) = mounter.get(mtm).borrow_mut().as_mut() {
+                    mounter.resized(size);
+                }
+            });
+        }
     }
 
     fn request_frame(&self) {
@@ -1038,6 +1052,7 @@ impl RootView {
             mounter: mounter.clone(),
             on_error: self.ivars().on_error.clone(),
             on_hot_failed: self.ivars().on_hot_failed.clone(),
+            standalone: crate::app::RootController::for_surface(self).is_some(),
             #[cfg(feature = "dev")]
             test_model: self.ivars().test_model.clone(),
         };
