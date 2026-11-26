@@ -310,6 +310,57 @@ fn rust_runner_web_view(platform: Platform, may: impl FnOnce() -> bool) -> Vec<&
     }
 }
 
+/// Whether `nsh run`'s bundle may make a web view, as its development
+/// session last built it ([`set_dev_bundle_web_view`]); `None` when no
+/// session built it (`nsh test`, a failed build).
+static DEV_BUNDLE_WEB_VIEW: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+
+/// A Linux development host was built without web views
+/// ([`dev_host_web_view`]).
+static DEV_HOST_WITHOUT_WEB_VIEW: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Records whether the bundle a development session built may make a web
+/// view (it spells `webview`, or `nsh.json` keeps the feature). A bundle
+/// that makes one after the host was built without them says so once: the
+/// host shows a placeholder until `nsh run` starts again.
+pub(crate) fn set_dev_bundle_web_view(may: bool) {
+    let mut last = DEV_BUNDLE_WEB_VIEW
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if may
+        && last.replace(true) == Some(false)
+        && DEV_HOST_WITHOUT_WEB_VIEW.swap(false, std::sync::atomic::Ordering::Relaxed)
+    {
+        crate::ui::warn(
+            "the app now makes a WebView, which this development host was built without: \
+             it shows a placeholder until `nsh run` starts again",
+        );
+    } else if !may {
+        *last = Some(false);
+    }
+}
+
+/// The cargo arguments that turn web views on in a Rust app's Linux
+/// development host: only when the app may make one, by its bundle
+/// ([`set_dev_bundle_web_view`]; not known: kept) or its own Rust code
+/// (`may`), as its package would (#2377), and this machine can build them
+/// (`can`, [`crate::runtime::linux_web_views`]). An app that makes none
+/// builds no WebKitGTK.
+fn dev_host_web_view(may: impl FnOnce() -> bool, can: impl FnOnce() -> bool) -> Vec<&'static str> {
+    let bundle = *DEV_BUNDLE_WEB_VIEW
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let wanted = bundle.unwrap_or(true) || may();
+    if wanted && can() {
+        DEV_HOST_WITHOUT_WEB_VIEW.store(false, std::sync::atomic::Ordering::Relaxed);
+        vec!["--features", "nsh-platform-linux/webview"]
+    } else {
+        DEV_HOST_WITHOUT_WEB_VIEW.store(!wanted, std::sync::atomic::Ordering::Relaxed);
+        Vec::new()
+    }
+}
+
 impl RustApp {
     /// The generated workspace (`<app>/.nsh/rust`).
     pub(crate) fn workspace(&self) -> &Path {
@@ -3636,12 +3687,10 @@ opt-level = \"s\"
                 format!("\n[features]\ndefault = [{default}]\n{forward}"),
             )
         } else {
-            // Linux's host makes web views when this machine can build
-            // them ([`crate::runtime::linux_web_views`]).
-            let lib_dep = if dir == "linux-host"
-                && cfg!(target_os = "linux")
-                && !crate::runtime::linux_web_views()
-            {
+            // Linux's host has no web views of its own (WebKitGTK, a large
+            // system library to build): its build turns them on when the
+            // app may make one ([`dev_host_web_view`]).
+            let lib_dep = if dir == "linux-host" {
                 self.nsh.dep(lib, ", default-features = false")
             } else {
                 src(lib)
@@ -3909,7 +3958,13 @@ opt-level = \"s\"
         } else {
             Vec::new()
         };
-        let trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
+        let mut trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
+        if matches!(platform, Platform::Linux) && !runner {
+            trimmed.extend(dev_host_web_view(
+                || may_make_web_view(self),
+                || !cfg!(target_os = "linux") || crate::runtime::linux_web_views(),
+            ));
+        }
         let (workspace, features) = match platform {
             Platform::Gpui => (self.gpui_workspace()?, crate::runtime::gpui_features()),
             Platform::Tui => (self.tui_workspace()?, &[][..]),
@@ -4790,6 +4845,29 @@ mod tests {
 
     /// Serialises the tests that set [`super::RUNNER_FEATURES`].
     static RUNNER_FEATURES_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn a_linux_development_host_builds_web_views_only_for_an_app_that_makes_one() {
+        let _guard = RUNNER_FEATURES_TEST
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let set = |v| *super::DEV_BUNDLE_WEB_VIEW.lock().unwrap() = v;
+        let on = ["--features", "nsh-platform-linux/webview"];
+        // No development session built the bundle (`nsh test`): kept.
+        set(None);
+        assert_eq!(super::dev_host_web_view(|| false, || true), on);
+        // A bundle that makes none, and Rust code that makes none: left out.
+        set(Some(false));
+        assert!(super::dev_host_web_view(|| false, || true).is_empty());
+        // The app's Rust code may make one.
+        assert_eq!(super::dev_host_web_view(|| true, || true), on);
+        // The bundle makes one.
+        set(Some(true));
+        assert_eq!(super::dev_host_web_view(|| false, || true), on);
+        // The machine cannot build them.
+        assert!(super::dev_host_web_view(|| true, || false).is_empty());
+        set(None);
+    }
 
     #[test]
     fn a_release_runner_builds_with_the_chosen_features() {

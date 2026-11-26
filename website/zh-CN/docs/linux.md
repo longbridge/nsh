@@ -21,7 +21,8 @@ NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用�
 - Web 视图及下载决策需要 **WebKitGTK 6.0**（2.42 及以上）：构建运行时需要 Debian 与 Ubuntu 上的 `libwebkitgtk-6.0-dev`、Arch 上的
   `webkitgtk-6.0`、Fedora 上的 `webkitgtk6.0-devel`。开发宿主和发布运行器默认使用它，因此打包后的应用运行的机器上需要装有
   WebKitGTK 6.0（Debian 与 Ubuntu 上为 `libwebkitgtk-6.0-4`；GNOME 桌面自带）。在没有它的开发包的机器上，`cargo xtask dist`
-  构建的运行时中 Web 视图为占位视图，其应用只需要 GTK。
+  构建的运行时中 Web 视图为占位视图，其应用只需要 GTK。自带 Rust crate 的应用只在会创建 `WebView` 时才带 WebKitGTK
+  构建开发宿主和运行器，所以不用 Web 视图的应用 `nsh run` 时不编译它。
 - **GStreamer** 1.14 及以上：GTK 通过它播放视频，NSH 用它播放声音。构建时不需要它：应用第一次播放声音时 NSH
   才加载 GStreamer。应用运行的机器上需要 GStreamer 及其 base 插件（桌面系统自带），以及应用要播放的视频和音频格式对应的插件。
   没有 GStreamer 时应用照常启动，加载声音会失败，错误信息会写明缺少哪个库。应用没有导入 `Sound` 时，`nsh package` 构建的
