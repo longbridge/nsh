@@ -184,7 +184,9 @@ platform moves in the sink without a key (an input method that puts its caret be
 the editor's by as much, within the textblock and over text the document shows the same way. The sink is emptied
 when the caret moves and once it holds 256 bytes; on iOS it is set to the text of the caret's textblock before it
 instead (`sink_context`, 128 bytes at most), as UIKit's keyboard repeats a held Delete (and speeds up to words) only
-over text it sees before the input's caret. The platform's text stays while it still ends with that text: setting it
+over text it sees before the input's caret; on macOS to the last 8 bytes of it (whole characters), what input methods
+that put a space between Chinese and Latin text read before the caret, and no more: the sink is a point wide, so each
+character it holds is a line of it, and the candidates open where its text ends. The platform's text stays while it still ends with that text: setting it
 again would stop the held Delete. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's
 typography, and the document waits; the caret is drawn after it, as a native text view draws it after its marked
