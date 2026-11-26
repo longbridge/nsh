@@ -416,6 +416,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         }
     }));
     surface.windows.borrow_mut().push(window.clone());
+    crate::file_drop::window_opened(surface, id, hwnd);
     crate::shell::sync(surface, hwnd, None, resolved);
     place(&window, open);
     window.positioned.set(true);
@@ -1018,6 +1019,7 @@ fn destroy(surface: &Surface, window: &AppWindow) {
     window.placed.borrow_mut().clear();
     window.composed.borrow_mut().clear();
     window.swap.borrow_mut().take();
+    crate::file_drop::window_closing(surface, window.hwnd);
     // SAFETY: plain calls on a window of this thread, if it is still there
     // (the system destroys owned windows with their owner).
     unsafe {
@@ -1332,6 +1334,68 @@ mod tests {
             ),
             None
         );
+    }
+
+    /// A view in a window of the app's own (`<Window>`) that listens for
+    /// file drops makes that window an OLE drop destination, not only the
+    /// main window: Explorer looks the destination up on the window under
+    /// the pointer (#3395).
+    #[test]
+    fn a_window_of_the_apps_own_takes_file_drops() {
+        use windows::{
+            Win32::{System::Ole::OleInitialize, UI::WindowsAndMessaging::GetPropW},
+            core::w,
+        };
+
+        // SAFETY: OLE on this test's thread, as the app's UI thread has it.
+        let _ = unsafe { OleInitialize(None) };
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let id: NodeId = 7;
+        let view = NshView::new(id, ViewKind::Modal);
+        let hwnd = crate::window::create_app_window(
+            surface,
+            id,
+            WindowKind::Normal,
+            &WindowAttributes::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        surface.windows.borrow_mut().push(Rc::new(AppWindow {
+            id,
+            hwnd,
+            view: view.clone(),
+            owner: None,
+            modal: false,
+            composition: None,
+            web: RefCell::default(),
+            placed: RefCell::default(),
+            composed: RefCell::default(),
+            swap: RefCell::new(None),
+            target_scale: Cell::new(0.0),
+            pixels: Cell::new((0, 0)),
+            scale: Cell::new(1.0),
+            invalid: Cell::new(false),
+            positioned: Cell::new(true),
+            reported: Cell::new(None),
+            opened: Cell::new(false),
+            closed: Cell::new(false),
+            hidden: Cell::new(false),
+            state: Cell::new(None),
+        }));
+        let registered = |hwnd: HWND| {
+            // SAFETY: reads the property OLE's RegisterDragDrop sets.
+            !unsafe { GetPropW(hwnd, w!("OleDropTargetInterface")) }.is_invalid()
+        };
+        view.state_mut().events.set(EventKind::FileDrop, true);
+        crate::file_drop::events_changed(surface, &view);
+        assert!(registered(hwnd), "the window showing the view takes drops");
+
+        let window = get(surface, id).unwrap();
+        destroy(surface, &window);
+        surface.windows.borrow_mut().clear();
+        crate::file_drop::reset(surface);
     }
 
     #[test]
