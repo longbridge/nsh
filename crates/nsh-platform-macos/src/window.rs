@@ -13,7 +13,7 @@
 //! - **Opening**: the root leaves the main window's modals
 //!   ([`crate::navigation::release`]) and becomes the content of the new
 //!   window, its size the root's (`set_root_size`). The window shows once a
-//!   batch laid out at that size is in ([`batch_applied`]), or after
+//!   batch laid out at that size is in ([`batch_applied`], [`laid_out`]), or after
 //!   [`FIRST_FRAME_MS`] if the engine is late, so it never flashes empty.
 //! - **Input** reaches the surface with the window's root as the root
 //!   events are picked in ([`crate::input::enter`]). A window under a
@@ -1668,6 +1668,28 @@ pub(crate) fn batch_applied(surface: &Surface) {
     }
 }
 
+/// The engine laid root `id` out at `size`, and the batch that came of it
+/// was applied: a window waiting for its first frame at that size has it,
+/// even when its content was in the commit that opened it and nothing
+/// changed since (no batch follows to show it). Shown on the next turn of
+/// the run loop: this may run while a resize waits for its layout
+/// ([`Surface::await_layout`]).
+pub(crate) fn laid_out(surface: &Surface, id: NodeId, size: Size<Points>) {
+    let ready = surface.windows.try_borrow().is_ok_and(|windows| {
+        windows.get(&id).is_some_and(|w| {
+            matches!(w.showing.get(), Showing::Waiting(_)) && w.reported.get() == Some(size)
+        })
+    });
+    if ready {
+        let key = surface.key();
+        crate::surface::after(0, move || {
+            if let Some(surface) = Surface::with_key(key) {
+                first_frame(&surface, id);
+            }
+        });
+    }
+}
+
 /// Window `id` has its first frame (or waited long enough): it shows, in
 /// the mode it opens in.
 fn first_frame(surface: &Surface, id: NodeId) {
@@ -1698,7 +1720,7 @@ fn first_frame(surface: &Surface, id: NodeId) {
 }
 
 /// Whether a window of the app's own is still opening, hidden until its
-/// first frame ([`batch_applied`], or [`FIRST_FRAME_MS`] after it opened):
+/// first frame ([`batch_applied`], [`laid_out`], or [`FIRST_FRAME_MS`] after it opened):
 /// AppKit gives it no mouse events until it shows, so the test agent waits
 /// for it (`nsh_testing::agent::Native::opening`).
 #[cfg(feature = "dev")]
