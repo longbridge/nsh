@@ -2038,6 +2038,11 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "phase" => "phase",
                 "progress" => "progress",
                 "edge" => "edge",
+                // `Mounter.java`'s clipboard image and files answers
+                // (`ClipboardAnswer::from_payload`).
+                "uri" => "uri",
+                "files" => "files",
+                "tooLarge" => "tooLarge",
                 "opened" => "opened",
                 "permission" => "permission",
                 "shown" => "shown",

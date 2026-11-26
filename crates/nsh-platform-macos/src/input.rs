@@ -65,8 +65,9 @@ use nsh_core::{
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
-        self, Candidate, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE, VelocityTracker,
-        WheelLatch, WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
+        self, Candidate, ContextMenuTarget, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE,
+        VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds,
+        transforms,
     },
     platform::InputModality,
     tailwind::state::{FOCUSED, HOVERED, PRESSED},
@@ -1078,8 +1079,11 @@ fn context_link(links: &[nsh_core::TextLink], at: u32) -> Option<nsh_core::TextL
 }
 
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
-/// around the one under it that listens to `onContextMenu` hears it. Text
-/// fields are AppKit's views, which show their own menu.
+/// around the one under it that listens to `onContextMenu` hears it,
+/// unless selectable text is nearer: that shows its edit menu, but where
+/// its selectable view, or a view between them, listens
+/// ([`nsh_core::input::context_menu_target`], as on Linux and Windows).
+/// Text fields are AppKit's views, which show their own menu.
 fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return;
@@ -1110,34 +1114,39 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
             return;
         }
     }
-    for v in chain(&hit.view) {
-        let (id, listens, input) = {
-            let s = v.state();
-            (
-                s.id,
-                s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input,
-            )
-        };
-        if listens {
-            let (location_x, location_y) = local(surface, &v, x, y);
+    let views = chain(&hit.view);
+    let hops: Vec<_> = views.iter().map(|v| context_menu_hop(&v.state())).collect();
+    match input::context_menu_target(&hops) {
+        Some(ContextMenuTarget::Listener(i)) => {
+            let v = &views[i];
+            let (location_x, location_y) = local(surface, v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
                 point(Points(x), Points(y)),
                 modifiers(flags),
                 Some(nsh_core::PointerType::Mouse),
             );
-            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
-            return;
+            surface.event(
+                v.id(),
+                EventKind::ContextMenu,
+                EventPayload::ContextMenu(event),
+            );
         }
-        if input {
-            return;
-        }
-        if crate::text::selectable(&v.state()) || v.state().props.selectable_view {
-            let area = crate::selectable_view::area_of(&v);
+        Some(ContextMenuTarget::EditMenu(i)) => {
+            let area = crate::selectable_view::area_of(&views[i]);
             crate::text::context_menu(surface, area.as_ref());
-            return;
         }
+        Some(ContextMenuTarget::Field(_)) | None => {}
+    }
+}
+
+/// What `state`'s view is to a secondary click's menu.
+fn context_menu_hop(state: &crate::view::ViewState) -> input::ContextMenuHop {
+    input::ContextMenuHop {
+        listens: state.events.contains(EventKind::ContextMenu),
+        field: state.kind == ViewKind::Input,
+        selectable_text: crate::text::selectable(state),
+        selectable_view: state.props.selectable_view,
     }
 }
 

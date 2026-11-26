@@ -232,6 +232,8 @@ nsh package --target web              # static site
 
 With your own host, `"updater": { "url": "https://dl.example.com/app/latest.json", "publicKey": "<keys/update.pub>" }`; the key is required there. A beta for users who opt in: add `"channels": { "beta": "<its latest.json URL>" }` (needs `publicKey`) and call `checkForUpdate({ channel: "beta" })`; the code can pass only a declared name.
 
+OTA packages from a server the user picks at run time: `"packages": { "roots": [...], "source": "runtime" }` (needs `publicKey`; `github`/`url` become optional), then `checkForPackage({ url })`. Add `"allowHttp": true` only for a plain-HTTP feed on a private network; its files and redirects must stay on its origin. See `website/docs/ota-updates.md`.
+
 ```tsx
 import { openUrl } from "nsh";
 import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";

@@ -971,51 +971,57 @@ pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
 /// menu, but where its selectable view, or a view between them, listens
-/// ([`menu_area`]).
+/// ([`nsh_core::input::context_menu_target`], as on Linux and macOS; the
+/// listener's menu acts on that view's selection: [`menu_area`]).
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
-    let menu_area = menu_area(&hit.view);
-    let app_menu = menu_area.is_some();
     surface.chrome.context_area.take();
-    let mut view = Some(hit.view);
-    while let Some(v) = view {
-        let (id, listens, input, selectable, area) = {
+    let mut views = Vec::new();
+    let mut at = Some(hit.view);
+    while let Some(v) = at {
+        at = v.parent_view();
+        views.push(v);
+    }
+    let hops: Vec<_> = views
+        .iter()
+        .map(|v| {
             let s = v.state();
-            (
-                s.id,
-                s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input,
-                crate::text::selectable(&s),
-                s.props.selectable_view,
-            )
-        };
-        if listens {
-            surface.chrome.context_area.replace(menu_area);
-            let (location_x, location_y) = local(&v, x, y);
+            nsh_core::input::ContextMenuHop {
+                listens: s.events.contains(EventKind::ContextMenu),
+                field: s.kind == ViewKind::Input,
+                selectable_text: crate::text::selectable(&s),
+                selectable_view: s.props.selectable_view,
+            }
+        })
+        .collect();
+    match nsh_core::input::context_menu_target(&hops) {
+        Some(nsh_core::input::ContextMenuTarget::Listener(i)) => {
+            let v = &views[i];
+            surface.chrome.context_area.replace(menu_area(&views[0]));
+            let (location_x, location_y) = local(v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
                 point(Points(x), Points(y)),
                 modifiers.core(),
                 Some(nsh_core::PointerType::Mouse),
             );
+            let id = v.state().id;
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
-            return;
         }
-        if input {
-            crate::text_input::context_menu(surface, &v, None);
-            return;
+        Some(nsh_core::input::ContextMenuTarget::Field(i)) => {
+            crate::text_input::context_menu(surface, &views[i], None);
         }
-        if (selectable || area) && !app_menu {
+        Some(nsh_core::input::ContextMenuTarget::EditMenu(i)) => {
             // Text in a selectable view has the area's menu.
-            match crate::selectable_view::area_of(&v) {
+            let v = &views[i];
+            match crate::selectable_view::area_of(v) {
                 Some(area) => crate::selectable_view::context_menu(surface, &area),
-                None => crate::text::context_menu(surface, &v),
+                None => crate::text::context_menu(surface, v),
             }
-            return;
         }
-        view = v.parent_view();
+        None => {}
     }
 }
 
