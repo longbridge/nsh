@@ -678,8 +678,10 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.audio = env.audio;
         e.shaders = env.shaders;
         app.control.set_environment(app.environment);
-        // The DOM draws emoji as wide as the pixel ratio makes them.
-        if rescaled && app.text.emoji_measured() {
+        // Text is measured as the DOM draws it at the pixel ratio
+        // (`measureWidth` in `nsh.js`): a hinted font's widths and emoji
+        // change with it.
+        if rescaled {
             app.text.clear_caches();
             app.control.fonts_changed();
         }
