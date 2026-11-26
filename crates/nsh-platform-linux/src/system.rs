@@ -505,6 +505,11 @@ pub(crate) fn environment_applied(surface: &Surface) {
     root.add_css_class(add);
     // The app's windows of its own follow it.
     crate::window::schemes_applied(surface);
+    if let Some((start, end)) = crate::chrome::window_controls(surface) {
+        let dark = crate::window::main_dark(surface);
+        crate::window::controls_scheme(&start, dark);
+        crate::window::controls_scheme(&end, dark);
+    }
     // The menu bar's menus are outside the root.
     if let Some(slot) = crate::chrome::menu_bar_slot(surface) {
         slot.remove_css_class(remove);

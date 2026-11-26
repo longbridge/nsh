@@ -120,6 +120,13 @@ pub(crate) fn attach(surface: &Rc<Surface>, overlay: &gtk::Overlay, slot: &gtk::
 
 /// The box above the app holding the menu bar (the menus it opens are
 /// inside it), once the `AppView` is made.
+/// The main window's buttons over a hidden title bar, if any.
+pub(crate) fn window_controls(
+    surface: &Surface,
+) -> Option<(gtk::WindowControls, gtk::WindowControls)> {
+    surface.chrome.controls.borrow().clone()
+}
+
 pub(crate) fn menu_bar_slot(surface: &Surface) -> Option<gtk::Box> {
     surface.chrome.slot.borrow().as_ref()?.upgrade()
 }
@@ -271,6 +278,7 @@ fn apply_title_bar(surface: &Rc<Surface>, window: &gtk::Window) {
                 controls.set_valign(gtk::Align::Start);
                 controls.set_margin_start(MARGIN);
                 controls.set_margin_end(MARGIN);
+                crate::window::controls_scheme(&controls, crate::window::main_dark(surface));
                 overlay.add_overlay(&controls);
                 // The decoration layout changed (or first known).
                 let weak = Rc::downgrade(surface);

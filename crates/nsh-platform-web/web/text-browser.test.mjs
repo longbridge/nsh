@@ -116,6 +116,50 @@ test('emoji are measured as wide as the DOM draws them on a 2x screen', { skip: 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+// A hinted font rounds its advances to device pixels: at a pixel ratio of
+// 1.25 or 1.5 the DOM draws it narrower or wider than canvas measures it at
+// 1 (NSimSun, Chrome's `monospace` on Chinese Windows, at 13px: 6.5 against
+// 7 per character), and runs laid out at canvas widths stand apart.
+// `measureWidth` measures at the ratio's size and scales back.
+for (const ratio of ['1.25', '1.5']) {
+  test(`text is measured as wide as the DOM draws it at a pixel ratio of ${ratio}`, { skip: !chromium }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'nsh-text-ratio-'));
+    try {
+      const source = await readFile(new URL('./nsh.js', import.meta.url), 'utf8');
+      const module = 'data:text/javascript;base64,' + Buffer.from(source + '\nexport { measureWidth };').toString('base64');
+      await writeFile(join(dir, 'index.html'), `<!doctype html><meta charset="utf-8"><body><script type="module">
+        import { measureWidth } from '${module}';
+        try {
+          const canvas = document.createElement('canvas').getContext('2d');
+          const drawn = (font, text) => {
+            const run = document.createElement('span');
+            run.style.cssText = 'position:absolute;white-space:pre;font:' + font;
+            run.textContent = text;
+            document.body.append(run);
+            const width = run.getBoundingClientRect().width;
+            run.remove();
+            return width;
+          };
+          for (const family of ['ui-monospace, monospace', 'NSimSun, monospace', 'sans-serif'])
+            for (let size = 11; size <= 20; size++)
+              for (const text of ['eymap. On your com', '大家好，这是中文']) {
+                const font = '400 ' + size + 'px ' + family;
+                const measured = measureWidth(canvas, font, text);
+                if (Math.abs(measured - drawn(font, text)) > 0.05) throw Error(font + ' ' + text + ': measured ' + measured + ', drawn ' + drawn(font, text));
+              }
+          document.body.dataset.result = 'passed';
+        } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }
+      </script>`);
+      const html = execFileSync(chromium, ['--headless', '--no-sandbox', '--disable-dev-shm-usage',
+        '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--virtual-time-budget=1000',
+        '--force-device-scale-factor=' + ratio,
+        '--user-data-dir=' + join(dir, 'profile'), '--dump-dom', pathToFileURL(join(dir, 'index.html')).href],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000, maxBuffer: 1024 * 1024 });
+      assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+}
+
 test('cluster boxes follow bidi reordering and preserve measurement styles', { skip: !chromium }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nsh-text-bidi-'));
   try {
