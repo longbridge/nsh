@@ -73,11 +73,10 @@ function App() {
         editor={tasks}
         classes={{
           taskCheckbox: "size-4",
-          taskCheckboxIndicator: "rounded border checked:border-blue-500",
+          taskCheckboxIndicator: "rounded border checked:border-blue-500 checked:bg-blue-500",
         }}
         styles={{
           taskCheckboxIndicator: { width: 16, height: 16 },
-          taskCheckboxChecked: { backgroundColor: "#3b82f6" },
         }}
       />
     </View>

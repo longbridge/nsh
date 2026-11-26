@@ -848,15 +848,10 @@ fn task_checkbox(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
                 .project_checked(checked)
                 .app_class(move || classes.with(|c| c.part(Part::TaskCheckboxIndicator).cloned()))
                 .inline_style(move || {
-                    let checked = checked();
                     styles.with(|s| {
-                        let base = s.part(Part::TaskCheckboxIndicator);
-                        let active = s.part(Part::TaskCheckboxChecked).filter(|_| checked);
-                        Style::from_decls(
-                            base.into_iter()
-                                .chain(active)
-                                .flat_map(|style| style.decls().iter().cloned()),
-                        )
+                        s.part(Part::TaskCheckboxIndicator)
+                            .cloned()
+                            .unwrap_or_default()
                     })
                 })
                 .child(

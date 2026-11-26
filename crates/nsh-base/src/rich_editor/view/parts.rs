@@ -147,9 +147,6 @@ pub struct RichEditorStyles {
     /// The square inside a task item's checkbox.
     #[prop(skip_none)]
     pub task_checkbox_indicator: Option<PartStyle>,
-    /// The square while the task is checked, over `taskCheckboxIndicator`.
-    #[prop(skip_none)]
-    pub task_checkbox_checked: Option<PartStyle>,
     /// A block the selection is in, while focused.
     #[prop(skip_none)]
     pub focused_node: Option<PartStyle>,
@@ -239,8 +236,6 @@ pub(crate) enum Part {
     /// The square a task item's checkbox shows: the `Checkbox` draws nothing
     /// of its own, so the app's styles are what make it visible.
     TaskCheckboxIndicator,
-    /// The checked indicator's style over its base style.
-    TaskCheckboxChecked,
     FocusedNode,
     SelectedCell,
     TableGrip,
@@ -266,7 +261,6 @@ impl RichEditorClasses {
             Part::DropCursor => self.drop_cursor.as_ref(),
             Part::TaskCheckbox => self.task_checkbox.as_ref(),
             Part::TaskCheckboxIndicator => self.task_checkbox_indicator.as_ref(),
-            Part::TaskCheckboxChecked => None,
             Part::FocusedNode => self.focused_node.as_ref(),
             Part::SelectedCell => self.selected_cell.as_ref(),
             Part::TableGrip => self.table_grip.as_ref(),
@@ -294,7 +288,6 @@ impl RichEditorStyles {
             Part::DropCursor => &self.drop_cursor,
             Part::TaskCheckbox => &self.task_checkbox,
             Part::TaskCheckboxIndicator => &self.task_checkbox_indicator,
-            Part::TaskCheckboxChecked => &self.task_checkbox_checked,
             Part::FocusedNode => &self.focused_node,
             Part::SelectedCell => &self.selected_cell,
             Part::TableGrip => &self.table_grip,

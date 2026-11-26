@@ -50,7 +50,7 @@ mount(() => (
 
 编辑器以应用的外观绘制文档：`classes` 和 `styles` 设置它的各个部件（`root`、`content`、`caret`、`selection`、`placeholder`、`composition`、`selectedNode`、`listMarker`、触摸选区的手柄 `selectionHandle`、`selectionHandleStart`、`selectionHandleEnd`，以及表格的 `selectedCell`、`tableGrip`、`tableResizeHandle`、`tableDropIndicator`），按类型设置节点（`nodes: { heading: "text-2xl font-bold", "heading[level=2]": "text-xl" }`），以及设置标记（`marks: { bold: "font-bold" }`）。节点规格把 `extra.listMarker` 设为 `"bullet"` 或 `"ordered"` 的列表（starter schema 的列表）中，每一项都在 `listMarker` 部件中显示标记：按层级显示 `•`、`◦`、`▪`，或从列表的 `start` 开始编号，放在列表项之前、列表的缩进中（如浏览器缩进 `ul`，在列表上设置 `pl-6`）。
 
-任务列表的 `taskCheckbox` 部件设置复选框的外框。`classes` 或 `styles` 中的 `taskCheckboxIndicator` 设置内框。内框支持 `checked:` 类，勾选时还会在基本样式上叠加 `styles.taskCheckboxChecked`。
+任务列表的 `taskCheckbox` 部件设置复选框的外框。`classes` 或 `styles` 中的 `taskCheckboxIndicator` 设置内框。勾选时的样式用 `checked:` 类设置。
 
 ```tsx
 <RichEditor

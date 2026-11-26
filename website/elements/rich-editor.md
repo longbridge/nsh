@@ -72,8 +72,7 @@ lists whose node spec sets `extra.listMarker` to `"bullet"` or `"ordered"` (the 
 in the `listMarker` part: `•`, `◦`, `▪` by depth, or numbers from the list's `start`, placed before the item, in the list's indent (`pl-6` on the list, as a browser indents `ul`).
 
 For task lists, `taskCheckbox` styles the outer box. Set `taskCheckboxIndicator` in `classes` or
-`styles` to style the inner box. The indicator supports `checked:` classes and applies
-`styles.taskCheckboxChecked` over its base style while the task is checked.
+`styles` to style the inner box. Use `checked:` classes to style it while the task is checked.
 
 ```tsx
 <RichEditor
