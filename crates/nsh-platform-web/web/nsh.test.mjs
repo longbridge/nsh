@@ -2951,6 +2951,88 @@ test("the main window's title titles the page once the turn's entries exist, und
   }
 });
 
+/** A `<head>` holding `links` (`{ rel, href?, type? }`), enough for the tab's icon. */
+function fakeHead(links) {
+  const writes = [];
+  const element = (attrs) => {
+    const el = {
+      attrs: { ...attrs },
+      getAttribute(name) { return this.attrs[name] ?? null; },
+      setAttribute(name, value) { writes.push([name, value]); this.attrs[name] = String(value); },
+      removeAttribute(name) { if (name in this.attrs) writes.push([name, null]); delete this.attrs[name]; },
+      remove() { head.children.splice(head.children.indexOf(this), 1); },
+    };
+    return el;
+  };
+  const head = { children: links.map(element), append(el) { this.children.push(el); } };
+  const document = {
+    head,
+    createElement: () => element({}),
+    // `link[rel~='icon' i]`: a rel naming `icon` among its tokens.
+    querySelectorAll: () => head.children.filter(el => /(^|\s)icon(\s|$)/i.test(el.attrs.rel ?? "")),
+  };
+  return { document, head, writes };
+}
+
+test("the main window's icon is every icon link's while set, and the page's own once cleared", () => {
+  const saved = { document: globalThis.document };
+  const dot = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  try {
+    const page = fakeHead([
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "shortcut icon", href: "/favicon.ico" },
+      { rel: "apple-touch-icon", href: "/touch.png" },
+      { rel: "manifest", href: "/app.webmanifest" },
+    ]);
+    globalThis.document = page.document;
+    const { player } = fakePlayer();
+    Object.assign(player, { history: true, views: new Map() });
+    const hrefs = () => page.head.children.map(el => el.attrs.href);
+    player.op_cmd(["cmd", 1, "setIcon", dot]);
+    assert.deepEqual(hrefs(), [dot, dot, "/touch.png", "/app.webmanifest"]);
+    // A `type` could keep the browser from taking another kind of image.
+    assert.equal(page.head.children[0].attrs.type, undefined);
+    // The same icon again writes nothing; another one writes each link once.
+    page.writes.splice(0);
+    player.op_cmd(["cmd", 1, "setIcon", dot]);
+    assert.deepEqual(page.writes, []);
+    player.op_cmd(["cmd", 1, "setIcon", png]);
+    assert.deepEqual(page.writes, [["href", png], ["href", png]]);
+    // Cleared: each link's own `href` and `type` back.
+    player.op_cmd(["cmd", 1, "setIcon", null]);
+    assert.deepEqual(hrefs(), ["/favicon.svg", "/favicon.ico", "/touch.png", "/app.webmanifest"]);
+    assert.equal(page.head.children[0].attrs.type, "image/svg+xml");
+    assert.equal(page.head.children[1].attrs.type, undefined);
+    page.writes.splice(0);
+    player.op_cmd(["cmd", 1, "setIcon", null]);
+    assert.deepEqual(page.writes, []);
+    // An app's asset is where the app's assets are served.
+    player.op_cmd(["cmd", 1, "setIcon", "asset:/dot.png"]);
+    assert.equal(hrefs()[0], "https://example.test/app/dot.png");
+
+    // A page with no icon link gets one while the app's shows, then none.
+    const bare = fakeHead([{ rel: "stylesheet", href: "/site.css" }]);
+    globalThis.document = bare.document;
+    const { player: other } = fakePlayer();
+    Object.assign(other, { history: true, views: new Map() });
+    other.op_cmd(["cmd", 1, "setIcon", dot]);
+    assert.deepEqual(bare.head.children.map(el => el.attrs), [{ rel: "stylesheet", href: "/site.css" }, { rel: "icon", href: dot }]);
+    other.op_cmd(["cmd", 1, "setIcon", null]);
+    assert.deepEqual(bare.head.children.map(el => el.attrs), [{ rel: "stylesheet", href: "/site.css" }]);
+
+    // Where the app is not the page (an iframe), the page's icon is the page's.
+    const framed = fakePlayer().player;
+    Object.assign(framed, { history: false, views: new Map() });
+    bare.writes.splice(0);
+    framed.op_cmd(["cmd", 1, "setIcon", dot]);
+    assert.deepEqual(bare.writes, []);
+    assert.equal(bare.head.children.length, 1);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});
+
 test("the browser's back gives the core the entry's address with no open, and a kept page keeps its own", () => {
   const calls = [];
   const saved = { history: globalThis.history, location: globalThis.location };

@@ -58,4 +58,7 @@ below it does again. What no mounted head sets any more is removed; with no head
 window title titles the document (nsh.json `window.title`, or a root `WindowAttributes` title), else the document's own. TSX uses `<Head title>`: on the web `currentWindow()` throws (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`),
 and the document's own language comes back when no head sets one. Each prop is reactive: a head that reads a signal follows it.
 
+A Rust app's root window icon (a root `WindowAttributes` `icon`) is the tab's icon while it is set, to show a status
+dot on the tab for one; cleared, the page's own icon comes back.
+
 [The web](../docs/web.md#search-engines) shows a whole site that search engines index, with each page a URL of its own.

@@ -197,6 +197,7 @@ Each platform shows a kind as its own windows of that role: an `NSPanel` on macO
 | Group | Attribute | Description |
 |---|---|---|
 | Chrome | `title` | Shown in the title bar, the taskbar, the window switcher and to assistive technologies. In a browser there is no window: the page's title is its [`Head`](./nsh-web.md#head)'s, shown on its tab. |
+| | `icon` | An image's URL (`data:`, `https:`, `asset:/`), or `null` for none of the app's. In a browser, a Rust app's root window icon is the page's tab icon, and `null` gives back the page's own; other platforms do not show it yet. |
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`: the system's title bar, or a title bar of the app's own ([below](#a-title-bar-of-your-own)). `controlsOffset` (`{ x, y }`) places macOS's traffic lights in a hidden title bar. |
 | | `frame` | `"default"`, or `"none"`: no title bar or border, the app draws everything. |
 | Size | `minSize`, `maxSize` | The least and largest content size the user may give it, `{ width, height }` in points; `null` clears it. |

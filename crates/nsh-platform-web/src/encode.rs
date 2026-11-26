@@ -1853,12 +1853,20 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         // A browser's bars are the browser's; the browser's own developer
         // tools measure the page.
         Command::StatusBar(_) | Command::PerfMonitor(_) | Command::PerfMonitorMode(_) => {}
-        // The main window's title is the page's title (`nsh.js` writes it
-        // where the app is the page); the rest of a window is the browser's.
+        // The main window's title and icon are the page's title and tab
+        // icon (`nsh.js` writes them where the app is the page); the rest
+        // of a window is the browser's.
         Command::Desktop(desktop) => match (id == nsh_core::ROOT_ID, &**desktop) {
             (true, nsh_core::desktop::DesktopCommand::SetAttributes(attributes)) => {
                 if let Some(title) = &attributes.title {
                     out.item("cmd").num(id).str("setTitle").str(title).end();
+                }
+                if let Some(icon) = &attributes.icon {
+                    out.item("cmd")
+                        .num(id)
+                        .str("setIcon")
+                        .opt_str(icon.as_deref())
+                        .end();
                 }
             }
             // While the app listens to quit requests, leaving the page asks
@@ -2079,6 +2087,26 @@ mod tests {
                 DesktopCommand::Request(WindowRequest::Focus)
             ),
             "[]"
+        );
+    }
+
+    #[test]
+    // WindowAttributes is non-exhaustive outside nsh-core.
+    #[allow(clippy::field_reassign_with_default)]
+    fn the_main_windows_icon_is_the_tabs() {
+        let mut attributes = WindowAttributes::default();
+        attributes.icon = Some(Some("data:image/png;base64,iVBORw0KGgo=".to_owned()));
+        let set = || DesktopCommand::SetAttributes(Box::new(attributes.clone()));
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, set()),
+            r#"[["cmd",1,"setIcon","data:image/png;base64,iVBORw0KGgo="]]"#
+        );
+        assert_eq!(commands(nsh_core::ROOT_ID + 2, set()), "[]");
+        // Cleared: the page's own icon back.
+        attributes.icon = Some(None);
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, set()),
+            r#"[["cmd",1,"setIcon",null]]"#
         );
     }
 

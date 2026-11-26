@@ -499,6 +499,11 @@ attributes! {
     shadow: bool = "shadow", plain;
     /// Progress on its taskbar button or the Dock's icon.
     progress: Option<WindowProgress> = "progress", nullable;
+    /// Its icon: an image's URL (`data:`, `https:`, `asset:/`), or `null`
+    /// for none of the app's. In a browser, the main window's is the
+    /// page's tab icon (`null`: the page's own); other platforms do not
+    /// show it yet.
+    icon: Option<String> = "icon", nullable;
 }
 
 // `window().attributes(WindowAttributes { .. })`: a static value.
@@ -534,6 +539,7 @@ impl WindowAttributes {
             backdrop: Some(Backdrop::None),
             shadow: Some(true),
             progress: Some(None),
+            icon: Some(None),
         };
         match kind {
             WindowKind::Normal => normal,
@@ -1289,6 +1295,25 @@ mod tests {
         assert!(record.take_diff().is_some());
         record.pending.min_size = Some(None);
         assert_eq!(record.take_diff().unwrap().min_size, Some(None));
+    }
+
+    #[test]
+    fn an_icon_is_sent_when_it_changes_and_when_cleared() {
+        let mut record = WindowRecord::opened(
+            WindowAttributes::resolve(WindowKind::Normal, &Default::default()),
+            None,
+            false,
+        );
+        let dot = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+        record.pending.icon = Some(Some(dot.into()));
+        let diff = record.take_diff().unwrap();
+        assert_eq!(diff.names(), ["icon"]);
+        assert_eq!(diff.icon, Some(Some(dot.into())));
+        // The same icon again sends nothing; `null` gives the page's back.
+        record.pending.icon = Some(Some(dot.into()));
+        assert_eq!(record.take_diff(), None);
+        record.pending.icon = Some(None);
+        assert_eq!(record.take_diff().unwrap().icon, Some(None));
     }
 
     #[test]

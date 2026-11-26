@@ -2046,6 +2046,7 @@ class Player {
       this.windowTitle = null;
       this.syncTitleSoon();
     }
+    if (this.windowIcon) this.setWindowIcon(null);
     this.app = (this.app ?? 0) + 1;
     const root = this.root;
     root.textContent = "";
@@ -6698,6 +6699,47 @@ class Player {
     if (document.title !== title) document.title = title;
   }
 
+  // The tab's icon: the main window's (`icon`, where the app is the page)
+  // on every icon link of the page, else the page's own. A link's `type` is
+  // dropped while the app's shows: it could make a browser skip another
+  // kind of image. Touch icons and the manifest's stay the installed app's.
+
+  /** The main window's icon, a URL; `null` (or empty) gives the page its own back. */
+  setWindowIcon(url) {
+    if (!this.history) return;
+    const href = url ? this.asset(url) : null;
+    if (href === (this.windowIcon ?? null)) return;
+    this.windowIcon = href;
+    if (href === null) {
+      for (const [link, own] of this.pageIcons) {
+        if (!own) {
+          link.remove();
+          continue;
+        }
+        for (const name of ["href", "type"]) {
+          if (own[name] === null) link.removeAttribute(name);
+          else link.setAttribute(name, own[name]);
+        }
+      }
+      this.pageIcons = null;
+      return;
+    }
+    if (!this.pageIcons) {
+      this.pageIcons = new Map();
+      for (const link of document.querySelectorAll("link[rel~='icon' i]")) {
+        this.pageIcons.set(link, { href: link.getAttribute("href"), type: link.getAttribute("type") });
+        link.removeAttribute("type");
+      }
+      if (!this.pageIcons.size) {
+        const link = document.createElement("link");
+        link.setAttribute("rel", "icon");
+        document.head.append(link);
+        this.pageIcons.set(link, null);
+      }
+    }
+    for (const link of this.pageIcons.keys()) link.setAttribute("href", href);
+  }
+
   backDepth() {
     let depth = [...this.root.children].filter((el) => el._kind === "modal" && !el._leaving).length;
     for (const el of this.views.values()) {
@@ -7751,6 +7793,7 @@ class Player {
       // other times the page stays as it is.
       case "quit": if (this.quitAsked) this.quitAsked.granted = true; break;
       case "setTitle": this.setWindowTitle(args[0]); break;
+      case "setIcon": this.setWindowIcon(args[0]); break;
       case "exitApp": {
         const app = this.app;
         // Finish the current engine call before releasing its surface.

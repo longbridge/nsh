@@ -197,6 +197,7 @@ let Some(doc) = open_window(
 | 分组 | 属性 | 说明 |
 |---|---|---|
 | 窗口外框 | `title` | 显示在标题栏、任务栏、窗口切换器中，也提供给辅助技术。浏览器中没有窗口：页面的标题来自 [`Head`](./nsh-web.md#head)，显示在标签页上。 |
+| | `icon` | 图片的 URL（`data:`、`https:`、`asset:/`），或 `null` 表示不用应用自己的图标。浏览器中，Rust 应用根窗口的图标就是页面标签页的图标，`null` 恢复页面原有的图标；其他平台暂不显示。 |
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`：系统标题栏，或应用自己的标题栏（[见下](#自定义标题栏)）。`controlsOffset`（`{ x, y }`）设置隐藏标题栏中 macOS 红绿灯的位置。 |
 | | `frame` | `"default"`，或 `"none"`：没有标题栏和边框，由应用绘制全部内容。 |
 | 尺寸 | `minSize`、`maxSize` | 用户能调整到的最小和最大内容尺寸，`{ width, height }`，单位为点；`null` 清除。 |

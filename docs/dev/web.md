@@ -1209,6 +1209,8 @@ owns `document.title`: the heads' title, else the app root's (a root `SetAttribu
 the `setTitle` command, and `runtime.js` hands it to `setWindowTitle`; kept where the app is the page), else the page's own, written once the turn's history entries
 exist (after `syncHistory`, or after a traversal of its own lands) so each entry keeps its page's title. A `canonical` path starts at the site's
 base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
+The app root's `icon` (the `setIcon` command, kept where the app is the page) goes on every icon link of the page, one
+the player adds where there is none; clearing it puts the links back as they were. `nsh.test.mjs` tests it.
 
 ## Not implemented
 
