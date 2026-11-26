@@ -102,6 +102,8 @@ pub(crate) struct AppWindow {
     scale: Cell<f32>,
     /// A `WM_PAINT` is asked for.
     invalid: Cell<bool>,
+    /// What changed since its last frame: the next frame draws only that.
+    damage: crate::surface::Damage,
     /// It was sized and placed as the app opened it ([`place`]): until
     /// then its size is the system's default, which is reported to nobody.
     positioned: Cell<bool>,
@@ -402,6 +404,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         pixels: Cell::new((0, 0)),
         scale: Cell::new(1.0),
         invalid: Cell::new(false),
+        damage: Default::default(),
         positioned: Cell::new(false),
         reported: Cell::new(None),
         opened: Cell::new(false),
@@ -410,9 +413,13 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         state: Cell::new(None),
     });
     let weak = Rc::downgrade(&window);
-    view.set_invalidate(Rc::new(move |_, _| {
+    view.set_invalidate(Rc::new(move |view, rect| {
         if let Some(window) = weak.upgrade() {
-            invalidate(&window);
+            match rect {
+                Some(rect) => window.damage.view_rect(view, rect),
+                None => window.damage.view(view),
+            }
+            request_paint(&window);
         }
     }));
     surface.windows.borrow_mut().push(window.clone());
@@ -529,9 +536,34 @@ fn main_title(surface: &Surface) -> String {
     String::from_utf16_lossy(&text[..n.max(0) as usize])
 }
 
-/// Asks for `window` to be drawn again (once, however often asked before it
-/// is).
+/// Asks for the whole of `window` to be drawn again (once, however often
+/// asked before it is).
 fn invalidate(window: &AppWindow) {
+    window.damage.whole();
+    request_paint(window);
+}
+
+/// Asks for `area` (DIPs) of the window of the app's own `hwnd` to be drawn
+/// again: what is drawn there besides its views (its caption buttons).
+/// False when `hwnd` is not one.
+pub(crate) fn invalidate_area(
+    surface: &Surface,
+    hwnd: HWND,
+    area: crate::view::WindowRect,
+) -> bool {
+    let Ok(windows) = surface.windows.try_borrow() else {
+        return false;
+    };
+    let Some(window) = windows.iter().find(|w| w.hwnd == hwnd) else {
+        return false;
+    };
+    window.damage.area(area);
+    request_paint(window);
+    true
+}
+
+/// Asks for a `WM_PAINT` of `window`, which draws what changed.
+fn request_paint(window: &AppWindow) {
     if !window.invalid.replace(true) {
         crate::window::invalidate(window.hwnd);
     }
@@ -652,6 +684,7 @@ fn paint(surface: &Rc<Surface>, window: &AppWindow) {
             scale: window.scale.get(),
             placed: &window.placed,
             composed: &window.composed,
+            damage: &window.damage,
         },
     );
     if deferred {
@@ -1075,6 +1108,7 @@ mod tests {
             pixels: Cell::new((0, 0)),
             scale: Cell::new(1.0),
             invalid: Cell::new(false),
+            damage: Default::default(),
             positioned: Cell::new(true),
             reported: Cell::new(None),
             opened: Cell::new(false),
@@ -1156,6 +1190,7 @@ mod tests {
                 pixels: Cell::new((0, 0)),
                 scale: Cell::new(1.0),
                 invalid: Cell::new(false),
+                damage: Default::default(),
                 positioned: Cell::new(true),
                 reported: Cell::new(None),
                 opened: Cell::new(false),
@@ -1364,6 +1399,7 @@ mod tests {
             pixels: Cell::new((0, 0)),
             scale: Cell::new(1.0),
             invalid: Cell::new(false),
+            damage: Default::default(),
             positioned: Cell::new(true),
             reported: Cell::new(None),
             opened: Cell::new(false),
