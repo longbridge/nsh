@@ -5552,6 +5552,7 @@ class Player {
       if (!start.pulling) {
         start.pulling = true;
         el._pulling = true;
+        if (!el._refreshing) el._refreshDismissing = false;
         cancelAnimationFrame(el._pullAnimation);
       }
       this.dragPull(el, v);

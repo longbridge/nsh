@@ -81,6 +81,8 @@ mod press_momentum;
 #[cfg(target_os = "macos")]
 mod quit_requests;
 #[cfg(target_os = "macos")]
+mod refresh_dismiss;
+#[cfg(target_os = "macos")]
 mod removed_focus;
 #[cfg(target_os = "macos")]
 mod scaled_input;
@@ -220,6 +222,8 @@ fn main() {
                 clamped_scroll::run();
             } else if std::env::var_os("NSH_DELETED_SCROLL_CHECK_ONLY").is_some() {
                 deleted_scroll::run();
+            } else if std::env::var_os("NSH_REFRESH_DISMISS_CHECK_ONLY").is_some() {
+                refresh_dismiss::run();
             } else if std::env::var_os("NSH_DOWNLOAD_REDIRECT_CHECK_ONLY").is_some() {
                 download_redirect::run();
             } else if std::env::var_os("NSH_WEB_LOAD_WAIT_CHECK_ONLY").is_some() {
@@ -291,6 +295,7 @@ fn main() {
                 scaled_input::run();
                 zoom::run();
                 deleted_scroll::run();
+                refresh_dismiss::run();
                 clamped_scroll::run();
                 scroll_indicator_layout::run();
                 download_redirect::run();

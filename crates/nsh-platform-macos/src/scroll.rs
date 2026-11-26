@@ -1069,7 +1069,7 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
             .map(|t| (p.with(s.horizontal, t.0 + lead), t.0 + lead - pos));
         (p, clamp(p, lims), target)
     };
-    if p.distance(back) > 0.5 {
+    if p.distance(back) > 0.5 || (back.y == 0.0 && p.y < 0.0) {
         animate_to(surface, view, back, ANIMATION, false, true);
     } else if let Some((target, distance)) = target {
         let duration = snap_duration(Points(distance), v);
@@ -1264,7 +1264,8 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
             ..
         } => {
             // A mouse wheel came to rest: snapping views move on to the
-            // next snap point in the wheel's direction.
+            // next snap point in the wheel's direction, and a view pulled
+            // past an edge bounces back.
             moved_to(surface, view, raw);
             set_phase(view, Phase::Idle);
             let snaps = view
@@ -1272,16 +1273,12 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
                 .scroll
                 .as_ref()
                 .is_some_and(|s| s.behavior.snaps() || s.behavior.paging);
-            if snaps {
-                let v = if total.abs() >= 1.0 {
-                    total.signum() * WHEEL_SNAP
-                } else {
-                    0.0
-                };
-                release(surface, view, 0.0, v);
+            let v = if snaps && total.abs() >= 1.0 {
+                total.signum() * WHEEL_SNAP
             } else {
-                emit(surface, view, EventKind::ScrollEnd);
-            }
+                0.0
+            };
+            release(surface, view, 0.0, v);
         }
         Phase::AwaitMomentum { since } if now - since > MOMENTUM_WAIT => {
             set_phase(view, Phase::Idle);
@@ -1314,6 +1311,14 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
                 overlays = true;
             }
             fading = alpha > 0.0;
+        }
+        if matches!(s.live.phase, Phase::Idle) && s.live.dismissing {
+            s.live.dismissing = false;
+            if !s.live.refreshing {
+                s.live.spin_start = None;
+                s.live.spin = 0.0;
+            }
+            overlays = true;
         }
         // A deleted view's spinner stops ([`deleted`]).
         let spinning = !s.horizontal
@@ -2425,6 +2430,17 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
         return;
     }
     interrupt(surface, view);
+    let cleared = view.state_mut().scroll.as_mut().is_some_and(|s| {
+        let cleared = !s.live.refreshing && std::mem::take(&mut s.live.dismissing);
+        if cleared {
+            s.live.spin_start = None;
+            s.live.spin = 0.0;
+        }
+        cleared
+    });
+    if cleared {
+        update_overlays(view);
+    }
     let raw = current(view);
     set_phase(
         view,
@@ -2567,7 +2583,8 @@ pub(crate) fn wheel_end(surface: &Rc<Surface>, view: &NshView, vx: f32, vy: f32)
     let outside = {
         let state = view.state();
         let p = state.scroll.as_deref().map_or(Offset::default(), goal);
-        p.distance(clamp(p, limits(&state))) > 0.5
+        let back = clamp(p, limits(&state));
+        p.distance(back) > 0.5 || (back.y == 0.0 && p.y < 0.0)
     };
     if gesture && !outside && !snaps {
         // The system's momentum may follow ([`momentum_begin`]).
@@ -3182,13 +3199,17 @@ mod tests {
         assert_eq!(spinner_state(&s, false), Some((1.0, 1.0)));
 
         // Ending refresh enters dismissing: keeps full spinning progress and
-        // fades out linearly with the remaining offset.
+        // fades out linearly with the remaining offset, including under a top
+        // content inset where the spinner stays visible until y reaches 0.
+        s.behavior.content_inset.top = Points(48.0);
         s.live.refreshing = false;
         s.live.dismissing = true;
         assert_eq!(spinner_state(&s, true), Some((1.0, 1.0)));
         assert_eq!(spinner_state(&s, false), Some((1.0, 1.0)));
         s.y = -28.0;
         assert_eq!(spinner_state(&s, true), Some((1.0, 0.5)));
+        s.y = -2.8;
+        assert_eq!(spinner_state(&s, true), Some((1.0, 0.05)));
         s.y = 0.0;
         assert_eq!(spinner_state(&s, true), None);
 
