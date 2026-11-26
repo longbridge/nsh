@@ -263,6 +263,7 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (press, hover, menu) = (dt.clone(), dt.clone(), dt.clone());
     let indicator_dt = dt.clone();
+    let wheel = dt.clone();
     let (leave, focus, blur) = (dt.clone(), dt.clone(), dt.clone());
     scroll()
         .element_ref(&dt.vscroll)
@@ -282,6 +283,13 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         })
         .bounces(move || props.bounces.get())
         .on_scroll(move |e: &ScrollEvent| {
+            if scroll_dt
+                .wheel_y
+                .get_untracked()
+                .is_some_and(|to| (to.0 - e.offset.y.0).abs() < 0.5)
+            {
+                scroll_dt.wheel_y.set(None);
+            }
             scroll_dt.scroll_y.set(e.offset.y);
         })
         .on_scroll_drag_start({
@@ -334,6 +342,13 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                             move |_: &Point<Points>| dt.rest()
                         })
                         .on_scroll(move |e: &ScrollEvent| {
+                            if hscroll_dt
+                                .wheel_x
+                                .get_untracked()
+                                .is_some_and(|to| (to.0 - e.offset.x.0).abs() < 0.5)
+                            {
+                                hscroll_dt.wheel_x.set(None);
+                            }
                             hscroll_dt.scroll_x.set(e.offset.x);
                             // The desktops' bar follows, unless it leads.
                             if lead.take(Side::Table) {
@@ -370,6 +385,11 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                                     }
                                 })
                                 .on_mouse_leave(move |_: &MouseEvent| leave.hover_left())
+                                .when(is_desktop() && !dt.web_desktop, |v| {
+                                    v.on_wheel(move |e: &nsh_core::WheelEvent| {
+                                        wheel.pan_by_wheel(e)
+                                    })
+                                })
                                 .on_context_menu(move |e: &ContextMenuEvent| {
                                     menu.context_menu(e.position, e.page_position)
                                 }),

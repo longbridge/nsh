@@ -777,6 +777,48 @@ fn a_wheel_over_the_empty_state_scrolls_the_columns() {
     app.wait_for("First column 1").unwrap();
 }
 
+/// A table that reports both visible axes after one diagonal wheel event.
+#[component]
+fn DiagonalWheelTable() -> impl IntoElement {
+    let row = signal(0);
+    let col = signal(0);
+    view()
+        .child(
+            wide(80)
+                .data(DataTableRows::new(1).texts("a", ["Wheel target"]))
+                .on_visible_rows_change(move |range: &nsh_base::DataTableRange| {
+                    row.set(range.start)
+                })
+                .on_visible_columns_change(move |range: &nsh_base::DataTableRange| {
+                    col.set(range.start)
+                }),
+        )
+        .child(text(move || {
+            format!("First visible {}:{}", row.get(), col.get())
+        }))
+}
+
+#[test]
+fn a_diagonal_wheel_moves_both_data_table_axes() {
+    let viewport = Size::new(px(600.0), px(300.0));
+    let mut app = Headless::start(EngineConfig {
+        viewport,
+        environment: Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            window: viewport,
+            ..Default::default()
+        },
+        ..EngineConfig::new(nsh_testing::windowed_root::<DiagonalWheelTable>())
+    })
+    .unwrap();
+    app.first_render().unwrap();
+    app.wait_for("First visible 0:0").unwrap();
+    app.wheel("text:Wheel target", point(px(400.0), px(240.0)))
+        .unwrap();
+    app.wait_for("First visible 8:1").unwrap();
+}
+
 /// Wide columns between one fixed at each side.
 #[component]
 fn WideFixed() -> impl IntoElement {
