@@ -65,9 +65,9 @@ use nsh_core::{
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
-        self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
-        SCROLL_PRESS_DELAY, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE, has_press, laid_out,
-        latch_holds, transforms,
+        self, Candidate, ContextMenuTarget, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP,
+        PRESS_SLOP, Pinch, SCROLL_PRESS_DELAY, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE,
+        has_press, laid_out, latch_holds, transforms,
     },
     tailwind::state::{HOVERED, PRESSED},
 };
@@ -827,42 +827,51 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
 
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it (true:
-/// the click is taken). Text fields are GTK's widgets, which show their
-/// own menu.
+/// the click is taken), unless selectable text is nearer: that shows its
+/// edit menu, but where its selectable view, or a view between them,
+/// listens ([`nsh_core::input::context_menu_target`], as on macOS and
+/// Windows). Text fields are GTK's widgets, which show their own menu.
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, state: gdk::ModifierType) -> bool {
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return false;
     };
-    for v in chain(&hit.view) {
-        let (id, listens, input) = {
-            let s = v.state();
-            (
-                s.id,
-                s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input,
-            )
-        };
-        if listens {
-            let (location_x, location_y) = local(surface, &v, x, y);
+    let views = chain(&hit.view);
+    let hops: Vec<_> = views.iter().map(|v| context_menu_hop(&v.state())).collect();
+    match input::context_menu_target(&hops) {
+        Some(ContextMenuTarget::Listener(i)) => {
+            let v = &views[i];
+            let (location_x, location_y) = local(surface, v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
                 point(Points(x), Points(y)),
                 modifiers(state),
                 Some(nsh_core::PointerType::Mouse),
             );
-            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
-            return true;
+            surface.event(
+                v.state().id,
+                EventKind::ContextMenu,
+                EventPayload::ContextMenu(event),
+            );
+            true
         }
-        if input {
-            return false;
-        }
-        if crate::text::selectable(&v.state()) || v.state().props.selectable_view {
+        Some(ContextMenuTarget::EditMenu(i)) => {
             // Text in a selectable view has the area's menu.
-            let target = crate::selectable_view::area_of(&v).unwrap_or(v);
-            return edit_menu(surface, &target, x, y);
+            let v = &views[i];
+            let target = crate::selectable_view::area_of(v).unwrap_or_else(|| v.clone());
+            edit_menu(surface, &target, x, y)
         }
+        Some(ContextMenuTarget::Field(_)) | None => false,
     }
-    false
+}
+
+/// What `state`'s view is to a secondary click's menu.
+fn context_menu_hop(state: &crate::view::ViewState) -> input::ContextMenuHop {
+    input::ContextMenuHop {
+        listens: state.events.contains(EventKind::ContextMenu),
+        field: state.kind == ViewKind::Input,
+        selectable_text: crate::text::selectable(state),
+        selectable_view: state.props.selectable_view,
+    }
 }
 
 /// A wheel by `(dx, dy)` (`lines`: notches, else points) at `(x, y)` (root
