@@ -1291,7 +1291,11 @@ hold write tokens or decide and build what users download run on fresh machines.
 The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
 three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed
 them. The scheduled runs save the dependencies' caches the pull requests restore. TUI's
-macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome; the Website workflow builds the site on pull
+macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome, except the smoke set
+(`examples/gallery/tests/smoke.test.tsx`: typing, the focus a press gives, the keymap's shortcuts), which pull requests
+that touch `nsh-platform-web`, `nsh-base` or `nsh-testing` run too. The macOS workflow runs the same smoke set in AppKit
+windows (`nsh test --target macos`) on pull requests that touch the macOS backend, `nsh-platform-apple`,
+`nsh-macos-host` or `nsh-testing`, and on `main` every three hours. The Website workflow builds the site on pull
 requests only when `website/`, the skills, the tasks examples or `nsh-platform-web` change.
 
 ### Homebrew publishing setup and recovery
