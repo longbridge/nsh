@@ -938,18 +938,17 @@ The gate, checked: with `--stall 150` startup is 744 ms (730–779) and the run 
 `FAIL startup 744 ms > baseline 576 ms + 100 ms`; without it, 584 ms passes.
 
 Baseline, Linux (2026-11-26, Intel Core Ultra 7 270K Plus, Hyprland on Wayland, 60 Hz display, `nsh 0.7.1` (f78eace),
-5 runs at nice 0):
+5 runs at nice 0 on an idle machine):
 
 | Scenario | Startup | Frame p95 / max | Gap p50 / p95 / max | Over one refresh |
 |---|---:|---:|---:|---:|
-| Launch | 596 ms (576–739) | | | |
-| Animation (3 loops) | | 1.96 / 2.36 ms | 16.7 / 17.2 / 18.7 ms | 0% |
-| List scroll (10,000 rows) | | 10.83 / 20.66 ms | 16.7 / 23.0 / 34.8 ms | 2% |
+| Launch | 575 ms (563–595) | | | |
+| Animation (3 loops) | | 1.62 / 2.57 ms | 16.7 / 17.1 / 19.2 ms | 0% |
+| List scroll (10,000 rows) | | 2.24 / 3.71 ms | 16.7 / 17.4 / 18.4 ms | 0% |
 
-The gate, checked: with `--stall 150` startup is 732 ms and the run fails with
-`FAIL startup 732 ms > baseline 596 ms + 100 ms`. On Linux the scroll scenario is already over the frame-cost budget:
-a plain run fails with `FAIL scroll: p95 main-thread frame 9.78 ms > 8.33 ms`, so the gate reports a real
-regression to fix, not noise.
+The gate, checked: with `--stall 150` startup is 732 ms and the run fails with `FAIL startup ... > baseline + 100 ms`.
+Run it on an idle machine: a first Linux run taken while parallel cargo builds kept the load at 18–20 measured the
+scroll's p95 frame cost at about 10 ms and failed the 8.3 ms budget, against 2.24 ms idle.
 
 Not covered yet: the Rust app's startup (the #3365 probe, a Rust app whose window content is in the commit that
 opens it, timed 783 ms median after the fix against 962 ms before it on the same host, debug), and p99: the monitor's
