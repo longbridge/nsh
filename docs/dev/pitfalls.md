@@ -489,7 +489,12 @@ Things that were found the hard way. Read the section of the area you change bef
   (`getGlobalVisibleRect`) records nothing. Four glass views of about the screen's size, without shadows, slid at
   34 ms a frame on an emulator, 12 ms after. Every blurred view still records and blurs its backdrop again on
   every frame, also when nothing behind it changed: a drawer sliding over blurred panes makes each of them blur
-  again (31 ms a frame on the emulator, 17 ms with the panes not blurred).
+  again (31 ms a frame on the emulator, 17 ms with the panes not blurred). A blurred view's display list holds its
+  backdrop node, so a backdrop that records it holds everything behind it a second time, and hwui's `prepareTree`
+  walks a node once for every display list that draws it: the five stacked layers of a progressive blur (the
+  gallery's Styles page) walked the window 31 times a frame, 37 ms of a Pixel 10 Pro's RenderThread while scrolling
+  and 808 ms in the first frame. A view that draws nothing but its blurred backdrop (`Backdrop.onlyBlurs`) is left
+  out of the backdrops behind it, which then blur what lies behind the whole stack: about 3 ms a frame.
 - **Android, hidden views lose their display lists**: HWUI drops the display list of a RenderNode no longer drawn,
   and `setVisibility` tells every view under the one that changes, whose background `Drawable.setVisible` calls
   `invalidateSelf`. A whole screen hidden and shown again therefore records all of its views again (22–36 ms for the

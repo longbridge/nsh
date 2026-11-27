@@ -622,8 +622,6 @@ impl RootView {
             // app running on a Mac ("Designed for iPad") report none.
             app_settings: !cfg!(target_abi = "macabi")
                 && !objc2_foundation::NSProcessInfo::processInfo().isiOSAppOnMac(),
-            // `ASWebAuthenticationSession` (`crate::auth_session`).
-            auth_session: true,
             // The notification center.
             notifications: true,
             // AVAudioEngine and AVPlayer.

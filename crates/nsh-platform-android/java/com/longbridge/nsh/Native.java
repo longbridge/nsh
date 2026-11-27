@@ -101,12 +101,11 @@ final class Native {
     static final int DOWNLOAD_END = 89;
     static final int SHARE = 90;
     static final int DETENT_CHANGE = 91;
-    static final int AUTH_SESSION = 92;
-    static final int FOCUS_IN = 93;
-    static final int FOCUS_OUT = 94;
-    static final int TEXT_DROP = 95;
-    static final int OPEN_APP_SETTINGS = 96;
-    static final int BACK_PROGRESS = 97;
+    static final int FOCUS_IN = 92;
+    static final int FOCUS_OUT = 93;
+    static final int TEXT_DROP = 94;
+    static final int OPEN_APP_SETTINGS = 95;
+    static final int BACK_PROGRESS = 96;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -172,9 +171,10 @@ final class Native {
 
     /**
      * Whether a web view of the running app may navigate to {@code url}, with
-     * its {@code allowOrigin} {@code origin} (null: none).
+     * its {@code allowOrigin} {@code origin} and its {@code allowNavigation}
+     * {@code hosts}, one pattern per line (null: none).
      */
-    static native boolean allowsWebview(long handle, String url, String origin);
+    static native boolean allowsWebview(long handle, String url, String origin, String hosts);
 
     /**
      * Whether the running app's web pages may capture {@code kind}

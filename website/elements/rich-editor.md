@@ -201,8 +201,8 @@ is copied with `transform_copied`.
 
 Files reach the app, which decides what they become (an image node, an attachment, a link to an uploaded copy); the
 editor inserts nothing for them and keeps its selection, where the app inserts what it makes of them. A paste of
-images or of files copied in a file manager calls `onPasteFiles` with `{ files, uris }`: `files` the images with
-their bytes, `uris` the copied files' `file:` URLs. On the desktops, files dragged from another application onto
+images or of files copied in a file manager calls `onPasteFiles` with `{ paste: { files, uris } }`: `files` the images with
+their bytes (`{ name, mime, data }`), `uris` the copied files' `file:` URLs. On the desktops, files dragged from another application onto
 the editor call its `onFileDrop` with `{ uris, mimeTypes }`, as a [view's file drops](./view.md#desktop-file-drops)
 do, and `onFileDragEnter` / `onFileDragLeave` follow the drag, for a hint such as "Release to attach". Without
 `onFileDrop` the editor leaves dropped files to the view around it that listens.
@@ -214,7 +214,7 @@ the text goes in as a paste of it would (with its HTML when the drag has some, t
 ```tsx
 <RichEditor
   editor={editor}
-  onPasteFiles={({ files }) => attach(files)}
+  onPasteFiles={({ paste }) => attach(paste.files)}
   onFileDrop={({ uris, mimeTypes }) => attachFiles(uris, mimeTypes)}
 />
 ```

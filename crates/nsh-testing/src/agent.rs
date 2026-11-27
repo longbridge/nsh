@@ -1881,7 +1881,7 @@ impl Agent {
                 serde_json::to_value(self.scene.view_style(&selector)?).map_err(|e| e.to_string())
             }
             TestStep::Layout { selector } => {
-                serde_json::to_value(self.scene.layout(&selector)?).map_err(|e| e.to_string())
+                serde_json::to_value(self.layout(&selector)?).map_err(|e| e.to_string())
             }
             TestStep::Accessibility { selector } => {
                 serde_json::to_value(self.scene.accessibility(selector.as_deref())?)
@@ -2102,6 +2102,41 @@ impl Agent {
         target: PickTarget,
     ) -> Result<(NodeId, Point<Points>), String> {
         self.find_at(selector, what, target, None)
+    }
+
+    /// Where the view `selector` names is ([`Scene::layout`]), placed
+    /// where the platform shows it when it is inside a scroll view. The
+    /// scene knows only the scrolls the core asked for; one the native
+    /// scroll view made itself (a wheel, a finger, [`Native::scroll`], the
+    /// content kept in place as rows above it go) moves the view on screen
+    /// alone, so its place and whether its scroll views cut it come from
+    /// the platform's views.
+    fn layout(&self, selector: &str) -> Result<Option<ViewLayout>, String> {
+        let Some(mut layout) = self.scene.layout(selector)? else {
+            return Ok(None);
+        };
+        let Pick::One(id) = self.scene.pick(selector, PickTarget::View)? else {
+            return Ok(Some(layout));
+        };
+        let scrollers = self.scene.scroll_ancestors(id)?;
+        if scrollers.is_empty() {
+            return Ok(Some(layout));
+        }
+        let Some(bounds) = self.native.bounds(id) else {
+            return Ok(Some(layout));
+        };
+        let bounds = Bounds::new(
+            bounds.origin,
+            Size::new(Points(layout.width), Points(layout.height)),
+        );
+        layout.x = bounds.origin.x.0;
+        layout.y = bounds.origin.y.0;
+        layout.clipped = scrollers.iter().any(|&(scroller, _)| {
+            self.native
+                .bounds(scroller)
+                .is_some_and(|b| b.intersect(&bounds) != bounds)
+        });
+        Ok(Some(layout))
     }
 
     /// [`Agent::find`] for a press at `position` in the view `selector`
@@ -3314,6 +3349,43 @@ mod tests {
             !landed.is_empty() && landed.iter().all(|y| (103.0..=526.0).contains(y)),
             "{landed:?}"
         );
+    }
+
+    #[test]
+    fn layout_places_a_view_where_its_natively_scrolled_scroll_view_shows_it() {
+        use nsh_core::{MountItem, ViewProps};
+        // The scroll view was scrolled down 200 points natively (a wheel, a
+        // finger): the scene still has it at its top.
+        let layout = |target: f32| {
+            let model = page_model();
+            let props = ViewProps {
+                test_id: Some("row".into()),
+                ..ViewProps::default()
+            };
+            let frame = Bounds::new(point(px(0.0), px(target)), size(px(320.0), px(40.0)));
+            model.apply(&MountBatch {
+                items: vec![
+                    MountItem::ViewProps {
+                        id: 4,
+                        props: Box::new(props),
+                    },
+                    MountItem::Frame { id: 4, frame },
+                ],
+            });
+            let page = Page {
+                offset: Mutex::new(200.0),
+                target,
+                ..Page::default()
+            };
+            let agent = Agent::new(model, Box::new(page));
+            let layout = agent.layout("id:row").unwrap().unwrap();
+            (layout.y, layout.clipped)
+        };
+        // 600 points down its content, it shows 400 points down the window,
+        // inside the scroll view.
+        assert_eq!(layout(600.0), (400.0, false));
+        // Scrolled past, it is cut.
+        assert_eq!(layout(100.0), (-100.0, true));
     }
 
     #[test]

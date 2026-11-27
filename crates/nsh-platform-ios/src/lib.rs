@@ -61,7 +61,6 @@ mod agent;
 mod animation;
 mod app;
 mod application;
-mod auth_session;
 mod blur;
 mod bottom_bar;
 mod canvas;

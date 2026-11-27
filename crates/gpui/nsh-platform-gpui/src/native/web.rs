@@ -619,13 +619,18 @@ mod imp {
                 let access = surface
                     .upgrade()
                     .and_then(|s| s.native.access.borrow().clone());
-                let origin = item.upgrade().and_then(|i| {
-                    i.props
-                        .borrow()
-                        .as_ref()
-                        .and_then(|p| p.allow_origin.clone())
-                });
-                if access.is_none_or(|a| a.allows_webview_with(&url, origin.as_ref())) {
+                let (origin, hosts) = item
+                    .upgrade()
+                    .and_then(|i| {
+                        i.props
+                            .borrow()
+                            .as_ref()
+                            .map(|p| (p.allow_origin.clone(), p.allow_navigation.clone()))
+                    })
+                    .unwrap_or_default();
+                if hosts.as_ref().is_none_or(|h| h.allows(&url))
+                    && access.is_none_or(|a| a.allows_webview_with(&url, origin.as_ref()))
+                {
                     return true;
                 }
                 log::warn!(target: "js", "web view navigation to {url} is not granted");

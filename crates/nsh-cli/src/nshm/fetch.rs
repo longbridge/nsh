@@ -328,10 +328,15 @@ impl Fetch for Net {
                 let body = match self.downloaded.remove(&format!("{name}-{version}")) {
                     Some(body) => body,
                     None => {
-                        status("Downloading", format!("{name} v{version}"));
+                        // A spinner while it downloads: the `Installed` line below
+                        // says it once it is there.
+                        let step = crate::ui::Step::start(format!("downloading {name} v{version}"));
                         let url = format!("{DOWNLOADS}/{name}/{name}-{version}.crate");
-                        self.get(&url)?
-                            .with_context(|| format!("{name} v{version} is not on crates.io"))?
+                        let body = self
+                            .get(&url)?
+                            .with_context(|| format!("{name} v{version} is not on crates.io"))?;
+                        step.finish();
+                        body
                     }
                 };
                 if let Some(expected) = &candidate.checksum {
@@ -400,7 +405,6 @@ impl Fetch for Net {
             Some(s) => format!("{base}/{s}"),
             None => base,
         };
-        let dir = self.root.join(&rel);
         let shown = if name.is_empty() {
             match origin {
                 Origin::Git { url, .. } => repo_dir(url)
@@ -418,10 +422,7 @@ impl Fetch for Net {
             (None, Some(c)) => format!(" #{}", &c[..c.len().min(12)]),
             _ => String::new(),
         };
-        status(
-            "Installed",
-            format!("{shown}{at} to {}", home_relative(&dir)),
-        );
+        status("Installed", format!("{shown}{at}"));
         Ok(rel)
     }
 }
@@ -474,15 +475,6 @@ fn get(agent: &ureq::Agent, url: &str) -> anyhow::Result<Option<Vec<u8>>> {
 fn own_crate(name: &str, origin: &Origin) -> Option<String> {
     (matches!(origin, Origin::Git { .. }) && rust_app::OWN_NSHM.contains(&name))
         .then(|| format!("crates/{name}"))
-}
-
-/// `path` with the user's home directory as `~`, as people write it.
-pub(crate) fn home_relative(path: &Path) -> String {
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
-    match home.and_then(|h| path.strip_prefix(h).ok().map(Path::to_path_buf)) {
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
-    }
 }
 
 /// The directory, relative to the installation root, of `candidate` of
