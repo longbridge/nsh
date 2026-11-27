@@ -321,6 +321,27 @@ public final class NshAppView: UIView {
         try check(nsh_app_set_granted_capabilities(app, json))
     }
 
+    /// Reports the errors of the apps loaded from now on (load failures,
+    /// uncaught exceptions, stopped VMs, unhandled promise rejections) to a
+    /// Sentry-protocol tracker, such as Sentry or Beacon: `dsn` is the
+    /// project's DSN (`nil`: not reported), `environment` the one the events
+    /// are filed under (`nil`: the tracker's default), `tags` are added to
+    /// every event (the embedding app's version, channel). Events carry the
+    /// stack mapped to the app's sources and the package's
+    /// `id@version+build` as release. Applies from the next load: a change
+    /// removes the running app, as ``limits`` does. Off by default.
+    public func setErrorReporting(
+        dsn: String?, environment: String? = nil, tags: [String: String] = [:]
+    ) throws {
+        let strings = tags.flatMap { [$0.key, $0.value] }.map { strdup($0) }
+        defer { strings.forEach { free($0) } }
+        let pointers = strings.map { UnsafePointer($0) }
+        try pointers.withUnsafeBufferPointer { buffer in
+            try check(nsh_app_set_error_reporting(
+                app, dsn, environment, buffer.baseAddress, tags.count))
+        }
+    }
+
     /// Runs a bundle written by `nsh build`; assets come from `assets` next
     /// to it. Bytecode (`bundle.nshc`) loads only from inside the app bundle;
     /// elsewhere load `bundle.js`, or use signed packages.

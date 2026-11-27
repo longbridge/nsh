@@ -133,6 +133,9 @@ final class Native {
     /** No VM limits for the apps loaded next: they run on their own. */
     static native void setStandaloneLimits(long handle);
 
+    /** Where the apps loaded next report their errors (dsn null: not reported); tags as name, value pairs. */
+    static native void setErrorReporting(long handle, String dsn, String environment, String[] tags);
+
     /** Whether scroll views make their content's native views only near their viewport (default: true). */
     static native void setContentCulling(long handle, boolean enabled);
 

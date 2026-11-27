@@ -233,6 +233,54 @@ pub unsafe extern "C" fn nsh_app_set_content_culling(app: *mut NshApp, enabled: 
     app.view.set_content_culling(enabled);
 }
 
+/// Reports the errors of the apps `app` loads next to the Sentry-protocol
+/// tracker of `dsn` (NULL: not reported), filed under `environment` (NULL:
+/// the tracker's default), with `tag_count` tags: `tags` holds their names
+/// and values in turn. Applies from the next load. Returns why the
+/// settings are invalid, or NULL.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `dsn` and `environment` are
+/// NULL or NUL-terminated strings, `tags` points to `2 * tag_count` of them
+/// (NULL when `tag_count` is 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_error_reporting(
+    app: *mut NshApp,
+    dsn: *const c_char,
+    environment: *const c_char,
+    tags: *const *const c_char,
+    tag_count: usize,
+) -> *mut c_char {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    let reporting = (|| -> Result<_, String> {
+        if dsn.is_null() {
+            return Ok(None);
+        }
+        // SAFETY: guaranteed by the caller.
+        let mut reporting = nsh_engine::ErrorReporting::new(unsafe { utf8(dsn, "the DSN") }?);
+        if !environment.is_null() {
+            // SAFETY: guaranteed by the caller.
+            reporting = reporting.environment(unsafe { utf8(environment, "the environment") }?);
+        }
+        if tag_count > 0 {
+            // SAFETY: guaranteed by the caller.
+            let tags = unsafe { std::slice::from_raw_parts(tags, tag_count * 2) };
+            for pair in tags.chunks_exact(2) {
+                if pair[0].is_null() || pair[1].is_null() {
+                    return Err("a tag is NULL".into());
+                }
+                // SAFETY: guaranteed by the caller.
+                let (name, value) = unsafe { (utf8(pair[0], "a tag")?, utf8(pair[1], "a tag")?) };
+                reporting = reporting.tag(name, value);
+            }
+        }
+        Ok(Some(reporting))
+    })();
+    status(reporting.map(|reporting| app.view.set_error_reporting(reporting)))
+}
+
 /// Gives the address of the apps `app` loads (`UrlScheme.setUrl`) to the
 /// system as the current `NSUserActivity`, for Handoff. An address
 /// that is no web page needs `<bundle id>.url` in the embedding app's

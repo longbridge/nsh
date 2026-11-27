@@ -189,6 +189,17 @@ impl AppView {
         }
     }
 
+    /// Reports the errors of the apps this view loads (load failures,
+    /// uncaught exceptions, stopped VMs, unhandled promise rejections) to a
+    /// Sentry-protocol tracker ([`SurfaceOptions::error_reporting`]);
+    /// `None`: not reported. Applies from the next [`AppView::load`]: a
+    /// change removes the running app, as [`AppView::set_limits`] does.
+    pub fn set_error_reporting(&self, reporting: Option<nsh_engine::ErrorReporting>) {
+        if self.inner.state.borrow().options.error_reporting != reporting {
+            self.reconfigure(|options| options.error_reporting = reporting);
+        }
+    }
+
     /// Gives the address of the apps this view loads (`UrlScheme.setUrl`)
     /// to the system as the current `NSUserActivity` (Handoff;
     /// [`SurfaceOptions::handoff`]). Applies from the next [`AppView::load`]:

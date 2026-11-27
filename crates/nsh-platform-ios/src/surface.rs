@@ -1034,7 +1034,7 @@ impl RootView {
             picker: None,
             audio: None,
             windows: None,
-            error_reporting: None,
+            error_reporting: self.ivars().options.error_reporting.clone(),
             login_item: None,
         };
         // A test session's app: the test's storage, network and trace.
@@ -1197,6 +1197,9 @@ pub struct SurfaceOptions {
     /// viewport (true, the default), or all of it
     /// ([`Surface::set_content_culling`]).
     pub content_culling: bool,
+    /// Where the apps report their errors (a Sentry-protocol tracker, such
+    /// as Sentry or Beacon); `None`, the default: not reported.
+    pub error_reporting: Option<nsh_engine::ErrorReporting>,
 }
 
 impl Default for SurfaceOptions {
@@ -1216,6 +1219,7 @@ impl Default for SurfaceOptions {
             fps: false,
             handoff: false,
             content_culling: true,
+            error_reporting: None,
         }
     }
 }
