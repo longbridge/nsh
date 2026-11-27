@@ -4719,6 +4719,7 @@ expect Editable: false
 expect Both: threw
 expect Duplicate: threw
 expect Classes: starterKit,doc,paragraph,heading,blockquote,bulletList,orderedList,listItem,taskList,taskItem,codeBlock,codeBlockHighlight,hardBreak,horizontalRule,image,bold,italic,strike,code,underline,link,highlight,subscript,superscript,textStyle,textAlign,history,trailingNode,typography,listKeymap
+expect Language: null rust true
 covers [nsh/base] Blockquote
 covers [nsh/base] Bold
 covers [nsh/base] BulletList
