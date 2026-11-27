@@ -56,7 +56,7 @@ mod mac {
     }
 
     /// The `NSWindow` of a GPUI window.
-    fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
+    pub(in crate::window) fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
         let handle = HasWindowHandle::window_handle(window).ok()?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
             return None;
@@ -254,6 +254,7 @@ mod mac {
         if keep && w.frame() != frame {
             w.setFrame_display(frame, true);
         }
+        super::super::box_none::shown_ns(w);
     }
 
     /// The window is about to be removed: an order-in left to the next
@@ -498,7 +499,7 @@ mod win {
     /// `DWMWA_USE_IMMERSIVE_DARK_MODE`.
     const DARK_MODE: u32 = 20;
 
-    fn hwnd(window: &Window) -> Option<HWND> {
+    pub(in crate::window) fn hwnd(window: &Window) -> Option<HWND> {
         let handle = HasWindowHandle::window_handle(window).ok()?;
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return None;
@@ -506,7 +507,7 @@ mod win {
         Some(handle.hwnd.get() as HWND)
     }
 
-    fn set_style(hwnd: HWND, index: i32, bits: u32, on: bool) {
+    pub(in crate::window) fn set_style(hwnd: HWND, index: i32, bits: u32, on: bool) {
         // SAFETY: plain calls on a live window of this thread.
         unsafe {
             let style = GetWindowLongPtrW(hwnd, index) as u32;

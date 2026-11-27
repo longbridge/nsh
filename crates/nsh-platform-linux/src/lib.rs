@@ -46,6 +46,7 @@ mod mount;
 mod native;
 mod navigation;
 mod notifications;
+mod presenting;
 mod scroll;
 mod selectable_view;
 mod session;
@@ -85,4 +86,5 @@ pub use crate::{
     image::AssetBase,
     links::set_exec_args,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
+    presenting::{native_view, presenting_window},
 };

@@ -289,9 +289,14 @@ pub(crate) struct Surface {
     /// scroll indicator fading out, keyframes repeating forever): what
     /// [`Surface::moving`] and [`Surface::animating`] do not count.
     cosmetic_frames: Cell<usize>,
-    /// The model of a test session's app (`nsh test --target`).
+    /// The model of the app the agent's steps see: a test session's (`nsh
+    /// test --target`), or a development session's (`nsh test --attach`).
     #[cfg(feature = "dev")]
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
+    /// Whether a test drives the app (`nsh test --target`), not only an
+    /// attached session's steps ([`Surface::testing`]).
+    #[cfg(feature = "dev")]
+    testing: Cell<bool>,
     /// The display link, once something wanted frames, and the root it
     /// was made from (it is made again from another window's:
     /// [`Surface::follow_windows`]).
@@ -443,6 +448,8 @@ impl Surface {
             cosmetic_frames: Cell::new(0),
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
+            #[cfg(feature = "dev")]
+            testing: Cell::new(false),
             link: RefCell::new(None),
             link_rate: Cell::new(None),
             link_screen_max: Cell::new(0.0),
@@ -862,7 +869,9 @@ impl Surface {
                 self.resize_late.set(false);
                 crate::window::laid_out(self, id, size);
             }
-            Message::Run(task) => task.run(),
+            // A module's main-thread function: this surface is current
+            // while it runs (`crate::native_view`, `crate::presenting_view`).
+            Message::Run(task) => crate::presenting::run_for(Rc::downgrade(self), || task.run()),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`
                 // (nsh-js) restricted it to a plain `<stem>.js`, so this
@@ -1056,11 +1065,18 @@ impl Surface {
             || !self.queued.borrow().is_empty()
     }
 
-    /// Keeps the model `nsh test --target` steps see of the app
+    /// Keeps the model the agent's steps see of the app
     /// ([`nsh_testing::agent::Model`]): every batch applied and every error
-    /// go to it from now on.
+    /// go to it from now on. `testing`: a test drives the app (`nsh test
+    /// --target`, [`Surface::testing`]); otherwise `nsh test --attach` may
+    /// drive it as it runs.
     #[cfg(feature = "dev")]
-    pub(crate) fn set_test_model(&self, model: Option<std::sync::Arc<nsh_testing::agent::Model>>) {
+    pub(crate) fn set_test_model(
+        &self,
+        model: Option<std::sync::Arc<nsh_testing::agent::Model>>,
+        testing: bool,
+    ) {
+        self.testing.set(testing && model.is_some());
         *self.test_model.borrow_mut() = model;
     }
 
@@ -1341,7 +1357,7 @@ impl Surface {
     /// Whether `nsh test --target` drives the app ([`Surface::set_test_model`]).
     pub(crate) fn testing(&self) -> bool {
         #[cfg(feature = "dev")]
-        return self.test_model.borrow().is_some();
+        return self.testing.get();
         #[cfg(not(feature = "dev"))]
         false
     }

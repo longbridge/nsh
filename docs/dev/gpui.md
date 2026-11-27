@@ -483,7 +483,10 @@ parent's input), `panel` to a floating one, `popup` and `overlay` to a pop-up on
 has calls for go through GPUI; the others go to the native window under it (`window/native.rs`: AppKit's window
 on macOS, the Win32 window on Windows; levels, workspaces, showing and hiding, moving, ownership and the like). The
 close, Escape and blur policies are answered on the main thread; states, close presses and title bar areas are
-reported per window, moves and resizes once they settle. A hidden title bar gets the main window's drawn controls
+reported per window, moves and resizes once they settle. `pointerEvents: "box-none"` asks the input's picking
+(`input::takes_pointer`, the root aside) where the window takes the pointer, or for its rectangles
+(`input::pointer_rects`) where the system takes an input shape; `window/box_none.rs` lets the pointer through
+elsewhere on each desktop. A host's window an embedded surface draws in is left as it is. A hidden title bar gets the main window's drawn controls
 on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
 buttons and the frame's edges.
 

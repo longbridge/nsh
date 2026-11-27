@@ -61,6 +61,8 @@ mod keyboard;
 #[cfg(target_os = "macos")]
 mod keymap_ime;
 #[cfg(target_os = "macos")]
+mod layout_animation_bench;
+#[cfg(target_os = "macos")]
 mod mask_corners;
 #[cfg(target_os = "macos")]
 mod menu_labels;
@@ -78,6 +80,8 @@ mod navigation_unmount;
 mod nested_bounce;
 #[cfg(target_os = "macos")]
 mod nested_run_loop;
+#[cfg(target_os = "macos")]
+mod presenting;
 #[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
@@ -130,7 +134,9 @@ fn main() {
     } else {
         #[cfg(target_os = "macos")]
         {
-            if std::env::var_os("NSH_TAP_FEEDBACK_CHECK_ONLY").is_some() {
+            if std::env::var_os("NSH_LAYOUT_ANIMATION_BENCH").is_some() {
+                layout_animation_bench::run();
+            } else if std::env::var_os("NSH_TAP_FEEDBACK_CHECK_ONLY").is_some() {
                 tap_feedback::run();
             } else if std::env::var_os("NSH_TEXT_VIEW_SELECTION_CHECK_ONLY").is_some() {
                 text_view_selection::run();
@@ -260,6 +266,8 @@ fn main() {
                 nested_run_loop::run();
             } else if std::env::var_os("NSH_WINDOW_MODE_LAYOUT_CHECK_ONLY").is_some() {
                 window_mode_layout::run();
+            } else if std::env::var_os("NSH_PRESENTING_CHECK_ONLY").is_some() {
+                presenting::run();
             } else {
                 quit_requests::run();
                 #[cfg(feature = "js")]
@@ -287,6 +295,7 @@ fn main() {
                 window_frames::run();
                 window_layout::run();
                 window_mode_layout::run();
+                presenting::run();
                 keyboard::run();
                 ime::run();
                 input_hidden::run();

@@ -17,6 +17,40 @@ use std::sync::{
 use crate::shader_frame::SharedTexture;
 use crate::shader_frame::{Frame, PixelFormat};
 
+/// Bytes to write into buffers just before a frame's commands run: its
+/// uniforms. They go with the frame, so they are written in the order the
+/// frames are submitted, on whichever thread submits them.
+pub(crate) type Writes = Vec<(wgpu::Buffer, Vec<u8>)>;
+
+/// Writes `writes` into their buffers.
+fn write(queue: &wgpu::Queue, writes: Writes) {
+    for (buffer, bytes) in writes {
+        queue.write_buffer(&buffer, 0, &bytes);
+    }
+}
+
+/// A frame encoded on the main thread, to finish and submit, there or on
+/// the renderer's submitting thread ([`FrameTarget::submit_on`]).
+#[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
+pub(crate) struct Submission {
+    writes: Writes,
+    encoder: wgpu::CommandEncoder,
+    /// Once submitted: marks the surface done when the GPU is.
+    #[cfg(target_vendor = "apple")]
+    submitted: crate::shader_surfaces::Submitted,
+}
+
+#[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
+impl Submission {
+    /// Writes its bytes, finishes and submits its commands.
+    pub(crate) fn run(self, queue: &wgpu::Queue) {
+        write(queue, self.writes);
+        queue.submit([self.encoder.finish()]);
+        #[cfg(target_vendor = "apple")]
+        self.submitted.after_submit(queue);
+    }
+}
+
 /// The texture format of read-back frames in `format`.
 pub(crate) fn texture_format(format: PixelFormat) -> wgpu::TextureFormat {
     match format {
@@ -198,12 +232,48 @@ impl FrameTarget {
         &mut self,
         queue: &wgpu::Queue,
         destination: Destination,
+        encoder: wgpu::CommandEncoder,
+    ) {
+        self.submit_on(queue, None, destination, encoder, Writes::new());
+    }
+
+    /// As [`Self::submit`], after writing `writes`. Apple: a frame on a
+    /// surface is finished and submitted by `send` when there is one (on
+    /// the renderer's submitting thread),
+    /// which does what the GPU driver does there (most of a frame's cost on
+    /// the main thread: Metal's render pass is encoded as the commands
+    /// finish); the surface counts as rendering from now on.
+    pub(crate) fn submit_on(
+        &mut self,
+        queue: &wgpu::Queue,
+        send: Option<&dyn Fn(Submission)>,
+        destination: Destination,
         mut encoder: wgpu::CommandEncoder,
+        writes: Writes,
     ) {
         self.serial += 1;
         match destination {
-            #[cfg(any(target_vendor = "apple", windows))]
+            #[cfg(target_vendor = "apple")]
             Destination::Surface(i) => {
+                let submitted = self
+                    .surfaces
+                    .as_mut()
+                    .expect("surfaces")
+                    .submitting(i, self.serial);
+                let submission = Submission {
+                    writes,
+                    encoder,
+                    submitted,
+                };
+                match send {
+                    Some(send) => send(submission),
+                    None => submission.run(queue),
+                }
+            }
+            #[cfg(windows)]
+            Destination::Surface(i) => {
+                let _ = send;
+                write(queue, writes);
                 queue.submit([encoder.finish()]);
                 self.surfaces
                     .as_mut()
@@ -211,6 +281,9 @@ impl FrameTarget {
                     .submitted(i, self.serial, queue);
             }
             Destination::Readback(i) => {
+                #[cfg(not(target_vendor = "apple"))]
+                let _ = send;
+                write(queue, writes);
                 let target = self.target.as_mut().expect("target");
                 let (width, height, stride) = (target.width, target.height, target.stride);
                 let readback = &mut target.readbacks[i];

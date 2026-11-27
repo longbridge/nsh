@@ -26,7 +26,7 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    DefinedClass, MainThreadOnly, Message, define_class, msg_send,
+    DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject},
 };
@@ -303,7 +303,14 @@ pub(crate) fn schedule(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
             return;
         };
         match surface.upgrade() {
-            Some(surface) => show(&surface, id, &sheet),
+            // The menu finds its views with the surface current, as a
+            // module's system UI does (`crate::native_view`,
+            // `crate::presenting_view`), and shows after: what runs on the
+            // main thread while it tracks the mouse is not this surface's.
+            Some(live) => {
+                let at = crate::presenting::run_for(surface, || place(live.mtm, &sheet));
+                show(&live, id, &sheet, at);
+            }
             None => log::warn!("share: the surface closed; request {id} is not answered"),
         }
     });
@@ -314,9 +321,38 @@ pub(crate) fn schedule(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
     unsafe { NSRunLoop::mainRunLoop().performInModes_block(&modes, &block) };
 }
 
-/// Shows the share menu for `sheet` in `surface`, below the view of node
-/// `sheet.anchor` where it is in a window, and answers request `id`.
-fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
+/// Where the menu for `sheet` points, in the current surface
+/// ([`crate::presenting::run_for`]): the view of node `sheet.anchor` where
+/// it is in a window, else the middle of the window's content. `None` when
+/// the surface is in no visible window.
+fn place(mtm: MainThreadMarker, sheet: &ShareSheet) -> Option<(Retained<NSView>, NSRect)> {
+    // No batch holds the mounter on this turn; were one to, the menu shows
+    // at the middle rather than wait.
+    let anchor = sheet
+        .anchor
+        .and_then(|anchor| crate::native_view(mtm, anchor))
+        .filter(|view| view.window().is_some());
+    match anchor {
+        Some(anchor) => {
+            let rect = anchor.bounds();
+            Some((anchor, rect))
+        }
+        None => {
+            let root = crate::presenting_view(mtm)?;
+            let rect = middle(root.bounds());
+            Some((root, rect))
+        }
+    }
+}
+
+/// Shows the share menu for `sheet` in `surface` at `place` ([`place`]'s),
+/// and answers request `id`.
+fn show(
+    surface: &Rc<Surface>,
+    id: u32,
+    sheet: &ShareSheet,
+    place: Option<(Retained<NSView>, NSRect)>,
+) {
     let Some(control) = surface.event_control() else {
         // No engine runs to hear an answer (the command came from one).
         log::warn!("share: no app runs in this surface; request {id} is not answered");
@@ -351,29 +387,11 @@ fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
     if items.is_empty() {
         return fail(ShareError::failed("share: nothing to share"));
     }
-    // No batch holds the mounter on this turn; were one to, the menu shows
-    // at the middle rather than wait.
-    let anchor = sheet
-        .anchor
-        .and_then(|anchor| {
-            let mounter = surface.mounter.try_borrow().ok()?;
-            mounter.views.get(&anchor).cloned()
-        })
-        .filter(|view| view.ns().window().is_some());
-    let (view, rect): (Retained<NSView>, NSRect) = match &anchor {
-        Some(anchor) => (anchor.ns().retain(), anchor.ns().bounds()),
-        None => {
-            let root = crate::window::visible_container(surface)
-                .unwrap_or_else(|| surface.root.ns().retain());
-            if root.window().is_none_or(|w| !w.isVisible()) {
-                // AppKit shows no menu there, and so never answers.
-                return fail(ShareError::failed(
-                    "share: the surface is in no visible window",
-                ));
-            }
-            let rect = middle(root.bounds());
-            (root, rect)
-        }
+    let Some((view, rect)) = place else {
+        // AppKit shows no menu there, and so never answers.
+        return fail(ShareError::failed(
+            "share: the surface is in no visible window",
+        ));
     };
     // The window's container is not flipped, an anchor (an NSH view) is.
     let edge = below(view.isFlipped());

@@ -146,6 +146,8 @@ fn workspace() -> impl IntoElement {
 
 `renderToolbar` 为组当前显示的标签页绘制标签栏末尾的工具栏：这个面板自己的操作，例如新建标签页或放大按钮，对应 GPUI dock 面板的 toolbar buttons。它拿到的是和 `renderTab` 相同的 `DockTab`（`panel`、`group`、`index`、`zoomed` 等），所以不同面板可以显示不同的操作，ref 的 `toggleZoom(tab.group)` 作用于它所在的组。它是标签栏里位于标签页滚动视图之后的子元素，标签页滚动时它保持原位，由标签栏自己的布局摆放（在 `flex-row` 的标签栏里，给返回的元素加 `ml-auto` 可以把它推到末尾）。在紧凑方式中，唯一的标签栏以当前显示的标签页的工具栏结尾。
 
+`renderTabBarPrefix` 对应标签栏开头，位于标签页滚动视图之前，拿到同样的 `DockTab`：放标签页滚动时保持原位的留白或控件，例如只给左上角的组给窗口按钮留位（`tabBarStyle` 会给所有组都留）。
+
 ```tsx
 renderToolbar={(tab) => (
   <View class="ml-auto flex-row items-center gap-2 px-2">
@@ -306,6 +308,7 @@ const terminalOpen = signal(true);
 | `renderPanel` | `.render_panel(\|panel\| ..)` | `(panel: DockPanel) => JSX.Element` | 无 | 面板的内容，按它的键（`panel.id`）。 |
 | `renderTab` | `.render_tab(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | 面板的键 | 标签页显示的内容。 |
 | `renderToolbar` | `.render_toolbar(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | 无 | 标签栏末尾的工具栏，对应组当前显示的标签页：这个面板自己的操作（新建标签页、放大按钮）。 |
+| `renderTabBarPrefix` | `.render_tab_bar_prefix(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | 无 | 标签栏开头、标签页之前的内容，对应组当前显示的标签页。 |
 | `renderDropIndicator` | `.render_drop_indicator(\|drop\| ..)` | `(drop: DockDropIndicator) => JSX.Element` | 无 | 放置指示里的内容：`group`、`side`、`index`。 |
 | `renderDock` | `.render_dock(\|dock\| ..)` | `(dock: DockInfo) => JSX.Element` | 无 | 停靠区自己的装饰，位于它的布局之前：`placement`、`open`（在当前呈现方式中是否显示）、`size`、`collapsible`。 |
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | 无 | 中心区域为空时显示的内容。 |
@@ -348,6 +351,7 @@ const terminalOpen = signal(true);
 | 标签组 | 区域里 | `groupClass`、`groupStyle` | |
 | 标签栏 | 组里 | `tabBarClass`、`tabBarStyle` | |
 | 标签页 | 标签栏里 | `tabClass`、`tabStyle`；`renderTab` | `selected:`、`active:`、`hover:` |
+| 标签栏前缀 | 标签栏开头 | `renderTabBarPrefix` | |
 | 工具栏 | 标签栏末尾 | `renderToolbar` | |
 | 组的内容 | 组里 | `contentClass`、`contentStyle`；`renderPanel` | |
 | 手柄的指示器 | 分栏的组之间、停靠区的边缘 | `handleClass`、`handleStyle` | `group-hover:`、`group-active:` |

@@ -124,9 +124,7 @@ impl ShareContent {
             ..ShareRequest::default()
         };
         for file in &files {
-            request
-                .files
-                .push(crate::runtime::fs::shared_file(sys, file)?);
+            request.files.push(sys.readable_file(file)?);
         }
         request.check().map_err(JsError::Type)?;
         Ok(request)

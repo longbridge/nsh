@@ -151,8 +151,9 @@ pub(crate) fn hwnds(surface: &Surface) -> Vec<HWND> {
     surface.windows.borrow().iter().map(|w| w.hwnd).collect()
 }
 
-/// The app window with the keyboard focus, for test steps that act on the
-/// focused window (the host is not one).
+/// The app window with the keyboard focus (the host is not one): what test
+/// steps act on, and what owns a module's system UI
+/// ([`crate::presenting_window`]).
 pub(crate) fn focused_hwnd(surface: &Surface) -> Option<HWND> {
     surface
         .windows
@@ -365,8 +366,10 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         attrs
     };
     let owner = open.parent.and_then(|parent| window_hwnd(surface, parent));
-    let composed =
-        resolved.transparent || resolved.backdrop != Backdrop::None || resolved.click_through;
+    let composed = resolved.transparent
+        || resolved.backdrop != Backdrop::None
+        || resolved.click_through
+        || resolved.box_none;
     let hwnd = match crate::window::create_app_window(
         surface,
         id,
@@ -1056,6 +1059,7 @@ fn destroy(surface: &Surface, window: &AppWindow) {
     window.composed.borrow_mut().clear();
     window.swap.borrow_mut().take();
     crate::file_drop::window_closing(surface, window.hwnd);
+    crate::box_none::forget(window.hwnd);
     // SAFETY: plain calls on a window of this thread, if it is still there
     // (the system destroys owned windows with their owner).
     unsafe {
