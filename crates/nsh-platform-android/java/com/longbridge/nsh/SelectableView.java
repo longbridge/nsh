@@ -45,6 +45,8 @@ final class SelectableView implements SelectionHandle.Owner {
 
     private static native String nativeText(long handle, SelectableView area);
 
+    private static native int[] nativeEnds(long handle, SelectableView area);
+
     private static native int[] nativeReadingOrder(int count, float[] runs);
 
     private static native int[] nativeKept(long handle);
@@ -56,6 +58,8 @@ final class SelectableView implements SelectionHandle.Owner {
     private final int id;
     /** The selected text last reported to the area's {@code onSelectionChange}. */
     private String reported = "";
+    /** Its ends (anchor node, offset, focus node, offset; empty for none). */
+    private int[] reportedEnds = new int[0];
     /** The area's view is gone: clearing reports nothing. */
     private boolean removed;
     /** The native model while there is a selection, else 0. */
@@ -133,11 +137,23 @@ final class SelectableView implements SelectionHandle.Owner {
         clear();
     }
 
-    /** Reports {@code text}, the selected text, to {@code onSelectionChange} when it changed and JS listens. */
-    private void report(String text) {
-        if (text.equals(reported) || !mounter.wants(id, Native.SELECTION_CHANGE)) return;
+    /**
+     * Reports {@code text}, the selected text, and {@code ends}, its anchor's and focus's text nodes and offsets
+     * ({@code nativeEnds}, which the core places in list items), to {@code onSelectionChange} when they changed
+     * and JS listens.
+     */
+    private void report(String text, int[] ends) {
+        if ((text.equals(reported) && java.util.Arrays.equals(ends, reportedEnds))
+                || !mounter.wants(id, Native.SELECTION_CHANGE)) return;
         reported = text;
-        mounter.eventMap(id, Native.SELECTION_CHANGE, new String[] {"text"}, new Object[] {text});
+        reportedEnds = ends;
+        if (ends.length < 4) {
+            mounter.eventMap(id, Native.SELECTION_CHANGE, new String[] {"text"}, new Object[] {text});
+            return;
+        }
+        mounter.eventMap(id, Native.SELECTION_CHANGE,
+                new String[] {"text", "anchorNode", "anchorNodeOffset", "focusNode", "focusNodeOffset"},
+                new Object[] {text, ends[0], ends[1], ends[2], ends[3]});
     }
 
     /** Whether the long press selected and the gesture goes on (presses are cancelled). */
@@ -244,8 +260,12 @@ final class SelectableView implements SelectionHandle.Owner {
         mode = null;
         if (m != null) m.finish();
         nativeDestroy(h);
-        if (removed) reported = "";
-        else report("");
+        if (removed) {
+            reported = "";
+            reportedEnds = new int[0];
+        } else {
+            report("", new int[0]);
+        }
     }
 
     /** Whether the screen point is on one of the handles (a touch there keeps the selection). */
@@ -492,7 +512,8 @@ final class SelectableView implements SelectionHandle.Owner {
         if (kept != null) Native.keepRendered(mounter.handle(), kept);
         if (mounter.wants(id, Native.SELECTION_CHANGE)) {
             String text = empty() ? "" : nativeText(handle, this);
-            report(text != null ? text : "");
+            int[] ends = empty() ? null : nativeEnds(handle, this);
+            report(text != null ? text : "", ends != null ? ends : new int[0]);
         }
         int[] ranges = nativeRanges(handle, this);
         java.util.ArrayList<TextBox> now = new java.util.ArrayList<>();
