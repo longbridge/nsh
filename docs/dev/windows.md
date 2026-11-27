@@ -133,7 +133,8 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   is presented, and a stretched last frame would move everything by part of a pixel on each step of a resize. The last
   frame stays where it is, and DWM shows the window's redirection surface past it, which `WM_SIZE` fills with the
   window's background before it waits for the layout (`window::fill`; DWM never shows a window swap chain's own
-  background color).
+  background color). Growing a normal frameless app window by its edge prepares and presents a frame for the
+  proposed client size in `WM_SIZING`. `WM_SIZE` reuses it when the actual size and DPI match.
 - **Text is typeset on the engine thread** with DirectWrite's shared, free-threaded factory; the final layout is plain
   data (glyph runs recorded through a text renderer of NSH's own), which the main thread only draws and hit-tests
   (`text.rs`).
@@ -449,9 +450,9 @@ waitable object and one frame in flight (two buffers), and a window draws only w
 (`SwapChain::ready`, a non-blocking poll). Otherwise `render::frame` returns before drawing, the damage and the
 invalid flag stay, and a thread pool wait on the object posts `WM_NSH_PAINT` to the window when a frame is free
 (posted, not `InvalidateRect`: a posted message comes before the `WM_PAINT`s that wait for the thread's other
-messages). A resized window draws in its `WM_SIZE` once it holds the token (`SwapChain::wait_ready`): it waits for its
-frame in flight to be shown, at most 50 ms, so a drag runs at the display's rate with one frame in flight and the
-window keeps up with the pointer. This is the one place a window's present holds its thread up, for a vblank at most:
+messages). A resized window takes the token (`SwapChain::wait_ready`) before it draws in `WM_SIZE` or prepares a
+growth frame in `WM_SIZING`. It waits up to 50 ms for the frame in flight, keeping the queue to one frame during
+a drag. This is the one place a window's present holds its thread up, for a vblank at most:
 an embedding app that resizes an `NshView`, or an app resizing a window again and again, has its UI thread paced
 to that window's display meanwhile. A window DWM does not show (hidden, minimized, cloaked) only polls, and a resized
 window without the token waits for `WM_NSH_PAINT` as any other.
