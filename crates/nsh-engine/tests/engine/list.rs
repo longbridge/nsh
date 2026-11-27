@@ -175,12 +175,13 @@ fn scrolls_with_recycled_cells(app: &str) {
             _ => None,
         })
         .unwrap();
-    // 500 pt viewport + 500 pt overscan at 50 pt per row = 21 rows.
+    // 500 pt viewport, 500 pt overscan below it and the 500 pt the start
+    // leaves empty above it, at 50 pt per row = 31 rows.
     let mut window = first_texts;
     while let Ok(batch) = rx.recv_timeout(Duration::from_millis(300)) {
         window.extend(texts(&batch));
     }
-    assert_eq!(window.len(), 21, "{window:?}");
+    assert_eq!(window.len(), 31, "{window:?}");
 
     // Scroll to row 40: rows 30..=60 are needed; cells are recycled, so the
     // update re-renders text in existing views instead of creating them.

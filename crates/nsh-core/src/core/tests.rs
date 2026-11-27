@@ -3796,8 +3796,9 @@ fn list_renders_window_and_recycles_cells() {
     );
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    // Estimated 50 pt rows: viewport + one screen of overscan = 17 rows.
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 100.0), 17);
+    // Estimated 50 pt rows: the viewport, its screen of overscan and the
+    // one the start leaves empty above it = 25 rows.
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 100.0), 25);
     let batch = c.commit().unwrap();
     // Rows are really 100 pt: positioned by measured sizes.
     assert_eq!(
@@ -3808,10 +3809,10 @@ fn list_renders_window_and_recycles_cells() {
         MountItem::ScrollContent { id: 2, size } => Some(size.height.0),
         _ => None,
     });
-    assert_eq!(content, Some(17.0 * 100.0 + 983.0 * 50.0));
+    assert_eq!(content, Some(25.0 * 100.0 + 975.0 * 50.0));
 
     // Scroll far down into unmeasured (50 pt estimated) rows: the window
-    // needs 25 rows; all 17 existing cells are reused and 8 are added.
+    // needs 25 rows; the 25 existing cells are reused, none are added.
     c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
     c.commit();
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
@@ -4462,7 +4463,7 @@ fn spare_list_cells_are_hidden_until_placed_again() {
     thousand_rows(&mut c);
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     let batch = c.commit().unwrap();
     for &cell in &cells {
         assert_eq!(
@@ -4513,7 +4514,7 @@ fn spare_list_cells_are_hidden_until_placed_again() {
         }],
     );
     c.commit();
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 14);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 22);
     let batch = c.commit().unwrap();
     let mut rows: Vec<f32> = cells[3..]
         .iter()
@@ -4529,32 +4530,37 @@ fn spare_list_cells_are_hidden_until_placed_again() {
     rows.sort_by(f32::total_cmp);
     assert_eq!(
         rows,
-        (3..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+        (3..25).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
     );
 
-    // Far down, the window takes all 17 cells and 8 more; back at the
-    // top, the 8 it no longer needs stay where the window left them,
-    // showing their own rows there, out of sight. Screen readers skip the
-    // cells the window left behind (the rows there may have moved since
-    // they were laid out) until their new rows are bound: nothing else is
-    // mounted before.
+    // Far down, the rows are 30 pt: the window takes all 25 cells and
+    // more; back at the top, the ones it no longer needs stay where the
+    // window left them, showing their own rows there, out of sight. Screen
+    // readers skip the cells the window left behind (the rows there may
+    // have moved since they were laid out) until their new rows are bound:
+    // nothing else is mounted before.
     c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
     c.commit();
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 30.0), 25);
     c.commit();
+    while render_binds(&mut c, &mut next_id, &mut cells, 30.0) > 0 {
+        c.commit();
+    }
+    let made = cells.len();
+    assert!(made > 25, "{made}");
     c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
     let left = c.commit().expect("the cells left behind");
     for &cell in &cells {
         assert_eq!(hidden_in(&left, cell), (None, Some(true)), "cell {cell}");
         assert_eq!(frame_of(&left, cell), None, "cell {cell}");
     }
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     let placed = c.commit().unwrap();
     let mut spare = Vec::new();
     for &cell in &cells {
         match frame_of(&placed, cell) {
             Some(frame) => {
-                assert!(frame.origin.y.0 <= 800.0, "cell {cell} at {frame:?}");
+                assert!(frame.origin.y.0 <= 1200.0, "cell {cell} at {frame:?}");
                 assert_eq!(hidden_in(&placed, cell), (None, Some(false)), "cell {cell}");
             }
             None => {
@@ -4563,7 +4569,7 @@ fn spare_list_cells_are_hidden_until_placed_again() {
             }
         }
     }
-    assert_eq!(spare.len(), 8);
+    assert_eq!(spare.len(), made - 25);
     // Once the items change, the rows they show may be gone: hidden.
     apply(
         &mut c,
@@ -4656,7 +4662,7 @@ fn a_list_under_display_none_keeps_its_window_and_cells() {
     );
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     c.commit();
 
     // A page kept alive under `display: none`: its list has no size, which
@@ -4689,7 +4695,7 @@ fn a_list_under_display_none_keeps_its_window_and_cells() {
     rows.sort_by(f32::total_cmp);
     assert_eq!(
         rows,
-        (0..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+        (0..25).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
     );
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 0);
 }
@@ -4700,7 +4706,7 @@ fn list_cells_unbound_before_they_are_placed_are_hidden() {
     thousand_rows(&mut c);
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     // The data shrinks before the new cells were placed: those without a
     // row show the content made for it, with no frame to move them away.
     apply(
@@ -4732,9 +4738,9 @@ fn spare_list_cells_waiting_for_a_paced_bind_show_when_it_lands() {
     thousand_rows(&mut c);
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     c.commit();
-    // Shrunk to 3 rows, the other 14 cells are hidden; grown back, the
+    // Shrunk to 3 rows, the other 22 cells are hidden; grown back, the
     // viewport's rows bind at once and the overscan's wait.
     apply(
         &mut c,
@@ -4772,9 +4778,9 @@ fn spare_list_cells_waiting_for_a_paced_bind_show_when_it_lands() {
             other => panic!("cell {cell}: {other:?}"),
         }
     }
-    assert_eq!(waiting.len(), 9);
+    assert_eq!(waiting.len(), 17);
     // The paced binds land: those cells show, at their rows.
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 9);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
     assert!(!c.has_paced_list_binds());
     let batch = c.commit().unwrap();
     let mut rows: Vec<f32> = waiting
@@ -4791,7 +4797,7 @@ fn spare_list_cells_waiting_for_a_paced_bind_show_when_it_lands() {
     rows.sort_by(f32::total_cmp);
     assert_eq!(
         rows,
-        (8..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+        (8..25).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
     );
 }
 
@@ -19198,8 +19204,9 @@ mod components {
     /// other cell does, or nothing, so a row's elements are found once.
     #[test]
     fn spare_list_cells_never_show_a_row_another_cell_shows() {
-        // The window holds 34 rows in the middle of the list, 23 at either
-        // end: scrolled from the middle to an end, 11 cells are spare.
+        // The window holds about 34 rows wherever it is (one more in the
+        // middle, where both its edges cut a row): scrolled from the middle
+        // to an end, a cell is spare.
         let cases: [(&str, usize, &[f32], RowsChange); 8] = [
             // At the end: the gone row's cell stays spare, the rows after
             // it move up into theirs.
@@ -19293,7 +19300,10 @@ mod components {
                 settle(&mut c);
                 check(&c, format!("then at {y}"));
             }
-            if made != 0 {
+            // Two rows gone, one spare cell: the second new row takes a
+            // cell whose row went, and makes its content (a view, a text).
+            let allowed = if name == "drop two" { 2 } else { 0 };
+            if made != allowed {
                 failures.push(format!("{name}: {made} views made"));
             }
             // Back at the start, the rows in the viewport show, once each.
@@ -43822,14 +43832,16 @@ mod built_in_scrollbars {
                     stack.apply(&batch);
                 }
                 render_binds(&mut c, &mut next_id, &mut cells, 50.0);
-                let batch = c.commit().unwrap();
-                // Every set the list pins keeps its bar, last (on top).
-                for item in &batch.items {
-                    if let MountItem::StickyCells { id: 2, cells } = item {
-                        assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                // Nothing to commit when the window already held the rows.
+                if let Some(batch) = c.commit() {
+                    // Every set the list pins keeps its bar, last (on top).
+                    for item in &batch.items {
+                        if let MountItem::StickyCells { id: 2, cells } = item {
+                            assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                        }
                     }
+                    stack.apply(&batch);
                 }
-                stack.apply(&batch);
                 assert_eq!(
                     stack.views.last(),
                     Some(&bar),
