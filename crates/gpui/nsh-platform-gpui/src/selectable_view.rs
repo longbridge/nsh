@@ -27,7 +27,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Points,
     geometry::{Point, point},
-    selection::{SelectionModel, SelectionTexts, marker_of},
+    selection::{KeptRows, SelectionModel, SelectionTexts, marker_of},
 };
 use rustc_hash::FxHashSet;
 
@@ -66,6 +66,11 @@ struct Active {
     gesture: Option<Gesture>,
     /// The selected text last reported to the area's `onSelectionChange`.
     reported: String,
+    /// The ends last reported with it (`SelectionModel::ends`).
+    reported_ends: Option<[(u64, u32); 2]>,
+    /// The ends' texts, whose virtual list rows stay rendered while
+    /// scrolled away: recycled, they would show other items.
+    kept: KeptRows,
 }
 
 /// A press in an area, while the button is down.
@@ -296,11 +301,13 @@ fn with_area<R>(surface: u64, area: &NshView, f: impl FnOnce(&mut Active) -> R) 
             highlighted: Vec::new(),
             gesture: None,
             reported: String::new(),
+            reported_ends: None,
+            kept: KeptRows::default(),
         });
         (old, f(a))
     });
-    if let Some(old) = old {
-        cleared(&old);
+    if let Some(mut old) = old {
+        cleared(&mut old);
     }
     report(surface);
     r
@@ -310,6 +317,13 @@ fn with_area<R>(surface: u64, area: &NshView, f: impl FnOnce(&mut Active) -> R) 
 /// `onSelectionChange` when it changed (after the selection's borrow ends:
 /// the handler may change what is shown).
 fn report(surface: u64) {
+    let kept = ACTIVE.with_borrow_mut(|active| {
+        let a = active.as_mut().filter(|a| a.surface == surface)?;
+        a.kept.changed(&a.model)
+    });
+    if let Some(nodes) = kept {
+        keep_rendered(surface, nodes);
+    }
     let change = ACTIVE.with_borrow_mut(|active| {
         let a = active.as_mut().filter(|a| a.surface == surface)?;
         let (id, listens) = {
@@ -319,19 +333,20 @@ fn report(surface: u64) {
         if !listens {
             return None;
         }
-        let (text, start) = if a.model.is_empty() {
-            (String::new(), 0)
+        let (text, start, ends) = if a.model.is_empty() {
+            (String::new(), 0, None)
         } else {
             AreaTexts::of(&a.area).map_or_else(
-                || (String::new(), 0),
-                |t| (a.model.text(&t), a.model.start_offset(&t)),
+                || (String::new(), 0, None),
+                |t| (a.model.text(&t), a.model.start_offset(&t), a.model.ends(&t)),
             )
         };
-        if text == a.reported {
+        if text == a.reported && ends == a.reported_ends {
             return None;
         }
         a.reported.clone_from(&text);
-        Some((id, text, start))
+        a.reported_ends = ends;
+        Some((id, text, start, ends))
     });
     if let Some(change) = change {
         send(surface, change);
@@ -340,24 +355,41 @@ fn report(surface: u64) {
 
 /// Reports `""` for `old`, an area that lost its selection, if it last
 /// reported a selected text and is still shown.
-fn cleared(old: &Active) {
+fn cleared(old: &mut Active) {
+    if let Some(nodes) = old.kept.release() {
+        keep_rendered(old.surface, nodes);
+    }
     if !old.reported.is_empty() && old.area.attached() {
         let id = old.area.state().id;
-        send(old.surface, (id, String::new(), 0));
+        send(old.surface, (id, String::new(), 0, None));
     }
 }
 
-/// Sends `onSelectionChange` with `text` to view `id` of `surface`.
-fn send(surface: u64, (id, text, start): (NodeId, String, u32)) {
+/// An `onSelectionChange` due: the area, the selected text, where it
+/// starts and its ends (`SelectionModel::ends`), which the core places in
+/// list items.
+type Change = (NodeId, String, u32, Option<[(u64, u32); 2]>);
+
+/// Keeps the virtual list rows holding `nodes` of `surface` rendered
+/// (none: releases them).
+fn keep_rendered(surface: u64, nodes: Vec<u64>) {
     if let Some(surface) = Surface::by_key(surface) {
-        surface.event(
-            id,
-            EventKind::SelectionChange,
-            EventPayload::Map(vec![
-                ("text", PayloadValue::Str(text)),
-                ("start", PayloadValue::Number(f64::from(start))),
-            ]),
-        );
+        let nodes = nodes.into_iter().map(|n| n as NodeId).collect();
+        surface.control(|c| c.keep_rendered(nodes));
+    }
+}
+
+/// Sends `onSelectionChange` with `change` to its view of `surface`.
+fn send(surface: u64, (id, text, start, ends): Change) {
+    if let Some(surface) = Surface::by_key(surface) {
+        let mut fields = vec![
+            ("text", PayloadValue::Str(text)),
+            ("start", PayloadValue::Number(f64::from(start))),
+        ];
+        if let Some(ends) = ends {
+            fields.extend(nsh_core::selection::end_fields(ends));
+        }
+        surface.event(id, EventKind::SelectionChange, EventPayload::Map(fields));
     }
 }
 
@@ -633,9 +665,9 @@ pub(crate) fn clear_in(view: &NshView) {
 
 /// Clears the area selection, if there is one (a text selects alone).
 pub(crate) fn clear_all() {
-    if let Some(a) = ACTIVE.with_borrow_mut(Option::take) {
+    if let Some(mut a) = ACTIVE.with_borrow_mut(Option::take) {
         unhighlight(&a.highlighted);
-        cleared(&a);
+        cleared(&mut a);
     }
 }
 

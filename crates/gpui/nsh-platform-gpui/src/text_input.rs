@@ -932,6 +932,7 @@ pub(crate) fn removing(surface: &Surface, view: &NshView) {
                 input.drag.set(None);
                 input.model.borrow_mut().composition = None;
                 input.relayout();
+                report_composition(surface, &field, &input);
             }
             FOCUS.with(|f| {
                 if let Some(f) = f.borrow_mut().get_mut(&surface.key()) {
@@ -2680,6 +2681,24 @@ mod tests {
         assert!(key(&surface, &copy));
         input.config.borrow_mut().secure = true;
         assert!(!key(&surface, &copy));
+        surface_stopped(surface.key());
+    }
+
+    #[test]
+    fn removing_a_composing_field_reports_the_end_without_committing() {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let field = NshView::new(4, nsh_core::ViewKind::Input);
+        field.insert_before(&surface.root, None);
+        focus_for_test(&surface, &field);
+        ime::replace_and_mark_text_in_range(&surface, None, "ni", None);
+        let input = input_of(&field).unwrap();
+        assert_eq!(input.composed.borrow().as_deref(), Some("ni"));
+
+        removing(&surface, &field);
+
+        assert!(input.composed.borrow().is_none());
+        assert!(input.model.borrow().text().is_empty());
+        assert!(focused(&surface).is_none());
         surface_stopped(surface.key());
     }
 
