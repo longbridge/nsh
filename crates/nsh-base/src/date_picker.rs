@@ -646,9 +646,6 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
     crate::popup::note_focus_origin(move || open.get(), anchor);
     let width = signal(None::<Points>);
     let focused = signal(false);
-    // Why it closed: a press outside leaves the focus where it went.
-    let closed_by = stored(None::<OpenChangeReason>);
-    let owner = Owner::current();
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
         if next && props.disabled.get_untracked() {
             return;
@@ -656,23 +653,12 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
         if open.get_untracked() == next {
             return;
         }
-        if !next {
-            closed_by.replace(Some(reason));
-        }
-        open.request(next, || cx.emit(DatePickerEvent::OpenChange(next, reason)));
-        // An app that controls `open` can keep it open (a press outside it
-        // asks to confirm first): the reason goes with the refusal, or the
-        // app's own close later (its `footer`'s Apply) would read it and
-        // leave the keyboard focus in the popup that went.
-        if !next {
-            owner.run(|| {
-                after_answer(move || {
-                    if open.get_untracked() {
-                        closed_by.replace(None);
-                    }
-                })
-            });
-        }
+        // The reason a close keeps says where the keyboard goes (`back`):
+        // none once the app kept it open, so its own close later (its
+        // `footer`'s Apply) gives the focus back.
+        open.request_for(next, reason, || {
+            cx.emit(DatePickerEvent::OpenChange(next, reason))
+        });
     });
     let report = move |next: DateTime| {
         if matches!(props.value.get_untracked(), DatePickerValue::Uncontrolled) {
@@ -756,7 +742,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
         // Back to the trigger, unless a press outside or the app's
         // `onChange` took the keyboard somewhere else.
         back: Rc::new(move |popup| {
-            if closed_by.replace(None) != Some(OpenChangeReason::PressOutside) {
+            if open.take_closed_by() != Some(OpenChangeReason::PressOutside) {
                 anchor.focus_back(popup);
             }
         }),
