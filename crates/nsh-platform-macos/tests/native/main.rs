@@ -123,6 +123,8 @@ mod window_hover;
 #[cfg(target_os = "macos")]
 mod window_layout;
 #[cfg(target_os = "macos")]
+mod window_mode_layout;
+#[cfg(target_os = "macos")]
 mod window_press;
 #[cfg(target_os = "macos")]
 mod zoom;
@@ -262,6 +264,8 @@ fn main() {
                 press_momentum::run();
             } else if std::env::var_os("NSH_NESTED_RUN_LOOP_CHECK_ONLY").is_some() {
                 nested_run_loop::run();
+            } else if std::env::var_os("NSH_WINDOW_MODE_LAYOUT_CHECK_ONLY").is_some() {
+                window_mode_layout::run();
             } else if std::env::var_os("NSH_PRESENTING_CHECK_ONLY").is_some() {
                 presenting::run();
             } else {
@@ -290,6 +294,7 @@ fn main() {
                 tray_owner::run();
                 window_frames::run();
                 window_layout::run();
+                window_mode_layout::run();
                 presenting::run();
                 keyboard::run();
                 ime::run();
