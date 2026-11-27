@@ -781,6 +781,11 @@ browsers' touches into what phones report:
   way to scroll, the mouse has the wheel, the keyboard and the scroll bar. Its drags go to pans, the responder system
   and selectable text (`pointerDown` only takes touches and pens in zoomable views, which pan themselves; a press
   elsewhere has its `mousedown` prevented, so it selects no page text).
+- **Presses on fields**: a field takes its own presses (the caret, a selection, the focus are the browser's), and so
+  does its input's padding around it, which gives the field the focus (`mouseDown`); only an `Input` that listens to
+  presses hears them, after the focus the press gives, and no view around it does, as on Linux and Windows
+  (`pointerDown`, `pressOut`). A tap's press waits for that focus only while the browser's mouse events of the tap
+  last (`awaitFieldFocus`).
 - **Scroll bars** in the desktop idiom are nsh's own, as on the desktop backends (`showBar`): the browser's are hidden
   (they would take 6 px from content the core laid out for the whole view), and a 4 px thumb in a sticky, zero-size
   `.nsh-bar` at the view's top left (it stays put as the content scrolls, in step with the compositor) shows while
