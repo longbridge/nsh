@@ -56,7 +56,11 @@ pub(super) enum Patch {
         elements: Vec<RegionElement>,
     },
     /// A list's layout, its bound parts read again.
-    Layout { list: NodeId, config: ListConfig },
+    Layout {
+        list: NodeId,
+        binding: Owner,
+        config: ListConfig,
+    },
     /// The styles a view gives a nested component (its host), the bound
     /// parts read again.
     Nested {
@@ -329,7 +333,11 @@ impl<M: TextEngine> Core<M> {
                 part(&mut config);
             }
             runs.run(config, |config| {
-                patches.borrow_mut().push(Patch::Layout { list, config });
+                patches.borrow_mut().push(Patch::Layout {
+                    list,
+                    binding: Owner::current(),
+                    config,
+                });
             });
         });
         let config = first.take().unwrap_or(base);
@@ -517,9 +525,7 @@ impl<M: TextEngine> Core<M> {
                 count,
                 keys,
             } => {
-                // A new region run can keep the list node after disposing its
-                // old row owners. The old binding's queued update would
-                // invalidate the cell indices the replacement needs to rebuild.
+                // The list node can outlive the binding that queued these rows.
                 if binding.is_live() {
                     self.set_list_rows(list, count, keys);
                 }
@@ -535,7 +541,14 @@ impl<M: TextEngine> Core<M> {
                     self.set_user(host, user);
                 }
             }
-            Patch::Layout { list, config } => {
+            Patch::Layout {
+                list,
+                binding,
+                config,
+            } => {
+                if !binding.is_live() {
+                    return;
+                }
                 let Some(old) = self.components.list_layouts.get_mut(&list) else {
                     return;
                 };
