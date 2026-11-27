@@ -1986,6 +1986,12 @@ impl ListState {
             return (start, end);
         }
         let body = self.blocks().body;
+        // Past the items altogether (an offset the content shrank under,
+        // not yet clamped), the window binds nothing there: moving the
+        // overscan back would bind rows far from the viewport.
+        if end < body || start > body + self.items_len() {
+            return (start, end);
+        }
         let length = end - start;
         let before = (body - start).clamp(0.0, length);
         let after = (end - (body + self.items_len())).clamp(0.0, length);
@@ -2415,6 +2421,24 @@ mod tests {
         assert_eq!(indices.first(), Some(&976));
         assert_eq!(indices.last(), Some(&999));
         assert_eq!(l.slots.len(), 25);
+    }
+
+    /// Content shrunk under the offset (a terminal's rows going from 24 to
+    /// 5 before the offset is clamped) leaves the window past the items:
+    /// it binds none rather than taking the overscan back to the start,
+    /// which would bind rows far from the viewport for the scroll anchor
+    /// to keep in place.
+    #[test]
+    fn window_past_the_items_binds_none() {
+        let mut l = list(24, 18.0, 90.0);
+        l.offset = 342.0;
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        assert!(!binds.is_empty());
+        l.set_count(5);
+        binds.clear();
+        l.update_window(&mut binds);
+        assert!(binds.is_empty(), "{binds:?}");
     }
 
     /// A header at the top leaves the window's overscan above empty and
