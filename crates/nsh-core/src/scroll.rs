@@ -203,6 +203,13 @@ pub struct Live {
     pub alpha: f32,
     /// The refresh spinner shows.
     pub refreshing: bool,
+    /// `refreshing` turned off while pulled past the top: the spinner keeps
+    /// turning until the offset returns to 0 instead of falling back to pull
+    /// progress.
+    dismissing: bool,
+    /// When the current refresh spin started (ms), so large monotonic
+    /// timestamps do not lose precision in `f32`.
+    spin_start: Option<f64>,
     /// The spinner's angle.
     pub spin: Radians,
     /// [`ScrollHost::dark`] when the indicator was last shown, for
@@ -512,6 +519,14 @@ fn shifted(phase: Phase, d: Offset, horizontal: bool) -> Phase {
         },
         other => other,
     }
+}
+
+/// Angle of the refresh spinner `elapsed` ms after it started (one turn a
+/// second), reduced in `f64` before casting to `f32` so large monotonic
+/// clocks stay precise.
+fn spin_angle(elapsed: f64) -> Radians {
+    let frac = elapsed.max(0.0).rem_euclid(1000.0) / 1000.0;
+    Radians(frac as f32 * 2.0 * PI)
 }
 
 /// The spokes of the refresh spinner, as an activity indicator of eight
@@ -921,20 +936,32 @@ impl ScrollState {
     pub fn spinner(&self, width: Points, refresh: bool) -> Option<(Point<Points>, Percentage)> {
         let y = self.y.0;
         let b = &self.behavior;
-        if self.horizontal
-            || y >= 0.0
-            || b.refresh_indicator.is_some()
-            || !(self.live.refreshing || refresh)
-        {
+        let active = self.live.refreshing || self.live.dismissing;
+        if self.horizontal || y >= 0.0 || b.refresh_indicator.is_some() || !(active || refresh) {
             return None;
         }
-        let progress = if self.live.refreshing {
+        let progress = if active {
             1.0
         } else {
             (-y / b.refresh_threshold().0).min(1.0)
         };
         let cy = b.content_inset.top.0 - y - b.refresh_inset().0 / 2.0;
         Some((point(width / 2.0, Points(cy)), Percentage(progress)))
+    }
+
+    /// Opacity (`0..=1`) of the refresh spinner: `1.0` while pulling or
+    /// refreshing, fading linearly to `0.0` as the offset retracts on dismiss.
+    pub fn spinner_opacity(&self) -> f32 {
+        if self.live.dismissing {
+            let inset = self.behavior.refresh_inset().0;
+            if inset > 0.0 {
+                (-self.y.0 / inset).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        } else {
+            1.0
+        }
     }
 
     /// Each sticky cell with how far it moves at the offset.
@@ -1019,6 +1046,13 @@ fn moved_to(host: &impl ScrollHost, to: Offset) {
         let pulled =
             (!s.horizontal && (s.y.0 < 0.0 || to.y < 0.0)).then(|| Points((-to.y).max(0.0)));
         (s.x, s.y) = (Points(to.x), Points(to.y));
+        if !s.horizontal && to.y >= 0.0 {
+            s.live.dismissing = false;
+            if !s.live.refreshing {
+                s.live.spin_start = None;
+                s.live.spin = Radians(0.0);
+            }
+        }
         if s.indicator {
             s.live.shown = host.now();
             s.live.alpha = 1.0;
@@ -1143,7 +1177,7 @@ fn release(host: &impl ScrollHost, v: Offset, snap_velocity: f32) {
     };
     let past = |p: f32, min: f32, max: f32| p < min - 0.5 || p > max + 0.5;
     let room = |v: f32, p: f32, min: f32, max: f32| v > 0.0 && p < max || v < 0.0 && p > min;
-    if past(pos.x, min.x, max.x) || past(pos.y, min.y, max.y) {
+    if past(pos.x, min.x, max.x) || past(pos.y, min.y, max.y) || (min.y == 0.0 && pos.y < 0.0) {
         animate_to(host, pos.clamp((min, max)), ANIMATION, false, true);
     } else if let Some((target, distance)) = target {
         let duration = snap_duration(Points(distance), main);
@@ -1230,7 +1264,14 @@ pub fn deadline(host: &impl ScrollHost, now: f64) -> Option<f64> {
 pub fn detached(host: &impl ScrollHost) {
     set_phase(host, Phase::Idle);
     report(host);
-    host.scroll_mut(|s, _| s.live.ticking = false);
+    host.scroll_mut(|s, _| {
+        s.live.ticking = false;
+        s.live.dismissing = false;
+        if !s.live.refreshing {
+            s.live.spin_start = None;
+            s.live.spin = Radians(0.0);
+        }
+    });
 }
 
 fn tick(host: &impl ScrollHost, now: f64) -> bool {
@@ -1320,7 +1361,7 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
         } if now - last > WHEEL_IDLE => {
             // A mouse wheel came to rest (a glide where it was going):
             // snapping views move on to the next snap point in the wheel's
-            // direction.
+            // direction, and a view pulled past an edge bounces back.
             if glide != wheel_glide::Glide::default() {
                 moved_to(host, raw);
             }
@@ -1328,22 +1369,21 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
             let snaps = host
                 .scroll(|s, _| s.behavior.snaps() || s.behavior.paging)
                 .unwrap_or(false);
-            if snaps {
-                let v = if total.abs() >= 1.0 {
-                    total.signum() * WHEEL_SNAP
-                } else {
-                    0.0
-                };
-                release(host, Offset::default(), v);
+            let v = if snaps && total.abs() >= 1.0 {
+                total.signum() * WHEEL_SNAP
             } else {
-                emit(host, EventKind::ScrollEnd);
-            }
+                0.0
+            };
+            release(host, Offset::default(), v);
         }
-        Phase::Idle if pos.x > max.x.max(min.x) + 0.5 || pos.y > max.y.max(min.y) + 0.5 => {
-            moved_to(
-                host,
-                Offset::new(pos.x.min(max.x.max(min.x)), pos.y.min(max.y.max(min.y))),
-            )
+        Phase::Idle
+            if pos.x < min.x - 0.5
+                || pos.x > max.x.max(min.x) + 0.5
+                || pos.y < min.y - 0.5
+                || pos.y > max.y.max(min.y) + 0.5
+                || (min.y == 0.0 && pos.y < 0.0) =>
+        {
+            moved_to(host, pos.clamp((min, max)))
         }
         _ => {}
     }
@@ -1368,12 +1408,21 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
             }
             busy |= alpha > 0.0;
         }
+        if matches!(s.live.phase, Phase::Idle) && s.live.dismissing {
+            s.live.dismissing = false;
+            if !s.live.refreshing {
+                s.live.spin_start = None;
+                s.live.spin = Radians(0.0);
+            }
+            redraw = true;
+        }
         if !s.horizontal
             && s.offset() < 0.0
-            && s.live.refreshing
+            && (s.live.refreshing || s.live.dismissing)
             && s.behavior.refresh_indicator.is_none()
         {
-            s.live.spin = Radians(((now / 1000.0) as f32 * 2.0 * PI) % (2.0 * PI));
+            let start = *s.live.spin_start.get_or_insert(now);
+            s.live.spin = spin_angle(now - start);
             redraw = true;
             busy = true;
         }
@@ -1522,6 +1571,15 @@ pub fn refreshing(host: &impl ScrollHost, refreshing: bool) {
             return None;
         }
         s.live.refreshing = refreshing;
+        if refreshing {
+            s.live.dismissing = false;
+        } else if s.offset() < 0.0 {
+            s.live.dismissing = true;
+        } else {
+            s.live.dismissing = false;
+            s.live.spin_start = None;
+            s.live.spin = Radians(0.0);
+        }
         Some((
             s.offset(),
             matches!(s.live.phase, Phase::Drag { .. }),
@@ -1740,7 +1798,19 @@ pub fn drag_begin(host: &impl ScrollHost) {
         return;
     }
     interrupt(host);
-    let start = host.scroll(|s, _| s.pos()).unwrap_or_default();
+    let (start, cleared) = host
+        .scroll_mut(|s, _| {
+            let cleared = !s.live.refreshing && std::mem::take(&mut s.live.dismissing);
+            if cleared {
+                s.live.spin_start = None;
+                s.live.spin = Radians(0.0);
+            }
+            (s.pos(), cleared)
+        })
+        .unwrap_or_default();
+    if cleared {
+        host.redraw();
+    }
     set_phase(
         host,
         Phase::Drag {
@@ -1826,7 +1896,10 @@ pub fn drag_end(host: &impl ScrollHost, vx: f32, vy: f32) {
     emit(host, EventKind::ScrollDragEnd);
     if refresh {
         // Shown right away, as UIRefreshControl does; JS turns it off.
-        host.scroll_mut(|s, _| s.live.refreshing = true);
+        host.scroll_mut(|s, _| {
+            s.live.refreshing = true;
+            s.live.dismissing = false;
+        });
         host.event(EventKind::Refresh, EventPayload::None);
     }
     release(host, v, 0.0);
@@ -2828,10 +2901,187 @@ mod tests {
         assert_eq!(s.spinner(Points(300.0), true), None);
     }
 
-    /// A vertical view 500 tall the tests drive by hand: the clock stays
-    /// at 0, frames run when called.
+    #[test]
+    fn refresh_dismissal_keeps_spinning_and_large_clocks_stay_precise() {
+        let host = TestHost::new(scroll_state((300.0, 1000.0), false));
+        refreshing(&host, true);
+        // Complete the reveal to -56 and spin one spoke step on a monotonic clock.
+        assert!(host.tick(ANIMATION));
+        assert_eq!(host.state.borrow().y, Points(-56.0));
+        assert!(host.tick(ANIMATION + 125.0));
+        let before = host.state.borrow().live.spin;
+        assert!((before.0 - PI / 4.0).abs() < 1e-5, "{before:?}");
+
+        // Ending refresh while pulled enters dismissing: keeps full spinning
+        // progress instead of snapping to 56/64 = 0.875, even without onRefresh.
+        refreshing(&host, false);
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|s| s.1),
+            Some(Percentage(1.0))
+        );
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), false)
+                .map(|s| s.1),
+            Some(Percentage(1.0))
+        );
+        assert_eq!(host.state.borrow().spinner_opacity(), 1.0);
+
+        // Mid-retraction on the same monotonic clock: keeps full progress,
+        // fades opacity with the remaining pull, and advances spin continuously
+        // from `before` without resetting `spin_start`.
+        assert!(host.tick(ANIMATION + 125.0 + 150.0));
+        let mid_y = host.state.borrow().y.0;
+        assert!(mid_y < 0.0 && mid_y > -56.0, "{mid_y}");
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|s| s.1),
+            Some(Percentage(1.0))
+        );
+        let mid_opacity = host.state.borrow().spinner_opacity();
+        assert!(
+            (mid_opacity - (-mid_y / 56.0)).abs() < 1e-5 && mid_opacity > 0.0 && mid_opacity < 1.0,
+            "{mid_opacity}"
+        );
+        let mid_spin = host.state.borrow().live.spin;
+        assert!(
+            mid_spin.0 > before.0 && (mid_spin.0 - spin_angle(275.0).0).abs() < 1e-5,
+            "before={before:?} mid={mid_spin:?}"
+        );
+
+        // Settled back at 0: spinner hides, dismissing clears, and a fresh
+        // pull uses pull progress again.
+        host.tick(ANIMATION + 125.0 + ANIMATION);
+        assert_eq!(host.state.borrow().y, Points(0.0));
+        assert_eq!(host.state.borrow().spinner(Points(300.0), true), None);
+        assert_eq!(host.state.borrow().spinner_opacity(), 1.0);
+        assert!(!host.tick(ANIMATION + 125.0 + ANIMATION + 16.0));
+        host.state.borrow_mut().y = Points(-32.0);
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|s| s.1),
+            Some(Percentage(0.5))
+        );
+        assert_eq!(host.state.borrow().spinner_opacity(), 1.0);
+
+        // With `contentInset.top = 48`, the spinner center stays well inside
+        // the viewport up to the final frame and fades smoothly to 0 instead of
+        // popping out at full opacity.
+        let mut inset_state = scroll_state((300.0, 1000.0), false);
+        inset_state.behavior.content_inset.top = Points(48.0);
+        let host = TestHost::new(inset_state);
+        refreshing(&host, true);
+        assert!(host.tick(ANIMATION));
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|(c, p)| (c.y.0, p)),
+            Some((76.0, Percentage(1.0)))
+        );
+        refreshing(&host, false);
+        assert!(host.tick(ANIMATION + 250.0));
+        let (center, progress) = host.state.borrow().spinner(Points(300.0), true).unwrap();
+        let near_end_opacity = host.state.borrow().spinner_opacity();
+        assert!(center.y.0 > 20.0, "center stays in viewport: {center:?}");
+        assert_eq!(progress, Percentage(1.0));
+        assert!(
+            near_end_opacity > 0.0 && near_end_opacity < 0.1,
+            "{near_end_opacity}"
+        );
+        host.tick(ANIMATION + ANIMATION);
+        assert_eq!(host.state.borrow().spinner(Points(300.0), true), None);
+
+        // Wheel input interrupting dismissal retracts cleanly after WHEEL_IDLE
+        // instead of stranding at -46pt and spinning forever.
+        let host = TestHost::new(scroll_state((300.0, 1000.0), false));
+        refreshing(&host, true);
+        assert!(host.tick(ANIMATION));
+        refreshing(&host, false);
+        wheel(&host, pt(0.0, 10.0));
+        assert_eq!(host.state.borrow().y, Points(-46.0));
+        let settled_wheel = ANIMATION + WHEEL_IDLE + 1.0;
+        assert!(host.tick(settled_wheel));
+        assert!(matches!(
+            host.state.borrow().live.phase,
+            Phase::Animate { to, .. } if to.y == 0.0
+        ));
+        assert!(host.tick(settled_wheel + 150.0));
+        let bounce_y = host.state.borrow().y.0;
+        assert!(bounce_y < 0.0 && bounce_y > -46.0, "{bounce_y}");
+        host.tick(settled_wheel + ANIMATION);
+        assert_eq!(host.state.borrow().y, Points(0.0));
+        assert_eq!(host.state.borrow().spinner(Points(300.0), true), None);
+        assert!(!host.tick(10_000.0));
+
+        // Sub-half-point offset left by an interrupting wheel also snaps back
+        // to 0 and stops frame callbacks.
+        let host = TestHost::new(scroll_state((300.0, 1000.0), false));
+        refreshing(&host, true);
+        assert!(host.tick(ANIMATION));
+        refreshing(&host, false);
+        wheel(&host, pt(0.0, 55.7));
+        assert!((host.state.borrow().y.0 - -0.3).abs() < 1e-4);
+        assert!(!host.tick(ANIMATION + WHEEL_IDLE + 1.0));
+        assert_eq!(host.state.borrow().y, Points(0.0));
+        assert_eq!(host.state.borrow().spinner(Points(300.0), true), None);
+
+        // A new drag or detach during dismissal clears `dismissing`.
+        let host = TestHost::new(scroll_state((300.0, 1000.0), false));
+        refreshing(&host, true);
+        assert!(host.tick(ANIMATION));
+        refreshing(&host, false);
+        drag_begin(&host);
+        assert_eq!(host.state.borrow().spinner_opacity(), 1.0);
+        assert_eq!(
+            host.state
+                .borrow()
+                .spinner(Points(300.0), true)
+                .map(|s| s.1),
+            Some(Percentage(56.0 / 64.0))
+        );
+        drag_end(&host, 0.0, 0.0);
+        host.tick(ANIMATION + ANIMATION);
+        assert_eq!(host.state.borrow().y, Points(0.0));
+
+        let host = TestHost::new(scroll_state((300.0, 1000.0), false));
+        refreshing(&host, true);
+        assert!(host.tick(ANIMATION));
+        refreshing(&host, false);
+        detached(&host);
+        assert!(!host.state.borrow().live.dismissing);
+
+        // A monotonic clock past 115 days (where `f32` seconds lose sub-second
+        // precision) still advances through all 8 spokes evenly.
+        let mut s = scroll_state((300.0, 1000.0), false);
+        s.y = Points(-56.0);
+        s.live.refreshing = true;
+        let host = TestHost::new(s);
+        let base = 10_000_000_000.0;
+        for step in 0..8 {
+            assert!(host.tick(base + step as f64 * 125.0));
+            let spin = host.state.borrow().live.spin;
+            let brightest = spokes(Percentage(1.0), spin)
+                .enumerate()
+                .max_by(|a, b| a.1.1.total_cmp(&b.1.1))
+                .map(|(i, _)| i);
+            assert_eq!(brightest, Some(step));
+        }
+    }
+
+    /// A vertical view 500 tall the tests drive by hand: the clock starts
+    /// at 0 and advances when [`TestHost::tick`] runs a frame.
     struct TestHost {
         state: std::cell::RefCell<ScrollState>,
+        clock: std::cell::Cell<f64>,
         redraws: std::cell::Cell<u32>,
         /// What it reported, in order: `zoom <scale>` and `scroll <x> <y>`.
         reports: std::cell::RefCell<Vec<String>>,
@@ -2843,10 +3093,16 @@ mod tests {
         fn new(state: ScrollState) -> Self {
             Self {
                 state: std::cell::RefCell::new(state),
+                clock: std::cell::Cell::new(0.0),
                 redraws: std::cell::Cell::new(0),
                 reports: Default::default(),
                 key_moves: Default::default(),
             }
+        }
+
+        fn tick(&self, now: f64) -> bool {
+            self.clock.set(now);
+            frame(self, now)
         }
     }
 
@@ -2858,7 +3114,7 @@ mod tests {
             Some(f(&mut self.state.borrow_mut(), sz(300.0, 500.0)))
         }
         fn now(&self) -> f64 {
-            0.0
+            self.clock.get()
         }
         fn listens(&self, _: EventKind) -> bool {
             true

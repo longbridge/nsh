@@ -744,6 +744,43 @@ fn chat() -> impl IntoElement {
 
 `ParseContext::source` 是整篇 Markdown 文本，节点位置是它里面的偏移；长文本分段读取时也一样。带插件的长文档同样读得快；`configure` 打开或关闭某个语法结构（construct）的插件会让文本每次按整篇一次解析。
 
+`ParseContext::conversion_id` 用来区分各次转换。同一次转换（一次 `Parser::markdown` 调用，或 `TextView` 读取的一份文本）的所有回调拿到同一个 `ConversionId`：包括用 `ParseContext::blocks` 和 `inlines` 读取的节点、长文本的各个分段、容器的内容和脚注。每次转换都拿到新的 id，即使文本相同、视图共享插件，或在回调里再调用 `Parser::markdown` 也是如此。插件从整篇源文本推导出的数据，每次转换只需算一次，按 id 保存即可；id 不表示节点被提供的次数或顺序。
+
+```rust
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use nsh_base::text_view::{ConversionId, ParseContext};
+
+/// Abbreviations and their titles.
+type Terms = Rc<HashMap<String, String>>;
+
+/// `*[HTML]: HyperText Markup Language` lines anywhere in the text, read once
+/// per conversion and consulted by the plugin's `inline`.
+#[derive(Default)]
+struct Abbreviations {
+    last: RefCell<Option<(ConversionId, Terms)>>,
+}
+
+impl Abbreviations {
+    fn of(&self, cx: &ParseContext<'_>) -> Terms {
+        let mut last = self.last.borrow_mut();
+        if let Some((id, terms)) = &*last
+            && *id == cx.conversion_id()
+        {
+            return terms.clone();
+        }
+        let terms: Terms = Rc::new(
+            cx.source()
+                .lines()
+                .filter_map(|line| line.strip_prefix("*[")?.split_once("]: "))
+                .map(|(term, title)| (term.to_owned(), title.to_owned()))
+                .collect(),
+        );
+        *last = Some((cx.conversion_id(), terms.clone()));
+        terms
+    }
+}
+```
+
 <a id="props"></a>
 
 ## 属性

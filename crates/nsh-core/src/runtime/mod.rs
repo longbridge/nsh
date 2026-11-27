@@ -41,8 +41,8 @@ mod webview;
 
 pub use fs::grant_user_files;
 pub use updater::{
-    PackageVersion, UpdatePrompt, UpdatePromptOptions, UpdaterHost, UpdaterSink, prompt_for_update,
-    set_update_presenter,
+    PackageVersion, UpdatePrompt, UpdatePromptOptions, UpdaterHost, UpdaterSink, UpdaterTransport,
+    prompt_for_update, set_update_presenter, set_updater_transport, updater_transport,
 };
 
 /// The [`crate::element::Quotas`] kind WebSockets count under: the `websocket`

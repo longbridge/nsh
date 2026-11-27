@@ -28,8 +28,8 @@ use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Point, Points, ViewKind,
     geometry::{bounds, point, size},
     selection::{
-        Direction, KeptRows, Movement, SelectionModel, SelectionTexts, TextPosition,
-        autoscroll_step, marker_of, reading_order, reorder,
+        Direction, KeptRows, Movement, SelectionModel, SelectionTexts, TextPosition, TextTree,
+        autoscroll_step, list_texts,
     },
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -58,9 +58,6 @@ struct Texts {
     frames: Vec<Bounds<Points>>,
     /// The list marker beside each text (`selection::marker_of`).
     markers: Vec<Option<String>>,
-    /// The last text left out (`selectable={false}`) while listing, its
-    /// content and frame: maybe the marker of the next.
-    chrome: Option<(String, Bounds<Points>)>,
 }
 
 impl SelectionTexts for Texts {
@@ -121,77 +118,58 @@ impl SelectionTexts for Texts {
     }
 }
 
-/// Lists the texts of `area`'s subtree.
+/// Lists the texts of `area`'s subtree (`selection::list_texts`, as the
+/// core lists a list item's).
 fn collect(area: &NshView) -> Texts {
     let mut texts = Texts::default();
-    walk(area, (0.0, 0.0), 1.0, &mut texts);
+    for listed in list_texts(&Views, area) {
+        texts.views.push(listed.view);
+        texts.contents.push(listed.text);
+        texts
+            .origins
+            .push(((listed.origin.x.0, listed.origin.y.0), listed.zoom));
+        texts.frames.push(listed.frame);
+        texts.markers.push(listed.marker);
+    }
     texts
 }
 
-/// Lists the texts of `view`'s subtree, `view` at `origin` of the area,
-/// shown at `zoom`.
-fn walk(view: &NshView, origin: (f32, f32), zoom: f32, out: &mut Texts) {
-    if view.ns().isHidden() {
-        return;
+/// The views of a window, as `selection::list_texts` walks them.
+struct Views;
+
+impl TextTree for Views {
+    type View = NshView;
+
+    fn hidden(&self, view: &NshView) -> bool {
+        view.ns().isHidden()
     }
-    {
+
+    fn text(&self, view: &NshView) -> Option<(Arc<AttributedText>, Bounds<Points>)> {
         let state = view.state();
-        if let Some(drawn) = &state.text {
-            let content = drawn.content;
-            let frame = bounds(
-                point(
-                    Points(origin.0 + content.origin.x.0 * zoom),
-                    Points(origin.1 + content.origin.y.0 * zoom),
-                ),
-                content.size * zoom,
-            );
-            if drawn.text.selectable == Some(false) {
-                // A list marker, maybe: the next text's copy starts with it.
-                out.chrome = Some((drawn.text.text.to_string(), frame));
-            } else {
-                out.views.push(view.clone());
-                out.contents.push(drawn.text.clone());
-                out.origins.push((origin, zoom));
-                out.frames.push(frame);
-                out.markers
-                    .push(marker_of(out.chrome.take().as_ref(), frame));
-            }
-        }
+        let drawn = state.text.as_ref()?;
+        Some((drawn.text.clone(), drawn.content))
     }
-    // Children sit in the container's bounds, which scroll views move: by
-    // their offset, which shows as a layer transform before the bounds
-    // have it, and zoom.
-    let offset = crate::scroll::bounds_origin(view);
-    let inner = zoom * crate::scroll::zoom(view);
-    // In reading order: a virtual list's recycled cells are mounted in no
-    // particular order.
-    let start = out.len();
-    let mut runs = Vec::new();
-    for child in view.child_views() {
-        let frame = child.ns().frame();
-        let at = (
-            origin.0 + (frame.origin.x as f32 - offset.0) * inner,
-            origin.1 + (frame.origin.y as f32 - offset.1) * inner,
-        );
-        let from = out.len();
-        walk(&child, at, inner, out);
-        runs.push((
-            bounds(
+
+    fn children(&self, view: &NshView, out: &mut Vec<(NshView, Bounds<Points>)>) {
+        for child in view.child_views() {
+            let frame = child.ns().frame();
+            let frame = bounds(
                 point(Points(frame.origin.x as f32), Points(frame.origin.y as f32)),
                 size(
                     Points(frame.size.width as f32),
                     Points(frame.size.height as f32),
                 ),
-            ),
-            from..out.len(),
-        ));
+            );
+            out.push((child, frame));
+        }
     }
-    if let Some(order) = reading_order(&runs) {
-        reorder(&mut out.views, start, &order);
-        reorder(&mut out.contents, start, &order);
-        reorder(&mut out.origins, start, &order);
-        reorder(&mut out.frames, start, &order);
-        reorder(&mut out.markers, start, &order);
+
+    // Children sit in the container's bounds, which scroll views move: by
+    // their offset, which shows as a layer transform before the bounds
+    // have it, and zoom.
+    fn content_offset(&self, view: &NshView) -> (Point<Points>, f32) {
+        let (x, y) = crate::scroll::bounds_origin(view);
+        (point(Points(x), Points(y)), crate::scroll::zoom(view))
     }
 }
 
@@ -321,13 +299,16 @@ impl Active {
     }
 }
 
-/// What `onSelectionChange` reports: the selected text, where it starts and
-/// the box around it in the area.
+/// What `onSelectionChange` reports: the selected text, where it starts,
+/// the box around it in the area and its ends.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Selected {
     text: String,
     start: u32,
     bounds: Option<Bounds<Points>>,
+    /// The anchor's and the focus's text nodes and offsets
+    /// (`SelectionModel::ends`), which the core places in list items.
+    ends: Option<[(u64, u32); 2]>,
 }
 
 /// Reports the selected text of the area that has the selection to its
@@ -357,6 +338,7 @@ fn report(surface: &Surface) {
                 text: active.model.text(&texts),
                 start: active.model.start_offset(&texts),
                 bounds: active.model.selected_bounds(&texts),
+                ends: active.model.ends(&texts),
             }
         };
         if selected == active.reported {
@@ -376,6 +358,9 @@ fn send(surface: &Surface, (id, selected): (NodeId, Selected)) {
     ];
     if let Some(bounds) = selected.bounds {
         fields.push(("bounds", PayloadValue::Bounds(bounds)));
+    }
+    if let Some(ends) = selected.ends {
+        fields.extend(nsh_core::selection::end_fields(ends));
     }
     surface.event(id, EventKind::SelectionChange, EventPayload::Map(fields));
 }

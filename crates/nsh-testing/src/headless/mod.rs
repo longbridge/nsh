@@ -1199,6 +1199,7 @@ impl Headless {
         let focused = self.screen.focused();
         let before = focused.or(self.screen.key_focus());
         self.screen.apply(batch);
+        self.selection_batch_applied();
         for (id, states) in self.screen.take_restated() {
             self.engine.control().set_states(id, states);
         }
@@ -6961,5 +6962,71 @@ mod tests {
         app.press_key("escape").unwrap();
         app.wait_for("cancel while held true").unwrap();
         app.wait_for("held false").unwrap();
+    }
+
+    /// A Rust component's own list of rows in a selectable view, saying
+    /// which rows its selection's ends are in.
+    #[component]
+    fn SelectedRows() -> impl IntoElement {
+        let ends = signal(String::from("none"));
+        let end = |e: &Option<nsh_core::element::TextSelectionEndpoint>| {
+            e.as_ref()
+                .map_or_else(|| String::from("-"), |e| format!("{}@{}", e.key, e.offset))
+        };
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .selectable(true)
+                    .h(px(300.0))
+                    .on_text_selection_change(move |e: &nsh_core::element::TextSelectionEvent| {
+                        ends.set(if e.text.is_empty() {
+                            String::from("none")
+                        } else {
+                            format!("{} {}", end(&e.anchor), end(&e.focus))
+                        });
+                    })
+                    .child(
+                        virtual_list(50, |at| {
+                            view()
+                                .h(px(40.0))
+                                .items_start()
+                                .child(text(move || format!("Row number {}", at.index())))
+                        })
+                        .estimated_item_size(px(40.0))
+                        .flex_1(),
+                    ),
+            )
+            .child(text(move || format!("Ends {}", ends.get())))
+    }
+
+    /// A Rust listener hears the rows of a Rust list by their index, as a
+    /// TSX list without keys names its items.
+    #[test]
+    fn a_rust_lists_rows_are_named_by_their_index_in_a_selection() {
+        // A desktop's mouse drags select (a phone's finger scrolls).
+        let mut config = EngineConfig::new(crate::windowed_root::<SelectedRows>());
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        // "Row number 3" is 12 characters of the test engine (7.7 points
+        // each): the drag starts at its middle (offset 6) and goes back
+        // 20 points (offset 3).
+        app.drag(
+            "Row number 3",
+            point(px(-20.0), px(0.0)),
+            DragOptions::default(),
+        )
+        .unwrap();
+        app.wait_for("Ends 3@6 3@3").unwrap();
+        // Down across rows: the focus is in the row below.
+        app.drag(
+            "Row number 3",
+            point(px(0.0), px(40.0)),
+            DragOptions::default(),
+        )
+        .unwrap();
+        app.wait_for("Ends 3@6 4@6").unwrap();
     }
 }

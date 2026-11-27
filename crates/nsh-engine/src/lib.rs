@@ -983,6 +983,9 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         from: u64,
         sink: nsh_core::runtime::UpdaterSink<'_>,
     ) -> Result<(), String> {
+        if let Some(get) = nsh_core::runtime::updater_transport() {
+            return get(url, from, sink);
+        }
         const MAX_REDIRECTS: usize = 20;
         let mut current = url.to_owned();
         for hops in 0..=MAX_REDIRECTS {
@@ -4452,8 +4455,16 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if event == EventKind::CaretMove {
                 state.core.locate_caret(id, &mut payload);
             }
+            // The core knows the list rows the selection's ends are in,
+            // the runtime the keys of its lists' items; rows of other
+            // lists go by their index.
             if event == EventKind::SelectionChange {
                 state.core.locate_selection(id, &mut payload);
+                state.core.name_selection_ends(&mut payload, |list, index| {
+                    script.map_or(nsh_core::selection::ListItemKey::NotMine, |s| {
+                        s.list_item_key(list, index)
+                    })
+                });
             }
             if event == EventKind::Paste {
                 payload = payload.into_paste();

@@ -626,7 +626,7 @@ fn fill_background(surface: &Surface, id: NodeId, hwnd: HWND) {
 
 /// The window's client area was resized or moved to another scale: the
 /// root view takes its size, which the core lays the root out at.
-fn resized(surface: &Surface, window: &AppWindow) {
+fn resized(surface: &Rc<Surface>, window: &AppWindow) {
     // Made at the system's default size (`CW_USEDEFAULT`, most of the
     // screen), which its styles report before it is placed: the app would
     // lay itself out for a window nobody sees.
@@ -657,6 +657,9 @@ fn resized(surface: &Surface, window: &AppWindow) {
     }
     if window.reported.replace(Some(size)) != Some(size) {
         surface.control(|c| c.set_root_size(window.id, size, EdgeInsets::default()));
+        // Drawn at the new size rather than the last layout clipped or
+        // short of the edge, as the main window's.
+        surface.await_layout(window.id, size);
         // The dialogs presented in it follow its size.
         crate::navigation::surface_resized(surface, size.width.0, size.height.0);
         crate::system::window_resized(surface, window.id, size.width.0, size.height.0);
@@ -1412,6 +1415,7 @@ mod tests {
             pixels: Cell::new((0, 0)),
             scale: Cell::new(1.0),
             invalid: Cell::new(false),
+            damage: Default::default(),
             positioned: Cell::new(true),
             reported: Cell::new(None),
             opened: Cell::new(false),

@@ -1,7 +1,11 @@
 //! Applies mount batches to UIKit views and owns the per-surface native
 //! state: views, animation graph, image loads and gesture recognizers.
 
-use std::{cell::RefCell, ptr::NonNull, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    ptr::NonNull,
+    sync::Arc,
+};
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, MainThreadBound};
@@ -11,7 +15,7 @@ use nsh_core::{
     MountBatch, MountItem, NodeId, PayloadValue, Points, ResizeMode, StickyCell, SubmitBehavior,
     ViewKind, ViewProps, ViewStyle,
     animation::{AnimationProp, AnimationValue},
-    geometry::{DevicePixels, point, size},
+    geometry::{DevicePixels, Size, point, size},
     shader::ShaderRole,
     time::Instant,
 };
@@ -38,6 +42,7 @@ use crate::{
     decor::{self, Decor},
     image::{AssetBase, DecodedImage, ImageLoader, Request},
     input::Input,
+    interaction::{CoverageAnimation, coverage_animation},
     native_view::NshView,
     navigation::{ModalHost, ScreenHost, StackHost},
     press::{PressAt, PressRecognizer},
@@ -712,6 +717,13 @@ struct LeavingScreen {
 pub(crate) struct Mounter {
     /// Indexed by node id (ids are dense).
     views: Vec<Option<Slot>>,
+    /// The viewport the engine has laid out, which can lag UIKit's bounds.
+    mounted_viewport: Size<Points>,
+    /// First mounted child if it animates the backdrop, with its last
+    /// eligible color. Animation frames never walk the UIKit hierarchy.
+    animated_backdrop: Option<(NodeId, Option<Color>)>,
+    /// The current backdrop candidate waiting for a finite native animation.
+    backdrop_waiting: Option<NodeId>,
     /// Views with animated bindings, re-evaluated when values change.
     animated: Vec<NodeId>,
     /// Image views waiting for their frame before loading.
@@ -756,8 +768,9 @@ pub(crate) struct Mounter {
     /// The scroll view edges views name (`ios={{ scrollEdgeElement }}`),
     /// with how many name each: soft while any does (`crate::scroll_edge`).
     soft_edges: Vec<(NodeId, nsh_core::ScrollEdge, u32)>,
-    /// One-shot display link for `requestAnimationFrame`.
+    /// Display link for JS frame requests and pending native backdrops.
     frame_link: Retained<objc2_quartz_core::CADisplayLink>,
+    frame_requested: Cell<bool>,
     /// Parents of screens, header items and modals (which are not
     /// subviews of their parent).
     hosts: rustc_hash::FxHashMap<NodeId, NodeId>,
@@ -891,9 +904,13 @@ impl Mounter {
         let mut views = Vec::with_capacity(256);
         views.resize_with(2, || None);
         root.setTag(nsh_core::ROOT_ID as isize);
+        let mounted_viewport = viewport_size(root.bounds().size);
         views[nsh_core::ROOT_ID as usize] = Some(Slot::new(Native::Root(root)));
         Self {
             views,
+            mounted_viewport,
+            animated_backdrop: None,
+            backdrop_waiting: None,
             animated: Vec::new(),
             pending_images: Vec::new(),
             image_scale: 0.0,
@@ -933,6 +950,7 @@ impl Mounter {
             disappearing: Default::default(),
             soft_edges: Vec::new(),
             frame_link: crate::animation::frame_link(&target_for_link),
+            frame_requested: Cell::new(false),
             shaders,
             gpu: crate::gpu::SurfaceGpu::new(&target_for_link),
             text_colors: crate::interaction::TextColors::new(&target_for_link),
@@ -1012,7 +1030,9 @@ impl Mounter {
     fn apply_batch(&mut self, batch: MountBatch) {
         let initial_inputs = initial_input_layouts(&batch.items);
         let mut animation_changed = false;
+        let mut backdrop_changed = false;
         for item in batch.items {
+            backdrop_changed = backdrop_changed || self.affects_backdrop(&item);
             animation_changed |= self.apply_item(item, &initial_inputs);
         }
         if let Some(animation) = self.layout_animation.take() {
@@ -1021,6 +1041,10 @@ impl Mounter {
         self.created.clear();
         self.finish_navigation();
         self.apply_orientations();
+        if backdrop_changed {
+            self.animated_backdrop = None;
+            self.backdrop_waiting = None;
+        }
         if animation_changed {
             self.apply_animations();
         }
@@ -1038,6 +1062,111 @@ impl Mounter {
         if !self.keyboard_pending && self.keyboard > 0.0 && self.focused.is_some() {
             self.pan_for_keyboard(self.keyboard_motion);
         }
+        if backdrop_changed {
+            self.follow_background();
+        }
+    }
+
+    fn affects_backdrop(&self, item: &MountItem) -> bool {
+        let id = match *item {
+            MountItem::Insert { parent, child, .. } => {
+                if parent == nsh_core::ROOT_ID {
+                    return true;
+                }
+                child
+            }
+            MountItem::Remove { id }
+            | MountItem::Delete { id }
+            | MountItem::Frame { id, .. }
+            | MountItem::AnimationBindings { id, .. }
+            | MountItem::ViewStyle { id, .. } => id,
+            _ => return false,
+        };
+        id == nsh_core::ROOT_ID
+            || self
+                .slot(id)
+                .is_some_and(|s| s.parent == Some(nsh_core::ROOT_ID))
+    }
+
+    /// Keep the standalone backdrop in sync with the first mounted child
+    /// when it paints the whole viewport, not with overlays above it.
+    fn follow_background(&mut self) {
+        let Some(root) = self.slot(nsh_core::ROOT_ID) else {
+            return;
+        };
+        let view = root.native.view();
+        let Some((controller, window)) = crate::app::RootController::for_surface(view) else {
+            self.animated_backdrop = None;
+            self.backdrop_waiting = None;
+            return;
+        };
+        let viewport = view.bounds().size;
+        if viewport_size(viewport) != self.mounted_viewport {
+            return;
+        }
+        let candidate = root
+            .decor
+            .container(view)
+            .subviews()
+            .iter()
+            .find_map(|view| {
+                let id = view.tag() as NodeId;
+                let slot = self.slot(id)?;
+                (slot.parent == Some(nsh_core::ROOT_ID) && std::ptr::eq(slot.native.view(), &*view))
+                    .then_some((id, slot))
+            });
+        let (color, waiting) = candidate.map_or((None, None), |(id, slot)| {
+            let (color, pending) = backdrop_color(slot, viewport, &self.animator);
+            (color, pending.then_some(id))
+        });
+        self.animated_backdrop = candidate
+            .filter(|(_, slot)| {
+                slot.bindings.iter().any(|(prop, _)| {
+                    matches!(
+                        prop,
+                        AnimationProp::BackgroundColor
+                            | AnimationProp::Opacity
+                            | AnimationProp::Transform(_)
+                    )
+                })
+            })
+            .map(|(id, _)| (id, color));
+        self.wait_for_backdrop(waiting);
+        controller.set_backdrop(&window, color);
+    }
+
+    fn follow_animated_background(&mut self, id: NodeId, previous: Option<Color>) {
+        let Some(root) = self.slot(nsh_core::ROOT_ID) else {
+            return;
+        };
+        let view = root.native.view();
+        let viewport = view.bounds().size;
+        if viewport_size(viewport) != self.mounted_viewport {
+            return;
+        }
+        let (color, pending) = self.slot(id).map_or((None, false), |slot| {
+            backdrop_color(slot, viewport, &self.animator)
+        });
+        let owner = (color != previous)
+            .then(|| crate::app::RootController::for_surface(view))
+            .flatten();
+        self.wait_for_backdrop(pending.then_some(id));
+        if let Some((controller, window)) = owner {
+            self.animated_backdrop = Some((id, color));
+            controller.set_backdrop(&window, color);
+        }
+    }
+
+    fn wait_for_backdrop(&mut self, candidate: Option<NodeId>) {
+        if self.backdrop_waiting != candidate && candidate.is_some() {
+            self.frame_link.setPaused(false);
+        }
+        self.backdrop_waiting = candidate;
+    }
+
+    pub(crate) fn resized(&mut self, viewport: Size<Points>) {
+        self.mounted_viewport = viewport;
+        self.follow_background();
     }
 
     /// Narrows the content size of a vertical scroll view to its width when
@@ -3521,6 +3650,7 @@ impl Mounter {
         self.shaders.revisit();
         self.gpu.reveal();
         self.restore_root_focus();
+        self.follow_background();
     }
 
     /// The surface's traits changed: on a screen of another scale (an
@@ -6087,13 +6217,32 @@ impl Mounter {
 
     /// JS waits for a display frame (`requestAnimationFrame`).
     pub(crate) fn request_frame(&self) {
+        self.frame_requested.set(true);
         self.frame_link.setPaused(false);
     }
 
+    #[cfg(test)]
+    pub(crate) fn frame_link_paused(&self) -> bool {
+        self.frame_link.isPaused()
+    }
+
     /// The frame link fired.
-    pub(crate) fn frame(&self) {
+    pub(crate) fn frame(&mut self) {
         self.frame_link.setPaused(true);
-        self.control.frame();
+        if self.frame_requested.replace(false) {
+            self.control.frame();
+        }
+        if let Some(id) = self.backdrop_waiting.take()
+            && let Some(slot) = self.slot(id)
+            && slot.parent == Some(nsh_core::ROOT_ID)
+        {
+            let layer = slot.native.view().layer();
+            if coverage_animation(&layer) == Some(CoverageAnimation::Finite) {
+                self.wait_for_backdrop(Some(id));
+            } else {
+                self.follow_background();
+            }
+        }
     }
 
     /// The shaders' display link fired.
@@ -6369,8 +6518,10 @@ impl Mounter {
 
     fn follow_scroll(&mut self, id: NodeId, offset: CGPoint) {
         self.pin_sticky(id);
-        // Shader views scrolled back into sight render what fell due.
+        // Shader and GPU views scrolled back into sight render what fell
+        // due.
         self.shaders.revisit();
+        self.gpu.reveal();
         if self.shaders.pictured()
             && let Some(s) = self.views.get(id as usize).and_then(Option::as_ref)
         {
@@ -6508,6 +6659,9 @@ impl Mounter {
             }
         }
         self.lay_out_untransformed();
+        if let Some((id, previous)) = self.animated_backdrop {
+            self.follow_animated_background(id, previous);
+        }
     }
 
     fn report_finished(&mut self) {
@@ -6650,6 +6804,50 @@ fn key_modifiers(flags: isize) -> nsh_core::keymap::Modifiers {
         cmd: has(20),
         alt_graph: false,
     }
+}
+
+fn viewport_size(size: CGSize) -> Size<Points> {
+    Size::new(Points(size.width as f32), Points(size.height as f32))
+}
+
+/// The backdrop color and whether a finite native animation temporarily blocks it.
+fn backdrop_color(slot: &Slot, viewport: CGSize, animator: &Animator) -> (Option<Color>, bool) {
+    let view = slot.native.view();
+    if !slot.style.radii().is_zero()
+        || slot.style.clip_path().is_some()
+        || slot
+            .style
+            .effects
+            .as_ref()
+            .is_some_and(|e| !e.mask_images.is_empty())
+        || slot.style.animation.is_some()
+        || view.isHidden()
+        || view.alpha() != 1.0
+    {
+        return (None, false);
+    }
+    let layer = view.layer();
+    if !layer.transform().is_identity() {
+        return (None, false);
+    }
+    let color = opaque_backdrop(view.frame(), viewport, dynamic_background(slot, animator));
+    match color.and_then(|_| coverage_animation(&layer)) {
+        Some(CoverageAnimation::Finite) => (None, true),
+        Some(CoverageAnimation::Persistent) => (None, false),
+        None => (color, false),
+    }
+}
+
+fn opaque_backdrop(frame: CGRect, viewport: CGSize, color: Color) -> Option<Color> {
+    let (width, height) = (viewport.width, viewport.height);
+    (color.0 & 0xff == 0xff
+        && width > 0.0
+        && height > 0.0
+        && frame.origin.x <= 0.0
+        && frame.origin.y <= 0.0
+        && frame.origin.x + frame.size.width >= width
+        && frame.origin.y + frame.size.height >= height)
+        .then_some(color)
 }
 
 /// Sets a frame through `bounds` + `center`: `frame` is undefined for
@@ -6834,16 +7032,9 @@ fn apply_dynamic(slot: &Slot, animator: &Animator) -> bool {
         }));
     }
     let view = slot.native.view();
-    let mut background = slot.style.background_color;
-    for &(prop, node) in &slot.bindings {
-        if prop == AnimationProp::BackgroundColor
-            && let AnimationValue::Color(c) = animator.eval(node)
-        {
-            background = Color(c);
-        }
-    }
     view.setAlpha(dynamic_opacity(slot, animator) as CGFloat);
-    slot.decor.set_background(view, background);
+    slot.decor
+        .set_background(view, dynamic_background(slot, animator));
     let layer = view.layer();
     let transform = dynamic_transform(slot, animator);
     let untransformed = transform.is_identity() && !layer.transform().is_identity();
@@ -7019,6 +7210,26 @@ mod tests {
     use nsh_core::geometry::px;
 
     use super::*;
+
+    #[test]
+    fn only_an_opaque_view_covering_the_viewport_supplies_a_backdrop() {
+        let viewport = CGSize::new(390.0, 844.0);
+        let full = CGRect::new(CGPoint::ZERO, viewport);
+        for color in [Color::BLACK, Color::rgba(242, 242, 247, 255)] {
+            assert_eq!(opaque_backdrop(full, viewport, color), Some(color));
+        }
+        assert_eq!(opaque_backdrop(full, viewport, Color::TRANSPARENT), None);
+        assert_eq!(
+            opaque_backdrop(full, viewport, Color::rgba(0, 0, 0, 254)),
+            None
+        );
+        let shifted = CGRect::new(CGPoint::new(1.0, 0.0), full.size);
+        assert_eq!(opaque_backdrop(shifted, viewport, Color::BLACK), None);
+        assert_eq!(
+            opaque_backdrop(full, CGSize::new(844.0, 390.0), Color::BLACK),
+            None
+        );
+    }
 
     #[test]
     fn a_new_input_has_its_layout_before_insertion() {
