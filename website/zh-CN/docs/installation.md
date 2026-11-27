@@ -85,6 +85,7 @@ nsh component remove gpui
 | `web` | Web 运行时（`--target web`） | 所有平台 |
 | `gpui` | [GPUI](./gpui.md) 开发宿主（`--target gpui`） | 所有平台，各自构建 |
 | `tui` | 终端开发宿主（`--target tui`） | 所有平台，各自构建 |
+| `windows-linker` | 链接器：让 TSX 应用的可执行文件只包含它导入的 `nsh/base` 部件（`nsh package --target windows`） | Windows x86_64 |
 
 组件总是来自与 CLI 相同的构建。`nsh update` 会从更新到的发布版重新安装已安装的组件。nightly 构建的组件每晚都会替换，因此较早一晚的 nightly `nsh` 会提示先运行 `nsh update`。
 

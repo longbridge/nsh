@@ -299,7 +299,7 @@ nsh remove <NAME>...
 
 ## nsh component
 
-添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。
+添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`），以及 Windows 上 `nsh package` 用的链接器（`windows-linker`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。
 
 ```sh
 nsh component list

@@ -85,6 +85,7 @@ nsh component remove gpui
 | `web` | The web runtimes (`--target web`) | Every platform |
 | `gpui` | The [GPUI](./gpui.md) development host (`--target gpui`) | Every platform, built for it |
 | `tui` | The terminal development host (`--target tui`) | Every platform, built for it |
+| `windows-linker` | The linker that gives a TSX app's executable only the parts of `nsh/base` it imports (`nsh package --target windows`) | Windows x86_64 |
 
 A component always comes from the same build as the CLI. `nsh update` adds the installed components again from the release it updates to. A nightly build's components are replaced every night, so a nightly `nsh` from an earlier night asks you to run `nsh update` first.
 

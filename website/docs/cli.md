@@ -304,7 +304,7 @@ nsh remove <NAME>...
 
 ## nsh component
 
-Adds, removes or lists the runtimes installed next to an installed `nsh`: those of the platforms other than the one it runs on (`android`, `android-symbols`, `ios`, `web`, `gpui`, `tui`). A command that needs one adds it itself the first time ([Installation](./installation.md#components)).
+Adds, removes or lists the runtimes installed next to an installed `nsh`: those of the platforms other than the one it runs on (`android`, `android-symbols`, `ios`, `web`, `gpui`, `tui`), and on Windows the linker `nsh package` uses (`windows-linker`). A command that needs one adds it itself the first time ([Installation](./installation.md#components)).
 
 ```sh
 nsh component list

@@ -99,6 +99,11 @@ without any extra tools; packaging on another system keeps the default icon. The
 the taskbar. `--run` launches the app after packaging it. The executable is not signed: sign it with your own
 certificate (`signtool`) to distribute it.
 
+A TSX app's executable has only the parts of `nsh/base` the app imports. On x86_64, `nsh package` links nsh's release
+runner again from its prebuilt objects (`runtime\windows\nsh-windows-app.link\`) and leaves out the other parts. This
+needs neither Rust nor Visual Studio: the linker is the `windows-linker` [component](./installation.md#components),
+which the first package downloads. If the link fails, the app gets the prebuilt runner, with every part.
+
 ## Embedding in a Win32 app
 
 The `nsh-platform-windows` crate (from the NSH repository) gives a Rust Win32 app `AppView`: one NSH engine in a child
