@@ -8,11 +8,11 @@
 // months with a preset and its description (a second line in a look of its
 // own, read after the label), its days styled by their `data-range-*:` and
 // `data-outside:` classes and their content by `group-data-*:`, a half
-// range's preview up to the day under the mouse by
-// `data-range-preview-*:`; and a date and time whose sheet a tap on a day
-// closes and which opens again for the time (`timePrecision`, `hourCycle`,
-// the time's label and segments). The dates are fixed, so nothing depends
-// on today. Its script checks each.
+// range's start reported (`onChangeStart({ value })`) and its preview up to
+// the day under the mouse by `data-range-preview-*:`; and a date and time
+// whose sheet a tap on a day closes and which opens again for the time
+// (`timePrecision`, `hourCycle`, the time's label and segments). The dates
+// are fixed, so nothing depends on today. Its script checks each.
 import { Text, View, signal } from "nsh";
 import { type CalendarEntry, DatePicker, type DatePickerValue } from "nsh/base";
 
@@ -68,6 +68,7 @@ function App() {
         range
         defaultValue={["2026-10-05", "2026-10-07"]}
         onChange={({ value }) => trip.set(`Trip: ${JSON.stringify(value)}`)}
+        onChangeStart={({ value }) => trip.set(`Trip: start ${JSON.stringify(value)}`)}
         accessibilityLabel="Trip"
         numberOfMonths={2}
         presets={[{ label: "Week", value: ["2026-10-19", "2026-10-25"], description: "Oct 19-25" }]}

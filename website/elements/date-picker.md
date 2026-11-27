@@ -132,7 +132,10 @@ change with `onChange({ value })`; the app sets `value` to follow it. Left out, 
 
 - A single date: a press on a day sets the value and closes the popup.
 - With `range`, the first press starts the range and the second ends it, as a [calendar's](./calendar.md#value); the
-  complete range sets the value and closes the popup.
+  complete range sets the value and closes the popup. `onChangeStart({ value })` reports the start, `[start, null]`,
+  while the popup stays open for the end. A start that you don't set as `value` is dropped when the popup closes; one
+  that you set stays, so the popup opens on it again and the next press ends the range, as in a [calendar that keeps its
+  start](./calendar.md#value).
 - With `timePrecision` (a single date only), a time field shows under the calendar and every edit of the time is
   reported. On the desktops, picking a day keeps the popup open for the time and reports the date with its time; a
   press on the selected day again closes the popup. On phones and tablets, a tap on a day picks it at its time and
@@ -245,6 +248,7 @@ appears and goes at once; the sheet of touch screens slides in and out on its ow
 | Event | Rust | Description |
 |---|---|---|
 | `onChange` | `.on_change(\|value\| ..)` | The value changed (a day, a range's end, a preset, the time, the clear button): `{ value }`. Set `value` to follow it. |
+| `onChangeStart` | `.on_change_start(\|value\| ..)` | With `range`, the user started a range in the popup: `{ value }`, `[start, null]`. The popup stays open for the end, which `onChange` reports. |
 | `onOpenChange` | `.on_open_change(\|e\| ..)` | The popup opened or closed, with why (`{ open, reason }`). Set `open` to follow it. |
 | `onOpen`, `onClose` | `.on_open(..)`, `.on_close(..)` | The popup is shown, or gone. |
 | `onCancel` | `.on_cancel(..)` | The user closed the popup without a choice (Escape or back, a press outside or on the backdrop). |

@@ -1,10 +1,12 @@
 //! `DatePicker`: the trigger opens a calendar in a popup (a sheet on touch
 //! screens); a complete date is the value and closes it; a range takes two
-//! days; with a time precision the popup stays open for the time and a
-//! press on the selected day again closes it on a desktop, while on a phone
-//! a tap on a day closes it; presets set the value, a description a
-//! second line of its own look that screen readers read after the label; the
-//! clear button and Delete clear it; Return opens and Escape closes;
+//! days, its start reported while the popup stays open for the end and
+//! kept past a close when the app sets it as the value; with a time
+//! precision the popup stays open for the time and a press on the selected
+//! day again closes it on a desktop, while on a phone a tap on a day closes
+//! it; presets set the value, a description a second line of its own look
+//! that screen readers read after the label; the clear button and Delete
+//! clear it; Return opens and Escape closes;
 //! screen readers hear the value in the display format; on a phone one
 //! tap on a day closes the sheet, and the calendar spans it. Today is
 //! 2026-10-28 (the engine's manual clock).
@@ -32,6 +34,8 @@ use nsh_testing::Headless;
 #[derive(Clone, PartialEq, Props)]
 struct HarnessProps {
     controlled: bool,
+    /// Controlled, the app sets `value` to a range's start too.
+    holds_start: bool,
     range: bool,
     time: bool,
     presets: bool,
@@ -43,6 +47,7 @@ struct HarnessProps {
 fn props() -> HarnessProps {
     HarnessProps {
         controlled: false,
+        holds_start: false,
         range: false,
         time: false,
         presets: false,
@@ -69,13 +74,14 @@ fn show(p: &PickedDate) -> String {
 
 /// A picker under a 160 × 30 trigger `Pick`, days drawn as `M-D` and at
 /// half opacity with the keyboard on them (`focus:`), segments as their
-/// label; what it heard as `Log: …`.
+/// label; what it heard as `Log: …` (a range's start as `start:…`).
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let value = signal(DateTime::Single(None));
     let log = signal(Vec::<String>::new());
     let push = move |s: String| log.update(|l| l.push(s));
     let controlled = props.controlled;
+    let holds_start = props.holds_start;
     let mut el = date_picker()
         .range(props.range)
         .accessibility_label("Due")
@@ -106,6 +112,12 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .on_change(move |v: &PickedDate| {
             push(show(v));
             if controlled {
+                value.set(v.value);
+            }
+        })
+        .on_change_start(move |v: &PickedDate| {
+            push(format!("start:{}", show(v)));
+            if controlled && holds_start {
                 value.set(v.value);
             }
         })
@@ -294,16 +306,67 @@ fn a_range_takes_two_days() {
     app.open();
     app.press("label:2026-10-20").unwrap();
     app.see("10-20*");
-    assert_eq!(
-        app.log(),
-        "open:true:TriggerPress",
-        "half a range is no value"
-    );
+    // Half a range is no value: its start is reported, and the popup stays
+    // open for the end.
+    assert_eq!(app.log(), "open:true:TriggerPress start:2026-10-20..-");
+    app.see("prev");
     app.press("label:2026-10-22").unwrap();
     app.closed();
     assert_eq!(
         app.log(),
-        "open:true:TriggerPress 2026-10-20..2026-10-22 open:false:Select"
+        "open:true:TriggerPress start:2026-10-20..- 2026-10-20..2026-10-22 open:false:Select"
+    );
+    assert_eq!(app.heard().as_deref(), Some("2026/10/20 - 2026/10/22"));
+    // A start the app does not keep goes when the popup closes: open
+    // again, the value is shown.
+    app.open();
+    app.press("label:2026-10-05").unwrap();
+    app.see("10-5*");
+    app.press_key("escape").unwrap();
+    app.closed();
+    assert!(
+        app.log().ends_with(
+            "open:false:Select open:true:TriggerPress start:2026-10-05..- cancel open:false:Cancel"
+        ),
+        "{}",
+        app.log()
+    );
+    // Open again: the value's start selected, the keyboard on it (the
+    // desktops), the dropped start not.
+    app.open();
+    app.see("10-20*^");
+    app.see("10-5");
+    assert_eq!(app.heard().as_deref(), Some("2026/10/20 - 2026/10/22"));
+}
+
+#[test]
+fn a_range_start_the_app_keeps_as_its_value_stays_past_a_close() {
+    let mut app = start(HarnessProps {
+        controlled: true,
+        holds_start: true,
+        range: true,
+        ..props()
+    });
+    app.open();
+    app.press("label:2026-10-20").unwrap();
+    app.see("10-20*");
+    app.press_key("escape").unwrap();
+    app.closed();
+    assert_eq!(
+        app.log(),
+        "open:true:TriggerPress start:2026-10-20..- cancel open:false:Cancel"
+    );
+    // Open again: the start the app kept, selected, the keyboard on it
+    // (the desktops); the next press ends the range and closes the popup.
+    app.open();
+    app.see("10-20*^");
+    app.press("label:2026-10-22").unwrap();
+    app.closed();
+    assert!(
+        app.log()
+            .ends_with("open:true:TriggerPress 2026-10-20..2026-10-22 open:false:Select"),
+        "{}",
+        app.log()
     );
     assert_eq!(app.heard().as_deref(), Some("2026/10/20 - 2026/10/22"));
 }
@@ -581,7 +644,7 @@ fn on_a_phone_one_tap_on_a_day_picks_it_and_closes_the_sheet() {
     app.closed();
     assert_eq!(
         app.log(),
-        "open:true:TriggerPress 2026-10-20..2026-10-22 open:false:Select"
+        "open:true:TriggerPress start:2026-10-20..- 2026-10-20..2026-10-22 open:false:Select"
     );
 }
 
