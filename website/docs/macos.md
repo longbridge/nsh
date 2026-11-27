@@ -327,7 +327,7 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 (`platform.idiom` is `"desktop"`), `os_version()` (`platform.version`) is the macOS version, and dark mode follows the system's appearance live. See
 [Device and environment](./device-and-environment.md).
 
-Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
+Input is a desktop's: the mouse, the trackpad (scrolling with momentum, stretching past the edges and springing back as in AppKit's scroll views, pinch and rotation) and the keyboard.
 Trackpad tap-to-click briefly shows the app’s `active:` feedback even when the press and release arrive together; press callbacks run at release. Reduced motion keeps immediate visual release.
 A zoomable scroll view zooms with a trackpad pinch or Control + wheel around the pointer, and scrolls both ways while
 zoomed.
