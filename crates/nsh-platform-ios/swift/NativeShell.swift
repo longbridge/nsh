@@ -333,9 +333,9 @@ public final class NshAppView: UIView {
     public func setErrorReporting(
         dsn: String?, environment: String? = nil, tags: [String: String] = [:]
     ) throws {
-        let strings = tags.flatMap { [$0.key, $0.value] }.map { strdup($0) }
+        let strings = tags.flatMap { [strdup($0.key), strdup($0.value)] }
         defer { strings.forEach { free($0) } }
-        let pointers = strings.map { UnsafePointer($0) }
+        let pointers: [UnsafePointer<CChar>?] = strings.map { $0.map { UnsafePointer($0) } }
         try pointers.withUnsafeBufferPointer { buffer in
             try check(nsh_app_set_error_reporting(
                 app, dsn, environment, buffer.baseAddress, tags.count))
