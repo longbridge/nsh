@@ -112,7 +112,8 @@
   own selection takes the clicks). Positions are (text index, UTF-16 offset),
   never inside a surrogate pair. A point outside every text is hit-tested in reading order: when it sits below a text
   in a closer, horizontally disjoint column than any text whose row contains it, it stays in that column (clamping to
-  the vertically nearer text above or below in the column); otherwise the horizontally nearest text on its row, above
+  the vertically nearer text above or below in the column, but never a text below the end of the point's row, as
+  the next row of a table whose wrapped cell makes this one taller); otherwise the horizontally nearest text on its row, above
   every text the first text's start, and between rows or below a column the vertically nearer edge in the point's
   column (falling back to document order when no column has width). Words are runs of letters, digits and `_`, runs
   of spaces, or single other characters (each CJK ideograph, kana, emoji or punctuation mark); a triple click selects
