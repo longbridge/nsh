@@ -52,6 +52,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSAccessibility, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventType,
+    NSLayoutAttribute, NSLayoutConstraint, NSLayoutRelation,
     NSResponder, NSTrackingArea, NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy,
     NSWindowOrderingMode,
 };
@@ -1895,6 +1896,33 @@ pub(crate) fn superview(view: &NSView) -> Option<Retained<NSView>> {
     // SAFETY: a plain getter, on the main thread (views are main-thread
     // only); AppKit keeps the superview alive while `view` is in it.
     unsafe { view.superview() }
+}
+
+/// Gives the window `view` goes into an Auto Layout engine from the start,
+/// with one constraint that always holds (its width at least 0).
+///
+/// The views nsh mounts do not translate their autoresizing masks
+/// (`mount.rs`), so AppKit asks the window to lay out whenever one of them
+/// moves or resizes. A window with no engine then searches its whole view
+/// tree for a view that needs one (`_findAnySubviewNeedingAutoLayoutEngine`)
+/// on every Core Animation commit that follows: 0.2 ms for 3 100 views in a
+/// bench, several ms in a long list's window. With an engine, AppKit skips
+/// that search and lays out only what asked (0.06 ms); no frame changes.
+pub(crate) fn keep_layout_engine(view: &NSView) {
+    // SAFETY: a plain constraint factory on the main thread; `view` is a
+    // live view and there is no second item.
+    let c = unsafe {
+        NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+            view,
+            NSLayoutAttribute::Width,
+            NSLayoutRelation::GreaterThanOrEqual,
+            None,
+            NSLayoutAttribute::NotAnAttribute,
+            0.0,
+            0.0,
+        )
+    };
+    c.setActive(true);
 }
 
 /// Makes `view` layer-backed with the policies every view of ours uses.

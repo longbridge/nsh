@@ -413,6 +413,7 @@ impl Surface {
     pub(crate) fn new(mtm: MainThreadMarker, environment: Environment) -> Rc<Surface> {
         let key = NEXT_KEY.fetch_add(1, Ordering::Relaxed);
         let root = NshView::new(mtm, ROOT_ID, nsh_core::ViewKind::View);
+        crate::view::keep_layout_engine(root.ns());
         let surface = Rc::new(Surface {
             key,
             mtm,
