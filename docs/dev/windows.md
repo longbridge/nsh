@@ -168,7 +168,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   they would run inside `ExitProcess`, after the graphics DLLs are gone, and the process would end with a stray exit
   code. The UI thread sets per-monitor DPI awareness and `OleInitialize`s (clipboard, drag and drop, WIC).
   The app host is made and never shown: the windows the app declares with `<Window>` are what shows, and a launch
-  shows no window until the app opens one. nsh.json `window.defaultVisible` is parsed but has no effect. A
+  shows no window until the app opens one. nsh.json `window.defaultVisible` is parsed but has no effect. Placing the
+  main window (`AppView::place_main_window`) keeps its content size when the app's attributes hide its title bar:
+  Windows keeps a window's outer size when its frame changes, which would give the caption's strip to the content. A
   development host opens the app root as the runner does; an error still reports through the app, and a reload
   leaves the open windows as they are. A window that is hidden (one of the app's own before its first show, or
   hidden by the app: a tray app) is not put in a mode, which Windows changes by showing a window (`ShowWindow`,
