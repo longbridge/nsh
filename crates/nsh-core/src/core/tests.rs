@@ -21101,6 +21101,60 @@ mod components {
         );
     }
 
+    /// Two listeners hearing the app's links as long as it runs, as the TS
+    /// runtime's and a Rust module's.
+    #[component]
+    fn TwoLinkLoops() -> impl IntoElement {
+        let a = signal(String::new());
+        let b = signal(String::new());
+        for heard in [a, b] {
+            spawn(async move {
+                loop {
+                    say(heard, next_url_scheme_open().await);
+                }
+            });
+        }
+        view()
+            .child(text(move || format!("a:{}", a.get())))
+            .child(text(move || format!("b:{}", b.get())))
+    }
+
+    #[test]
+    fn listeners_in_a_loop_hear_every_link_of_a_burst() {
+        let mut c = core();
+        c.set_url_schemes(["myapp"]);
+        // The link that launched the app, before anything listened.
+        open_link(&mut c, "myapp://launch");
+        c.mount_root(&crate::element::Root::new::<TwoLinkLoops>(|| ()));
+        let mut shown: Vec<String> = c.commit().map(|b| texts(&b)).unwrap_or_default();
+        let settle = |c: &mut Core<FakeEngine>, shown: &mut Vec<String>| {
+            for _ in 0..50 {
+                c.run_component_tasks();
+                if let Some(batch) = c.commit() {
+                    shown.extend(texts(&batch));
+                }
+            }
+        };
+        settle(&mut c, &mut shown);
+        // Links in a burst, before the listeners run again.
+        open_link(&mut c, "myapp://1");
+        open_link(&mut c, "myapp://2");
+        open_link(&mut c, "myapp://3");
+        settle(&mut c, &mut shown);
+        let last = |prefix: &str| shown.iter().rfind(|t| t.starts_with(prefix)).cloned();
+        let shown = [last("a:").unwrap(), last("b:").unwrap()];
+        // Each loop hears the links that came while it handled the one
+        // before; the one that came while nothing listened goes to the
+        // first listener only.
+        assert_eq!(
+            shown,
+            [
+                "a: myapp://launch myapp://1 myapp://2 myapp://3",
+                "b: myapp://1 myapp://2 myapp://3"
+            ]
+        );
+    }
+
     /// Hears the app's links as long as it runs; a press starts a sign-in
     /// session that waits for one link of `auth`, and a second press one
     /// it drops before the link comes.

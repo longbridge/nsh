@@ -2193,7 +2193,8 @@ UrlScheme.on("open", ({ url }) => {
 等待某一个链接的原生模块（例如等待服务方跳回 `myapp://signed-in` 的登录会话）改为 await
 `next_url_scheme_open_for("myapp")`。等待期间，该 scheme 的下一个链接只交给它：`open` 监听者和 `next_url_scheme_open()`
 都收不到，`url()` 也不变。其他 scheme 的链接，以及该 scheme 在等待之前和之后的链接，照常交给应用。等待从调用时开始，所以要在打开会把链接
-发回来的页面之前调用；丢弃它的结果即结束等待。
+发回来的页面之前调用；丢弃它的结果即结束等待。等待会拿走该 scheme 的所有链接，所以回调要用应用自己专用的 scheme：
+等待 `https` 会在此期间拿走应用全部的 Web 链接。
 
 ```rust
 use nsh_core::prelude::*;

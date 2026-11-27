@@ -2298,7 +2298,9 @@ A native module that waits for one link, such as a sign-in session waiting for t
 `myapp://signed-in`, awaits `next_url_scheme_open_for("myapp")` instead. While it waits, the next link of that scheme
 goes to it alone: `open` listeners and `next_url_scheme_open()` do not hear it, and `url()` does not change. Links of
 other schemes, and the scheme's links before and after the wait, reach the app as usual. Call it before opening the
-page that will send the link back, since the wait starts with the call; dropping its answer ends the wait.
+page that will send the link back, since the wait starts with the call; dropping its answer ends the wait. The wait
+takes every link of the scheme, so give callbacks a scheme of the app's own: waiting for `https` would take all of the
+app's web links meanwhile.
 
 ```rust
 use nsh_core::prelude::*;

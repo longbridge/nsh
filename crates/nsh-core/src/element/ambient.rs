@@ -1162,14 +1162,19 @@ pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> 
 /// URL of a scheme the app claims (`nsh.json` `schemes`), those
 /// that came before anything listened first, the one that launched the app
 /// included ([`crate::url_scheme`]). Every call waiting when a link comes
-/// gets it, as TS's `open` listeners all do; a link that comes while none
-/// waits is kept for the next call (at most
-/// [`crate::url_scheme::MAX_PENDING`]). A link a call of
+/// gets it, as TS's `open` listeners all do. A task that awaits it in a
+/// loop hears every link: those that came while it handled the one before
+/// come at its next call. Links that came while nothing listened, the one
+/// that launched the app included, go to the first call that asks, not to
+/// later listeners (at most [`crate::url_scheme::MAX_PENDING`] are kept).
+/// A link a call of
 /// [`next_url_scheme_open_for`] waits for goes to that call alone. To await
 /// in a task.
 pub fn next_url_scheme_open() -> Answer<String> {
     let (answer, slot) = Answer::new();
-    act(Action::NextUrlSchemeOpen(slot));
+    let executor = executor();
+    let listener = executor.current_task();
+    executor.act(Action::NextUrlSchemeOpen(listener, slot));
     answer
 }
 
@@ -1184,8 +1189,11 @@ pub fn next_url_scheme_open() -> Answer<String> {
 /// the app's, never this call's. Calls waiting for the same scheme take
 /// its links in the order they were made. The app must claim `scheme`
 /// (`nsh.json` `schemes`, or `https` with its web links), else no link of
-/// it comes. The wait starts at the call, not at the first poll, so a
-/// module calls it before it opens what will send the link. Dropping the
+/// it comes. The wait claims the whole scheme: waiting for `https` takes
+/// every `https` link of the app meanwhile (its Universal Links and App
+/// Links), so a callback should use a scheme of the app's own; matching by
+/// host or path would be another function. The wait starts at the call,
+/// not at the first poll, so a module calls it before it opens what will send the link. Dropping the
 /// answer (a task cancelled, the losing branch of a `select!`) ends the
 /// wait. To await in a task.
 pub fn next_url_scheme_open_for(scheme: impl Into<String>) -> Answer<String> {
