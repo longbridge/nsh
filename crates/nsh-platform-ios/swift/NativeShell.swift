@@ -324,12 +324,12 @@ public final class NshAppView: UIView {
     /// Reports the errors of the apps loaded from now on (load failures,
     /// uncaught exceptions, stopped VMs, unhandled promise rejections) to a
     /// Sentry-protocol tracker, such as Sentry or Beacon: `dsn` is the
-    /// project's DSN (`nil`: not reported), `environment` the one the events
+    /// project's DSN (`nil`: the app's own `nsh.json` `errorReporting`, if any), `environment` the one the events
     /// are filed under (`nil`: the tracker's default), `tags` are added to
     /// every event (the embedding app's version, channel). Events carry the
     /// stack mapped to the app's sources and the package's
     /// `id@version+build` as release. Applies from the next load: a change
-    /// removes the running app, as ``limits`` does. Off by default.
+    /// removes the running app, as ``limits`` does. Off unless the app's `nsh.json` turns it on.
     public func setErrorReporting(
         dsn: String?, environment: String? = nil, tags: [String: String] = [:]
     ) throws {

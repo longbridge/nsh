@@ -288,9 +288,9 @@ public class NshView extends FrameLayout {
      * Sentry-protocol tracker, such as Sentry or Beacon. Events carry the
      * stack mapped to the app's sources, the package's
      * {@code id@version+build} as release and {@code tags}, and go through
-     * the app's network stack. Off by default.
+     * the app's network stack. Off unless the app's {@code nsh.json} turns it on.
      *
-     * @param dsn the project's DSN ({@code https://<public key>@<host>/<project id>}); null turns reporting off
+     * @param dsn the project's DSN ({@code https://<public key>@<host>/<project id>}); null: the app's own {@code nsh.json} {@code errorReporting}, if any
      * @param environment the environment the events are filed under ({@code production}, {@code sit}); null: the tracker's default
      * @param tags tags added to every event (the embedding app's version, channel); may be null
      */

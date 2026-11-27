@@ -795,7 +795,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_setStandaloneLimits(
 }
 
 /// Where the apps loaded next report their errors (`NshView.setErrorReporting`):
-/// the tracker's DSN (null: not reported), the environment (null: the
+/// the tracker's DSN (null: the app's own `nsh.json` setting), the environment (null: the
 /// tracker's default) and tags as name, value pairs.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_setErrorReporting(

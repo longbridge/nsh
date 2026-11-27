@@ -57,7 +57,7 @@ void nsh_app_set_limits(NshApp *app, uint32_t memory_mb, uint32_t stack_kb, uint
 void nsh_app_set_content_culling(NshApp *app, bool enabled);
 
 /// Reports the errors of the apps `app` loads next to the Sentry-protocol
-/// tracker of `dsn` (NULL: not reported), filed under `environment` (NULL:
+/// tracker of `dsn` (NULL: the app's own `nsh.json` `errorReporting`, if any), filed under `environment` (NULL:
 /// the tracker's default), with `tag_count` tags: `tags` holds their names
 /// and values in turn. Applies from the next load. Returns why the settings
 /// are invalid, or NULL.
