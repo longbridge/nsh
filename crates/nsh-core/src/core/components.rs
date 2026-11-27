@@ -685,10 +685,26 @@ struct Notifications {
 struct UrlScheme {
     /// The links the app claims: its schemes and web links.
     links: crate::url_scheme::AppLinks,
-    /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
-    pending: std::collections::VecDeque<String>,
-    /// The listener waiting for a link.
-    next: Option<AnswerSlot<String>>,
+    /// The links some listener has yet to hear, by number, at most
+    /// [`crate::url_scheme::MAX_PENDING`]: those no listener took yet (from
+    /// [`Self::unheard`] on), and those a listener missed between two calls.
+    recent: std::collections::VecDeque<(u64, String)>,
+    /// The number of the next link.
+    next_number: u64,
+    /// The first link that came while nothing listened and no listener
+    /// took yet, which the next new listener gets.
+    unheard: u64,
+    /// The tasks that listen, each with the number of the next link it is
+    /// to hear: a task awaiting links in a loop is not waiting between two
+    /// calls, and hears the links that came meanwhile at its next call.
+    listeners: Vec<(u64, u64)>,
+    /// The calls waiting for a link, with their task: each gets the next
+    /// one.
+    next: Vec<(Option<u64>, AnswerSlot<String>)>,
+    /// The waits for a link of one scheme (lowered), in the order they
+    /// came: the first takes the next link of its scheme, which no other
+    /// listener gets ([`crate::element::next_url_scheme_open_for`]).
+    next_of_scheme: Vec<(String, AnswerSlot<String>)>,
     /// Address moves no listener took yet
     /// ([`crate::url_scheme::AppUrlChange`]), kept once something listened
     /// ([`Self::hears_changes`]), at most [`crate::url_scheme::MAX_PENDING`].
@@ -702,6 +718,111 @@ struct UrlScheme {
     /// what the app set (`UrlScheme.setUrl`, `set_app_url`). The one copy,
     /// which every VM's `System` shares ([`Core::app_url_cell`]).
     address: crate::url_scheme::AppUrlCell,
+}
+
+impl UrlScheme {
+    /// Hands `url`, a link for the app's listeners, to those waiting, and
+    /// keeps it for those that are not (and for the next new listener when
+    /// none was waiting).
+    fn open(&mut self, url: String, alive: impl Fn(u64) -> bool) {
+        let number = self.next_number;
+        self.next_number += 1;
+        self.listeners.retain(|&(task, _)| alive(task));
+        if self.recent.len() == crate::url_scheme::MAX_PENDING
+            && let Some((dropped, _)) = self.recent.pop_front()
+            && dropped >= self.unheard
+        {
+            log::warn!(
+                "link dropped: {} came while nothing listened",
+                crate::url_scheme::MAX_PENDING
+            );
+            self.unheard = dropped + 1;
+        }
+        self.recent.push_back((number, url.clone()));
+        // A listener whose answer went (its task ended, or it lost a
+        // `select!`) leaves the link to the others.
+        self.next
+            .retain(|(_, answer)| crate::element::task::awaited(answer));
+        // Came while something listened: the listeners between two calls
+        // hear it at their next, and a listener that starts later does not
+        // (only links that came while nothing listened wait for one).
+        if !self.next.is_empty() || !self.listeners.is_empty() {
+            self.unheard = number + 1;
+        }
+        if !self.next.is_empty() {
+            for (task, answer) in std::mem::take(&mut self.next) {
+                if let Some(task) = task {
+                    self.heard(task, number);
+                }
+                answer.borrow_mut().deliver(url.clone());
+            }
+        }
+        self.trim();
+    }
+
+    /// Answers a call of `task` (none: outside a task) waiting for a link:
+    /// with the first link the task has not heard, a new listener's being
+    /// the first no listener took; else with the next one to come.
+    fn listen(
+        &mut self,
+        task: Option<u64>,
+        answer: AnswerSlot<String>,
+        alive: impl Fn(u64) -> bool,
+    ) {
+        self.listeners.retain(|&(task, _)| alive(task));
+        let known = task.and_then(|task| {
+            self.listeners
+                .iter()
+                .find(|&&(listener, _)| listener == task)
+                .map(|&(_, next)| next)
+        });
+        let from = known.unwrap_or(self.unheard);
+        if let Some((number, url)) = self.recent.iter().find(|(n, _)| *n >= from).cloned() {
+            self.unheard = self.unheard.max(number + 1);
+            if let Some(task) = task {
+                self.heard(task, number);
+            }
+            answer.borrow_mut().deliver(url);
+        } else {
+            if let Some(task) = task
+                && known.is_none()
+            {
+                self.listeners.push((task, self.next_number));
+            }
+            self.next
+                .retain(|(_, answer)| crate::element::task::awaited(answer));
+            self.next.push((task, answer));
+        }
+        self.trim();
+    }
+
+    /// `task` heard link `number`.
+    fn heard(&mut self, task: u64, number: u64) {
+        match self
+            .listeners
+            .iter_mut()
+            .find(|(listener, _)| *listener == task)
+        {
+            Some((_, next)) => *next = number + 1,
+            None => self.listeners.push((task, number + 1)),
+        }
+    }
+
+    /// Lets go of the links every listener heard.
+    fn trim(&mut self) {
+        let keep = self
+            .listeners
+            .iter()
+            .map(|&(_, next)| next)
+            .fold(self.unheard, u64::min);
+        while self
+            .recent
+            .front()
+            .is_some_and(|&(number, _)| number < keep)
+        {
+            self.recent.pop_front();
+        }
+    }
 }
 
 /// Files the system opened the app with ([`crate::file_type`]).
@@ -6405,11 +6526,29 @@ impl<M: TextEngine> Core<M> {
             log::warn!("link dropped: {dropped}");
             return;
         }
-        self.components.url_schemes.address.set(url.clone());
+        let links = &mut self.components.url_schemes;
+        // A link a wait for its scheme takes is that wait's alone (a sign-in
+        // session's callback): no listener of the app's hears it, and it
+        // does not become the app's address.
+        if !quiet && change.is_none() {
+            let scheme = url.split_once(':').map_or("", |(scheme, _)| scheme);
+            links
+                .next_of_scheme
+                .retain(|(_, answer)| crate::element::task::awaited(answer));
+            if let Some(at) = links
+                .next_of_scheme
+                .iter()
+                .position(|(waited, _)| waited.eq_ignore_ascii_case(scheme))
+            {
+                let (_, answer) = links.next_of_scheme.remove(at);
+                answer.borrow_mut().deliver(url);
+                return;
+            }
+        }
+        links.address.set(url.clone());
         if quiet {
             return;
         }
-        let links = &mut self.components.url_schemes;
         if let Some(reason) = change {
             if !links.hears_changes {
                 return;
@@ -6425,18 +6564,8 @@ impl<M: TextEngine> Core<M> {
             links.changes.push_back(change);
             return;
         }
-        if let Some(answer) = links.next.take() {
-            answer.borrow_mut().deliver(url);
-            return;
-        }
-        if links.pending.len() == crate::url_scheme::MAX_PENDING {
-            log::warn!(
-                "link dropped: {} came while nothing listened",
-                crate::url_scheme::MAX_PENDING
-            );
-            links.pending.pop_front();
-        }
-        links.pending.push_back(url);
+        let executor = &self.components.executor;
+        links.open(url, |task| executor.has_task(task));
     }
 
     /// The schemes the app claims (`nsh.json` `schemes`,
@@ -6887,12 +7016,25 @@ impl<M: TextEngine> Core<M> {
             Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
             Action::LoginItem(enabled, answer) => self.login_item_action(enabled, answer),
-            Action::NextUrlSchemeOpen(answer) => {
+            Action::NextUrlSchemeOpen(task, answer) => {
+                let executor = &self.components.executor;
+                self.components
+                    .url_schemes
+                    .listen(task, answer, |task| executor.has_task(task));
+            }
+            Action::NextUrlSchemeOpenFor(scheme, answer) => {
                 let links = &mut self.components.url_schemes;
-                match links.pending.pop_front() {
-                    Some(url) => answer.borrow_mut().deliver(url),
-                    None => links.next = Some(answer),
+                let claimed = links.links.schemes().contains(&scheme)
+                    || (scheme == "https" && !links.links.web().is_empty());
+                if !claimed {
+                    log::warn!(
+                        "next_url_scheme_open_for: the app does not claim `{scheme}` (nsh.json `schemes`), so no link of it comes"
+                    );
                 }
+                links
+                    .next_of_scheme
+                    .retain(|(_, answer)| crate::element::task::awaited(answer));
+                links.next_of_scheme.push((scheme, answer));
             }
             Action::NextOpenFiles(answer) => {
                 let files = &mut self.components.open_files;

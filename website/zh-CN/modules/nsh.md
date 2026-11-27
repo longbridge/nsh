@@ -2187,7 +2187,26 @@ UrlScheme.on("open", ({ url }) => {
 
 `open` 报告系统交给应用的每一个链接，启动时和运行中都会。没有监听者时到达的链接（包括启动应用的那个）会留给下一个监听者
 （最多 16 个，超出时丢弃最早的），所以在应用启动时，或处理链接的界面准备好后再监听都可以。Rust 代码 await
-`nsh_core::prelude` 的 `next_url_scheme_open()`；Rust 应用生成的代码会把 scheme 交给它的根组件（`Root::url_schemes`）。
+`nsh_core::prelude` 的 `next_url_scheme_open()`，链接到达时每个正在等待的调用都会收到它。调用过它的任务在存活期间一直算监听者：
+下一次调用会先拿到上次以来到达的链接（最多最近 16 个），所以循环调用能收到每一个链接，包括处理上一个链接时到达的。请在循环里调用，
+或放在不再监听就结束的任务里；隔很久再调用的任务会一次拿到期间到达的所有链接。之后才开始监听的任务收不到它开始之前到达的链接，
+没有任何监听时到达的除外。Rust 应用生成的代码会把 scheme 交给它的根组件（`Root::url_schemes`）。
+
+等待某一个链接的原生模块（例如等待服务方跳回 `myapp://signed-in` 的登录会话）改为 await
+`next_url_scheme_open_for("myapp")`。等待期间，该 scheme 的下一个链接只交给它：`open` 监听者和 `next_url_scheme_open()`
+都收不到，`url()` 也不变。其他 scheme 的链接，以及该 scheme 在等待之前和之后的链接，照常交给应用。等待从调用时开始，所以要在打开会把链接
+发回来的页面之前调用；丢弃它的结果即结束等待。等待会拿走该 scheme 的所有链接，所以回调要用应用自己专用的 scheme：
+等待 `https` 会在此期间拿走应用全部的 Web 链接。
+
+```rust
+use nsh_core::prelude::*;
+
+spawn(async {
+    let callback = next_url_scheme_open_for("myapp");
+    open_url("https://accounts.example.com/authorize?...").await;
+    let url = callback.await; // myapp://signed-in?code=...
+});
+```
 
 链接是来自应用外部的输入：任何网页或应用都能用任意路径和参数打开 `myapp://`。在执行链接要求的操作之前，像对待其他输入一样先校验
 （id 确实存在、操作经用户确认）。NSH 只放行应用自己的 scheme、长度不超过 16 KB 的链接，并且从不自行导航：链接打开什么由应用决定。
