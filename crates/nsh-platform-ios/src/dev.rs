@@ -131,6 +131,8 @@ impl DevSession {
                 .filter_map(|set| set.specifier().map(str::to_owned))
                 .collect(),
             tests: true,
+            // It keeps no model in a development session (`nsh test --attach`).
+            attach: false,
         };
         let started = DevClient::start(url, host, move |event| {
             // Taken off the main queue: a step waits for what it does there.
@@ -253,6 +255,7 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         }
         // The client's thread hands them to the test agent.
         DevEvent::Testing
+        | DevEvent::Attachable
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}

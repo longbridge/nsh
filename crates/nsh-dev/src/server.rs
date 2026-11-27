@@ -11,7 +11,7 @@ use std::{
 use axum::{
     Router,
     extract::{
-        State,
+        ConnectInfo, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, Method, StatusCode, Uri, header},
@@ -21,8 +21,9 @@ use axum::{
 use tokio::sync::broadcast;
 
 use crate::protocol::{
-    BundleFormat, ClientMessage, FetchReply, HostPlatform, LogLevel, MAX_MESSAGE_SIZE,
-    PROTOCOL_VERSION, RunningBuild, ServerMessage, StepOutcome, TestNetwork, TestStep, WS_PATH,
+    ATTACH_PATH, AttachHost, AttachReply, AttachRequest, BundleFormat, ClientMessage, FetchReply,
+    HostPlatform, LogLevel, MAX_MESSAGE_SIZE, PROTOCOL_VERSION, RunningBuild, ServerMessage,
+    StepOutcome, TestNetwork, TestStep, WS_PATH,
 };
 
 /// What a dev host did, for the server's owner to show ([`DevServer::start`]).
@@ -156,9 +157,12 @@ struct Shared {
     on_event: Box<dyn Fn(ClientEvent) + Send + Sync>,
     /// A test session ([`DevServer::test_session`]).
     test: AtomicBool,
-    /// The connected hosts that take test steps, oldest first: their
-    /// connection's id and what sends it a message.
-    testers: Mutex<Vec<(u64, tokio::sync::mpsc::UnboundedSender<ServerMessage>)>>,
+    /// The token `nsh test --attach` gives to drive the hosts of this
+    /// development session ([`DevServer::set_attach_token`]); `None`: it
+    /// takes no attached steps.
+    attach_token: Mutex<Option<String>>,
+    /// The connected hosts, oldest first.
+    hosts: Mutex<Vec<ConnectedHost>>,
     /// The steps waiting for an outcome, by id: their host's connection and
     /// who waits.
     steps: Mutex<std::collections::HashMap<u64, (u64, std::sync::mpsc::Sender<StepOutcome>)>>,
@@ -234,7 +238,8 @@ impl DevServer {
             clients: AtomicUsize::new(0),
             on_event: Box::new(on_event),
             test: AtomicBool::new(false),
-            testers: Mutex::default(),
+            attach_token: Mutex::new(None),
+            hosts: Mutex::default(),
             steps: Mutex::default(),
             next_step: AtomicU64::new(1),
             next_connection: AtomicU64::new(1),
@@ -250,10 +255,13 @@ impl DevServer {
         let app = Router::new()
             .route("/bundle.js", get(bundle_source))
             .route("/assets/{*path}", get(asset))
+            .route(ATTACH_PATH, get(attach_upgrade))
             .fallback(web_file)
             .layer(axum::middleware::from_fn(addresses_only))
             .route(WS_PATH, get(upgrade))
-            .with_state(shared.clone());
+            .with_state(shared.clone())
+            // `/attach` takes only this machine's connections.
+            .into_make_service_with_connect_info::<SocketAddr>();
         runtime.spawn(async move {
             if let Err(err) = axum::serve(listener, app).await {
                 log::error!("dev server stopped: {err}");
@@ -332,6 +340,15 @@ impl DevServer {
         self.shared.test.store(true, Ordering::Relaxed);
     }
 
+    /// Lets `nsh test --attach` drive the hosts of this development session
+    /// (`nsh run`, `nsh dev`) that take its steps, given `token`, from
+    /// this machine only ([`crate::protocol::ATTACH_PATH`]); `None` (the
+    /// default) takes none. Hosts connecting from now on that take them
+    /// keep the model of their app from the first bundle on.
+    pub fn set_attach_token(&self, token: Option<String>) {
+        *self.shared.attach_token.lock().expect("token lock") = token;
+    }
+
     /// The storage a test session's app starts with, in place of its own
     /// (hosts connecting from now on).
     pub fn set_test_storage(&self, entries: Vec<(String, String)>) {
@@ -363,7 +380,12 @@ impl DevServer {
 
     /// Whether a host that takes test steps is connected.
     pub fn has_tester(&self) -> bool {
-        !self.shared.testers.lock().expect("testers lock").is_empty()
+        self.shared
+            .hosts
+            .lock()
+            .expect("hosts lock")
+            .iter()
+            .any(|host| host.steps.is_some())
     }
 
     /// Asks the host that connected last of those taking test steps to
@@ -371,54 +393,7 @@ impl DevServer {
     /// query gives (`null` for actions), or why it failed. Blocks: call it
     /// off the server's threads.
     pub fn step(&self, step: TestStep, timeout: Duration) -> Result<serde_json::Value, String> {
-        let shared = &self.shared;
-        let (connection, host) = shared
-            .testers
-            .lock()
-            .expect("testers lock")
-            .last()
-            .cloned()
-            .ok_or("no host that takes test steps is connected")?;
-        let id = shared.next_step.fetch_add(1, Ordering::Relaxed);
-        let message = ServerMessage::Step { id, step };
-        // A host closes the connection on a message larger than it takes.
-        let size = encoded_size(&message);
-        if size > MAX_MESSAGE_SIZE {
-            return Err(format!(
-                "the step is {} MiB encoded, more than the {} MiB a message to the host carries",
-                size.div_ceil(1 << 20),
-                MAX_MESSAGE_SIZE >> 20
-            ));
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        shared
-            .steps
-            .lock()
-            .expect("steps lock")
-            .insert(id, (connection, tx));
-        if host.send(message).is_err() {
-            shared.steps.lock().expect("steps lock").remove(&id);
-            return Err("the host left".into());
-        }
-        let outcome = rx.recv_timeout(timeout);
-        shared.steps.lock().expect("steps lock").remove(&id);
-        match outcome {
-            Ok(StepOutcome::Done { value }) => Ok(value),
-            Ok(StepOutcome::Failed { message }) => Err(message),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
-                "the host did not take the step in {} s",
-                timeout.as_secs_f64()
-            )),
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) if size > OLD_HOST_FRAME_SIZE => {
-                Err(format!(
-                    "the host left while taking a {} MiB step (hosts built with an older nsh take \
-                     at most {} MiB)",
-                    size.div_ceil(1 << 20),
-                    OLD_HOST_FRAME_SIZE >> 20
-                ))
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("the host left".into()),
-        }
+        take_step(&self.shared, None, step, timeout)
     }
 
     /// Announces that a rebuild started.
@@ -511,6 +486,71 @@ impl DevServer {
     fn set(&self, event: Event) {
         *self.shared.latest.lock().expect("latest lock") = Some(event.clone());
         let _ = self.shared.events.send(event);
+    }
+}
+
+/// Asks `host` (the host that connected last of those taking steps when
+/// `None`) to take `step`, and waits for its outcome, `timeout` at most.
+/// Blocks: call it off the server's threads.
+fn take_step(
+    shared: &Shared,
+    host: Option<u64>,
+    step: TestStep,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    let (connection, host) = {
+        let hosts = shared.hosts.lock().expect("hosts lock");
+        let mut takers = hosts
+            .iter()
+            .filter_map(|h| h.steps.clone().map(|steps| (h.id, steps)));
+        match host {
+            None => takers
+                .next_back()
+                .ok_or("no host that takes test steps is connected")?,
+            Some(id) => takers
+                .find(|(taker, _)| *taker == id)
+                .ok_or("the host left, or takes no steps")?,
+        }
+    };
+    let id = shared.next_step.fetch_add(1, Ordering::Relaxed);
+    let message = ServerMessage::Step { id, step };
+    // A host closes the connection on a message larger than it takes.
+    let size = encoded_size(&message);
+    if size > MAX_MESSAGE_SIZE {
+        return Err(format!(
+            "the step is {} MiB encoded, more than the {} MiB a message to the host carries",
+            size.div_ceil(1 << 20),
+            MAX_MESSAGE_SIZE >> 20
+        ));
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    shared
+        .steps
+        .lock()
+        .expect("steps lock")
+        .insert(id, (connection, tx));
+    if host.send(message).is_err() {
+        shared.steps.lock().expect("steps lock").remove(&id);
+        return Err("the host left".into());
+    }
+    let outcome = rx.recv_timeout(timeout);
+    shared.steps.lock().expect("steps lock").remove(&id);
+    match outcome {
+        Ok(StepOutcome::Done { value }) => Ok(value),
+        Ok(StepOutcome::Failed { message }) => Err(message),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "the host did not take the step in {} s",
+            timeout.as_secs_f64()
+        )),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) if size > OLD_HOST_FRAME_SIZE => {
+            Err(format!(
+                "the host left while taking a {} MiB step (hosts built with an older nsh take \
+                 at most {} MiB)",
+                size.div_ceil(1 << 20),
+                OLD_HOST_FRAME_SIZE >> 20
+            ))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("the host left".into()),
     }
 }
 
@@ -826,6 +866,7 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
         platform,
         ui_sets,
         tests,
+        attach,
         running,
     } = serde_json::from_str(&text)?
     else {
@@ -847,12 +888,15 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
         );
         BundleFormat::Source
     };
+    let test = shared.test.load(Ordering::Relaxed);
+    let attachable = !test && shared.attach_token.lock().expect("token lock").is_some();
     send(
         &mut socket,
         &ServerMessage::Hello {
             protocol: PROTOCOL_VERSION,
             session: shared.session,
-            test: shared.test.load(Ordering::Relaxed),
+            test,
+            attach: attachable,
         },
     )
     .await?;
@@ -875,11 +919,18 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
         _ => None,
     };
     let device = host.device.clone();
-    let _connection = Connection::new(&shared, &device, build);
-    // A host taking a test session's steps: steps reach it through `steps`.
+    // A host taking a test session's steps, or an attached session's:
+    // steps reach it through `steps`.
     let (step_tx, mut steps) = tokio::sync::mpsc::unbounded_channel();
-    let testing = tests && shared.test.load(Ordering::Relaxed);
-    let _tester = testing.then(|| Tester::new(&shared, step_tx.clone()));
+    let testing = tests && test;
+    let takes_steps = testing || (attach && attachable);
+    let _connection = Connection::new(
+        &shared,
+        &device,
+        host.platform,
+        build,
+        takes_steps.then(|| step_tx.clone()),
+    );
     if testing {
         // Before the first bundle: what the app starts with.
         let storage = shared.test_storage.lock().expect("storage lock").clone();
@@ -1046,26 +1097,66 @@ fn cannot_run_message(missing: &[String], install: Option<&str>) -> String {
     message
 }
 
-/// A host connected after its hello: counted and reported until its
-/// session ends, however it ends.
+/// A connected host, as [`Shared::hosts`] lists it.
+struct ConnectedHost {
+    /// Its connection's id.
+    id: u64,
+    device: String,
+    platform: Option<HostPlatform>,
+    /// What sends it a message, when it takes steps (a test session's, or
+    /// an attached development session's).
+    steps: Option<tokio::sync::mpsc::UnboundedSender<ServerMessage>>,
+}
+
+/// A host connected after its hello: counted, listed and reported until its
+/// session ends, however it ends; its waiting steps fail when it leaves.
 struct Connection<'a> {
     shared: &'a Shared,
     device: &'a str,
+    id: u64,
 }
 
 impl<'a> Connection<'a> {
-    fn new(shared: &'a Shared, device: &'a str, build: Option<u64>) -> Self {
+    fn new(
+        shared: &'a Shared,
+        device: &'a str,
+        platform: Option<HostPlatform>,
+        build: Option<u64>,
+        steps: Option<tokio::sync::mpsc::UnboundedSender<ServerMessage>>,
+    ) -> Self {
+        let id = shared.next_connection.fetch_add(1, Ordering::Relaxed);
+        shared
+            .hosts
+            .lock()
+            .expect("hosts lock")
+            .push(ConnectedHost {
+                id,
+                device: device.to_owned(),
+                platform,
+                steps,
+            });
         shared.clients.fetch_add(1, Ordering::Relaxed);
         (shared.on_event)(ClientEvent::Connected {
             device: device.to_owned(),
             build,
         });
-        Connection { shared, device }
+        Connection { shared, device, id }
     }
 }
 
 impl Drop for Connection<'_> {
     fn drop(&mut self) {
+        self.shared
+            .hosts
+            .lock()
+            .expect("hosts lock")
+            .retain(|host| host.id != self.id);
+        // Its waiting steps end now: dropping their senders.
+        self.shared
+            .steps
+            .lock()
+            .expect("steps lock")
+            .retain(|_, (connection, _)| *connection != self.id);
         self.shared.clients.fetch_sub(1, Ordering::Relaxed);
         (self.shared.on_event)(ClientEvent::Disconnected {
             device: self.device.to_owned(),
@@ -1073,39 +1164,119 @@ impl Drop for Connection<'_> {
     }
 }
 
-/// A host taking test steps, while it is connected: its steps fail when
-/// it leaves.
-struct Tester<'a> {
-    shared: &'a Shared,
-    id: u64,
+/// Takes `nsh test --attach`'s WebSocket: only from this machine, never from
+/// a browser's page (which always sends an `Origin`), and only in a session
+/// that takes attached steps; [`serve_attach`] checks its token.
+async fn attach_upgrade(
+    ws: WebSocketUpgrade,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    State(shared): State<Arc<Shared>>,
+) -> Response {
+    if !peer.ip().is_loopback() || headers.contains_key(header::ORIGIN) {
+        log::warn!("dev server: refused an attached session from {peer}");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    ws.max_message_size(MAX_MESSAGE_SIZE)
+        .max_frame_size(MAX_MESSAGE_SIZE)
+        .on_upgrade(move |socket| async move {
+            if let Err(err) = serve_attach(socket, shared).await {
+                log::debug!("attached session ended: {err}");
+            }
+        })
 }
 
-impl<'a> Tester<'a> {
-    fn new(shared: &'a Shared, steps: tokio::sync::mpsc::UnboundedSender<ServerMessage>) -> Self {
-        let id = shared.next_connection.fetch_add(1, Ordering::Relaxed);
-        shared
-            .testers
-            .lock()
-            .expect("testers lock")
-            .push((id, steps));
-        Tester { shared, id }
+/// Serves an attached session ([`AttachRequest`]): its hello's token must
+/// be the session's ([`DevServer::set_attach_token`]); then each step goes
+/// to the host it names, one at a time. A `quit` is refused: the app keeps
+/// running after the attached session.
+async fn serve_attach(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), BoxError> {
+    let hello = tokio::time::timeout(Duration::from_secs(5), socket.recv())
+        .await
+        .map_err(|_| "no hello")?
+        .ok_or("closed before hello")??;
+    let Message::Text(text) = hello else {
+        return Err("expected hello".into());
+    };
+    let refusal = match serde_json::from_str(&text)? {
+        AttachRequest::Hello { protocol, .. } if protocol != PROTOCOL_VERSION => Some(format!(
+            "the dev server speaks protocol {PROTOCOL_VERSION}, this nsh {protocol}: use the nsh \
+             that runs the session"
+        )),
+        AttachRequest::Hello { token, .. } => {
+            let expected = shared.attach_token.lock().expect("token lock").clone();
+            match expected {
+                None => Some("this session takes no attached steps".into()),
+                Some(expected) if !same_token(&expected, &token) => {
+                    Some("the session's token differs: it was replaced or restarted".into())
+                }
+                Some(_) => None,
+            }
+        }
+        AttachRequest::Step { .. } => Some("expected hello".into()),
+    };
+    if let Some(message) = refusal {
+        send_attach(&mut socket, &AttachReply::Refused { message }).await?;
+        return Ok(());
     }
+    let hosts = shared
+        .hosts
+        .lock()
+        .expect("hosts lock")
+        .iter()
+        .map(|host| AttachHost {
+            id: host.id,
+            device: host.device.clone(),
+            platform: host.platform,
+            steps: host.steps.is_some(),
+        })
+        .collect();
+    send_attach(&mut socket, &AttachReply::Hosts { hosts }).await?;
+    while let Some(msg) = socket.recv().await {
+        let Message::Text(text) = msg? else { continue };
+        let AttachRequest::Step {
+            id,
+            host,
+            step,
+            timeout_ms,
+        } = serde_json::from_str(&text)?
+        else {
+            continue;
+        };
+        let outcome = if matches!(step, TestStep::Quit) {
+            Err("an attached session leaves the app running: it does not quit it".to_owned())
+        } else {
+            let shared = shared.clone();
+            tokio::task::spawn_blocking(move || {
+                take_step(&shared, Some(host), step, Duration::from_millis(timeout_ms))
+            })
+            .await?
+        };
+        let outcome = match outcome {
+            Ok(value) => StepOutcome::Done { value },
+            Err(message) => StepOutcome::Failed { message },
+        };
+        send_attach(&mut socket, &AttachReply::StepDone { id, outcome }).await?;
+    }
+    Ok(())
 }
 
-impl Drop for Tester<'_> {
-    fn drop(&mut self) {
-        self.shared
-            .testers
-            .lock()
-            .expect("testers lock")
-            .retain(|(id, _)| *id != self.id);
-        // Its waiting steps end now: dropping their senders.
-        self.shared
-            .steps
-            .lock()
-            .expect("steps lock")
-            .retain(|_, (connection, _)| *connection != self.id);
-    }
+/// Whether `given` is the session's token, compared in a time that does not
+/// depend on where they differ.
+fn same_token(expected: &str, given: &str) -> bool {
+    expected.len() == given.len()
+        && expected
+            .bytes()
+            .zip(given.bytes())
+            .fold(0, |diff, (a, b)| diff | (a ^ b))
+            == 0
+}
+
+async fn send_attach(socket: &mut WebSocket, reply: &AttachReply) -> Result<(), BoxError> {
+    socket
+        .send(Message::Text(serde_json::to_string(reply)?.into()))
+        .await?;
+    Ok(())
 }
 
 async fn send(socket: &mut WebSocket, msg: &ServerMessage) -> Result<(), BoxError> {

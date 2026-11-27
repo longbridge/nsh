@@ -94,6 +94,8 @@ impl DevSession {
                 .filter_map(|set| set.specifier().map(str::to_owned))
                 .collect(),
             tests: true,
+            // It keeps no model in a development session (`nsh test --attach`).
+            attach: false,
         };
         log::info!("Connecting to {url}");
         let attach = sender.clone();
@@ -238,6 +240,7 @@ impl DevSession {
                 }
             }
             DevEvent::Testing
+            | DevEvent::Attachable
             | DevEvent::Step { .. }
             | DevEvent::TestSetup { .. }
             | DevEvent::Fetch { .. } => {}

@@ -221,6 +221,8 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
         tests: true,
+        // It keeps no model in a development session (`nsh test --attach`).
+        attach: false,
     };
     // A test session (`nsh test --target windows`): the surface keeps the
     // model the agent's steps see, from the first bundle on (posted
@@ -343,6 +345,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         DevEvent::Disconnected => show_status(ui, Status::Reconnecting),
         // The client's thread hands them to the test agent.
         DevEvent::Testing
+        | DevEvent::Attachable
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}

@@ -63,6 +63,8 @@ impl DevSession {
                 .filter_map(|set| set.specifier().map(str::to_owned))
                 .collect(),
             tests: true,
+            // It keeps no model in a development session (`nsh test --attach`).
+            attach: false,
         };
         // A test session (`nsh test --target android`): the host keeps the
         // model the agent's steps see, from the first bundle on (the
@@ -134,6 +136,7 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
         DevEvent::Disconnected => host.dev_status(Some("Dev server disconnected — reconnecting…")),
         // The client's thread hands them to the test agent.
         DevEvent::Testing
+        | DevEvent::Attachable
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}

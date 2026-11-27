@@ -6,6 +6,10 @@
 //! Without `--port`, a command takes the port its app had last, replacing the
 //! app's previous session there, else the first free one from the default.
 //! Each port's `.app` file names the app that had it.
+//!
+//! A running session keeps its token for `nsh test --attach` in its port's
+//! `.attach` file ([`AttachFile`]), readable by its user only: what lets
+//! that command, and nothing else on the machine, drive its hosts.
 
 use std::{
     fs::{self, File, TryLockError},
@@ -166,6 +170,101 @@ fn identity(app: &Path) -> PathBuf {
 
 fn app_file(dir: &Path, port: u16) -> PathBuf {
     dir.join(format!("{port}.app"))
+}
+
+fn attach_file(dir: &Path, port: u16) -> PathBuf {
+    dir.join(format!("{port}.attach"))
+}
+
+/// A running session's token for `nsh test --attach`, kept in its port's
+/// `.attach` file while the session runs (removed when dropped, unless a
+/// later session on the port wrote its own).
+pub(crate) struct AttachFile {
+    path: PathBuf,
+    token: String,
+}
+
+impl AttachFile {
+    /// Makes a token for the session on `port` and writes it where `nsh
+    /// test --attach` finds it, readable by this user only.
+    pub(crate) fn new(port: u16) -> anyhow::Result<Self> {
+        let dir = crate::check::cache()?.join("dev-sessions");
+        fs::create_dir_all(&dir).context("create development session directory")?;
+        let mut bytes = [0u8; 32];
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes)
+            .map_err(|_| anyhow::anyhow!("make the development session's token"))?;
+        let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let path = attach_file(&dir, port);
+        write_private(&path, token.as_bytes())
+            .context("record the development session's token for nsh test --attach")?;
+        Ok(AttachFile { path, token })
+    }
+
+    /// The token.
+    pub(crate) fn token(&self) -> &str {
+        &self.token
+    }
+}
+
+impl Drop for AttachFile {
+    fn drop(&mut self) {
+        if fs::read(&self.path).is_ok_and(|kept| kept == self.token.as_bytes()) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Writes `bytes` to `path`, which only this user may read (a new file's
+/// mode on Unix; the user's own cache directory elsewhere).
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let _ = fs::remove_file(path);
+    let mut options = File::options();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::io::Write::write_all(&mut options.open(path)?, bytes)
+}
+
+/// A development session `nsh test --attach` may drive, as its files say:
+/// it may have ended since.
+pub(crate) struct AttachableSession {
+    pub(crate) port: u16,
+    pub(crate) token: String,
+    /// Its app's entry (`None`: a session on a port the OS chose).
+    pub(crate) app: Option<PathBuf>,
+}
+
+/// The development sessions on this machine `nsh test --attach` may drive,
+/// by port; on `port` only, when given.
+pub(crate) fn attachable_sessions(port: Option<u16>) -> anyhow::Result<Vec<AttachableSession>> {
+    let dir = crate::check::cache()?.join("dev-sessions");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut sessions: Vec<AttachableSession> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let port: u16 = name.to_str()?.strip_suffix(".attach")?.parse().ok()?;
+            let token = fs::read_to_string(entry.path()).ok()?;
+            let app = fs::read(app_file(&dir, port))
+                .ok()
+                .map(|bytes| PathBuf::from(String::from_utf8_lossy(&bytes).into_owned()));
+            Some(AttachableSession {
+                port,
+                token: token.trim().to_owned(),
+                app,
+            })
+        })
+        .filter(|session| port.is_none_or(|p| p == session.port))
+        .collect();
+    sessions.sort_by_key(|session| session.port);
+    Ok(sessions)
+}
+
+/// Whether `entry` is the app a session's `.app` file names.
+pub(crate) fn is_app(recorded: &Path, entry: &Path) -> bool {
+    recorded == identity(entry)
 }
 
 /// Fails for an address this machine cannot listen at (a mistyped `--host`),

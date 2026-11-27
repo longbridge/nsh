@@ -23,6 +23,11 @@ pub enum DevEvent {
     /// The server runs a test session: keep the model of the app test
     /// steps need, from the first bundle on. Comes before the bundle.
     Testing,
+    /// The server's development session takes steps from `nsh test
+    /// --attach`, and the host said it takes them ([`HostInfo::attach`]):
+    /// keep the model of the app those steps need, from the first bundle
+    /// on, without changing how the app runs. Comes before the bundle.
+    Attachable,
     /// A step of the test: answer it with [`DevClient::step_done`] and its
     /// id.
     Step {
@@ -124,6 +129,9 @@ pub struct HostInfo {
     pub ui_sets: Vec<String>,
     /// It takes test steps ([`DevEvent::Step`]).
     pub tests: bool,
+    /// It takes steps in a development session too, from `nsh test
+    /// --attach` ([`DevEvent::Attachable`]).
+    pub attach: bool,
 }
 
 /// Connects a dev host to a dev server, reconnecting until dropped, and
@@ -155,12 +163,14 @@ impl DevClient {
             platform: Some(host.platform),
             ui_sets: Some(host.ui_sets),
             tests: host.tests,
+            attach: host.attach,
             running: None,
         };
         // The build the app reached, across reconnects. Hosts check each
         // patch's base themselves, so a patch the app could not apply only
         // makes the server's catch-up patches fall through to the bundle.
         let mut running: Option<RunningBuild> = None;
+        let attach = host.attach;
         thread::Builder::new()
             .name("nsh-dev-client".into())
             .spawn(move || {
@@ -193,6 +203,7 @@ impl DevClient {
                                 &log_rx,
                                 &reply_rx,
                                 &mut running,
+                                attach,
                                 &mut on_event,
                             );
                             let error = match end {
@@ -283,6 +294,7 @@ fn session(
     logs: &Receiver<ClientMessage>,
     replies: &Receiver<ClientMessage>,
     running: &mut Option<RunningBuild>,
+    attach: bool,
     on_event: &mut impl FnMut(DevEvent),
 ) -> Result<(), SessionEnd> {
     if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
@@ -329,10 +341,17 @@ fn session(
         };
         match msg {
             Message::Text(text) => match serde_json::from_str::<ServerMessage>(&text) {
-                Ok(ServerMessage::Hello { session, test, .. }) => {
+                Ok(ServerMessage::Hello {
+                    session,
+                    test,
+                    attach: attachable,
+                    ..
+                }) => {
                     server_session = session;
                     if test {
                         on_event(DevEvent::Testing);
+                    } else if attachable && attach {
+                        on_event(DevEvent::Attachable);
                     }
                 }
                 Ok(ServerMessage::Step { id, step }) => on_event(DevEvent::Step { id, step }),

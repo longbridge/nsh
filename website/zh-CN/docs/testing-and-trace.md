@@ -638,6 +638,38 @@ echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh tes
 这 1.2 s 让引擎的空闲垃圾回收在第一步之前运行，这样，如果应用丢掉了它仍在使用的对象，问题就会暴露出来：它的处理函数
 不再生效。
 
+### 驱动正在运行的会话
+
+`nsh test --attach` 直接驱动你已经用 `nsh run` 或 `nsh dev` 打开的应用，就在它的窗口里，保持它现在的样子。有些问题只在那个
+窗口里出现，比如开发了很久、热更新了很多次之后，这时就用它。另起的 `nsh test` 实例从头开始，复现不出这类问题。
+
+在应用目录里运行，步骤从标准输入给出：
+
+```sh
+nsh run --target gpui                         # 一个终端里：你正在用的窗口
+echo 'console.log(app.texts()); await app.press("text:+1"); await app.screenshot("now.png")' | nsh test --attach
+```
+
+可用的步骤和查询与[在真实平台上运行](#在真实平台上运行)相同：`press`、`type`、`scroll`、`hover`、`waitFor`、`texts()`、
+`shows()`、`layout()`、`accessibility()`、`screenshot(path)` 等。它们用平台自己的输入作用在正在运行的应用上。`app` 就是这个
+应用，马上可用，不会先等 1.2 s。
+
+- `--attach` 选本机正在运行的会话。同时有几个会话时，选当前目录这个应用的那个。`--attach=<port>` 按端口指定会话
+  （`nsh run` 打印的端口）。
+- 一个会话可以连着几个宿主，比如一个 GPUI 窗口加一个浏览器。步骤默认发给最后连上的宿主。用 `--device <name>` 换一个：
+  按会话终端里显示的名字，或按 `--target` 的平台名（`--device gpui`）。`nsh test --attach` 会打印它选中的宿主和其余宿主。
+- 也可以给一个测试文件：`nsh test tests/repro.test.tsx --attach`。文件里的 `open("./App.tsx")` 会附着到正在运行的应用。
+  这时 `open` 不接受选项，因为选项是给新应用做准备的：`storage`、`network`、`width`、`colorScheme` 等都会以
+  `ERR_NSH_TEST_UNSUPPORTED` 拒绝。
+- 步骤结束后应用照常运行，测试里关闭应用也不会让它退出。应用的请求照常走网络，所以 `app.requests()` 是空的。
+- 步骤看到的是应用已经创建的视图。长列表在行接近屏幕时才创建它们，所以靠下的行要先 `scroll` 才能找到。
+- `--target`、`--trace`、`--fps`、`--display` 和 `--foreground` 是给测试打开的应用做准备的，不能和 `--attach` 一起用。
+
+macOS 和 GPUI 的开发宿主接受附着的步骤。其他宿主（Windows、Linux、iOS、Android、终端和浏览器）会明确报告不接受。
+
+只有本机能驱动会话。开发服务器只在回环地址上接受附着的步骤，拒绝任何网页（包括它自己的页面），还要求一个令牌。会话把令牌
+写在只有你的用户能读的文件里。网络上的其他机器、本机的其他用户和浏览器里打开的网页都无法驱动你的应用。
+
 示例中有可以参考的测试：Rust 应用见 `examples/gallery-rs`（`cargo test`，每个演示一个模块，以及 `App.test.tsx`），带 Rust crate
 的应用见 `examples/rust-exports`，TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求、
 深色模式、手动时钟）。

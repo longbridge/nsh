@@ -283,15 +283,19 @@ pub(crate) fn start(this: &AppView, url: String, held: bool, cx: &mut Context<Ap
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
         tests: true,
+        attach: true,
     };
-    // A test session (`nsh test --target gpui`): the model goes to the
-    // surface through the session's messages, ahead of the bundle.
+    // A test session (`nsh test --target gpui`), or a development session
+    // `nsh test --attach` may drive: the model goes to the surface through
+    // the session's messages, ahead of the bundle. Keeping it changes
+    // nothing of how the app runs, so both attach it alike.
     let models = tx.clone();
     let key = surface.key();
-    let tester = nsh_testing::agent::Tester::new(move |model| {
+    let keep_model = move |model| {
         let _ = models.unbounded_send(Msg::TestModel(model));
-        Box::new(crate::agent::GpuiNative::new(key))
-    });
+        Box::new(crate::agent::GpuiNative::new(key)) as Box<dyn nsh_testing::agent::Native>
+    };
+    let tester = nsh_testing::agent::Tester::with_attach(keep_model.clone(), keep_model);
     let tests = tester.clone();
     let events = tx;
     let started = DevClient::start(url, host, move |event| {
@@ -475,6 +479,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
         DevEvent::Disconnected => dev.show_status(Status::Reconnecting),
         // The client's thread hands them to the test agent.
         DevEvent::Testing
+        | DevEvent::Attachable
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}

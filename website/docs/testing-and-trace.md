@@ -736,6 +736,45 @@ echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh tes
 The 1.2 s let the engine's idle garbage collection run before the first step, so an app that lets go of what it still
 uses shows it: its handlers stop working.
 
+### Driving a running session
+
+`nsh test --attach` drives the app you already have open with `nsh run` or `nsh dev`, in its window, as it is. Use it
+when a problem only shows in that window, for example after a long session with many hot updates. A fresh `nsh test`
+instance starts from scratch and would not show it.
+
+Run it in the app's directory, with the steps on standard input:
+
+```sh
+nsh run --target gpui                         # in one terminal: the window you work in
+echo 'console.log(app.texts()); await app.press("text:+1"); await app.screenshot("now.png")' | nsh test --attach
+```
+
+The steps and queries are the ones of [On a real platform](#on-a-real-platform): `press`, `type`, `scroll`, `hover`,
+`waitFor`, `texts()`, `shows()`, `layout()`, `accessibility()`, `screenshot(path)` and the others. They act on the
+running app with the platform's own input. `app` is that app, at once: nothing waits 1.2 s first.
+
+- `--attach` takes the session running on this machine. When several run, it takes the one of this directory's app.
+  `--attach=<port>` names the session's port (the port `nsh run` prints).
+- A session can have several hosts connected, such as a GPUI window and a browser. The steps go to the host that
+  connected last. `--device <name>` picks another one, by its name as the session's terminal shows it, or by its
+  platform as `--target` names it (`--device gpui`). `nsh test --attach` prints the host it took and the others.
+- A test file works too: `nsh test tests/repro.test.tsx --attach`. Its `open("./App.tsx")` attaches to the running app.
+  `open` takes no options there, because they would set a new app up: `storage`, `network`, `width`, `colorScheme` and
+  the others reject with `ERR_NSH_TEST_UNSUPPORTED`.
+- The app keeps running when the steps end, and closing it in a test does not quit it. Its requests go to the
+  network as usual, so `app.requests()` is empty.
+- The steps see the views the app has made. A long list makes its rows as they come near the screen, so a row far
+  down is found after a `scroll`.
+- `--target`, `--trace`, `--fps`, `--display` and `--foreground` set up an app a test opens, and don't go with
+  `--attach`.
+
+The macOS and GPUI development hosts take attached steps. The other hosts (Windows, Linux, iOS, Android, the
+terminal and the browser) say that they take none.
+
+Only this machine can drive a session. The dev server takes attached steps on loopback only, refuses any web page
+(even its own), and asks for a token that the session writes to a file only your user can read. Other machines on
+the network, other users of this machine and pages open in a browser cannot drive your app.
+
 The examples have tests to start from: `examples/gallery-rs` for a Rust app (`cargo test`, one module per demo, and
 `App.test.tsx`), `examples/rust-exports` for an app with a Rust crate, `examples/counter` and `examples/gallery/tests`
 (storage, inputs, a long list, stubbed requests, dark mode, a manual clock) for TSX apps.

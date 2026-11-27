@@ -15,6 +15,11 @@
 //! app's own waiting to show for 100 ms, 2 s at most. [`Native`]'s calls
 //! come from that thread; implementations do their work on the main thread
 //! and return when it is done.
+//!
+//! `nsh test --attach` takes the same steps on the app of a development
+//! session that runs already (`nsh run`, `nsh dev`): a host that takes them
+//! keeps its model in every such session ([`Tester::with_attach`]), so the
+//! steps find the views the app shows however long it ran.
 
 use std::{
     sync::{Arc, Condvar, Mutex, MutexGuard},
@@ -153,9 +158,14 @@ struct State {
     batches: u64,
     /// When the last one was.
     last: Option<Instant>,
-    /// What the app threw since the last step looked.
+    /// What the app threw since the last step looked: the latest
+    /// [`KEPT_ERRORS`], as a development session's app may run long
+    /// without a step looking.
     errors: Vec<String>,
 }
+
+/// How many of the app's errors a [`Model`] keeps for the next step.
+const KEPT_ERRORS: usize = 64;
 
 impl Model {
     /// Takes in a batch the host applied (on its main thread, after
@@ -183,7 +193,12 @@ impl Model {
     /// The app threw `message` (an exception that escaped a callback, a
     /// bundle that did not load): the step taken meanwhile fails with it.
     pub fn error(&self, message: impl Into<String>) {
-        self.lock().errors.push(message.into());
+        let mut state = self.lock();
+        if state.errors.len() == KEPT_ERRORS {
+            state.errors.remove(0);
+        }
+        state.errors.push(message.into());
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -333,10 +348,19 @@ impl Model {
     /// The engine [`Model::set_up_engine`] set up started: the test moves
     /// its clock through it.
     pub fn engine_started(&self, engine: nsh_engine::EngineControl) {
-        // Steps reach every view of a page, below its fold too, as the
-        // headless driver's do.
-        engine.set_content_culling(false);
+        // The views of the app it replaced are gone: an app reloaded in a
+        // development session starts on a fresh screen, in the same window.
+        {
+            let mut state = self.lock();
+            if state.batches > 0 {
+                state.screen = state.screen.restarted();
+            }
+        }
         if let Some(setup) = &mut *self.setup.lock().unwrap_or_else(|e| e.into_inner()) {
+            // A test's steps reach every view of a page, below its fold
+            // too, as the headless driver's do; an attached session leaves
+            // the app as it runs.
+            engine.set_content_culling(false);
             setup.engine = Some(engine);
         }
     }
@@ -1489,6 +1513,11 @@ impl Worker {
     }
 }
 
+/// What attaches a [`Model`] to the host's surface and makes the platform's
+/// [`Native`] ([`Tester`]).
+#[cfg(not(target_arch = "wasm32"))]
+type KeepModel = dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync;
+
 #[cfg(not(target_arch = "wasm32"))]
 /// A dev host's test session: when the server says it runs one
 /// ([`nsh_dev::DevEvent::Testing`]), it makes the app's [`Model`] and the
@@ -1496,7 +1525,10 @@ impl Worker {
 /// before the first bundle comes) and takes the steps that follow on a
 /// [`Worker`], answering each through the dev client.
 pub struct Tester {
-    start: Box<dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync>,
+    start: Box<KeepModel>,
+    /// What attaches the model to the surface in a development session
+    /// `nsh test --attach` may drive ([`Tester::with_attach`]).
+    attach: Option<Box<KeepModel>>,
     /// Shared with the closures that answer: the dev client's thread makes
     /// them, maybe before the thread that started it sets the client.
     client: Arc<std::sync::OnceLock<std::sync::Weak<nsh_dev::DevClient>>>,
@@ -1513,6 +1545,27 @@ impl Tester {
     ) -> std::sync::Arc<Tester> {
         std::sync::Arc::new(Tester {
             start: Box::new(start),
+            attach: None,
+            client: Arc::default(),
+            worker: Mutex::new(None),
+            model: Mutex::new(None),
+        })
+    }
+
+    /// A host's tester that takes the steps of `nsh test --attach` in a
+    /// development session too ([`nsh_dev::DevEvent::Attachable`]): there
+    /// `attach` (on the dev client's thread) attaches the model to the
+    /// surface before the first bundle comes, as `start` does in a test
+    /// session, but leaves the app as it runs: no test drives it, so the
+    /// user's own input and the platform's settings stay as they are. The
+    /// host says it takes them ([`nsh_dev::HostInfo::attach`]).
+    pub fn with_attach(
+        start: impl Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync + 'static,
+        attach: impl Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync + 'static,
+    ) -> std::sync::Arc<Tester> {
+        std::sync::Arc::new(Tester {
+            start: Box::new(start),
+            attach: Some(Box::new(attach)),
             client: Arc::default(),
             worker: Mutex::new(None),
             model: Mutex::new(None),
@@ -1530,7 +1583,11 @@ impl Tester {
     /// back the others.
     pub fn event(&self, event: nsh_dev::DevEvent) -> Option<nsh_dev::DevEvent> {
         match event {
-            nsh_dev::DevEvent::Testing => self.start(),
+            nsh_dev::DevEvent::Testing => self.start(&*self.start),
+            nsh_dev::DevEvent::Attachable => match &self.attach {
+                Some(attach) => self.start(&**attach),
+                None => log::warn!("the dev server offers attached steps this host does not take"),
+            },
             nsh_dev::DevEvent::Step { id, step } => self.take(id, step),
             nsh_dev::DevEvent::TestSetup {
                 storage,
@@ -1570,14 +1627,16 @@ impl Tester {
         self.model.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn start(&self) {
+    /// Makes the app's model and the worker taking its steps, once:
+    /// `start` attaches the model to the surface.
+    fn start(&self, start: &KeepModel) {
         let mut worker = self.worker.lock().unwrap_or_else(|e| e.into_inner());
         if worker.is_some() {
             return;
         }
         let model = std::sync::Arc::new(Model::default());
         *self.model.lock().unwrap_or_else(|e| e.into_inner()) = Some(model.clone());
-        let native = (self.start)(model.clone());
+        let native = start(model.clone());
         let client = self.client.clone();
         let started = Worker::spawn(Agent::new(model, native), move |id, outcome| {
             if let Some(client) = client.wait().upgrade() {
@@ -4522,6 +4581,7 @@ mod tests {
                 bytecode_version: "bc".into(),
                 ui_sets: Vec::new(),
                 tests: true,
+                attach: false,
             },
             move |event| {
                 let setup = matches!(event, DevEvent::TestSetup { .. });

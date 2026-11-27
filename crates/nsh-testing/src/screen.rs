@@ -1606,6 +1606,16 @@ impl Screen {
         children
     }
 
+    /// A screen for the app that replaces this one's (a reload), in the
+    /// same window: its viewport and system bar, none of its views.
+    pub(crate) fn restarted(&self) -> Screen {
+        Screen {
+            viewport: self.viewport,
+            system_bar: self.system_bar,
+            ..Screen::default()
+        }
+    }
+
     /// The window is `size` (what lies outside it is not on screen).
     pub(crate) fn set_viewport(&mut self, size: Size<Points>) {
         self.viewport = Some(size);

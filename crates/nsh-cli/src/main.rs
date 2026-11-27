@@ -36,6 +36,7 @@ mod sign;
 mod store;
 mod test;
 mod test_android;
+mod test_attach;
 mod test_host;
 mod test_ios;
 mod test_web;
@@ -213,7 +214,9 @@ enum Command {
         /// UDID); default: a booted one, else the newest iPhone. With
         /// `--target android`: the device or emulator (its serial, as `adb
         /// devices` lists it); default: the one `ANDROID_SERIAL` names, else
-        /// the first one.
+        /// the first one. With `--attach`: the session's host (its name, or
+        /// its platform as `--target` names it); default: the one that
+        /// connected last.
         #[arg(long, value_name = "DEVICE")]
         device: Option<String>,
         /// With `--target macos` or `gpui`: the display the apps' windows
@@ -232,6 +235,15 @@ enum Command {
         /// except on a display nobody types on, such as Xvfb).
         #[arg(long)]
         foreground: bool,
+        /// Drive the app of a development session that runs already (`nsh
+        /// run`, `nsh dev`) in the window it shows, as it is, instead of
+        /// opening one: the session on this port, else the one running on
+        /// this machine (the app's, when several run). Its host the
+        /// connected last takes the steps, or the one `--device` names (its
+        /// name, or its platform as `--target` names it). From this machine
+        /// only; `open` takes no options, and the app keeps running after.
+        #[arg(long, value_name = "PORT", num_args = 0..=1, require_equals = true)]
+        attach: Option<Option<u16>>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed); an app with
@@ -1194,6 +1206,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device,
             display,
             foreground,
+            attach,
         } => test::test(
             &path,
             &entry,
@@ -1209,6 +1222,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device.as_deref(),
             display.map(|n| n as usize),
             foreground,
+            attach,
         ),
         Command::Dev {
             entry,

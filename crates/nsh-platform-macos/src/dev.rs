@@ -188,19 +188,29 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
         tests: true,
+        attach: true,
     };
-    // A test session (`nsh test --target macos`): the surface keeps the
-    // model the agent's steps see, from the first bundle on.
+    // A test session (`nsh test --target macos`), or a development session
+    // `nsh test --attach` may drive: the surface keeps the model the agent's
+    // steps see, from the first bundle on. Only a test changes how the app
+    // runs (`Surface::testing`).
     let key_of_surface = surface.key();
-    let tester = nsh_testing::agent::Tester::new(move |model| {
+    let keep_model = move |model, testing| {
         DispatchQueue::main().exec_async(move || {
             if let Some(surface) = crate::surface::Surface::with_key(key_of_surface) {
-                surface.set_test_model(Some(model));
-                crate::system::testing_started(&surface);
+                surface.set_test_model(Some(model), testing);
+                if testing {
+                    crate::system::testing_started(&surface);
+                }
             }
         });
         Box::new(crate::agent::MacNative::new(key_of_surface))
-    });
+            as Box<dyn nsh_testing::agent::Native>
+    };
+    let tester = nsh_testing::agent::Tester::with_attach(
+        move |model| keep_model(model, true),
+        move |model| keep_model(model, false),
+    );
     let tests = tester.clone();
     let started = DevClient::start(url, host, move |event| {
         // Taken off the main queue: a step waits for what it does there.
@@ -316,6 +326,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         DevEvent::Disconnected => show_status(ui, "Dev server disconnected — reconnecting…"),
         // The client's thread hands them to the test agent.
         DevEvent::Testing
+        | DevEvent::Attachable
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}
