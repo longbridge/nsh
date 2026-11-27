@@ -390,7 +390,8 @@ section), with no look. The app's trigger opens the list: a popup at the trigger
 bottom on phones and tablets. The select owns the keyboard (Up, Down, Home, End, Page Up and Down, typeahead, Return
 and Escape), search (`searchable`), the highlighted row (`focus:` on `itemClass`; `renderItem` gets what an item is, never its state) and
 the combobox, listbox and option roles for screen readers. The app owns the value (`value`, `onChange`) or leaves it
-to the select (`defaultValue`), and styles each part or draws the rows. See [Select](../elements/select.md).
+to the select (`defaultValue`), can own the search's query (`query`, `onQueryChange`), and styles each part or draws
+the rows. See [Select](../elements/select.md).
 
 ### Combobox
 

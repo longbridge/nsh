@@ -2897,6 +2897,38 @@ covers [props] Select.searchTestID
 covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty
+# The app's query (`query`, `onQueryChange`): typing in the search field is
+# reported, the app's query filters, and the app's rows mark the match from
+# it; the app clears it once the list is gone (`onClose`).
+tap id:ask
+expect Apple
+type label:AskField rr
+expect Query: rr
+expect Che_rr_y
+expect Ca_rr_ot
+absent Apple
+event label:Cherry onCancel
+absent Che_rr_y
+expect Query: none
+tap id:ask
+expect Apple
+expect Cherry
+tap below:parent:scroll:label:Apple
+absent Apple
+covers [props] Select.query
+covers [events] Select.onQueryChange
+# The field's own query starts each opening from `defaultQuery`.
+tap id:preset
+expect Carrot
+absent Apple
+event label:Carrot onCancel
+absent Carrot
+tap id:preset
+expect Carrot
+absent Apple
+event label:Carrot onCancel
+absent Carrot
+covers [props] Select.defaultQuery
 
 # base-color-picker
 tap id:case-base-color-picker
