@@ -873,9 +873,6 @@ pub(crate) struct Mounter {
     alert_tint: Option<nsh_core::element::AdaptiveColor>,
     /// The alerts shown and not answered yet (`Command::CloseDialog`).
     dialogs: crate::system::Dialogs,
-    /// The surface's share sheet, which a new share replaces
-    /// ([`crate::share`]).
-    share: std::rc::Rc<crate::share::Current>,
     /// `SplitView`s' splits, by their native component's node
     /// ([`crate::split`]).
     splits: rustc_hash::FxHashMap<NodeId, crate::split::SplitHost>,
@@ -956,7 +953,6 @@ impl Mounter {
             leaving_screens: rustc_hash::FxHashMap::default(),
             alert_tint: None,
             dialogs: Default::default(),
-            share: Default::default(),
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
             untransformed: Vec::new(),
@@ -2410,9 +2406,6 @@ impl Mounter {
                 native,
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
-            }
-            (Command::Share { id: request, sheet }, _) if id == nsh_core::ROOT_ID => {
-                share_later(self.shared.clone(), request, sheet);
             }
             (
                 Command::RenderCanvas {
@@ -6675,34 +6668,6 @@ impl Drop for Mounter {
 }
 
 /// The first scroll view in `view`'s subtree (breadth first).
-/// Shows share sheet `sheet` of request `request` on a later main-queue
-/// turn, with the surface of `shared` current: the sheet finds the
-/// surface's root and its anchor's view as a module's system UI does
-/// (`crate::native_view`), which the batch asking for it holds. A batch
-/// still applied then (UIKit can run the main queue inside one) holds the
-/// mounter too, and the sheet waits for the next turn, as the mounter's
-/// other deferred calls do.
-fn share_later(shared: SharedMounter, request: u32, sheet: Box<nsh_core::share::ShareSheet>) {
-    DispatchQueue::main().exec_async(move || {
-        let mtm = MainThreadMarker::new().expect("main queue");
-        let held = shared.get(mtm).try_borrow().ok().map(|mounter| {
-            mounter
-                .as_ref()
-                .map(|mounter| (mounter.share.clone(), mounter.control.clone()))
-        });
-        let Some(held) = held else {
-            return share_later(shared, request, sheet);
-        };
-        let Some((current, control)) = held else {
-            log::warn!("share: the surface closed; request {request} is not answered");
-            return;
-        };
-        crate::presenting::run_for(shared, || {
-            crate::share::show(request, &sheet, &current, &control);
-        });
-    });
-}
-
 pub(crate) fn first_scroll_view(view: &UIView) -> Option<Retained<UIScrollView>> {
     let mut queue = vec![view.retain()];
     while !queue.is_empty() {

@@ -470,12 +470,11 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   (`Headless::on_pick`, `app.onPick`; given as they are, nothing scaled), else cancelled (no files); `nsh/test`'s `App`
   answers them after each step and its dialogs (`answer_picks_myself`), and `app.picks()` lists what was asked; a real
   platform shows its own picker, which the driver does not answer;
-- shares (`Command::Share`) are answered as `onShare` says (`Headless::on_share`, `app.onShare`, which also turns
-  `Environment::share` on), and `app.shares()` lists what was shared;
 - native modules' fakes (`nsh_core::fake::Fake`, which a set registers with `Registry::fake` under a name) are
   installed before each app launches, in place of the device they reach; a test calls one by name with
   `Headless::call_fake` (`app.fake(name, method, args?)`, a JSON answer). `nsh/test` knows no module's fake: their
-  names, methods and answers are the module's (`nsh-extra`'s `"nsh-extra/speech"` is documented with `Speech`).
+  names, methods and answers are the module's (`nsh-extra`'s `"nsh-extra/speech"` is documented with `Speech`,
+  `"nsh-extra/share"` with `Share`).
   A fake may stand in process-wide, so `Headless` takes a turn for its fakes: apps with other fakes never overlap in
   one process, while apps started with the same fakes (clones of one registry, as one test file's apps) run
   together; fake names are unique across an app's sets (`Registry::merged`);

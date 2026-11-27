@@ -99,13 +99,12 @@ final class Native {
     static final int DOWNLOAD_OFFER = 87;
     static final int DOWNLOAD_PROGRESS = 88;
     static final int DOWNLOAD_END = 89;
-    static final int SHARE = 90;
-    static final int DETENT_CHANGE = 91;
-    static final int FOCUS_IN = 92;
-    static final int FOCUS_OUT = 93;
-    static final int TEXT_DROP = 94;
-    static final int OPEN_APP_SETTINGS = 95;
-    static final int BACK_PROGRESS = 96;
+    static final int DETENT_CHANGE = 90;
+    static final int FOCUS_IN = 91;
+    static final int FOCUS_OUT = 92;
+    static final int TEXT_DROP = 93;
+    static final int OPEN_APP_SETTINGS = 94;
+    static final int BACK_PROGRESS = 95;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

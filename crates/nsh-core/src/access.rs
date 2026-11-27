@@ -23,8 +23,8 @@
 //! }
 //! ```
 //!
-//! `share` lets the app show the system's share sheet (`Share` of `nsh`,
-//! [`crate::share`]): what it shares leaves the app where the user sends
+//! `share` lets the app show the system's share sheet (`Share` of
+//! `nsh-extra`, which checks it): what it shares leaves the app where the user sends
 //! it, and the files it shares are also checked against `fs.read`.
 //! `openUrl` lets the app open URLs outside it (`openUrl` of `nsh/device`,
 //! [`crate::open_url`]: the browser, the mail or phone app, other apps'
@@ -657,7 +657,7 @@ pub struct Capabilities {
     /// The app may show the system's picker (`nsh/picker`): the files the
     /// user picks in it reach the app.
     pub picker: bool,
-    /// The app may show the system's share sheet (`Share` of `nsh`): the
+    /// The app may show the system's share sheet (`Share` of `nsh-extra`): the
     /// text, links and files it shares leave the app where the user sends
     /// them.
     pub share: bool,
@@ -2645,7 +2645,7 @@ impl Access {
     }
 
     /// Whether the app may show the system's share sheet (`Share` of
-    /// `nsh`).
+    /// `nsh-extra`, which checks it).
     pub fn allows_share(&self) -> bool {
         self.each(|c| c.share)
     }

@@ -174,6 +174,7 @@ nshm（TSX nshm 在每个 target 上都是 bundle 的一部分），也只用于
 | `location` | `Location` | 在用户允许后读取设备位置，支持 macOS、iOS 和 Web |
 | `photos` | `Photos` | 在用户允许后读取 iOS 上用户最近的照片 |
 | `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知，在 Android 上通过该服务的绑定接收 |
+| `share` | `Share` | 在 iOS、Android、macOS 和 Web 上把文本、链接或本地文件交给系统的分享面板 |
 | `speech` | `Speech` | 在 macOS、iOS、Android、Windows 和 Web 上把用户说的话随说随转成文字 |
 
 ```tsx
@@ -337,6 +338,130 @@ function closeConversation(threadId: string) {
 - 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
 开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
+
+### Share
+
+`Share` 把文本、链接或本地文件交给系统的分享面板，由用户继续发送：发给另一个应用、消息、邮件、AirDrop 或存成文件。iOS 上是 `UIActivityViewController`，Android 上是 `Intent.ACTION_SEND` 的选择器，macOS 上是分享菜单（`NSSharingServicePicker`），浏览器里是 `navigator.share`。
+
+```sh
+nsh add nsh-extra --features share
+```
+
+```ts
+const Share: {
+  available(): Promise<boolean>;
+  show(content: ShareContent): Promise<ShareResult>;
+};
+
+interface ShareContent {
+  title?: string; // 主题（邮件的主题行），面板有标题时也是它的标题
+  text?: string;
+  url?: string; // 链接：http(s)、mailto、应用自己的 scheme
+  files?: string[]; // 本地文件的绝对路径，或 `${dataDir}/…`（最多 100 个）
+  anchor?: ViewRef; // 面板是 popover 时（iPad、macOS）指向的视图
+}
+
+interface ShareResult {
+  action: "shared" | "dismissed";
+  target: string | null; // 用户分享到了哪里，用平台给的名字
+}
+```
+
+一个旅行计划应用从分享按钮分享行程：
+
+```tsx
+import { Text, View, type ViewRef } from "nsh";
+import { Share } from "nsh-extra";
+
+function ShareButton(props: { trip: string }) {
+  let button: ViewRef | undefined;
+  const share = async () => {
+    try {
+      const { action } = await Share.show({
+        title: "Weekend in Kyoto",
+        url: `https://example.com/trips/${props.trip}`,
+        anchor: button,
+      });
+      if (action === "shared") console.log("shared");
+    } catch (e) {
+      console.warn("cannot share", e);
+    }
+  };
+  return (
+    <View ref={button} role="button" accessibilityLabel="Share" onPress={share}>
+      <Text>Share</Text>
+    </View>
+  );
+}
+```
+
+- `show` 以用户的操作 resolve：`"shared"`，带上用户分享到的 `target`（iOS 上是 activity type，Android 上是应用的包名，macOS 上是服务的标题，平台不告诉时为 `null`）；或 `"dismissed"`，表示用户关掉了面板。关掉面板是用户的回答，不是失败。`"shared"` 的含义以平台能知道的为准：iOS 上目标已完成分享（取消的邮件为 `"dismissed"`）；macOS 上服务报告已完成，或服务没有报告结果而用户回到了弹出菜单的窗口（拷贝、加入列表之后，邮件草稿仍开着时也算），服务报告取消、或没有报告且用户十分钟内没有回来时为 `"dismissed"`；Android 上用户选了一个应用，Android 不告诉该应用之后做了什么；Web 上 `navigator.share` 已 resolve。
+- `show` 在以下情况 reject：`text`、`url`、`files` 一个都没有（空文本视同没有），或 URL 解析不了、会运行代码（`javascript:`）、指向本地文件（`file:`；请用 `files` 分享）时为 `TypeError`；超过 100 个文件、文本或标题超过 1 MiB、URL 超过 16 KiB 时为 `RangeError`；`capabilities.fs.read` 没有授予的文件为 `ERR_ACCESS_DENIED`，不存在的文件为 `ENOENT`，文件夹为 `EISDIR`；没有分享面板的地方，或平台不分享的内容（Android 应用自有存储之外的文件、浏览器里的文件、浏览器在此不允许分享或仍在显示之前那次分享的面板）为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`。
+- 面板打开时再调用 `show`，之前的 promise 立即 resolve 为 `"dismissed"`。iOS 和 macOS 上新面板取代旧面板；Android 和 Web 上旧面板留到用户关掉为止，旧面板打开期间浏览器拒绝新的分享。
+- iPad 和 macOS 上面板是 popover：把打开它的视图（分享按钮，可以在页面、标题栏、对话框或另一个窗口里）交给 `anchor`，没有时显示在窗口中央。
+- 应用的能力授予了分享时，iOS、Android、macOS（AppKit 窗口）以及提供 `navigator.share` 且页面允许 `web-share` 的浏览器里 `available()` resolve 为 `true`；Windows、Linux、GPUI 窗口、终端应用，以及测试作答之前的无界面运行中为 `false`，此时 `show` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject，应用可以提供别的方式（比如复制链接）。
+- 声明了 `"capabilities"` 的应用用 [`"share": true`](./sandbox-and-capabilities.md#share) 授予 `Share`，分享的每个文件也要能被 `fs.read` 读取。没有授予时 `available()` resolve 为 `false`，`show` 以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"share"`。
+
+| 平台 | 分享面板 | 文件 |
+|---|---|---|
+| iOS | `UIActivityViewController`；iPad 上是 popover | 应用能读的任何文件 |
+| Android | `ACTION_SEND` 的选择器（多个文件时 `ACTION_SEND_MULTIPLE`） | 应用自己存储中的文件（`process.dataDir`、缓存），以 `content:` URI 分享 |
+| macOS | 分享菜单 `NSSharingServicePicker` | 应用能读的任何文件 |
+| Web | 浏览器提供的 `navigator.share`，且页面允许 `web-share` | 文本和链接 |
+
+这个 feature 不需要任何声明。iOS 上，应用说明了写入相册的理由时，面板才提供把图片存到“照片”：在 `ios.infoPlist` 中写 `NSPhotoLibraryAddUsageDescription`（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）。
+
+Rust 代码使用 `nsh_extra::share`：`show(ShareRequest).await` 以 `ShareOutcome`（`action` 是 `ShareAction`，以及 `target`）或 `ShareError`（`code`、`message`）结束，`available().await` 告诉这里能否显示面板。
+
+| TS | Rust |
+|---|---|
+| `await Share.available()` | `available().await -> bool` |
+| `await Share.show(content)` | `show(request).await -> Result<ShareOutcome, ShareError>` |
+| `title`、`text`、`url`、`files` | `ShareRequest::new().title(..).text(..).url(..).file(..)` |
+| `anchor` | `.anchor(&element_ref)` |
+| `result.action`、`.target` | `outcome.action`（`ShareAction`）、`outcome.target` |
+| `error.code` | `error.code` |
+
+```rust
+use nsh_core::prelude::*;
+use nsh_extra::share::{self, ShareAction, ShareRequest};
+
+fn share_button(trip: &'static str) -> impl IntoElement {
+    let button = element_ref();
+    view()
+        .element_ref(&button)
+        .role(AccessibilityRole::Button)
+        .accessibility_label("Share")
+        .on_press(move || {
+            let request = ShareRequest::new()
+                .title("Weekend in Kyoto")
+                .url(format!("https://example.com/trips/{trip}"))
+                .anchor(&button);
+            spawn(async move {
+                match share::show(request).await {
+                    Ok(outcome) if outcome.action == ShareAction::Shared => log::info!("shared"),
+                    Ok(_) => {}
+                    Err(error) => log::warn!("cannot share: {error}"),
+                }
+            });
+        })
+        .child(text("Share"))
+}
+```
+
+在 `nsh test`（以及 `nsh_testing::Headless`）中，分享交给模块的模拟分享面板，它的名称是 `"nsh-extra/share"`。测试作答之前没有面板：`available()` resolve 为 `false`，`show` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject。测试通过 [`app.fake`](./testing-and-trace.md)（Rust 中是 `Headless::call_fake`）代替用户作答：
+
+| 方法 | `args` | 作用和回答 |
+|---|---|---|
+| `answer` | `[{ action, target }]` | 这次运行从此有分享面板，用户按它回答每次分享：`"shared"`（有 `target` 时分享到它）或 `"dismissed"`。resolve 为 `null`。 |
+| `hold` | `[]` | 这次运行从此有分享面板，用户让每个面板都开着：下一次分享把它回答为 `"dismissed"`。resolve 为 `null`。 |
+| `shares` | `[]` | resolve 为应用分享过的内容，按顺序：`[{ title, text, url, files, anchored }]`（没给的为 `null`，`files` 是真实路径，`anchored` 表示面板是否指向这次分享的 `anchor`）。 |
+
+```tsx
+await app.fake("nsh-extra/share", "answer", [{ action: "shared", target: "com.apple.UIKit.activity.Mail" }]);
+await app.press("label:Share");
+expect(await app.fake("nsh-extra/share", "shares")).toHaveLength(1);
+```
 
 ### Speech
 

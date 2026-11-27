@@ -1358,8 +1358,6 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.os = nsh_engine::Os::Android;
     environment.notifications = true;
     environment.audio = true;
-    // A chooser over `ACTION_SEND` (`Share.java`).
-    environment.share = true;
     // The app's details in the system's settings (`SystemUi.java`
     // `openAppSettings`).
     environment.app_settings = true;

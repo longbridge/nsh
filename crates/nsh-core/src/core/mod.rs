@@ -13292,7 +13292,6 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::OpenUrl { .. }
                 | C::OpenAppSettings { .. }
                 | C::PickScreenColor { .. }
-                | C::Share { .. }
                 | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
                 | C::Audio { .. }

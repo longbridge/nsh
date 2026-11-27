@@ -613,8 +613,6 @@ fn initial_environment() -> Environment {
         // `setString:forType:` says whether the pasteboard took the write.
         clipboard_write_result: true,
         canvas_render: true,
-        // `NSSharingServicePicker` (`crate::share`).
-        share: true,
         file_requests: true,
         notifications: true,
         audio: true,

@@ -277,7 +277,7 @@ capability is what decides which code reaches them.
 
 ### `share`
 
-`"share": true` lets the app show the system's share sheet ([`Share`](../modules/nsh.md#share)): the user chooses
+`"share": true` lets the app show the system's share sheet (`nsh-extra`'s [`Share`](./nshm.md#share)): the user chooses
 where the content goes. A shared file must also be readable under `fs.read`.
 
 ### `speech`

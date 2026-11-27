@@ -90,7 +90,6 @@ mod scroll_edge;
 mod scroll_watch;
 mod selectable_view;
 mod shader;
-mod share;
 mod sight;
 mod split;
 mod state_words;

@@ -527,10 +527,6 @@ pub struct Environment {
     /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
     /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub canvas_render: bool,
-    /// The platform shows the system's share sheet
-    /// ([`crate::Command::Share`], `Share.show`); without it, a share fails
-    /// at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
-    pub share: bool,
     /// The platform opens the app's own page in the system's settings
     /// ([`crate::Command::OpenAppSettings`], `nsh/mobile`'s
     /// `AppSettings.open`: iOS and Android); without it, opening it fails at
@@ -684,7 +680,6 @@ impl Default for Environment {
             screen_color: false,
             clipboard_write_result: false,
             canvas_render: false,
-            share: false,
             app_settings: false,
             scheme_links: None,
             file_requests: false,
@@ -2448,8 +2443,10 @@ mod tests {
 /// `Desktop(SetAttributes(..))`, `Desktop(SetAttributes`), so commands with
 /// different payloads share one warning.
 pub fn warn_unsupported(backend: &str, command: &dyn std::fmt::Debug) {
-    use std::collections::HashSet;
-    use std::sync::{Mutex, OnceLock};
+    use std::{
+        collections::HashSet,
+        sync::{Mutex, OnceLock},
+    };
 
     static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     let debug = format!("{command:?}");
