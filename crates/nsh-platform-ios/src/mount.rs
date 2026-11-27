@@ -2266,6 +2266,22 @@ impl Mounter {
             }
             return;
         }
+        if let Command::SelectAll = command {
+            // The outermost selectable view `id` is or is inside, as a
+            // press selects in it.
+            let mut area = None;
+            let mut at = Some(id);
+            while let Some(node) = at {
+                if let Some((_, responder)) = self.areas.iter().find(|(a, _)| *a == node) {
+                    area = Some(responder);
+                }
+                at = self.slot(node).and_then(|s| s.parent);
+            }
+            if let Some(responder) = area {
+                responder.select_everything();
+            }
+            return;
+        }
         let Some(s) = self.slot(id) else { return };
         match (command, &s.native) {
             (

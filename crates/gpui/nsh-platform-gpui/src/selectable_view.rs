@@ -663,6 +663,14 @@ pub(crate) fn clear_in(view: &NshView) {
     }
 }
 
+/// `ref.selectAll()` on `view` (`Command::SelectAll`): selects every text
+/// of the selectable view `view` is or is inside.
+pub(crate) fn select_in(surface: &Surface, view: &NshView) {
+    if let Some(area) = area_of(view) {
+        select_all(surface.key(), &area);
+    }
+}
+
 /// Clears the area selection, if there is one (a text selects alone).
 pub(crate) fn clear_all() {
     if let Some(mut a) = ACTIVE.with_borrow_mut(Option::take) {

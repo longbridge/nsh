@@ -448,6 +448,11 @@ impl Mounter {
                     crate::selectable_view::clear_in(view);
                 }
             }
+            Command::SelectAll => {
+                if let Some(view) = view {
+                    crate::selectable_view::select_in(surface, view);
+                }
+            }
             // Not carried out on this platform yet: the app's paste is lost,
             // so say so.
             Command::InsertText(_) => {

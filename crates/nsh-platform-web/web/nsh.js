@@ -7649,6 +7649,13 @@ class Player {
         if (el && area && (el.contains(area) || area.contains(el))) sel.removeAllRanges();
         break;
       }
+      case "selectAll": {
+        // All the texts of the selectable view `el` is or is in, as Ctrl+A
+        // does there: `selectionchange` then reports them.
+        const area = el && this.areaOf(el);
+        if (area) getSelection()?.selectAllChildren(area);
+        break;
+      }
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
       case "insertText": {
         // As the user's typing: the browser's undo history keeps it and

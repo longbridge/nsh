@@ -1230,6 +1230,10 @@ impl Headless {
                     command: Command::ClearSelection,
                 } => self.clear_selection_in(*id),
                 MountItem::Command {
+                    id,
+                    command: Command::SelectAll,
+                } => self.select_all_in(*id),
+                MountItem::Command {
                     id: ROOT_ID,
                     command: Command::SetAppUrl(url),
                 } => self.set_page_url(url, false),

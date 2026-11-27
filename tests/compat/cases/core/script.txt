@@ -290,6 +290,12 @@ expect Cleared: no
 # Clearing a selectable view with nothing selected is no error.
 tap id:clear
 expect Cleared: yes
+# core-select-all
+tap id:case-core-select-all
+expect Selected all: no
+# Selecting all of a selectable view is no error.
+tap id:select-all
+expect Selected all: yes
 # core-ref
 tap id:case-core-ref
 # The signal and the function got their node when the views were made.

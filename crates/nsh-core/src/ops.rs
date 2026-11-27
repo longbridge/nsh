@@ -2826,6 +2826,9 @@ pub enum Command {
     /// Clear the selection of a selectable view (`ViewProps::selectable_view`)
     /// the view is, is inside or holds.
     ClearSelection,
+    /// Select all the text of the selectable view (`ViewProps::selectable_view`)
+    /// the view is or is inside, as the selection menu's Select All does.
+    SelectAll,
     /// Scroll a scroll view to an offset.
     ScrollTo {
         /// Horizontal offset.
