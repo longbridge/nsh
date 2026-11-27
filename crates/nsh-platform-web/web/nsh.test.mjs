@@ -2483,6 +2483,71 @@ test("a screen effect over an animated shader asks for one shader frame at a tim
   }
 });
 
+/**
+ * Runs `f(player, view, frames, drawn)` with a canvas view whose draws are
+ * counted, and the frames `requestAnimationFrame` was asked for.
+ */
+async function withCanvasView(f) {
+  const { player } = fakePlayer();
+  const view = { _id: 7, _kind: "canvas" };
+  const drawn = [];
+  player.view = (id) => (id === view._id ? view : null);
+  player.draw = (el) => drawn.push(el._ops);
+  const frames = [];
+  const saved = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+  try {
+    await f(player, view, frames, drawn);
+  } finally {
+    globalThis.requestAnimationFrame = saved;
+  }
+}
+
+const task = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("a canvas redrawn by several batches before a frame is drawn once, at the frame", async () => {
+  await withCanvasView(async (player, view, frames, drawn) => {
+    // Each pointer move or socket message is a task with a batch of its own.
+    for (const ops of [["a"], ["b"], ["c"]]) {
+      player.op_cv(["cv", view._id, ops]);
+      await task();
+    }
+    assert.deepEqual(drawn, [], "nothing is drawn before the frame");
+    assert.equal(frames.length, 1, "one frame asked for");
+    frames.shift()(16);
+    assert.deepEqual(drawn, [["c"]], "the last drawing, once");
+    assert.equal(frames.length, 0);
+  });
+});
+
+test("a canvas an animation frame changes is drawn in that frame", async () => {
+  await withCanvasView(async (player, view, frames, drawn) => {
+    view._ops = ["path"];
+    view._slots = [0];
+    // The engine's frame steps a canvas slot (`canvas:0`) in its batch.
+    player.wasm.nsh_frame = () => {
+      player.op_a(["a", view._id, "canvas:0", "0.5"]);
+      return -1;
+    };
+    player.requestFrame();
+    assert.equal(frames.length, 1);
+    frames.shift()(16);
+    await Promise.resolve();
+    assert.deepEqual(drawn, [["path"]], "drawn before the frame's paint");
+    assert.equal(frames.length, 0, "not left for the next frame");
+  });
+});
+
+test("a picture of a canvas draws its pending drawing first", async () => {
+  await withCanvasView(async (player, view, frames, drawn) => {
+    player.op_cv(["cv", view._id, ["new"]]);
+    player.flushDraws();
+    assert.deepEqual(drawn, [["new"]]);
+    frames.shift()(16);
+    assert.deepEqual(drawn, [["new"]], "the frame has nothing left to draw");
+  });
+});
+
 test("a picture taken again reads the styles of what changed only", () => {
   const { player } = fakePlayer();
   const read = [];
