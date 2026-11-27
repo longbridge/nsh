@@ -1788,6 +1788,97 @@ test("a press in a dialog over the window reports its place in the window", () =
   });
 });
 
+test("a press on a text field is its input's, after the focus it gives", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  inPage(() => {
+    globalThis.document.elementFromPoint = () => null;
+    globalThis.document.hasFocus = () => true;
+    const { player, sent } = dialogPlayer(false);
+    const focused = [];
+    const field = {
+      classList: { contains: (name) => name === "nsh-field" },
+      closest: () => null,
+      focus: () => focused.push("field"),
+    };
+    player.editable = (target) => target === field;
+    const view = (id, events, input) => ({
+      _id: id,
+      _events: new Set(events),
+      _props: {},
+      _tracked: 0,
+      _field: input ? field : undefined,
+      getBoundingClientRect: () => ({ left: 600, top: 300, right: 700, bottom: 340 }),
+      closest: () => null,
+    });
+    const row = view(8, ["onPress"], false);
+    const listening = view(9, ["onPress"], true);
+    const quiet = view(10, [], true);
+    /** Presses `input` (in a pressable row) with `pointerType`, on its
+     * field or on the padding around it (`at` the input itself). */
+    const press = (input, pointerType, at = field) => {
+      sent.length = 0;
+      player.viewOf = (target) => (target === field || target === input ? input : null);
+      player.ancestors = () => [input, row];
+      const e = { pointerId: 1, pointerType, button: 0, buttons: 1, clientX: 640, clientY: 320, target: at };
+      player.pointerDown(e);
+      player.pointerUp({ ...e, buttons: 0 }, false);
+      return sent.map(([name]) => name);
+    };
+    // A click focuses the field as it goes down: the input hears the press
+    // as it ends, the row around it nothing; so on the padding around the
+    // field.
+    globalThis.document.activeElement = field;
+    assert.deepEqual(press(listening, "mouse"), ["onPress"]);
+    assert.deepEqual(press(listening, "mouse", listening), ["onPress"]);
+    // A click whose focus went elsewhere (the app moved it) is pressed all
+    // the same: it waits for nothing.
+    globalThis.document.activeElement = null;
+    assert.deepEqual(press(listening, "mouse"), ["onPress"]);
+    assert.equal(player.fieldPress, null);
+    // An input that does not listen leaves the press to no one, on its
+    // field or around it.
+    assert.deepEqual(press(quiet, "mouse"), []);
+    assert.deepEqual(press(quiet, "mouse", quiet), []);
+    assert.deepEqual(press(quiet, "touch"), []);
+    assert.deepEqual(press(quiet, "touch", quiet), []);
+    // A tap on an unfocused field: the browser focuses it after the finger
+    // lifts, and the press follows that focus, once.
+    assert.deepEqual(press(listening, "touch"), []);
+    player.fieldPressed(field);
+    player.fieldPressed(field);
+    assert.deepEqual(sent.map(([name]) => name), ["onPress"]);
+    // So does one on the padding around the field.
+    assert.deepEqual(press(listening, "touch", listening), []);
+    player.fieldPressed(field);
+    assert.deepEqual(sent.map(([name]) => name), ["onPress"]);
+    // A tap whose focus did not come is pressed by its click on the input.
+    assert.deepEqual(press(listening, "touch"), []);
+    player.fieldClicked({ target: listening });
+    assert.deepEqual(sent.map(([name]) => name), ["onPress"]);
+    // One whose focus never came is dropped by the next press, by a click
+    // elsewhere, or once the mouse events of its tap are over: a focus
+    // that comes later reports none.
+    assert.deepEqual(press(listening, "touch"), []);
+    player.pointerDown({ pointerId: 2, pointerType: "touch", button: 0, clientX: 10, clientY: 10, target: {} });
+    player.fieldPressed(field);
+    assert.deepEqual(press(listening, "touch"), []);
+    player.fieldClicked({ target: {} });
+    player.fieldPressed(field);
+    assert.deepEqual(press(listening, "touch"), []);
+    t.mock.timers.tick(999);
+    assert.notEqual(player.fieldPress, null);
+    t.mock.timers.tick(1);
+    player.fieldPressed(field);
+    assert.deepEqual(sent, []);
+    // The mouse down of a press on the padding around a field gives the
+    // field the focus, and no view around it does.
+    let prevented = false;
+    player.mouseDown({ target: listening, button: 0, preventDefault: () => (prevented = true) });
+    assert.ok(prevented);
+    assert.deepEqual(focused, ["field"]);
+  });
+});
+
 test("the page does not scroll under a dialog or an alert over the window", () => {
   const cases = [
     [true, true, true],
