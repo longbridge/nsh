@@ -267,12 +267,12 @@ pub unsafe extern "C" fn nsh_app_set_error_reporting(
         if tag_count > 0 {
             // SAFETY: guaranteed by the caller.
             let tags = unsafe { std::slice::from_raw_parts(tags, tag_count * 2) };
-            for pair in tags.chunks_exact(2) {
-                if pair[0].is_null() || pair[1].is_null() {
+            for &[name, value] in tags.as_chunks::<2>().0 {
+                if name.is_null() || value.is_null() {
                     return Err("a tag is NULL".into());
                 }
                 // SAFETY: guaranteed by the caller.
-                let (name, value) = unsafe { (utf8(pair[0], "a tag")?, utf8(pair[1], "a tag")?) };
+                let (name, value) = unsafe { (utf8(name, "a tag")?, utf8(value, "a tag")?) };
                 reporting = reporting.tag(name, value);
             }
         }
