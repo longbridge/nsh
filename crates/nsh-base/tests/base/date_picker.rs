@@ -5,8 +5,10 @@
 //! a tap on a day closes it; presets set the value; the
 //! clear button and Delete clear it; Return opens and Escape closes;
 //! screen readers hear the value in the display format; on a phone one
-//! tap on a day closes the sheet, and the calendar spans it. Today is
-//! 2026-10-28 (the engine's manual clock).
+//! tap on a day closes the sheet, and the calendar spans it; with
+//! `closeOnSelect` off picks stay pending in a popup or sheet the app's
+//! footer closes, its header's and footer's stops around the calendar's.
+//! Today is 2026-10-28 (the engine's manual clock).
 
 use std::{
     collections::HashMap,
@@ -16,8 +18,8 @@ use std::{
 
 use chrono::NaiveDate;
 use nsh_base::{
-    CalendarEntry, CalendarItemKind, DatePickerEvent, DateRangePreset, DateTime, PickedDate,
-    TimeFieldSegmentEntry, TimePrecision, date_picker,
+    CalendarEntry, CalendarItemKind, DatePickerEvent, DateRangePreset, DateTime, OpenChangeReason,
+    PickedDate, TimeFieldSegmentEntry, TimePrecision, date_picker,
 };
 use nsh_core::{
     AccessibilityRole, MountItem, NodeId, Size, ViewKind,
@@ -34,6 +36,15 @@ struct HarnessProps {
     range: bool,
     time: bool,
     presets: bool,
+    /// Picks stay open (`closeOnSelect` off) as a pending value: a header
+    /// button `Header` and a footer with `Cancel` and `Apply` (each logs
+    /// its focus as `focus:<name>`), `open` the app's, which Cancel and
+    /// Apply close; Apply commits (`apply`), Cancel goes back to the value
+    /// committed (`discard`).
+    apply: bool,
+    /// With `apply`, the app keeps the popup open when a press outside
+    /// asks to close it.
+    refuse_press_outside: bool,
 }
 
 fn props() -> HarnessProps {
@@ -42,6 +53,8 @@ fn props() -> HarnessProps {
         range: false,
         time: false,
         presets: false,
+        apply: false,
+        refuse_press_outside: false,
     }
 }
 
@@ -68,9 +81,23 @@ fn show(p: &PickedDate) -> String {
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let value = signal(DateTime::Single(None));
+    let committed = signal(DateTime::Single(None));
+    let open = signal(false);
     let log = signal(Vec::<String>::new());
     let push = move |s: String| log.update(|l| l.push(s));
-    let controlled = props.controlled;
+    let apply = props.apply;
+    let refuse_press_outside = props.refuse_press_outside;
+    let controlled = props.controlled || apply;
+    // A button of the header or footer, logging its focus.
+    let button = move |name: &'static str, pressed: Box<dyn Fn()>| {
+        view()
+            .role(AccessibilityRole::Button)
+            .label(name)
+            .focusable(true)
+            .on_focus(move || push(format!("focus:{name}")))
+            .on_press(pressed)
+            .child(text(name))
+    };
     let mut el = date_picker()
         .range(props.range)
         .accessibility_label("Due")
@@ -104,8 +131,11 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             }
         })
         .on_open_change(move |e: &DatePickerEvent| {
-            if let DatePickerEvent::OpenChange(open, reason) = e {
-                push(format!("open:{open}:{reason:?}"));
+            if let DatePickerEvent::OpenChange(next, reason) = e {
+                push(format!("open:{next}:{reason:?}"));
+                if !(refuse_press_outside && *reason == OpenChangeReason::PressOutside) {
+                    open.set(*next);
+                }
             }
         })
         .on_cancel(move || push("cancel".into()));
@@ -118,8 +148,34 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             DateRangePreset::range("Last week", d(2026, 10, 19), d(2026, 10, 25)),
         ]);
     }
-    if props.controlled {
+    if controlled {
         el = el.value(move || value.get());
+    }
+    if apply {
+        el = el
+            .close_on_select(false)
+            .open(move || Some(open.get()))
+            .popup_header(button("Header", Box::new(|| {})))
+            .popup_footer(
+                view()
+                    .flex_row()
+                    .child(button(
+                        "Cancel",
+                        Box::new(move || {
+                            value.set(committed.get_untracked());
+                            push("discard".into());
+                            open.set(false);
+                        }),
+                    ))
+                    .child(button(
+                        "Apply",
+                        Box::new(move || {
+                            committed.set(value.get_untracked());
+                            push("apply".into());
+                            open.set(false);
+                        }),
+                    )),
+            );
     }
     view()
         .pt(px(40.0))
@@ -400,6 +456,146 @@ fn a_preset_is_the_value_and_closes_the_popup() {
 }
 
 #[test]
+fn kept_open_picks_are_pending_until_the_footer_s_apply() {
+    let mut app = start(HarnessProps {
+        apply: true,
+        range: true,
+        presets: true,
+        ..props()
+    });
+    app.open();
+    app.see("Header");
+    app.see("Apply");
+    // A range and a preset: each reported, the popup still open.
+    app.press("label:2026-10-20").unwrap();
+    app.see("10-20*");
+    app.press("label:2026-10-22").unwrap();
+    app.see("10-22*");
+    app.press("label:Last week").unwrap();
+    app.see("Log: open:true:TriggerPress 2026-10-20..2026-10-22 2026-10-19..2026-10-25");
+    app.wait(Duration::from_millis(100)).unwrap();
+    assert!(app.shows("prev"), "a pick leaves it open");
+    app.press("label:Apply").unwrap();
+    app.closed();
+    assert!(
+        app.log().ends_with("2026-10-19..2026-10-25 apply"),
+        "{}",
+        app.log()
+    );
+    assert_eq!(app.heard().as_deref(), Some("2026/10/19 - 2026/10/25"));
+    // Cancel in the footer goes back to the value applied.
+    app.open();
+    app.press("label:2026-10-14").unwrap();
+    app.press("label:2026-10-15").unwrap();
+    app.see("10-15*");
+    app.press("label:Cancel").unwrap();
+    app.closed();
+    assert!(
+        app.log()
+            .ends_with("apply open:true:TriggerPress 2026-10-14..2026-10-15 discard"),
+        "{}",
+        app.log()
+    );
+    assert_eq!(app.heard().as_deref(), Some("2026/10/19 - 2026/10/25"));
+}
+
+#[test]
+fn kept_open_the_selected_day_again_closes_nothing() {
+    let mut app = start(HarnessProps {
+        apply: true,
+        time: true,
+        ..props()
+    });
+    app.open();
+    app.press("label:2026-10-14").unwrap();
+    app.see("10-14*");
+    app.press("label:2026-10-14").unwrap();
+    app.wait(Duration::from_millis(100)).unwrap();
+    assert!(app.shows("prev"), "only the app closes it");
+    assert!(!app.log().contains("open:false"), "{}", app.log());
+}
+
+/// Presses `key` until the header or footer reports the focus, and gives
+/// the name of the first one that did.
+fn tab_to(app: &mut App, key: &str) -> String {
+    let before = app.log().matches("focus:").count();
+    for _ in 0..12 {
+        app.press_key(key).unwrap();
+        app.wait(Duration::from_millis(20)).unwrap();
+        let log = app.log();
+        if let Some(name) = log
+            .split(' ')
+            .filter_map(|w| w.strip_prefix("focus:"))
+            .nth(before)
+        {
+            return name.to_owned();
+        }
+    }
+    panic!("no stop of the header or footer: {}", app.log());
+}
+
+#[test]
+fn the_header_s_stops_come_before_the_calendar_s_and_the_footer_s_after() {
+    let mut app = start(HarnessProps {
+        apply: true,
+        ..props()
+    });
+    app.press_key("tab").unwrap();
+    app.press_key("enter").unwrap();
+    app.see("10-28^");
+    // From the days on, the footer is next; back from it, the calendar
+    // and then the header.
+    assert_eq!(tab_to(&mut app, "tab"), "Cancel");
+    assert_eq!(tab_to(&mut app, "shift+tab"), "Header");
+    // Return on the footer's Apply closes it, and the keyboard goes back
+    // to the trigger, where Return opens it again.
+    assert_eq!(tab_to(&mut app, "tab"), "Cancel");
+    app.press_key("tab").unwrap();
+    app.press_key("enter").unwrap();
+    app.closed();
+    assert!(app.log().ends_with("focus:Apply apply"), "{}", app.log());
+    app.press_key("enter").unwrap();
+    app.see("prev");
+}
+
+#[test]
+fn closed_by_the_app_after_it_kept_it_open_the_keyboard_goes_back_to_the_trigger() {
+    let mut app = start(HarnessProps {
+        apply: true,
+        refuse_press_outside: true,
+        ..props()
+    });
+    app.press_key("tab").unwrap();
+    app.press_key("enter").unwrap();
+    app.see("10-28^");
+    // A press outside asks to close it; the app keeps it open (a press on
+    // macOS leaves the keyboard on the day).
+    app.press("id:elsewhere").unwrap();
+    app.wait(Duration::from_millis(100)).unwrap();
+    assert!(
+        app.log().ends_with("cancel open:false:PressOutside"),
+        "{}",
+        app.log()
+    );
+    assert!(app.shows("prev"), "the app kept it open");
+    // Return on the footer's Apply: the app closes it, and the keyboard
+    // goes back to the trigger, where Return opens it again.
+    let mut stop = tab_to(&mut app, "tab");
+    for _ in 0..3 {
+        if stop == "Apply" {
+            break;
+        }
+        stop = tab_to(&mut app, "tab");
+    }
+    assert_eq!(stop, "Apply", "{}", app.log());
+    app.press_key("enter").unwrap();
+    app.closed();
+    assert!(app.log().ends_with("focus:Apply apply"), "{}", app.log());
+    app.press_key("enter").unwrap();
+    app.see("prev");
+}
+
+#[test]
 fn the_clear_button_and_delete_clear_the_value() {
     let mut app = start(props());
     assert!(!app.shows("Clear"), "nothing to clear");
@@ -521,6 +717,36 @@ fn on_a_phone_with_a_time_one_tap_on_a_day_picks_it_at_its_time_and_closes_the_s
         );
         assert_eq!(app.heard().as_deref(), Some("2026/10/15 09:00"));
     }
+}
+
+#[test]
+fn on_a_phone_kept_open_the_sheet_holds_the_header_and_footer_until_apply() {
+    let mut app = start_on(
+        Os::Ios,
+        HarnessProps {
+            apply: true,
+            time: true,
+            ..props()
+        },
+    );
+    app.open();
+    app.see("Header");
+    app.see("Apply");
+    // A tap on a day leaves the sheet open for the time.
+    app.press("label:2026-10-14").unwrap();
+    app.see("10-14*");
+    app.type_text("label:Due time", "0900").unwrap();
+    app.see("seg09");
+    app.press("label:Apply").unwrap();
+    app.closed();
+    let log = app.log();
+    assert!(
+        log.starts_with("open:true:TriggerPress 2026-10-14T00:00 ")
+            && log.ends_with(" 2026-10-14T09:00 apply")
+            && !log.contains("open:false"),
+        "{log}"
+    );
+    assert_eq!(app.heard().as_deref(), Some("2026/10/14 09:00"));
 }
 
 #[test]

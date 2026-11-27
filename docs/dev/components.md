@@ -1309,7 +1309,10 @@ with every prop of `Calendar` passed on (`calendar::Config`); opening it on the 
 days (`Grid::focus_days`). A complete date is the value and closes it with `"select"`; with a time the popup stays
 open on the desktops, each edit reported, until the selected day is pressed again (`gpui-component`'s double click),
 while in a sheet (touch screens, the `sheet` the content is made for) a tap on a day picks it at its time and closes,
-as a single date does: a touch has no double click (`api-naming.md`). The trigger's keys are bound while it has the
+as a single date does: a touch has no double click (`api-naming.md`). With `closeOnSelect` off no pick or preset
+closes it: each is reported and the app closes it through `open` (a pending value committed from its `popupFooter`).
+The app's `popupHeader` and `popupFooter` slots are the popup's first and last children, around the content, so their
+Tab stops come before and after the calendar's. The trigger's keys are bound while it has the
 focus: Return opens and closes (`gpui-base`'s `Confirm`), Delete and Backspace clear while it is closed. The value
 crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the precision of `timePrecision`
 (`PickedDate`).

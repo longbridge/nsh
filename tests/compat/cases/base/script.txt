@@ -2708,6 +2708,26 @@ covers [props] DatePicker.timeLabel
 covers [props] DatePicker.timeAccessibilityLabel
 covers [props] DatePicker.renderSegment
 covers [props] DatePicker.segmentStyle
+# `closeOnSelect={false}`: the sheet holds the app's header above the
+# calendar and its footer below; a range's two days are reported and
+# shown selected, the sheet still open, until the app's Apply in the
+# footer commits the pending value and closes it (`open`).
+tap id:stay
+expect StayHeader
+expect StayApply
+tap label:2026-10-12
+tap label:2026-10-14
+prop label:2026-10-13 accessibilityState selected=true
+expect StayHeader
+expect Stay: none
+tap id:stayApply
+expect Stay: ["2026-10-12","2026-10-14"]
+absent StayHeader
+prop label:Stay accessibilityValue text=2026/10/12 - 2026/10/14
+covers [props] DatePicker.closeOnSelect
+covers [props] DatePicker.popupHeader
+covers [props] DatePicker.popupFooter
+covers [props] DatePicker.open
 
 # base-select
 tap id:case-base-select
