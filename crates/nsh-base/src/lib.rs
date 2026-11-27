@@ -233,7 +233,10 @@ pub use crate::{
         SelectValue, select,
     },
     sheet::{Sheet, SheetDetent, SheetElement, SheetEvent, SheetProps, sheet},
-    slider::{Slider, SliderElement, SliderEvent, SliderProps, SliderScale, SliderValue, slider},
+    slider::{
+        Slider, SliderElement, SliderEvent, SliderProps, SliderScale, SliderThumbContext,
+        SliderValue, slider,
+    },
     split_view::{
         ColumnVisibility, SplitView, SplitViewElement, SplitViewEvent, SplitViewProps, split_view,
     },

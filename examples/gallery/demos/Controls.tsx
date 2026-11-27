@@ -3,7 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { keymap, platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, plural, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
+import { alpha, backdrop, Badge, plural, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderBubbleClass, sliderBubbleText, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -2723,7 +2723,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             </View>
           </Level>
           <Level label="Price" detail={`${listings(price())} listings between the two`} value={`$${price()[0]} – $${price()[1]}`}>
-            {/* How many listings each price has: the bars in the range light up as the thumbs move.
+            {/* How many listings each price has: the bars in the range light up as the thumbs move, and the
+                thumb under the pointer, dragged or focused shows its price in a bubble over the bars.
                 A terminal's two rows would draw them as blank Cells: the count in the label says it. */}
             <If when={!terminal}>
               <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
@@ -2754,6 +2755,11 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               onChange={({ value }) => price.set(value as [number, number])}
               onChangeEnd={({ value }) => last.set(`Price: ${(value as [number, number]).join(" to ")}`)}
               rangeStyle={sliderFill(price()[0] / 500, price()[1] / 500)}
+              renderThumb={({ start }) => (
+                <View class={sliderBubbleClass()}>
+                  <Text class={sliderBubbleText}>{`$${price()[start ? 0 : 1]}`}</Text>
+                </View>
+              )}
               {...sliderLook()}
             />
           </Level>
