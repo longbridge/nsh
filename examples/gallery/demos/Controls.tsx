@@ -3467,7 +3467,6 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     Tabs: [Sections, Project],
     Select: [Choices, Downloads, Shipping, Issue],
     Combobox: [Tags, People, Labels, Commands],
-    // The system's picker is on phones only: elsewhere the drawn ones stand alone.
     DatePicker: [Dates, Booking, Deadline, Slots],
     Collapsible: [Disclosure, Faq],
     Progress: [Transfers, Uploads, Steps, Meters],
