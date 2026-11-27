@@ -3521,7 +3521,7 @@ mod tests {
                 !in_rects(30.0, 140.0),
                 in_rects(110.0, 150.0),
                 !in_rects(60.0, 160.0),
-                !in_rects(160.0, 160.0),
+                !in_rects(165.0, 165.0),
                 !in_rects(110.0, 180.0),
                 !in_rects(190.0, 10.0),
             ];
