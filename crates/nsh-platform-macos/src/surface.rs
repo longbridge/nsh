@@ -39,7 +39,7 @@ use std::{
     path::PathBuf,
     rc::{Rc, Weak},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Instant,
@@ -126,6 +126,9 @@ struct Sink {
     /// The backing scale of the surface's window (`f64` bits), which its
     /// texts are painted at ([`Surface::raster_scale`]).
     raster_scale: Arc<AtomicU64>,
+    /// Live node sizes and layouts remembered across batches so updated
+    /// texts without a new frame still paint off the main thread.
+    raster_state: Mutex<crate::text::RasterState>,
 }
 
 impl Sink {
@@ -147,7 +150,13 @@ impl MountSink for Sink {
         // The texts are painted here, off the main thread, which then only
         // shows them: Core Animation would draw each in its commit.
         let scale = f64::from_bits(self.raster_scale.load(Ordering::Relaxed));
-        let rasters = crate::text::prerender(&batch, scale);
+        let rasters = {
+            let mut state = self
+                .raster_state
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            crate::text::prerender(&batch, scale, &mut state)
+        };
         let sent = self.perf.load(Ordering::Relaxed).then(Instant::now);
         self.send(Message::Batch(batch, sent, rasters));
     }
@@ -521,6 +530,7 @@ impl Surface {
             perf: self.perf_on.clone(),
             chunks: self.chunks.borrow().clone(),
             raster_scale: self.raster_scale.clone(),
+            raster_state: Mutex::default(),
         };
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
