@@ -172,9 +172,10 @@ final class Native {
 
     /**
      * Whether a web view of the running app may navigate to {@code url}, with
-     * its {@code allowOrigin} {@code origin} (null: none).
+     * its {@code allowOrigin} {@code origin} and its {@code allowNavigation}
+     * {@code hosts}, one pattern per line (null: none).
      */
-    static native boolean allowsWebview(long handle, String url, String origin);
+    static native boolean allowsWebview(long handle, String url, String origin, String hosts);
 
     /**
      * Whether the running app's web pages may capture {@code kind}

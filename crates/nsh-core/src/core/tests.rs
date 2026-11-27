@@ -56953,3 +56953,58 @@ mod resolved_style_cache {
         );
     }
 }
+
+/// `allowNavigation` reaches the web view's backend as host patterns, and
+/// a list with a pattern that does not read is refused with a message and
+/// leaves the web view not narrowed.
+#[test]
+fn allow_navigation_reaches_the_web_view() {
+    let narrowed = |hosts: &[&str]| {
+        let mut c = core();
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "webview": { "hosts": ["*"] } }),
+            )
+            .unwrap(),
+            granted: None,
+        }));
+        let prop = Prop::Native(NativeProp::AllowNavigation(Some(
+            hosts.iter().map(|h| Arc::<str>::from(*h)).collect(),
+        )));
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::WebView,
+                },
+                Op::SetProp { id: 2, prop },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let hosts = batch.items.iter().rev().find_map(|i| match i {
+            MountItem::NativeProps {
+                id: 2,
+                props: crate::NativeProps::WebView(p),
+            } => Some(p.allow_navigation.clone()),
+            _ => None,
+        });
+        (hosts.flatten(), c.denied.clone())
+    };
+    let (hosts, denied) = narrowed(&["127.0.0.1", "*.localhost"]);
+    let hosts = hosts.expect("narrowed");
+    assert!(hosts.allows("http://127.0.0.1:8001/"));
+    assert!(!hosts.allows("http://127.0.0.1:8002.evil.test/"));
+    assert!(denied.is_empty(), "{denied:?}");
+    let (hosts, denied) = narrowed(&["http://127.0.0.1:*"]);
+    assert!(hosts.is_none());
+    assert!(
+        denied.iter().any(|m| m.starts_with("`allowNavigation`")),
+        "{denied:?}"
+    );
+}

@@ -1585,11 +1585,15 @@ impl WebItem {
             return false;
         };
         let access = surface.native.access.borrow().clone();
-        let origin = self
+        let (origin, hosts) = self
             .props
             .borrow()
             .as_ref()
-            .and_then(|p| p.allow_origin.clone());
+            .map(|p| (p.allow_origin.clone(), p.allow_navigation.clone()))
+            .unwrap_or_default();
+        if hosts.as_ref().is_some_and(|h| !h.allows(url)) {
+            return false;
+        }
         access.is_none_or(|a: Arc<nsh_engine::Access>| a.allows_webview_with(url, origin.as_ref()))
     }
 

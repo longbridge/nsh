@@ -407,8 +407,8 @@ final class Mounter {
      * none) may navigate to {@code url} (the app's capabilities). The origin
      * is compared in Rust.
      */
-    boolean allowsWebview(String url, String origin) {
-        return Native.allowsWebview(handle(), url, origin);
+    boolean allowsWebview(String url, String origin, String hosts) {
+        return Native.allowsWebview(handle(), url, origin, hosts);
     }
 
     /** Whether the running app's web pages may capture {@code kind} (its {@code webview.media}). */
@@ -3255,9 +3255,10 @@ final class Mounter {
                 String injected = optString(b, objects), before = optString(b, objects), ua = optString(b, objects);
                 boolean scroll = b.getInt() != 0, js = b.getInt() != 0, incognito = b.getInt() != 0;
                 boolean zoomable = b.getInt() != 0;
-                String allowOrigin = optString(b, objects);
+                String allowOrigin = optString(b, objects), allowNavigation = optString(b, objects);
                 if (v instanceof WebBox) {
-                    ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito, zoomable, allowOrigin);
+                    ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito, zoomable, allowOrigin,
+                            allowNavigation);
                 }
                 break;
             }

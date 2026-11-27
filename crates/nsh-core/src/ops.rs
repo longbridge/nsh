@@ -4195,6 +4195,16 @@ pub enum NativeProp {
     /// the windows a page opens do not have it.
     #[prop(js = "allowOrigin", on = WEBVIEW)]
     AllowOrigin(Option<Arc<str>>),
+    /// `allowNavigation` (web views): the hosts this web view may show and
+    /// navigate to, narrower than `webview.hosts`: the same host patterns
+    /// (`*`, `*.example.com`, a host name), and an empty list refuses every
+    /// web page ([`crate::access::WebHosts`]). The platform refuses any
+    /// other `http` or `https` page before its request is made and reports
+    /// `onError` with `ERR_ACCESS_DENIED` and the `url`. It never widens
+    /// the app's grant. A list with a pattern that does not read is refused
+    /// with a message and the web view is not narrowed.
+    #[prop(js = "allowNavigation", on = WEBVIEW)]
+    AllowNavigation(Option<Vec<Arc<str>>>),
     /// `injectedJavaScript` (web views): runs after each page loads.
     #[prop(js = "injectedJavaScript", on = WEBVIEW)]
     InjectedJavaScript(Option<Arc<str>>),
