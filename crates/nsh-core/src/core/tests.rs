@@ -40416,6 +40416,167 @@ fn headless_text_frames_respect_inherited_and_updated_line_heights() {
     }
 }
 
+/// Nested spans resolve a unitless line height against their own font, but
+/// the paragraph keeps the root `<Text>`'s resolved strut separately.
+#[test]
+fn nested_spans_do_not_redefine_the_root_line_height() {
+    for first_small in [true, false] {
+        let mut c = Core::new(crate::ApproxTextEngine, size_pt(320.0, 480.0));
+        let insert = |parent, child| Op::Insert {
+            parent,
+            child,
+            before: None,
+        };
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::SetStyle {
+                id: 2,
+                style: style(&[
+                    ("fontSize", StyleValue::Number(14.0)),
+                    // Strings are CSS-like unitless multiples; numbers are points.
+                    ("lineHeight", StyleValue::Str("1.625")),
+                ]),
+                patch: Default::default(),
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::Text,
+            },
+            Op::SetStyle {
+                id: 3,
+                style: style(&[("fontSize", StyleValue::Str("0.9em"))]),
+                patch: Default::default(),
+            },
+            Op::CreateText {
+                id: 4,
+                text: "`code`".into(),
+            },
+            Op::CreateText {
+                id: 5,
+                text: " 中文正文".into(),
+            },
+            insert(3, 4),
+        ];
+        if first_small {
+            ops.extend([insert(2, 3), insert(2, 5)]);
+        } else {
+            ops.extend([insert(2, 5), insert(2, 3)]);
+        }
+        ops.push(insert(ROOT_ID, 2));
+        for op in ops {
+            c.apply(op).unwrap();
+        }
+        let batch = c.commit().unwrap();
+        let text = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text { id: 2, text, .. } => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        let strut = text.paragraph_strut.expect("core sets the root strut");
+        assert!(
+            (strut.line_height.0 - 22.75).abs() < 0.001,
+            "{first_small}: {:?}",
+            strut.line_height
+        );
+        assert_eq!(strut.font_size, px(14.0));
+        let small = text
+            .spans
+            .iter()
+            .map(|s| s.style.line_height.0)
+            .fold(f32::INFINITY, f32::min);
+        assert!((small - 20.475).abs() < 0.001, "{first_small}: {small}");
+        assert_eq!(
+            c.measure(2).unwrap().frame.size.height,
+            px(23.0),
+            "{first_small}"
+        );
+    }
+}
+
+/// `items-baseline` uses the body text's root-strut baseline even when the
+/// whole body is a smaller inline-code span.
+#[test]
+fn a_baseline_row_uses_the_body_texts_root_strut() {
+    let mut c = Core::new(crate::ApproxTextEngine, size_pt(320.0, 480.0));
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    for op in [
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        class_op(2, "flex-row items-baseline"),
+        Op::Create {
+            id: 3,
+            tag: Tag::Text,
+        },
+        Op::SetStyle {
+            id: 3,
+            style: style(&[
+                ("fontSize", StyleValue::Number(10.0)),
+                ("lineHeight", StyleValue::Number(24.375)),
+            ]),
+            patch: Default::default(),
+        },
+        Op::CreateText {
+            id: 4,
+            text: "•".into(),
+        },
+        Op::Create {
+            id: 5,
+            tag: Tag::Text,
+        },
+        Op::SetStyle {
+            id: 5,
+            style: style(&[
+                ("fontSize", StyleValue::Number(15.0)),
+                ("lineHeight", StyleValue::Str("1.625")),
+            ]),
+            patch: Default::default(),
+        },
+        Op::Create {
+            id: 6,
+            tag: Tag::Text,
+        },
+        Op::SetStyle {
+            id: 6,
+            style: style(&[("fontSize", StyleValue::Str("0.9em"))]),
+            patch: Default::default(),
+        },
+        Op::CreateText {
+            id: 7,
+            text: "`useState`".into(),
+        },
+        insert(3, 4),
+        insert(6, 7),
+        insert(5, 6),
+        insert(2, 3),
+        insert(2, 5),
+        insert(ROOT_ID, 2),
+    ] {
+        c.apply(op).unwrap();
+    }
+    let batch = c.commit().unwrap();
+    let top = |id| frame_of(&batch, id).map(|f| f.origin.y.0);
+    // Approx's body baseline is 15 × 1.2 plus half of 24.375 - 15 × 1.2 =
+    // 21.1875. The 10pt marker's is 18.1875, so it starts 3pt lower.
+    assert_eq!(top(5), Some(0.0));
+    assert!(
+        (top(3).unwrap() - 3.0).abs() < 0.001,
+        "marker top {:?}",
+        top(3)
+    );
+}
+
 #[test]
 fn percentage_line_heights_inherit_as_computed_lengths() {
     for (leading, expected) in [

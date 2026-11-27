@@ -347,6 +347,10 @@ pub(crate) struct Prepared {
     layout: pango::Layout,
     /// UTF-16 offset of each byte offset of the text.
     utf16: Box<[u32]>,
+    /// How far the root strut's baseline is below its line's top with a
+    /// fixed `lineHeight` (`None`: no fixed line height), and the root
+    /// font's size.
+    strut: Option<(f32, f32)>,
     /// Byte offsets of the attachments' placeholders, in order, with how
     /// far the attachment's top is above the baseline
     /// (`TextAttachment::ascent`).
@@ -403,6 +407,7 @@ fn natural_line_heights(
     s: &str,
     natural: &[(u32, u32, i32, i32)],
     placeholders: &[(u32, u32)],
+    root_height: i32,
 ) {
     if natural.is_empty() {
         return;
@@ -434,7 +439,7 @@ fn natural_line_heights(
     }
     let insert = |start: u32, end: u32, height: i32| {
         if end > start {
-            let mut attr = pango::AttrInt::new_line_height_absolute(height);
+            let mut attr = pango::AttrInt::new_line_height_absolute(height.max(root_height));
             attr.set_start_index(start);
             attr.set_end_index(end);
             attrs.insert(attr);
@@ -785,11 +790,21 @@ impl TextEngine for PangoTextEngine {
         hyphens.set_start_index(0);
         hyphens.set_end_index(u32::MAX);
         attrs.insert(hyphens);
-        let base = text
-            .spans
-            .first()
-            .map_or_else(ResolvedTextStyle::default, |s| s.style);
-        layout.set_font_description(Some(&font_description(&base, &self.ui_family)));
+        let root_strut = text.paragraph_strut_or_first();
+        layout.set_font_description(Some(&font_description(&root_strut, &self.ui_family)));
+        let root_height = if root_strut.line_height.0 > 0.0 {
+            to_pango(root_strut.line_height.0)
+        } else {
+            0
+        };
+        let strut = if root_height > 0 {
+            let desc = font_description(&root_strut, &self.ui_family);
+            let (ascent, descent) = self.natural_metrics(context, &desc);
+            let up = ascent + (root_height - ascent - descent) / 2;
+            Some((from_pango(up), root_strut.font_size.0))
+        } else {
+            None
+        };
         // The attachments' placeholders (byte ranges): they make their
         // line as tall as they are.
         let mut placeholders = Vec::with_capacity(text.attachments.len());
@@ -834,7 +849,7 @@ impl TextEngine for PangoTextEngine {
                 // run under it exactly that height, so an attachment
                 // taller than the line would not grow it. Their shapes
                 // reserve the line's own box instead (below).
-                let height = to_pango(style.line_height.0);
+                let height = to_pango(style.line_height.0).max(root_height);
                 let mut from = start;
                 for (a, b) in placeholders
                     .iter()
@@ -890,13 +905,22 @@ impl TextEngine for PangoTextEngine {
             let style = text
                 .span_at(a.index)
                 .map_or_else(Default::default, |s| s.style);
-            if style.line_height.0 > 0.0 {
-                let desc = font_description(&style, &self.ui_family);
+            let reserve = |style: &ResolvedTextStyle, height: f32| {
+                let desc = font_description(style, &self.ui_family);
                 let (ascent, descent) = self.natural_metrics(context, &desc);
-                let height = to_pango(style.line_height.0);
+                let height = to_pango(height);
                 let above = ascent + (height - ascent - descent) / 2;
+                (above, height - above)
+            };
+            if root_strut.line_height.0 > 0.0 {
+                let (above, below) = reserve(&root_strut, root_strut.line_height.0);
                 up = up.max(above);
-                down = down.max(height - above);
+                down = down.max(below);
+            }
+            if style.line_height.0 > 0.0 {
+                let (above, below) = reserve(&style, style.line_height.0);
+                up = up.max(above);
+                down = down.max(below);
             }
             let ink = pango::Rectangle::new(
                 0,
@@ -913,7 +937,7 @@ impl TextEngine for PangoTextEngine {
             attachment_extents.push((a.index, a.width.0));
         }
         layout.set_attributes(Some(&attrs));
-        natural_line_heights(&layout, &attrs, s, &natural, &placeholders);
+        natural_line_heights(&layout, &attrs, s, &natural, &placeholders, root_height);
         let flush = match alignment {
             pango::Alignment::Center => 0.5,
             pango::Alignment::Right => 1.0,
@@ -922,6 +946,7 @@ impl TextEngine for PangoTextEngine {
         Prepared {
             layout,
             utf16: utf16_offsets(s),
+            strut,
             attachments,
             attachment_extents,
             max_lines: text.max_lines,
@@ -1121,6 +1146,33 @@ impl TextEngine for PangoTextEngine {
                 runs: first..out.runs.len(),
                 baseline,
             });
+        }
+        if let Some((strut_up, strut_size)) = prepared.strut {
+            for line in &mut out.lines {
+                let current = line.baseline - line.info.y.0;
+                if current >= strut_up - 0.01 {
+                    continue;
+                }
+                let runs = &out.runs[line.runs.clone()];
+                // Attachments reserve the strut themselves; larger fonts
+                // and ellipsis lines keep the layout they already had.
+                let large = runs.iter().any(|r| r.font.size > strut_size + 0.01);
+                let ellipsis = runs.iter().any(|r| r.ellipsis);
+                let attachment = prepared
+                    .attachment_extents
+                    .iter()
+                    .any(|&(at, _)| at >= line.info.start && at < line.info.end);
+                if large || ellipsis || attachment {
+                    continue;
+                }
+                let delta = strut_up - current;
+                line.baseline += delta;
+                line.info.ascender += Points(delta);
+                line.info.descender = Points((line.info.descender.0 - delta).max(0.0));
+                for run in &mut out.runs[line.runs.clone()] {
+                    run.baseline += delta;
+                }
+            }
         }
         TextLayout(Arc::new(out))
     }
@@ -2781,6 +2833,82 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The paragraph's fixed line height is its root strut's, not the line
+    /// height of a smaller inline span that happens to start the text.
+    #[test]
+    fn the_paragraph_line_height_is_the_root_struts() {
+        let root = ResolvedTextStyle {
+            font_size: Points(14.0),
+            line_height: Points(22.75),
+            ..Default::default()
+        };
+        let small = ResolvedTextStyle {
+            font_size: Points(12.6),
+            line_height: Points(20.475),
+            ..Default::default()
+        };
+        let make = |first_small| {
+            let mut t = if first_small {
+                text(&[("`code`", small), (" 中文正文", root)])
+            } else {
+                text(&[("中文正文 ", root), ("`code`", small)])
+            };
+            t.paragraph_strut = Some(root);
+            t
+        };
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let measure = |first_small| {
+            let t = make(first_small);
+            let prepared = engine.prepare(&t);
+            let size = engine.measure(&prepared, Some(Points(300.0)));
+            let baseline = engine
+                .first_baseline(&prepared, Points(300.0))
+                .expect("a first line");
+            (size.height.0, baseline.0)
+        };
+        let small_first = measure(true);
+        let plain_first = measure(false);
+        assert!(
+            (small_first.0 - plain_first.0).abs() < 0.01,
+            "height: small first {small_first:?}, plain first {plain_first:?}"
+        );
+        assert!(
+            (small_first.1 - plain_first.1).abs() < 0.01,
+            "baseline: small first {small_first:?}, plain first {plain_first:?}"
+        );
+        assert!(
+            plain_first.0 >= 22.75,
+            "{plain_first:?}"
+        );
+
+        // Even when no root-sized glyph is present, the strut keeps the
+        // smaller inline box from lowering the paragraph or moving its baseline.
+        let only = |small_style| {
+            let mut t = text(&[("`code`", if small_style { small } else { root })]);
+            t.paragraph_strut = Some(root);
+            t
+        };
+        let measure_only = |small_style| {
+            let t = only(small_style);
+            let prepared = engine.prepare(&t);
+            let size = engine.measure(&prepared, Some(Points(300.0)));
+            let baseline = engine
+                .first_baseline(&prepared, Points(300.0))
+                .expect("a first line");
+            (size.height.0, baseline.0)
+        };
+        let small_only = measure_only(true);
+        let root_only = measure_only(false);
+        assert!(
+            (small_only.0 - root_only.0).abs() < 0.01,
+            "height: small only {small_only:?}, root only {root_only:?}"
+        );
+        assert!(
+            (small_only.1 - root_only.1).abs() < 0.01,
+            "baseline: small only {small_only:?}, root only {root_only:?}"
+        );
     }
 
     /// A text's first baseline (what `align-items: baseline` lines it up

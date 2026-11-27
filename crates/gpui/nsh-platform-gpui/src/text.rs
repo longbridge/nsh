@@ -861,6 +861,12 @@ pub(crate) struct Prepared {
     paragraphs: Vec<Paragraph>,
     /// One per style run (one for text without spans).
     spans: Vec<SpanBox>,
+    /// The line box empty text falls back to: the root font's natural box,
+    /// or its strut box with a fixed `lineHeight`.
+    base: (f32, f32),
+    /// The root paragraph's fixed strut box (`lineHeight`; `None`: none),
+    /// the minimum of every line.
+    strut: Option<(f32, f32)>,
     /// The fonts of the style runs and their sizes.
     fonts: Vec<(Font, f32)>,
     /// Ellipses shaped so far, by span.
@@ -981,8 +987,8 @@ impl Prepared {
     /// to `end` (UTF-16): those of the spans in it (spans that only hold
     /// attachments there aside) and of its attachments.
     fn line_box(&self, start: u32, end: u32) -> (f32, f32) {
-        let mut ascent = f32::NEG_INFINITY;
-        let mut descent = f32::NEG_INFINITY;
+        let (mut ascent, mut descent) =
+            self.strut.unwrap_or((f32::NEG_INFINITY, f32::NEG_INFINITY));
         let attachments = &self.text.attachments;
         let placeholders = |a: u32, b: u32| {
             attachments
@@ -996,7 +1002,9 @@ impl Prepared {
                 .spans
                 .partition_point(|s| s.end < start)
                 .min(self.spans.len() - 1);
-            (ascent, descent) = self.spans[i].extents();
+            let (up, down) = self.spans[i].extents();
+            ascent = ascent.max(up);
+            descent = descent.max(down);
         } else {
             let first = self.spans.partition_point(|s| s.end <= start);
             for s in self.spans[first..].iter().take_while(|s| s.start < end) {
@@ -1017,7 +1025,7 @@ impl Prepared {
             }
         }
         if ascent == f32::NEG_INFINITY {
-            return self.spans[0].extents();
+            return self.base;
         }
         (ascent, descent)
     }
@@ -1350,6 +1358,20 @@ impl TextEngine for GpuiTextEngine {
             });
             fonts.push((face.font.clone(), size));
         }
+        let root_style = t.paragraph_strut_or_first();
+        let (base, strut) = {
+            let face = self.face(&root_style);
+            let size = root_style.font_size.0;
+            let m = face.metrics;
+            let (ascent, descent) = (m.ascent * size, m.descent * size);
+            if root_style.line_height.0 > 0.0 {
+                let half = (root_style.line_height.0 - ascent - descent) / 2.0;
+                let strut = (ascent + half, descent + half);
+                (strut, Some(strut))
+            } else {
+                ((ascent, descent), None)
+            }
+        };
         let mut allowed = vec![false; s.len() + 1];
         for (i, op) in unicode_linebreak::linebreaks(s) {
             if op == unicode_linebreak::BreakOpportunity::Allowed {
@@ -1417,6 +1439,8 @@ impl TextEngine for GpuiTextEngine {
             prefix,
             paragraphs,
             spans,
+            base,
+            strut,
             fonts: b.fonts,
             ellipses: RefCell::default(),
         }
