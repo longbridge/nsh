@@ -51,6 +51,8 @@ mod input_hidden;
 #[cfg(target_os = "macos")]
 mod input_line_height;
 #[cfg(target_os = "macos")]
+mod input_press;
+#[cfg(target_os = "macos")]
 mod input_restyle;
 #[cfg(target_os = "macos")]
 mod input_tab_stops;
@@ -211,6 +213,8 @@ fn main() {
                 image_placeholder::run();
             } else if std::env::var_os("NSH_INPUT_CLIP_CHECK_ONLY").is_some() {
                 input_clip::run();
+            } else if std::env::var_os("NSH_INPUT_PRESS_CHECK_ONLY").is_some() {
+                input_press::run();
             } else if std::env::var_os("NSH_INPUT_RESTYLE_CHECK_ONLY").is_some() {
                 input_restyle::run();
             } else if std::env::var_os("NSH_REMOVED_FOCUS_CHECK_ONLY").is_some() {
@@ -319,6 +323,7 @@ fn main() {
                 input_baseline::run();
                 input_line_height::run();
                 input_restyle::run();
+                input_press::run();
                 removed_focus::run();
                 focus_selection::run();
                 text_view_selection::run();

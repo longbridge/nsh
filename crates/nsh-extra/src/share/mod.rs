@@ -566,6 +566,21 @@ pub async fn show(request: ShareRequest) -> Result<ShareOutcome, ShareError> {
             fake.show(sheet, reply).await;
         })),
         None if in_terminal() => none::show(sheet, reply),
+        // Where no platform sheet exists, `platform` is `none`, which
+        // answers at once and has nothing to spawn.
+        #[cfg(not(any(
+            target_os = "ios",
+            target_os = "macos",
+            target_os = "android",
+            target_arch = "wasm32"
+        )))]
+        None => platform::show(sheet, reply),
+        #[cfg(any(
+            target_os = "ios",
+            target_os = "macos",
+            target_os = "android",
+            target_arch = "wasm32"
+        ))]
         None => drop(nsh_core::element::spawn(platform::show(sheet, reply))),
     }
     answer

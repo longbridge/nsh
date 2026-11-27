@@ -71,6 +71,9 @@ Primary pointer events over hosted AppKit views (`NSTextField`, `NSTextView`,
 monitor (`input::install`) before AppKit's responder/modal tracking consumes
 them, keeping `:active`, pointer modality, momentum cancellation and
 `PressOutside` overlay dismissal consistent with ordinary `NshView` targets.
+A press on an input's editor or its pad is the `Input`'s when it listens, after
+the focus AppKit gives the editor, and no view around it hears it
+(`tests/native/input_press.rs`, `NSH_INPUT_PRESS_CHECK_ONLY=1`).
 `InputState::track_press` wraps an input editor's `mouseDown:` (AppKit's modal
 tracking of the press) and applies `selectTextOnFocus` once tracking ends: a plain
 click that focused the input selects its text, while a drag, a double click or a

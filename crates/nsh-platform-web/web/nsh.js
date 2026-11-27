@@ -3433,7 +3433,10 @@ class Player {
   updateAria(el) {
     const p = el._props ?? {};
     const set = (name, value) => setAriaAttribute(el, name, value);
-    const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
+    // An input that takes presses is still a text box, read on its field:
+    // its view is no button around it.
+    const button = el._pressable && el._kind !== "input";
+    const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : button ? "button" : null);
     // A combo box that is an input is its field, which keeps the focus
     // (`fieldAria`).
     set("role", el._field && p.role === "combobox" ? null : role);
@@ -3472,11 +3475,13 @@ class Player {
    * decides: pressables (Enter and Space press them) unless `focusable`
    * false, and any `focusable` view, pressable or not (its keys reach it
    * through the app's keymap); never disabled ones, those hidden from
-   * assistive technologies or those with no area (`seenByKeys`). */
+   * assistive technologies or those with no area (`seenByKeys`). An input's
+   * view is none, `focusable` or pressable: its field is its one stop
+   * (`fieldStop`), as on the desktops. */
   updateFocusable(el) {
     const p = el._props;
     const seen = this.seenByKeys(el);
-    const focusable = (p?.focusable ?? !!el._pressable) && !p?.disabled && !p?.hidden && seen;
+    const focusable = el._kind !== "input" && (p?.focusable ?? !!el._pressable) && !p?.disabled && !p?.hidden && seen;
     if (focusable) el.tabIndex = 0;
     // Programmatic focus only for what screen-reader focus moved to; an
     // element Tab reaches without a `tabindex` (a link, `web={{ element }}`)

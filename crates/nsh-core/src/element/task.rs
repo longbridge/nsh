@@ -163,8 +163,13 @@ pub(crate) enum Action {
         AnswerSlot<Result<bool, crate::desktop::LaunchAtLoginError>>,
     ),
     /// The next link the system hands the app ([`crate::url_scheme`])
-    /// resolves the slot, those that came before first.
-    NextUrlSchemeOpen(AnswerSlot<String>),
+    /// resolves the slot, those that came before first; every slot waiting
+    /// then gets it. The task that asks, if any, is the listener: one that
+    /// asked before gets first the links that came since its last one.
+    NextUrlSchemeOpen(Option<u64>, AnswerSlot<String>),
+    /// The next link of the scheme (lowered) that comes while the slot
+    /// waits resolves it, and no other listener gets that link.
+    NextUrlSchemeOpenFor(String, AnswerSlot<String>),
     /// The next files the system opens the app with
     /// ([`crate::file_type`]) resolve the slot, all that came before at
     /// once.
@@ -499,6 +504,8 @@ struct Inner {
 pub(crate) struct Executor {
     inner: RefCell<Inner>,
     ready: Arc<Ready>,
+    /// The task being polled.
+    current: std::cell::Cell<Option<u64>>,
     /// The runtime tasks are polled in the context of.
     runtime: RefCell<Option<Handle>>,
     /// Native animation nodes and animations made so far (their ids are
@@ -741,12 +748,15 @@ impl Executor {
                 id,
                 ready: self.ready.clone(),
             }));
-            let done = match super::component::caught(|| {
+            let outer = self.current.replace(Some(id));
+            let polled = super::component::caught(|| {
                 future
                     .as_mut()
                     .poll(&mut TaskContext::from_waker(&waker))
                     .is_ready()
-            }) {
+            });
+            self.current.set(outer);
+            let done = match polled {
                 Ok(done) => done,
                 // A task that panicked ends; its component failed.
                 Err(message) => {
@@ -766,6 +776,16 @@ impl Executor {
             }
         }
         true
+    }
+
+    /// The task being polled, if code runs in one.
+    pub(crate) fn current_task(&self) -> Option<u64> {
+        self.current.get()
+    }
+
+    /// Whether task `id` still runs.
+    pub(crate) fn has_task(&self, id: u64) -> bool {
+        self.inner.borrow().tasks.contains_key(&id)
     }
 
     #[cfg(test)]
@@ -854,6 +874,13 @@ pub(crate) struct Output<T> {
 
 /// Where an [`Answer`] comes from.
 pub(crate) type AnswerSlot<T> = Rc<RefCell<Output<T>>>;
+
+/// Whether the [`Answer`] of `slot` is still there to take a value: a
+/// task cancelled, or the losing branch of a `select!`, dropped it, and
+/// what is delivered to its slot then goes nowhere.
+pub(crate) fn awaited<T>(slot: &AnswerSlot<T>) -> bool {
+    Rc::strong_count(slot) > 1
+}
 
 impl<T> Default for Output<T> {
     fn default() -> Self {
