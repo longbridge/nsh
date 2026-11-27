@@ -1,9 +1,7 @@
 import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
 import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
-import { isAvailable as mobile, Switch as SystemSwitch } from "nsh/mobile";
 import { keymap, platform, windowSize } from "nsh";
-import { DateTimePicker, isAvailable } from "nsh/mobile";
 import { Icon, type IconName } from "../icons";
 import { alpha, backdrop, Badge, plural, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
@@ -673,57 +671,6 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           <Setting first label="Haptics" icon="gestures" detail="A tap under the finger as values change" on={haptics()} set={(on) => haptics.set(on)} />
           <Setting label="Low data mode" icon="storage" detail={lowData() ? "Images load at a lower quality" : "Images load in full"} on={lowData()} set={(on) => lowData.set(on)} />
         </View>
-      </Card>
-    );
-  }
-
-  /**
-   * `nsh/mobile`'s `Switch`, the system's own: a `UISwitch` on iOS and
-   * Material 3's switch on Android, on in the theme's `primary`, beside the
-   * row's label. The desktops and the web have no such control: the
-   * gallery's drawn switch stands in there.
-   */
-  function SystemSettings() {
-    const wifi = signal(true);
-    const ask = signal(true);
-    const bluetooth = signal(false);
-    function Row(props: { label: string; detail: string; on: boolean; set: (on: boolean) => void; disabled?: boolean; first?: boolean }) {
-      const flip = (on: boolean) => {
-        props.set(on);
-        last.set(`${props.label}: ${on ? "on" : "off"}`);
-      };
-      if (!mobile) {
-        const look = switchLook(() => props.on, size.switch);
-        return (
-          <Switch
-            checked={props.on}
-            disabled={props.disabled}
-            onChange={({ checked }) => flip(checked)}
-            {...listRow({ first: props.first, disabled: () => props.disabled, style: { flexDirection: "row-reverse" } })}
-            trackClass={look.trackClass}
-            trackStyle={look.trackStyle}
-            thumbStyle={look.thumbStyle}
-          >
-            <RowDivider show={!props.first} />
-            <RowLabel label={props.label} detail={props.detail} />
-          </Switch>
-        );
-      }
-      return (
-        <View style={row(!!props.first)}>
-          <RowLabel label={props.label} detail={props.detail} />
-          <SystemSwitch testID={`system-switch-${props.label}`} accessibilityLabel={props.label} checked={props.on} disabled={props.disabled} onChange={({ checked }) => flip(checked)} />
-        </View>
-      );
-    }
-    return (
-      <Card icon="system" title="The system's switch" subtitle={mobile ? "UIKit's and Material's switch, in the theme's color" : "Desktops draw the switch: nsh/base's Switch"}>
-        <View>
-          <Row first label="Wi-Fi" detail={wifi() ? "Connected" : "Off"} on={wifi()} set={(on) => wifi.set(on)} />
-          <Row label="Ask to join networks" detail={wifi() ? "Known networks join on their own" : "Turn on Wi-Fi first"} on={ask()} disabled={!wifi()} set={(on) => ask.set(on)} />
-          <Row label="Bluetooth" detail={bluetooth() ? "On" : "Off"} on={bluetooth()} set={(on) => bluetooth.set(on)} />
-        </View>
-        <Caption label={`Wi-Fi ${wifi() ? "on" : "off"} · Bluetooth ${bluetooth() ? "on" : "off"}`} />
       </Card>
     );
   }
@@ -2172,70 +2119,6 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     );
   }
 
-  /**
-   * A reminder set with the system's own picker (`nsh/mobile`'s
-   * `DateTimePicker`, on phones): its first day and time, the time it
-   * repeats at and the day it ends, each in the system's look; the summary
-   * follows them.
-   */
-  function Reminder() {
-    const today = new Date();
-    const starts = signal(`${iso(addDays(today, 1))}T08:00`);
-    const at = signal("09:30");
-    const until = signal(iso(addDays(today, 30)));
-    const t = settleOn(() => `${starts()} ${at()} ${until()}`);
-    const days = () => daysBetween(starts().slice(0, 10), until()) + 1;
-    return (
-      <Card title="Reminder" subtitle="The system's picker: a day, a time, or both" right={<View style={settle(t)}><Badge label={days() > 0 ? `${days()} days` : "Ends before it starts"} tone={days() > 0 ? "neutral" : "warn"} /></View>}>
-        <View>
-          <View style={row(true)}>
-            <RowLabel label="Starts" detail="The first reminder" />
-            <DateTimePicker
-              testID="reminder-starts"
-              accessibilityLabel="Starts"
-              mode="dateTime"
-              value={starts()}
-              min={`${iso(today)}T00:00`}
-              minuteInterval={15}
-              onChange={({ value }) => {
-                starts.set(value);
-                last.set(`Starts: ${value}`);
-              }}
-            />
-          </View>
-          <View style={row(false)}>
-            <RowLabel label="Every day at" detail="Five-minute steps" />
-            <DateTimePicker
-              testID="reminder-at"
-              accessibilityLabel="Every day at"
-              mode="time"
-              value={at()}
-              minuteInterval={5}
-              onChange={({ value }) => {
-                at.set(value);
-                last.set(`Every day at: ${value}`);
-              }}
-            />
-          </View>
-          <View style={row(false)}>
-            <RowLabel label="Until" detail="No later than a year" />
-            <DateTimePicker
-              testID="reminder-until"
-              accessibilityLabel="Until"
-              value={until()}
-              min={starts().slice(0, 10)}
-              max={iso(addDays(today, 365))}
-              onChange={({ value }) => {
-                until.set(value);
-                last.set(`Until: ${value}`);
-              }}
-            />
-          </View>
-        </View>
-      </Card>
-    );
-  }
-
   function Deadline() {
     const today = new Date();
     const due = signal<string | null>(iso(addDays(today, 2)));
@@ -3578,14 +3461,13 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
   }
 
   const cards: Record<Control, (() => JSX.Element)[]> = {
-    Switch: [Settings, SystemSettings, Quick],
+    Switch: [Settings, Quick],
     Checkbox: [Filter, Checklist, Consent, Channels, BoxStates],
     Radio: [Plans, Delivery, Reading],
     Tabs: [Sections, Project],
     Select: [Choices, Downloads, Shipping, Issue],
     Combobox: [Tags, People, Labels, Commands],
-    // The system's picker is on phones only: elsewhere the drawn ones stand alone.
-    DatePicker: [Dates, ...(isAvailable ? [Reminder] : []), Booking, Deadline, Slots],
+    DatePicker: [Dates, Booking, Deadline, Slots],
     Collapsible: [Disclosure, Faq],
     Progress: [Transfers, Uploads, Steps, Meters],
     Slider: [Levels, Equalizer],
