@@ -504,6 +504,14 @@ Things that were found the hard way. Read the section of the area you change bef
   gallery's index on a Pixel 10 Pro). `StackBox` keeps drawing the screen a pop reveals at alpha 0 while it is
   `INVISIBLE` (which still keeps it out of touches, accessibility and focus), and `Decor.setVisible` does not
   invalidate (#519).
+- **Android, animations out of sight**: HWUI draws the window again for any view whose properties change, seen or
+  not. Native loops keep running on cards scrolled away (the gallery's Animations page: the hero's orbits, Aurora's
+  drifting lights), and a still screen above them drew 120 frames a second on a Pixel 10 Pro (~4.5 ms of
+  RenderThread and 2 ms of UI thread each). `Mounter.outputs` holds the animated look (alpha, transform, colors) of a
+  view whose parent is not in sight (`isShown` and `getGlobalVisibleRect`; the parent, as a view moved out by its own
+  transform would never move back) and sets the latest values once it is, on the next animation tick or before
+  the next frame draws (a scroll, a pop). The graph still steps, so ends and promises keep their time; the same
+  screen draws no frame.
 - **Android, focusing a view that is not shown**: `requestFocus` fails on a view that is not shown, and a page's
   `focus()` (from a timer of the render, say) can arrive in the batch that pushes it, the engine merging a wake-up's
   commits into one batch, whose commands run before `finishNavigation` places the page (a transition shader also

@@ -1209,6 +1209,7 @@ final class Mounter {
         keyParents.delete(id);
         slops.remove(id);
         a11y.remove(id);
+        held.remove(id);
         if (accessibilityClicked == v) accessibilityClicked = null;
     }
 
@@ -1999,7 +2000,8 @@ final class Mounter {
     void outputs(float[] out) {
         if (out == null || out.length == 0) return;
         for (int i = 1; i + 2 < out.length; i += 3) {
-            View v = views.get(Float.floatToRawIntBits(out[i]));
+            int id = Float.floatToRawIntBits(out[i]);
+            View v = views.get(id);
             if (v == null) continue;
             float value = out[i + 2];
             int prop = (int) out[i + 1];
@@ -2014,57 +2016,141 @@ final class Mounter {
                 if (v instanceof CanvasBox) ((CanvasBox) v).setSlot(prop - CANVAS_ARG, value);
                 continue;
             }
-            switch (prop) {
-                case 0: v.setAlpha(Math.max(0, Math.min(1, value))); break;
-                case 1: v.setTranslationX((mirror(v) == 2 ? -1 : 1) * value * density); break;
-                case 2: v.setTranslationY(value * density); break;
-                case 3: v.setScaleX(mirror(v) != 0 ? -value : value); v.setScaleY(value); break;
-                case 4: v.setScaleX(mirror(v) != 0 ? -value : value); break;
-                case 5: v.setScaleY(value); break;
-                case 6: v.setRotation((mirror(v) == 2 ? -1 : 1) * value); break;
-                case 8:
-                case 9: {
-                    if ((int) out[i + 1] == 8) v.setRotationX(value);
-                    else v.setRotationY((mirror(v) == 2 ? -1 : 1) * value);
-                    Decor decor = decor(v);
-                    if (decor != null) decor.applyBackface(v);
-                    break;
+            if (prop <= LAST_LOOK) {
+                Held h = held.get(id);
+                if (!inSight(v)) {
+                    if (h == null) held.put(id, h = new Held());
+                    h.put(prop, value);
+                    listenForHeld();
+                    continue;
                 }
-                case 10: setPerspective(v, value); break;
-                case 7: {
-                    Decor decor = decor(v);
-                    int color = Float.floatToRawIntBits(value);
-                    if (decor != null && decor.fill != color) {
-                        decor.fill = color;
-                        v.invalidate();
-                    }
-                    break;
-                }
-                case 11: {
-                    Decor decor = decor(v);
-                    int color = Float.floatToRawIntBits(value);
-                    if (decor != null && (decor.borderColors[0] != color || decor.borderColors[1] != color
-                            || decor.borderColors[2] != color || decor.borderColors[3] != color)) {
-                        java.util.Arrays.fill(decor.borderColors, color);
-                        v.invalidate();
-                    }
-                    break;
-                }
-                case 12:
-                    if (v instanceof TextBox) ((TextBox) v).setColor(true, Float.floatToRawIntBits(value));
-                    break;
-                case 15: {
-                    // A sticky cell sticks further in: its scroll view pins it again.
-                    int id = Float.floatToRawIntBits(out[i]);
-                    Float old = stickyOffsets.put(id, value * density);
-                    ScrollBox s = stickyHosts.get(id);
-                    if (s != null && (old == null || old != value * density)) s.pinSticky();
-                    break;
-                }
-                default: break;
+                if (h != null) h.mask &= ~(1 << prop);
+            }
+            animated(v, id, prop, value);
+        }
+        if (held.size() > 0) showHeld();
+        if (out[0] != 0) host.requestFrames();
+    }
+
+
+    /** The last property code of a view's look (alpha through a text's color, `animation.rs`). */
+    private static final int LAST_LOOK = 12;
+
+    /** A view's latest animated look properties while out of sight. */
+    private static final class Held {
+        /** Which properties hold a value (bit per code). */
+        int mask;
+        final float[] values = new float[LAST_LOOK + 1];
+
+        void put(int prop, float value) {
+            // A uniform scale (3) sets both axes: drop the single axes held before it.
+            if (prop == 3) mask &= ~((1 << 4) | (1 << 5));
+            values[prop] = value;
+            mask |= 1 << prop;
+        }
+    }
+
+    /**
+     * The latest animated look of the views out of sight, set once they come
+     * into sight. A view's look changing out of sight (a loop on a card
+     * scrolled away) would make the window draw a frame for nothing on every
+     * tick: HWUI redraws the window for any view that changes, seen or not.
+     */
+    private final SparseArray<Held> held = new SparseArray<>();
+    private final android.graphics.Rect sight = new android.graphics.Rect();
+    /** Sets the held values of the views come into sight before a frame draws (a scroll, a pop). */
+    private android.view.ViewTreeObserver.OnPreDrawListener heldListener;
+
+    /**
+     * Whether `v` may show: its parent is shown and partly on screen. The
+     * parent, not the view: a view moved out by its own transform would
+     * otherwise never move back in.
+     */
+    private boolean inSight(View v) {
+        if (!(v.getParent() instanceof View)) return true;
+        View parent = (View) v.getParent();
+        return parent.isShown() && parent.getGlobalVisibleRect(sight);
+    }
+
+    private void listenForHeld() {
+        if (heldListener != null) return;
+        heldListener = () -> {
+            showHeld();
+            return true;
+        };
+        host.getViewTreeObserver().addOnPreDrawListener(heldListener);
+    }
+
+    /** Sets the held values of the views now in sight. */
+    private void showHeld() {
+        for (int i = held.size() - 1; i >= 0; i--) {
+            Held h = held.valueAt(i);
+            int id = held.keyAt(i);
+            View v = views.get(id);
+            if (h.mask != 0 && v != null && !inSight(v)) continue;
+            held.removeAt(i);
+            if (v == null) continue;
+            for (int prop = 0; prop <= LAST_LOOK; prop++) {
+                if ((h.mask & (1 << prop)) != 0) animated(v, id, prop, h.values[prop]);
             }
         }
-        if (out[0] != 0) host.requestFrames();
+        if (held.size() == 0 && heldListener != null) {
+            android.view.ViewTreeObserver observer = host.getViewTreeObserver();
+            if (observer.isAlive()) observer.removeOnPreDrawListener(heldListener);
+            heldListener = null;
+        }
+    }
+
+    /** Sets animated property `prop` of view `id`. */
+    private void animated(View v, int id, int prop, float value) {
+        switch (prop) {
+            case 0: v.setAlpha(Math.max(0, Math.min(1, value))); break;
+            case 1: v.setTranslationX((mirror(v) == 2 ? -1 : 1) * value * density); break;
+            case 2: v.setTranslationY(value * density); break;
+            case 3: v.setScaleX(mirror(v) != 0 ? -value : value); v.setScaleY(value); break;
+            case 4: v.setScaleX(mirror(v) != 0 ? -value : value); break;
+            case 5: v.setScaleY(value); break;
+            case 6: v.setRotation((mirror(v) == 2 ? -1 : 1) * value); break;
+            case 8:
+            case 9: {
+                if (prop == 8) v.setRotationX(value);
+                else v.setRotationY((mirror(v) == 2 ? -1 : 1) * value);
+                Decor decor = decor(v);
+                if (decor != null) decor.applyBackface(v);
+                break;
+            }
+            case 10: setPerspective(v, value); break;
+            case 7: {
+                Decor decor = decor(v);
+                int color = Float.floatToRawIntBits(value);
+                if (decor != null && decor.fill != color) {
+                    decor.fill = color;
+                    v.invalidate();
+                }
+                break;
+            }
+            case 11: {
+                Decor decor = decor(v);
+                int color = Float.floatToRawIntBits(value);
+                if (decor != null && (decor.borderColors[0] != color || decor.borderColors[1] != color
+                        || decor.borderColors[2] != color || decor.borderColors[3] != color)) {
+                    java.util.Arrays.fill(decor.borderColors, color);
+                    v.invalidate();
+                }
+                break;
+            }
+            case 12:
+                if (v instanceof TextBox) ((TextBox) v).setColor(true, Float.floatToRawIntBits(value));
+                break;
+            case 15: {
+                // A sticky cell sticks further in: its scroll view pins it again.
+                Float old = stickyOffsets.put(id, value * density);
+                ScrollBox s = stickyHosts.get(id);
+                if (s != null && (old == null || old != value * density)) s.pinSticky();
+                break;
+            }
+            default: break;
+        }
     }
 
     // --- Navigation ----------------------------------------------------------
