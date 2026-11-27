@@ -407,11 +407,11 @@ the combobox (`defaultValue`); `onConfirm` tells it as the list closes. The quer
 A date, or with `range` a range of dates, picked from months of days, with no look. One month or several
 (`numberOfMonths`) show side by side; the header turns them and opens a view of the months or a page of years. The
 value is an ISO date (`"2026-10-28"`) or `[start, end]` the app owns (`value`, `onChange`) or leaves to the calendar
-(`defaultValue`); `disabledMatcher` keeps days from being picked, and the days take the keyboard as one stop of Tab.
-The app styles the parts and draws the items (`renderItem`, given what an item is; its states are its classes, a
-range's days `selected:` with `data-range-start:`, `data-range-middle:` and `data-range-end:`, and while its end is
-chosen `data-range-preview-*:` up to the day under the mouse or the keyboard). See
-[Calendar](../elements/calendar.md).
+(`defaultValue`), and `onChangeStart` reports a range's start before its end is picked; `disabledMatcher` keeps days
+from being picked, and the days take the keyboard as one stop of Tab. The app styles the parts and draws the items
+(`renderItem`, given what an item is; its states are its classes, a range's days `selected:` with `data-range-start:`,
+`data-range-middle:` and `data-range-end:`, and while its end is chosen `data-range-preview-*:` up to the day under the
+mouse or the keyboard). See [Calendar](../elements/calendar.md).
 
 ### TimeField
 
