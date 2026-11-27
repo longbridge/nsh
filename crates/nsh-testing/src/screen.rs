@@ -1608,6 +1608,7 @@ impl Screen {
 
     /// A screen for the app that replaces this one's (a reload), in the
     /// same window: its viewport and system bar, none of its views.
+    #[cfg(feature = "agent")]
     pub(crate) fn restarted(&self) -> Screen {
         Screen {
             viewport: self.viewport,
