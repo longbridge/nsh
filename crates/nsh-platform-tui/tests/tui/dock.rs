@@ -511,7 +511,7 @@ fn a_tab_dragged_onto_a_group_s_content_outlines_it_over_what_it_shows() {
     view.load(App::Rust(Root::new::<Docked>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Panel c");
     let (tab_x, tab_y) = find(&terminal, "Tab a").expect("tab a is drawn");
-    let (c_x, c_y) = find(&terminal, "Tab c").expect("tab c is drawn");
+    find(&terminal, "Tab c").expect("tab c is drawn");
     let (panel_x, panel_y) = find(&terminal, "Panel c").expect("c's panel is drawn");
     // The handle's line between the groups, on c's panel row.
     let buffer = terminal.backend().buffer();
