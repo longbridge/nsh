@@ -1429,6 +1429,33 @@ fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
     wait_for(&view, cx, "at 10 12 in 18 20");
 }
 
+/// Runs the window until the engine has run everything sent to it so far
+/// and the window has applied the batches that made.
+#[track_caller]
+fn flush_engine(view: &Entity<AppView>, cx: &mut VisualTestContext) {
+    let (done, flushed) = std::sync::mpsc::channel();
+    view.read_with(cx, |view, _| {
+        view.surface().control(|control| {
+            control.flush(move |_| {
+                let _ = done.send(());
+            });
+        });
+    });
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        if flushed.try_recv().is_ok() {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the engine never flushed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    cx.run_until_parked();
+}
+
 /// Runs the window until the focused field's text satisfies `done`, and
 /// returns it.
 #[track_caller]
@@ -2342,6 +2369,9 @@ fn a_command_without_a_search_field_takes_the_keyboard_on_focus(cx: &mut TestApp
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+    // The command binds its keys once the engine hears of the focus: they
+    // reach the window's keymap in a later batch.
+    flush_engine(&view, cx);
     // Its keys reach it: Down moves to the next item, Return chooses it.
     cx.simulate_keystrokes("down");
     cx.run_until_parked();
