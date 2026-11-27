@@ -43,6 +43,7 @@ mod ui;
 mod updater;
 mod web;
 mod windows;
+mod windows_link;
 
 use std::{
     net::Ipv4Addr,
