@@ -122,7 +122,9 @@ const update = await checkForUpdate(wantsBeta() ? { channel: "beta" } : undefine
 Every channel is checked as the default source is: the same `publicKey`, and only a newer version is
 offered. Leaving a channel therefore never goes back: an app on `1.3.0-beta.2` that checks the default source again is
 offered `1.3.0`, not `1.2.0`. Publish each channel's manifest with `nsh update-manifest` as usual; a channel's
-archives' relative URLs resolve next to its own manifest.
+archives' relative URLs resolve next to its own manifest. When the manifest URL redirects, resolution uses the
+last same-origin redirect target (for GitHub, the versioned release URL), never a cross-origin asset CDN; absolute
+archive URLs are used unchanged.
 
 ## downloadUpdate
 
@@ -348,7 +350,7 @@ file; with it, unsigned manifests are refused. `channels` names other manifests 
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `github` | string | `owner/repo`: the manifest is the asset `latest.json` of its latest release. Drafts and prereleases are skipped |
-| `url` | string | The manifest's HTTPS URL on your own host; archives' relative URLs resolve next to it |
+| `url` | string | The manifest's HTTPS URL on your own host; archives' relative URLs resolve next to it (after same-origin redirects) |
 | `channels` | object | Channel name (letters, digits, `-`, `_`, `.`) to the HTTPS URL of its manifest, for `checkForUpdate({ channel })`. Requires `publicKey` |
 | `publicKey` | string | The Ed25519 key that signs the manifests (`latest.json.sig`). Required with `url` and `channels` |
 | `packages.roots` | string[] | Root public keys (`nsh keygen`'s `root.pub`) whose certified release keys sign the app's [OTA packages](#ota-updates). Without it the app runs no packages |

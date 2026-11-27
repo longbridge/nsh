@@ -33,20 +33,33 @@ pub type UpdaterSink<'a> = &'a mut dyn FnMut(u64, &[u8], Option<u64>) -> Result<
 /// ([`set_updater_transport`]). Same contract as [`UpdaterHost::get`].
 pub type UpdaterTransport = dyn Fn(&str, u64, UpdaterSink<'_>) -> Result<(), String> + Send + Sync;
 
-static TRANSPORT: std::sync::OnceLock<std::sync::Arc<UpdaterTransport>> =
-    std::sync::OnceLock::new();
+/// Downloads an update and reports its redirect targets, in place of the
+/// engine's HTTP ([`set_updater_transport_with_redirects`]). Same contract as
+/// [`UpdaterHost::get_with_redirects`]. Hidden: host/runtime plumbing, not an
+/// app-facing update API.
+#[doc(hidden)]
+pub type UpdaterTransportWithRedirects =
+    dyn Fn(&str, u64, UpdaterSink<'_>) -> Result<Vec<String>, String> + Send + Sync;
+
+enum Transport {
+    Simple(std::sync::Arc<UpdaterTransport>),
+    WithRedirects(std::sync::Arc<UpdaterTransportWithRedirects>),
+}
+
+static TRANSPORT: std::sync::OnceLock<Transport> = std::sync::OnceLock::new();
 
 /// Makes `get` download the update check and the archive, instead of the
 /// engine's HTTP; for releases behind credentials the app holds (a private
 /// GitHub repository, a CDN behind SSO). Call it at startup, before the
-/// first check. Only the first call counts.
+/// first check. Only the first transport call counts.
 ///
 /// The URLs still come from the packaged `nsh-updater.json`, and NSH still
 /// checks everything it checks otherwise (signature, version, size,
 /// SHA-256). `get` follows [`UpdaterHost::get`]: it gets `url` from byte
 /// `from` on (`Range: bytes=<from>-`), follows redirects, and hands each
 /// piece to `sink` with its offset; a server that ignores the range sends
-/// from offset `0`.
+/// from offset `0`. This shape cannot report the redirects it followed,
+/// so a manifest's relative names resolve at the URL the check started from.
 ///
 /// ```ignore
 /// nsh_core::runtime::set_updater_transport(|url, from, sink| my_fetch(url, from, sink));
@@ -54,13 +67,40 @@ static TRANSPORT: std::sync::OnceLock<std::sync::Arc<UpdaterTransport>> =
 pub fn set_updater_transport(
     get: impl Fn(&str, u64, UpdaterSink<'_>) -> Result<(), String> + Send + Sync + 'static,
 ) {
-    let _ = TRANSPORT.set(std::sync::Arc::new(get));
+    let _ = TRANSPORT.set(Transport::Simple(std::sync::Arc::new(get)));
+}
+
+/// [`set_updater_transport`] whose closure also returns every redirect
+/// target it followed, in order. The update check uses the furthest
+/// same-origin target as the base of the manifest's relative names, never a
+/// cross-origin asset CDN. Call it at startup, before the first check. Only
+/// the first transport call counts. Hidden: host/runtime plumbing, not an
+/// app-facing update API.
+#[doc(hidden)]
+pub fn set_updater_transport_with_redirects(
+    get: impl Fn(&str, u64, UpdaterSink<'_>) -> Result<Vec<String>, String> + Send + Sync + 'static,
+) {
+    let _ = TRANSPORT.set(Transport::WithRedirects(std::sync::Arc::new(get)));
 }
 
 /// The app's [`set_updater_transport`], if it set one.
 #[doc(hidden)]
 pub fn updater_transport() -> Option<&'static std::sync::Arc<UpdaterTransport>> {
-    TRANSPORT.get()
+    match TRANSPORT.get() {
+        Some(Transport::Simple(get)) => Some(get),
+        _ => None,
+    }
+}
+
+/// The app's [`set_updater_transport_with_redirects`], if it set one.
+/// Hidden: host/runtime plumbing, not an app-facing update API.
+#[doc(hidden)]
+pub fn updater_transport_with_redirects()
+-> Option<&'static std::sync::Arc<UpdaterTransportWithRedirects>> {
+    match TRANSPORT.get() {
+        Some(Transport::WithRedirects(get)) => Some(get),
+        _ => None,
+    }
 }
 
 /// What the platform gives the module: the package's update configuration
@@ -78,6 +118,24 @@ pub trait UpdaterHost: Send + Sync + 'static {
     /// (`416`) sends no pieces. Offsets count the raw resource's bytes, so
     /// the host asks for no transparent compression.
     fn get(&self, url: &str, from: u64, sink: UpdaterSink<'_>) -> Result<(), String>;
+
+    /// [`UpdaterHost::get`] that also returns each redirect target it
+    /// followed, in order. Hosts that cannot report them use the default:
+    /// no reported redirects, which keeps resolution at the original URL.
+    /// A cross-origin target is reported too; callers decide whether it may
+    /// resolve relative names and must not treat it as trusted merely because
+    /// it appears here. Hidden: host/runtime plumbing, not an app-facing
+    /// update API.
+    #[doc(hidden)]
+    fn get_with_redirects(
+        &self,
+        url: &str,
+        from: u64,
+        sink: UpdaterSink<'_>,
+    ) -> Result<Vec<String>, String> {
+        self.get(url, from, sink)?;
+        Ok(Vec::new())
+    }
 
     /// The signed package this run's code came from; `None` (the default):
     /// the bundle the app shipped with.
@@ -555,13 +613,20 @@ mod native {
                 // Windows leftovers also need removal when no newer update exists.
                 installation.remove_leftovers();
             }
-            let manifest = get_all(&*worker, &config.manifest_url())?;
-            let signature = match config.signature_url() {
+            let manifest_url = config.manifest_url();
+            let (manifest, redirects) = get_all_with_redirects(&*worker, &manifest_url)?;
+            let manifest_base = trusted_manifest_base(&manifest_url, &redirects);
+            let signature = match config.signature_url_with_base(&manifest_base) {
                 Some(url) => Some(get_all(&*worker, &url)?),
                 None => None,
             };
             let available = config
-                .check(&manifest, signature.as_deref(), &nsh_updater::platform())
+                .check_with_base(
+                    &manifest,
+                    signature.as_deref(),
+                    &nsh_updater::platform(),
+                    &manifest_base,
+                )
                 .map_err(|e| e.to_string())?;
             let running = worker.running_package();
             Ok(available.map(|mut available| {
@@ -681,17 +746,43 @@ mod native {
 
     /// A small file, whole. A manifest is a few kilobytes.
     fn get_all(host: &dyn UpdaterHost, url: &str) -> Result<Vec<u8>, String> {
+        Ok(get_all_with_redirects(host, url)?.0)
+    }
+
+    /// [`get_all`] with the redirect targets the host followed.
+    fn get_all_with_redirects(
+        host: &dyn UpdaterHost,
+        url: &str,
+    ) -> Result<(Vec<u8>, Vec<String>), String> {
         const MAX: usize = 1 << 20;
         let mut bytes = Vec::new();
-        host.get(url, 0, &mut |_, chunk, _| {
-            if bytes.len() + chunk.len() > MAX {
-                return Err("over 1 MiB".to_owned());
+        let redirects = host
+            .get_with_redirects(url, 0, &mut |_, chunk, _| {
+                if bytes.len() + chunk.len() > MAX {
+                    return Err("over 1 MiB".to_owned());
+                }
+                bytes.extend_from_slice(chunk);
+                Ok(())
+            })
+            .map_err(|e| format!("{url}: {e}"))?;
+        Ok((bytes, redirects))
+    }
+
+    /// The furthest manifest URL reachable through same-origin redirects.
+    /// A redirect that leaves the manifest host's origin (GitHub's signed
+    /// asset CDN, for instance) is fine to fetch the manifest bytes from,
+    /// but must not become the base of the manifest's relative names: those
+    /// names belong to the release server, not to the CDN object. When even
+    /// the first hop is cross-origin the original URL remains the base.
+    fn trusted_manifest_base(url: &str, redirects: &[String]) -> String {
+        let mut base = url.to_owned();
+        for target in redirects {
+            if !crate::access::is_same_origin(&base, target) {
+                break;
             }
-            bytes.extend_from_slice(chunk);
-            Ok(())
-        })
-        .map_err(|e| format!("{url}: {e}"))?;
-        Ok(bytes)
+            base = target.clone();
+        }
+        base
     }
 
     fn pending(sys: &System) -> Result<Rc<Pending>, JsError> {
@@ -1467,17 +1558,20 @@ mod native {
                 .running_package()
                 .map(|running| running.build)
                 .unwrap_or(config.build.unwrap_or(1));
-            let manifest = get_all(&*worker, &config.manifest_url())?;
-            let signature = match config.signature_url() {
+            let manifest_url = config.manifest_url();
+            let (manifest, redirects) = get_all_with_redirects(&*worker, &manifest_url)?;
+            let manifest_base = trusted_manifest_base(&manifest_url, &redirects);
+            let signature = match config.signature_url_with_base(&manifest_base) {
                 Some(url) => Some(get_all(&*worker, &url)?),
                 None => None,
             };
             let available = config
-                .check_package(
+                .check_package_with_base(
                     &manifest,
                     signature.as_deref(),
                     running_build,
                     env!("CARGO_PKG_VERSION"),
+                    &manifest_base,
                 )
                 .map_err(|e| e.to_string())?;
             Ok(available.map(|mut available| {
@@ -2251,6 +2345,328 @@ mod native {
             let mut bad = Download::resume(&hash, size, &mut corrupt).unwrap();
             bad.update(&full[6..]).unwrap();
             assert!(bad.finish().is_err());
+        }
+
+        /// A loopback HTTP client/updater host for the end-to-end redirect
+        /// tests. It follows redirects itself, records each target, and
+        /// implements `get_with_redirects` as the engine's network host does.
+        struct LoopbackHttpHost {
+            config: Vec<u8>,
+            urls: std::sync::Mutex<Vec<String>>,
+        }
+
+        impl LoopbackHttpHost {
+            fn get_inner(
+                &self,
+                url: &str,
+                from: u64,
+                sink: UpdaterSink<'_>,
+            ) -> Result<Vec<String>, String> {
+                use std::io::{Read as _, Write as _};
+
+                if from != 0 {
+                    return Err("test client only starts at byte 0".into());
+                }
+                let mut current = url.to_owned();
+                let mut redirects = Vec::new();
+                for _ in 0..10 {
+                    self.urls.lock().unwrap().push(current.clone());
+                    let parsed = url::Url::parse(&current).map_err(|e| e.to_string())?;
+                    if parsed.scheme() != "http"
+                        || !parsed
+                            .host_str()
+                            .is_some_and(|host| host == "127.0.0.1" || host == "localhost")
+                    {
+                        return Err(format!("{current}: not a loopback test URL"));
+                    }
+                    let port = parsed.port().unwrap_or(80);
+                    let mut target = parsed.path().to_owned();
+                    if let Some(query) = parsed.query() {
+                        target.push('?');
+                        target.push_str(query);
+                    }
+                    let mut stream =
+                        std::net::TcpStream::connect((parsed.host_str().unwrap(), port))
+                            .map_err(|e| e.to_string())?;
+                    write!(
+                        stream,
+                        "GET {target} HTTP/1.1\r\nHost: {}:{port}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+                        parsed.host_str().unwrap()
+                    )
+                    .map_err(|e| e.to_string())?;
+                    let mut response = Vec::new();
+                    stream
+                        .read_to_end(&mut response)
+                        .map_err(|e| e.to_string())?;
+                    let head_end = response
+                        .windows(4)
+                        .position(|bytes| bytes == b"\r\n\r\n")
+                        .ok_or_else(|| "bad HTTP response".to_owned())?;
+                    let head = String::from_utf8_lossy(&response[..head_end]).into_owned();
+                    let mut lines = head.split("\r\n");
+                    let status = lines
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .and_then(|status| status.parse::<u16>().ok())
+                        .ok_or_else(|| "bad HTTP status".to_owned())?;
+                    let header = |name: &str| {
+                        lines.clone().find_map(|line| {
+                            line.split_once(':').and_then(|(key, value)| {
+                                key.trim()
+                                    .eq_ignore_ascii_case(name)
+                                    .then(|| value.trim().to_owned())
+                            })
+                        })
+                    };
+                    if matches!(status, 301 | 302 | 303 | 307 | 308)
+                        && let Some(location) = header("location")
+                    {
+                        let next = crate::access::resolve_reference(&current, &location);
+                        redirects.push(next.clone());
+                        current = next;
+                        continue;
+                    }
+                    if status != 200 {
+                        return Err(format!("HTTP {status}"));
+                    }
+                    let body = &response[head_end + 4..];
+                    sink(0, body, Some(body.len() as u64))?;
+                    return Ok(redirects);
+                }
+                Err("too many redirects".into())
+            }
+        }
+
+        impl UpdaterHost for LoopbackHttpHost {
+            fn config(&self) -> Option<Vec<u8>> {
+                Some(self.config.clone())
+            }
+
+            fn get(&self, url: &str, from: u64, sink: UpdaterSink<'_>) -> Result<(), String> {
+                self.get_inner(url, from, sink).map(|_| ())
+            }
+
+            fn get_with_redirects(
+                &self,
+                url: &str,
+                from: u64,
+                sink: UpdaterSink<'_>,
+            ) -> Result<Vec<String>, String> {
+                self.get_inner(url, from, sink)
+            }
+
+            fn verify_package(
+                &self,
+                _: &std::path::Path,
+                _: &std::path::Path,
+                _: &str,
+                _: &[String],
+                _: u64,
+            ) -> Result<PackageVersion, String> {
+                Ok(PackageVersion {
+                    version: "1.0.1".into(),
+                    build: 2,
+                })
+            }
+        }
+
+        fn read_request_target(stream: &mut std::net::TcpStream) -> Option<String> {
+            use std::io::{BufRead as _, BufReader};
+            let mut reader = BufReader::new(stream.try_clone().ok()?);
+            let mut request = String::new();
+            reader.read_line(&mut request).ok()?;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).ok()? == 0 || line.trim().is_empty() {
+                    break;
+                }
+            }
+            request.split_whitespace().nth(1).map(str::to_owned)
+        }
+
+        fn write_response(
+            stream: &mut std::net::TcpStream,
+            status: u16,
+            headers: &[(String, String)],
+            body: &[u8],
+        ) {
+            use std::io::Write as _;
+            let mut head = format!(
+                "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n",
+                body.len()
+            );
+            for (name, value) in headers {
+                head.push_str(&format!("{name}: {value}\r\n"));
+            }
+            head.push_str("\r\n");
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body);
+        }
+
+        #[test]
+        fn version_locked_redirect_base_survives_latest_release_drift() {
+            use std::sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            };
+
+            let payload = b"package-one-payload";
+            let sha256 = nsh_updater::sha256(payload);
+            let manifest = serde_json::to_vec(&serde_json::json!({
+                "id": "dev.noop.app",
+                "version": "1.0.1",
+                "platforms": {},
+                "package": {
+                    "version": "1.0.1", "build": 2, "url": "app-1.nshpkg",
+                    "sha256": sha256, "size": payload.len(), "minRuntime": "0.1.0",
+                },
+            }))
+            .unwrap();
+            let signature = nsh_updater::sign(SECRET, &manifest).unwrap().into_bytes();
+
+            let cdn_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let cdn_port = cdn_listener.local_addr().unwrap().port();
+            let release_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let release_port = release_listener.local_addr().unwrap().port();
+            let drifted = Arc::new(AtomicBool::new(false));
+            let release_paths = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+
+            {
+                let manifest = manifest.clone();
+                std::thread::spawn(move || {
+                    for stream in cdn_listener.incoming() {
+                        let Ok(mut stream) = stream else { return };
+                        let target = read_request_target(&mut stream).unwrap_or_default();
+                        if target == "/cdn/blob-123?sig=xxx" {
+                            write_response(&mut stream, 200, &[], &manifest);
+                        } else {
+                            write_response(&mut stream, 404, &[], b"not found");
+                        }
+                    }
+                });
+            }
+            {
+                let drifted = drifted.clone();
+                let release_paths = release_paths.clone();
+                let signature = signature.clone();
+                let payload = payload.to_vec();
+                std::thread::spawn(move || {
+                    for stream in release_listener.incoming() {
+                        let Ok(mut stream) = stream else { return };
+                        let target = read_request_target(&mut stream).unwrap_or_default();
+                        release_paths.lock().unwrap().push(target.clone());
+                        match target.as_str() {
+                            "/releases/latest/download/latest.json" => {
+                                let tag = if drifted.load(Ordering::SeqCst) {
+                                    "v2.0.0"
+                                } else {
+                                    "v1.0.0"
+                                };
+                                write_response(
+                                    &mut stream,
+                                    302,
+                                    &[(
+                                        "Location".into(),
+                                        format!("/releases/download/{tag}/latest.json"),
+                                    )],
+                                    b"",
+                                );
+                            }
+                            "/releases/download/v1.0.0/latest.json" => {
+                                write_response(
+                                    &mut stream,
+                                    302,
+                                    &[(
+                                        "Location".into(),
+                                        format!("http://127.0.0.1:{cdn_port}/cdn/blob-123?sig=xxx"),
+                                    )],
+                                    b"",
+                                );
+                            }
+                            "/releases/download/v1.0.0/latest.json.sig" => {
+                                write_response(&mut stream, 200, &[], &signature);
+                            }
+                            "/releases/download/v1.0.0/app-1.nshpkg" => {
+                                write_response(&mut stream, 200, &[], &payload);
+                            }
+                            "/releases/latest/download/app-1.nshpkg"
+                                if drifted.load(Ordering::SeqCst) =>
+                            {
+                                write_response(&mut stream, 404, &[], b"not in v2");
+                            }
+                            _ => write_response(&mut stream, 404, &[], b"not found"),
+                        }
+                    }
+                });
+            }
+
+            let feed =
+                format!("http://127.0.0.1:{release_port}/releases/latest/download/latest.json");
+            let config = format!(
+                r#"{{"id":"dev.noop.app","version":"1.0.0","build":1,"url":"{feed}","publicKey":"{PUBLIC}","packages":{{"roots":["{PUBLIC}"]}}}}"#
+            );
+            let host = Arc::new(LoopbackHttpHost {
+                config: config.into_bytes(),
+                urls: std::sync::Mutex::new(Vec::new()),
+            });
+            let dir = TempDir::new("github-drift-e2e");
+            let mut sys = System::default().with_updater(Some(host.clone()));
+            sys.data_dir = Some(dir.path().to_path_buf());
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            let offered = rt
+                .block_on(check_package(sys.clone(), None, None))
+                .unwrap()
+                .unwrap();
+            assert_eq!(offered.build, 2.0);
+            // The release now drifts before the user confirms the download:
+            // the old drifting URL would 404 here.
+            drifted.store(true, Ordering::SeqCst);
+            rt.block_on(download_package(sys.clone(), None)).unwrap();
+
+            let versioned =
+                format!("http://127.0.0.1:{release_port}/releases/download/v1.0.0/app-1.nshpkg");
+            let urls = host.urls.lock().unwrap().clone();
+            assert!(urls.contains(&versioned), "{urls:?}");
+            assert!(
+                !urls
+                    .iter()
+                    .any(|url| url.contains("/releases/latest/download/app-1.nshpkg")),
+                "drifting latest asset URL was requested: {urls:?}"
+            );
+            assert!(
+                !urls.iter().any(|url| url.contains("/cdn/app-1.nshpkg")),
+                "CDN URL was used as a relative base: {urls:?}"
+            );
+            let paths = release_paths.lock().unwrap().clone();
+            assert!(
+                paths.contains(&"/releases/download/v1.0.0/app-1.nshpkg".to_owned()),
+                "{paths:?}"
+            );
+            assert!(
+                !paths.contains(&"/releases/latest/download/app-1.nshpkg".to_owned()),
+                "{paths:?}"
+            );
+
+            let updates = dir.path().join(UPDATES);
+            let part = updates.join(format!("next-{sha256}.nshpkg.part"));
+            assert!(updates.join(NEXT).exists());
+            assert!(!part.exists());
+        }
+
+        #[test]
+        fn trusted_manifest_base_stops_at_the_first_cross_origin_redirect() {
+            let original = "https://github.com/o/r/releases/latest/download/latest.json";
+            let versioned = "https://github.com/o/r/releases/download/v1.0.0/latest.json";
+            let cdn = "https://release-assets.githubusercontent.com/blob?sig=x";
+            assert_eq!(
+                trusted_manifest_base(original, &[versioned.into(), cdn.into()]),
+                versioned
+            );
+            assert_eq!(trusted_manifest_base(original, &[cdn.into()]), original);
+            assert_eq!(trusted_manifest_base(original, &[]), original);
         }
 
         #[test]

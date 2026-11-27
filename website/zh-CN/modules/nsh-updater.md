@@ -92,7 +92,7 @@ interface AppUpdate {
 const update = await checkForUpdate(wantsBeta() ? { channel: "beta" } : undefined);
 ```
 
-每个频道和默认来源按同样的规则检查：同一个 `publicKey`，只给更新的版本。所以离开频道不会降级：装着 `1.3.0-beta.2` 的应用改查默认来源后，拿到的是 `1.3.0`，不是 `1.2.0`。每个频道的清单照常用 `nsh update-manifest` 生成；频道里压缩包的相对 URL 按它自己的清单所在位置解析。
+每个频道和默认来源按同样的规则检查：同一个 `publicKey`，只给更新的版本。所以离开频道不会降级：装着 `1.3.0-beta.2` 的应用改查默认来源后，拿到的是 `1.3.0`，不是 `1.2.0`。每个频道的清单照常用 `nsh update-manifest` 生成；频道里压缩包的相对 URL 按它自己的清单所在位置解析。清单 URL 发生重定向时，按最后一个同源重定向目标解析（GitHub 上即带版本号的 Release 地址），绝不会以跨源资产 CDN 地址为基准；已经是绝对地址的压缩包 URL 原样使用。
 
 ## downloadUpdate
 
@@ -271,7 +271,7 @@ export const install = () =>
 | 键 | 类型 | 含义 |
 | --- | --- | --- |
 | `github` | string | `owner/repo`：清单是其最新 Release 的附件 `latest.json`，跳过 draft 和 prerelease |
-| `url` | string | 自己服务器上清单的 HTTPS 地址；压缩包的相对地址相对它解析 |
+| `url` | string | 自己服务器上清单的 HTTPS 地址；压缩包的相对地址相对它解析（同源重定向后的地址） |
 | `channels` | object | 频道名（字母、数字、`-`、`_`、`.`）到它的清单 HTTPS URL，供 `checkForUpdate({ channel })` 使用。需要 `publicKey` |
 | `publicKey` | string | 给清单签名（`latest.json.sig`）的 Ed25519 公钥。使用 `url` 或 `channels` 时必填 |
 | `packages.roots` | string[] | 根公钥（`nsh keygen` 的 `root.pub`），由它们认证的发布密钥为应用的 [OTA 包](#ota-更新)签名。没有它时应用不运行任何包 |

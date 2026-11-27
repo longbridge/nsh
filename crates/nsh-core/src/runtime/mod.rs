@@ -43,6 +43,11 @@ pub use updater::{
     PackageVersion, UpdatePrompt, UpdatePromptOptions, UpdaterHost, UpdaterSink, UpdaterTransport,
     prompt_for_update, set_update_presenter, set_updater_transport, updater_transport,
 };
+#[doc(hidden)]
+pub use updater::{
+    UpdaterTransportWithRedirects, set_updater_transport_with_redirects,
+    updater_transport_with_redirects,
+};
 
 /// The [`crate::element::Quotas`] kind WebSockets count under: the `websocket`
 /// module's connections and the global `WebSocket`'s (`nsh-js`) share
