@@ -608,7 +608,7 @@ crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStri
 
 | 需要 | 扩展点 |
 |---|---|
-| 检查应用传入的文件路径，规则与 `fs/promises` 读取相同 | `sys.readable_file(path)`（`sys: System` 参数）：在 `capabilities.fs.read` 内或用户粘贴、拖入的文件时返回真实路径，否则为 `ERR_ACCESS_DENIED`、`ENOENT`，Web 上为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
+| 检查应用传入的文件路径，规则与 `fs/promises` 读取相同 | `sys.readable_file(path)`（`sys: System` 参数）：在 `capabilities.fs.read` 内或用户粘贴、拖入的文件时返回真实路径，否则为 `ERR_ACCESS_DENIED`、`ENOENT`、文件夹为 `EISDIR`，Web 上为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
 | 在什么之上弹出（iOS） | `run_on_main_thread` 任务里的 `nsh_platform_ios::presenting_controller(mtm)`（[iOS](./ios.md#在-rust-中弹出视图)） |
 | 从哪里显示（macOS） | `run_on_main_thread` 任务里的 `nsh_platform_macos::presenting_view(mtm)`（[macOS](./macos.md#在-rust-中显示系统界面)） |
 | 在什么之上显示（Android） | `run_on_main_thread` 任务里的 `nsh::presenting_activity(env)`（[Android](./android.md#在-rust-中显示系统界面)） |
@@ -619,7 +619,7 @@ crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStri
 | Java 监听器或回调（Android） | `nsh::proxy::implement`（[Android](./android.md#用-rust-实现-java-监听器)） |
 | API 以广播作答（Android） | `nsh::receiver::register(env, action, handler)`（[Android](./android.md#在-rust-中接收广播)） |
 
-先检查路径再交出：应用无权读取的文件不会到达另一个应用。原生视图和窗口只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的视图。
+先检查路径再交出：应用无权读取的文件不会到达另一个应用。原生视图和窗口只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的视图。在没有这些扩展点的嵌入后端（GPUI）下，视图和窗口为 `None`，模块应退回其他做法或报告该界面不可用。
 
 ### 封装原生 SDK
 

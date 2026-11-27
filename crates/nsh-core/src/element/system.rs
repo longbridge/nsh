@@ -125,7 +125,8 @@ impl System {
     ///
     /// Rejects as `fs/promises` would: `ERR_ACCESS_DENIED` for a path no
     /// grant covers or a link leading out of its root, `ENOENT` for one that
-    /// is no file, `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the app's
+    /// does not exist, `EISDIR` for a folder (`EINVAL` for a FIFO or device),
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the app's
     /// files are not native files (the web) or the platform has no native
     /// filesystem.
     pub fn readable_file(&self, path: &str) -> Result<PathBuf, JsError> {

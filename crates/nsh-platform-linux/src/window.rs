@@ -2348,6 +2348,22 @@ pub(crate) fn key_window(surface: &Surface) -> Option<gtk::Window> {
         .or(main)
 }
 
+/// The visible window to present system UI from
+/// ([`crate::presenting_window`]): the one with the focus, else the window
+/// the surface is in, else the app's own window shown activated last.
+pub(crate) fn presenting_window(surface: &Surface) -> Option<gtk::Window> {
+    let main = main_window(surface).filter(|window| window.is_visible());
+    if main.as_ref().is_some_and(is_focused) {
+        return main;
+    }
+    let windows = surface.windows.borrow();
+    let shown = || windows.values().filter(|w| w.window.is_visible());
+    if let Some(active) = shown().find(|w| is_focused(&w.window)) {
+        return Some(active.window.clone());
+    }
+    main.or_else(|| shown().max_by_key(|w| w.shown).map(|w| w.window.clone()))
+}
+
 /// A key pressed in `window` (one of the app's own) that nothing in it
 /// used: as `window_key`. Whether it was taken.
 #[cfg(feature = "dev")]

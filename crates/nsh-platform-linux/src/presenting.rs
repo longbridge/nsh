@@ -54,15 +54,16 @@ pub fn native_view(node: NodeId) -> Option<gtk::Widget> {
 /// The window to make system UI that no element anchors transient for (a
 /// dialog's parent), from a function a module runs on the main thread
 /// (`run_on_main_thread`): the surface's visible window the user is in
-/// (the focused one, else the app's own window shown last, else the window
-/// the surface is in). `None` outside such a function and when the surface
-/// shows in no visible window, where the dialog would have no parent.
+/// (the one with the focus, else the window the surface is in, else
+/// another window of the app's own). `None` outside such a function and
+/// when the surface shows in no visible window, where the dialog would
+/// have no parent.
 ///
 /// For presenting system UI only: a module never changes, re-parents,
 /// restyles or closes a window NSH owns.
 pub fn presenting_window() -> Option<gtk::Window> {
     let surface = current()?;
-    crate::window::key_window(&surface).filter(|window| window.is_visible())
+    crate::window::presenting_window(&surface)
 }
 
 /// The surface whose main-thread function runs now, while it lives.

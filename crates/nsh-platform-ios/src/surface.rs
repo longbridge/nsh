@@ -108,7 +108,7 @@ impl MountSink for MainThreadSink {
         let mounter = self.mounter.clone();
         // The main queue is serial: after the batches submitted before it.
         DispatchQueue::main().exec_async(move || {
-            crate::presenting::run_for(Some(mounter), || task.run());
+            crate::presenting::run_for(mounter, || task.run());
         });
     }
 

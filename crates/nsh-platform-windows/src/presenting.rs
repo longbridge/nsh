@@ -98,10 +98,10 @@ pub fn element_bounds(node: NodeId) -> Option<ElementBounds> {
 /// The top-level window to own system UI that no element anchors (a
 /// dialog's owner, a menu's window), from a function a module runs on the
 /// main thread (`run_on_main_thread`): the surface's visible window the
-/// user is in (the app's own window with the focus, else the top-level
-/// window the surface is in, else another window of the app's own). `None`
-/// outside such a function and when the surface shows in no visible
-/// window, where Windows would show the UI ownerless.
+/// user is in (the one with the focus, else the window the surface is in,
+/// else another window of the app's own). `None` outside such a function
+/// and when the surface shows in no visible window, where Windows would
+/// show the UI ownerless.
 ///
 /// For owning and presenting system UI only: a module never changes,
 /// re-parents, restyles or destroys a window NSH owns.

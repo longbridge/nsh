@@ -106,7 +106,9 @@ cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
-`INTERNET` and `ACCESS_NETWORK_STATE` permissions and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
+`INTERNET` and `ACCESS_NETWORK_STATE` permissions, and the signature permission
+`${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (androidx's name, so the two merge) that keeps the receivers
+registered at run time to the app before Android 13, and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
 minified build applies on its own: the native library finds the runtime's classes by name, so `com.longbridge.nsh`
 stays as it is.
 
@@ -449,8 +451,10 @@ An Android API that answers with a broadcast (the app a chooser's `IntentSender`
 `receiver::register(env, action, handler)`: a receiver of that action, registered on the application, whose
 broadcasts reach `handler` (the broadcast `Intent`) on the UI thread, so the crate ships no `BroadcastReceiver`
 subclass. It is not exported: it hears the app's own broadcasts (aim the `PendingIntent`'s intent at the app's
-package) and the system's, never other apps'. Keep the `Receiver` it returns while the broadcast may come; dropping
-it unregisters it.
+package) and the system's, never other apps'. On Android 12 and below that takes a signature permission, which the
+runtime's manifest declares, so a broadcast another system app sends as itself (`DOWNLOAD_COMPLETE`, from the download
+provider) may not arrive there. Keep the `Receiver` it returns while the broadcast may come; dropping it unregisters
+it.
 
 ## Notifications from other code
 

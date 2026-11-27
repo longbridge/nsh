@@ -738,7 +738,7 @@ same public hooks NSH's own modules use, so it behaves as they do:
 
 | Need | Hook |
 |---|---|
-| A file path the app passes, checked as `fs/promises` reads it | `sys.readable_file(path)` (a `sys: System` argument): the real path within `capabilities.fs.read` or a file the user pasted or dropped, else `ERR_ACCESS_DENIED`, `ENOENT`, or `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` on the web |
+| A file path the app passes, checked as `fs/promises` reads it | `sys.readable_file(path)` (a `sys: System` argument): the real path within `capabilities.fs.read` or a file the user pasted or dropped, else `ERR_ACCESS_DENIED`, `ENOENT`, `EISDIR` for a folder, or `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` on the web |
 | What to present over (iOS) | `nsh_platform_ios::presenting_controller(mtm)` in a `run_on_main_thread` task ([iOS](./ios.md#presenting-from-rust)) |
 | What to show from (macOS) | `nsh_platform_macos::presenting_view(mtm)` in a `run_on_main_thread` task ([macOS](./macos.md#presenting-from-rust)) |
 | What to show over (Android) | `nsh::presenting_activity(env)` in a `run_on_main_thread` task ([Android](./android.md#presenting-from-rust)) |
@@ -751,7 +751,8 @@ same public hooks NSH's own modules use, so it behaves as they do:
 
 Check the path first, then hand it on: a file the app may not read never reaches the other app. Native views and
 windows are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a
-view NSH owns.
+view NSH owns. Under an embedding backend without these hooks (GPUI) the views and windows are `None`, so a module
+falls back or reports the UI unavailable.
 
 ### Wrapping a native SDK
 

@@ -9,7 +9,11 @@
 //!
 //! The receiver is not exported: it hears the app's own broadcasts (those
 //! a `PendingIntent` of the app sends, aimed at the app's package) and the
-//! system's, never other apps'.
+//! system's, never other apps'. On Android 12 and below that takes a
+//! signature permission the runtime's manifest declares, so only the app,
+//! the system and senders holding it reach the receiver: a broadcast
+//! another system app sends as itself (`DOWNLOAD_COMPLETE`, from the
+//! download provider) may not arrive there.
 //!
 //! ```no_run
 //! // The library of the `nsh-platform-android` crate is `nsh`.
@@ -108,8 +112,9 @@ impl Drop for Receiver {
 /// the UI thread with the env of that thread and the broadcast `Intent`,
 /// until the [`Receiver`] is dropped. A Java exception `handler` leaves
 /// pending, or an error it returns, is logged and cleared. Fails before any
-/// `NshView` was made, when there is no application to register on. Any
-/// thread.
+/// `NshView` was made, when there is no application to register on, and on
+/// Android 12 and below when the app's manifest lacks the runtime's
+/// receiver permission (an embedding app removed it). Any thread.
 pub fn register(
     env: &mut JNIEnv<'_>,
     action: &str,
@@ -182,15 +187,16 @@ extern "system" fn Java_com_longbridge_nsh_NativeReceiver_receive(
     };
     let heard =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&mut env, &intent)));
+    // Whatever the handler returned: a call it mapped to `Ok`, or one a
+    // panic cut short, still leaves its exception pending, which would
+    // throw out of `onReceive`.
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+    }
     match heard {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            if env.exception_check().unwrap_or(false) {
-                let _ = env.exception_describe();
-                let _ = env.exception_clear();
-            }
-            log::warn!("nsh: a broadcast receiver failed: {error}");
-        }
+        Ok(Err(error)) => log::warn!("nsh: a broadcast receiver failed: {error}"),
         Err(_) => log::error!("nsh: a broadcast receiver panicked"),
     }
 }

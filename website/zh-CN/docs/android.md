@@ -97,7 +97,8 @@ cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 
 AAR 包含 Java 运行时以及适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的 `libnsh.so`，库中带有符号：应用的 Gradle
 构建在打包时去除符号，并保留它们用于崩溃报告。它声明了 `INTERNET` 和
-`ACCESS_NETWORK_STATE` 权限，要求 **API 26**（Android 8）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
+`ACCESS_NETWORK_STATE` 权限，以及在 Android 13 之前让运行时注册的接收器只对应用自己开放的签名级权限
+`${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`（与 androidx 同名，二者会合并），要求 **API 26**（Android 8）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
 查找运行时的类，因此 `com.longbridge.nsh` 保持原样。
 
 把它加入应用模块，例如从 `libs` 文件夹引入：
@@ -408,7 +409,9 @@ Java 发起调用的线程上交给 `handler`（方法名和参数），所以 c
 以广播作答的 Android API（选择器的 `IntentSender` 报告用户选中的应用、闹钟或通知发回的 `PendingIntent`、下载完成）由
 `receiver::register(env, action, handler)` 接收：一个注册在 application 上、接收这个 action 的接收器，它收到的广播在 UI 线程上交给
 `handler`（广播的 `Intent`），所以 crate 不需要自带 `BroadcastReceiver` 子类。它不导出：只接收应用自己的广播（让 `PendingIntent`
-的 intent 指向应用自己的包名）和系统的广播，不接收其他应用的。广播可能到来期间要一直持有返回的 `Receiver`；丢弃即注销。
+的 intent 指向应用自己的包名）和系统的广播，不接收其他应用的。Android 12 及以下靠运行时 manifest 声明的签名级权限做到这一点，所以
+另一个系统应用以自己身份发出的广播（如下载服务发出的 `DOWNLOAD_COMPLETE`）在那些版本上可能收不到。
+广播可能到来期间要一直持有返回的 `Receiver`；丢弃即注销。
 
 ## 来自其他代码的通知
 

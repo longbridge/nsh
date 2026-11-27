@@ -173,12 +173,6 @@ final class Share {
                 }
             };
             Context app = activity.getApplicationContext();
-            IntentFilter filter = new IntentFilter(action);
-            if (Build.VERSION.SDK_INT >= 33) {
-                app.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                app.registerReceiver(receiver, filter);
-            }
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             // The chooser fills in the chosen component.
             if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
@@ -192,6 +186,7 @@ final class Share {
             pending.put(code, request);
             receivers.put(code, receiver);
             try {
+                NativeReceiver.registerNotExported(app, receiver, new IntentFilter(action));
                 startActivityForResult(chooser, code);
             } catch (RuntimeException e) {
                 Log.w(TAG, "cannot show the share sheet", e);

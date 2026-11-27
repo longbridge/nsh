@@ -20,8 +20,8 @@ thread_local! {
 }
 
 /// Runs `f` with `mounter`'s surface as the current one.
-pub(crate) fn run_for(mounter: Option<SharedMounter>, f: impl FnOnce()) {
-    let previous = CURRENT.with_borrow_mut(|current| std::mem::replace(current, mounter));
+pub(crate) fn run_for(mounter: SharedMounter, f: impl FnOnce()) {
+    let previous = CURRENT.with_borrow_mut(|current| current.replace(mounter));
     f();
     CURRENT.with_borrow_mut(|current| *current = previous);
 }

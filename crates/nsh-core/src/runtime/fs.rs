@@ -751,11 +751,14 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
 
 /// [`System::readable_file`]: the real path of the file at `path`, granted
 /// to read as `fs/promises` reads it, resolved through its links and still
-/// inside the root that grants it, and a file that exists.
+/// inside the root that grants it, and a file that exists: a folder is
+/// `EISDIR`, a FIFO or device `EINVAL`, as `confined::open_file` has them.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn readable_file(sys: &System, path: &str) -> Result<PathBuf, JsError> {
     let grant = grant(sys, path, false)?;
     let mut escaped = false;
+    // What is there instead of a file, when something is.
+    let mut other = std::io::ErrorKind::NotFound;
     for (root, relative) in &grant.within {
         let (Ok(real), Ok(real_root)) = (
             crate::access::canonicalize(&root.join(relative)),
@@ -767,8 +770,11 @@ pub(crate) fn readable_file(sys: &System, path: &str) -> Result<PathBuf, JsError
             escaped = true;
             continue;
         }
-        if real.is_file() {
-            return Ok(real);
+        match std::fs::metadata(&real) {
+            Ok(meta) if meta.is_file() => return Ok(real),
+            Ok(meta) if meta.is_dir() => other = std::io::ErrorKind::IsADirectory,
+            Ok(_) => other = std::io::ErrorKind::InvalidInput,
+            Err(_) => {}
         }
     }
     if escaped {
@@ -778,11 +784,7 @@ pub(crate) fn readable_file(sys: &System, path: &str) -> Result<PathBuf, JsError
             path,
         ));
     }
-    Err(
-        JsError::from(std::io::Error::from(std::io::ErrorKind::NotFound))
-            .with_code("ENOENT")
-            .with("path", path),
-    )
+    Err(JsError::from(std::io::Error::from(other)).with("path", path))
 }
 
 /// A page's files are the browser's, never a native path the system takes
@@ -1854,7 +1856,8 @@ mod tests {
     /// `System::readable_file`, a module's check of a file the app hands
     /// it: a file in a granted root by its path or its placeholder, a
     /// pasted one at its exact path; refused outside the roots, through a
-    /// link out of its root, for a folder, and `ENOENT` for a missing one.
+    /// link out of its root, `EISDIR` for a folder, and `ENOENT` for a
+    /// missing one.
     #[cfg(unix)]
     #[test]
     fn modules_read_the_files_fs_promises_reads() {
@@ -1910,7 +1913,7 @@ mod tests {
         );
         assert_eq!(
             code(sys.readable_file("${dataDir}/docs")).as_deref(),
-            Some("ENOENT")
+            Some("EISDIR")
         );
         let pasted = outside.join("pasted.txt");
         let pasted = pasted.to_str().unwrap();

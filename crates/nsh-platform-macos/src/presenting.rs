@@ -20,10 +20,11 @@ thread_local! {
 }
 
 /// Runs `f` with `surface` as the current one.
-pub(crate) fn run_for(surface: Weak<Surface>, f: impl FnOnce()) {
+pub(crate) fn run_for<R>(surface: Weak<Surface>, f: impl FnOnce() -> R) -> R {
     let previous = CURRENT.with_borrow_mut(|current| current.replace(surface));
-    f();
+    let result = f();
     CURRENT.with_borrow_mut(|current| *current = previous);
+    result
 }
 
 /// The native view of element `node` (its `ref`'s node, `NodeRef` in a
@@ -38,9 +39,10 @@ pub(crate) fn run_for(surface: Weak<Surface>, f: impl FnOnce()) {
 /// re-parents, restyles or removes a view NSH owns.
 ///
 /// `None` outside such a function, when no view of the surface carries
-/// `node` (not rendered, or removed since), or while a batch is being
-/// applied to the surface. The view may be out of a window (a screen not
-/// shown); check its `window()` before pointing at it.
+/// `node` (not rendered, or removed since), or, for an element other than
+/// the root, while a batch is being applied to the surface. The view may
+/// be out of a window (a screen not shown); check its `window()` before
+/// pointing at it.
 pub fn native_view(mtm: MainThreadMarker, node: NodeId) -> Option<Retained<NSView>> {
     let _ = mtm;
     let surface = current()?;

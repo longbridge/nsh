@@ -2412,25 +2412,7 @@ impl Mounter {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
             }
             (Command::Share { id: request, sheet }, _) if id == nsh_core::ROOT_ID => {
-                // On a later turn, with this surface current: the sheet
-                // finds the surface's root and its anchor's view as a
-                // module's system UI does (`crate::native_view`).
-                let shared = self.shared.clone();
-                DispatchQueue::main().exec_async(move || {
-                    let mtm = MainThreadMarker::new().expect("main queue");
-                    let held = shared
-                        .get(mtm)
-                        .borrow()
-                        .as_ref()
-                        .map(|mounter| (mounter.share.clone(), mounter.control.clone()));
-                    let Some((current, control)) = held else {
-                        log::warn!("share: the surface closed; request {request} is not answered");
-                        return;
-                    };
-                    crate::presenting::run_for(Some(shared), || {
-                        crate::share::show(request, &sheet, &current, &control);
-                    });
-                });
+                share_later(self.shared.clone(), request, sheet);
             }
             (
                 Command::RenderCanvas {
@@ -6693,6 +6675,34 @@ impl Drop for Mounter {
 }
 
 /// The first scroll view in `view`'s subtree (breadth first).
+/// Shows share sheet `sheet` of request `request` on a later main-queue
+/// turn, with the surface of `shared` current: the sheet finds the
+/// surface's root and its anchor's view as a module's system UI does
+/// (`crate::native_view`), which the batch asking for it holds. A batch
+/// still applied then (UIKit can run the main queue inside one) holds the
+/// mounter too, and the sheet waits for the next turn, as the mounter's
+/// other deferred calls do.
+fn share_later(shared: SharedMounter, request: u32, sheet: Box<nsh_core::share::ShareSheet>) {
+    DispatchQueue::main().exec_async(move || {
+        let mtm = MainThreadMarker::new().expect("main queue");
+        let held = shared.get(mtm).try_borrow().ok().map(|mounter| {
+            mounter
+                .as_ref()
+                .map(|mounter| (mounter.share.clone(), mounter.control.clone()))
+        });
+        let Some(held) = held else {
+            return share_later(shared, request, sheet);
+        };
+        let Some((current, control)) = held else {
+            log::warn!("share: the surface closed; request {request} is not answered");
+            return;
+        };
+        crate::presenting::run_for(shared, || {
+            crate::share::show(request, &sheet, &current, &control);
+        });
+    });
+}
+
 pub(crate) fn first_scroll_view(view: &UIView) -> Option<Retained<UIScrollView>> {
     let mut queue = vec![view.retain()];
     while !queue.is_empty() {
