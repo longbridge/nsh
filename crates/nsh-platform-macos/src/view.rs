@@ -685,6 +685,16 @@ define_class!(
             self.ivars().foreign.set(true);
         }
 
+        // A layout animation's frames do not lay out ([`hold_layout`]).
+        #[unsafe(method(setNeedsLayout:))]
+        fn set_needs_layout(&self, needs: bool) {
+            if needs && LAYOUT_HELD.get() {
+                return;
+            }
+            // SAFETY: NSView's own setter, on the main thread.
+            unsafe { msg_send![super(self), setNeedsLayout: needs] }
+        }
+
         // AppKit sets a layer-backed view's layer geometry (anchor,
         // position, transform) from the view when it lays it out or
         // displays it: nsh's transforms would be gone after the first
@@ -1611,6 +1621,16 @@ define_class!(
         #[unsafe(method(updateLayer))]
         fn update_layer(&self) {}
 
+        // As [`ViewObj`]'s: not while a layout animation moves it.
+        #[unsafe(method(setNeedsLayout:))]
+        fn set_needs_layout(&self, needs: bool) {
+            if needs && LAYOUT_HELD.get() {
+                return;
+            }
+            // SAFETY: NSView's own setter, on the main thread.
+            unsafe { msg_send![super(self), setNeedsLayout: needs] }
+        }
+
         // As [`ViewObj`]'s: what comes into its subviews.
         #[unsafe(method(didAddSubview:))]
         fn did_add_subview(&self, subview: &NSView) {
@@ -1648,6 +1668,28 @@ impl Container {
         // SAFETY: NSView's designated initializer.
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
+}
+
+thread_local! {
+    /// While [`hold_layout`] runs.
+    static LAYOUT_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Runs `f` (a frame of a layout animation placing a view) with the
+/// `setFrame:` of our views and containers not marking them as needing
+/// layout. Each would otherwise have AppKit's display cycle lay out every
+/// moved view, update the window's tracking areas and redraw the system
+/// titlebar on every frame of the animation; the mounter places all of
+/// them itself. [`NshView::relayout`] lays out once the frame lands.
+pub(crate) fn hold_layout<R>(f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LAYOUT_HELD.set(self.0);
+        }
+    }
+    let _restore = Restore(LAYOUT_HELD.replace(true));
+    f()
 }
 
 /// Whether `view` is an app's view (or a container of one), as opposed to
@@ -2733,6 +2775,15 @@ impl NshView {
         self.place();
         crate::decor::apply(self);
         crate::shader::ui_changed(self);
+    }
+
+    /// Lets AppKit lay it (and its container) out once, after a layout
+    /// animation moved it under [`hold_layout`].
+    pub(crate) fn relayout(&self) {
+        self.ns().setNeedsLayout(true);
+        if let Some(c) = &*self.ivars().container.borrow() {
+            c.setNeedsLayout(true);
+        }
     }
 
     /// Where its frame puts it, with its parent's mirroring and its shift.

@@ -261,20 +261,30 @@ fn tick(view: &NshView, now: f64) -> Next {
         if inherited {
             live.leave_with_ancestor();
         }
+        let was_moving = live.frame_target().is_some();
         let step = live.step(now, &mut s.frame, &mut s.style);
+        let moving = live.frame_target().is_some();
         let deadline = live.deadline(now);
         if !live.idle() {
             s.live = Some(live);
         }
-        (step, deadline)
+        (step, deadline, was_moving, moving)
     };
-    let (step, deadline) = step;
+    let (step, deadline, was_moving, moving) = step;
 
     if step.removed {
         view.unparent();
         return Next::Done;
     }
-    view.moved();
+    if moving {
+        // AppKit lays it out once it lands, not on every frame.
+        crate::view::hold_layout(|| view.moved());
+    } else {
+        view.moved();
+        if was_moving {
+            view.relayout();
+        }
+    }
     if step.restyled {
         // Text and canvas drawings may use the style (tint).
         view.redraw();
