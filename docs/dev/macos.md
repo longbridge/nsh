@@ -241,12 +241,14 @@ before each redirect and cancels one the grant does not allow, reporting it to t
   not typeset twice; when that read is the main thread's, it holds the text's lock for the time of one layout. Texts
   with attachments are made at once on the engine.
 - **Texts are painted off the main thread** (`text/raster.rs`): a content layer's delegate draws during Core
-  Animation's commit, so a page of new texts would spend its first frame there. The engine thread paints the texts of
-  a batch whose views get a frame in it into IOSurfaces at the window's backing scale (`text::prerender`, in the sink,
+  Animation's commit, so a page of new texts would spend its first frame there. The engine thread paints each
+  batch's new or re-laid-out texts at the views' known sizes (remembered across batches in the sink, so recycled cells
+  whose frames did not change still pre-render) into IOSurfaces at the window's backing scale (`text::prerender`,
   spread over a few threads) before the batch leaves; the main thread sets a surface as the content layer's
-  `contents` when the text first draws (`text::show_raster`). Whatever a raster cannot know draws in the commit as
-  before: a layer of another size or density, a selection, an animated or transitioning color, and every later
-  redraw. A text out of sight when its batch is applied drops its raster.
+  `contents` when the text draws (`text::show_raster`), while same-layout updates at the same size keep the partial
+  recolor path. Whatever a raster cannot know draws in the commit as before: a layer of another size or density, a
+  selection, an animated or transitioning color, and every later redraw. A text out of sight when its batch is
+  applied drops its raster.
 - **Frames**: native animations, JS frame requests, scroll glides and transitions run on one display link per surface
   (`NSView::displayLinkWithTarget_selector`) while something animates, which drives every window of the surface, the
   app's own (`Window.open`) too. AppKit fires a view's link only while some of the view's window shows on a screen

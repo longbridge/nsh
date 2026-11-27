@@ -44,7 +44,7 @@ use rustc_hash::FxHashMap;
 
 mod raster;
 
-pub(crate) use raster::{Rasters, prerender};
+pub(crate) use raster::{Rasters, State as RasterState, prerender};
 
 /// Identifies a font: size bits, weight, family, italic, OpenType features.
 type FontKey = (u32, u16, Option<FontFamily>, bool, u8);
