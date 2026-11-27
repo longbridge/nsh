@@ -828,7 +828,6 @@ final class ScrollBox extends FrameLayout implements Node {
         return null;
     }
 
-
     /** Before the scroll view sees {@code e}: whether it ends the touch. */
     private boolean beforeTouch(MotionEvent e) {
         int action = e.getActionMasked();
