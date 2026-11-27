@@ -1970,6 +1970,28 @@ impl ListState {
         )
     }
 
+    /// The natural span whose items are bound with the viewport at `at`:
+    /// the viewport and the overscan on each side. Near an end, the part of
+    /// the overscan the items leave empty there (the list's start, a
+    /// header) goes to the other side, at most the window's own length: the
+    /// list keeps about as many cells wherever it is, so scrolling away from
+    /// an end binds cells made in the idle frames before it rather than
+    /// making new ones as it goes.
+    fn item_window(&self, at: f32) -> (f32, f32) {
+        let overscan = self.viewport * OVERSCAN;
+        let (start, end) = (at - overscan, at + self.viewport + overscan);
+        // In a page, the window is where the page's viewport meets the
+        // list: what lies outside the list is the page's, not empty.
+        if self.parent {
+            return (start, end);
+        }
+        let body = self.blocks().body;
+        let length = end - start;
+        let before = (body - start).clamp(0.0, length);
+        let after = (end - (body + self.items_len())).clamp(0.0, length);
+        (start - after, end + before)
+    }
+
     /// The sticky item currently pinned to the viewport's start (or its
     /// sticky offset from it): the last one that starts before that.
     pub(super) fn active_sticky(&self) -> Option<u32> {
@@ -2047,8 +2069,8 @@ impl ListState {
             return Edges::default();
         }
         let at = self.natural_offset();
-        let overscan = self.viewport * OVERSCAN;
-        let range = self.items_in(at - overscan, at + self.viewport + overscan);
+        let (start, end) = self.item_window(at);
+        let range = self.items_in(start, end);
         let sticky = self.active_sticky();
         // And the one before it: scrolled back, it shows at once, pushed by
         // the pinned one, before a round of binding could render it.
@@ -2370,8 +2392,9 @@ mod tests {
         let mut l = list(1000, 50.0, 400.0);
         let mut binds = Vec::new();
         l.update_window(&mut binds);
-        // [0, 800] at 50 per item -> items 0..=16.
-        assert_eq!(binds.len(), 17);
+        // [0, 800], and the overscan the start leaves empty below it:
+        // [0, 1200] at 50 per item -> items 0..=24.
+        assert_eq!(binds.len(), 25);
         assert_eq!(binds[0], (0, 0));
 
         // Scroll down a screen: items scrolled far above are recycled.
@@ -2381,8 +2404,38 @@ mod tests {
         let indices: Vec<u32> = binds.iter().map(|b| b.1).collect();
         assert_eq!(indices.first(), Some(&32));
         assert_eq!(indices.last(), Some(&56));
-        // Slots were reused, not grown without bound.
-        assert!(l.slots.len() <= 25 + 17, "{}", l.slots.len());
+        // The cells made at the start are all there is: none were made.
+        assert_eq!(l.slots.len(), 25);
+
+        // At the end, the overscan past it goes before the viewport.
+        l.offset = 1000.0 * 50.0 - 400.0;
+        binds.clear();
+        l.update_window(&mut binds);
+        let indices: Vec<u32> = binds.iter().map(|b| b.1).collect();
+        assert_eq!(indices.first(), Some(&976));
+        assert_eq!(indices.last(), Some(&999));
+        assert_eq!(l.slots.len(), 25);
+    }
+
+    /// A header at the top leaves the window's overscan above empty and
+    /// part of the viewport too: the window takes as much more below, so
+    /// scrolling past the header binds the cells it made rather than making
+    /// new ones.
+    #[test]
+    fn window_keeps_its_cells_past_a_header() {
+        let mut l = list(1000, 50.0, 400.0);
+        l.extras[0].cell = 0;
+        l.extras[0].size = 300.0;
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        // Rows from 300 to 300 + 1200: items 0..=24.
+        assert_eq!(binds.len(), 25);
+        for offset in [100.0, 400.0, 800.0, 1500.0, 3000.0] {
+            l.offset = offset;
+            binds.clear();
+            l.update_window(&mut binds);
+            assert!(l.slots.len() <= 26, "{offset}: {}", l.slots.len());
+        }
     }
 
     #[test]
