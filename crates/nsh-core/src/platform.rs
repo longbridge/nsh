@@ -12,20 +12,6 @@ use crate::geometry::{Bounds, Edges, Points, Size};
 /// the same name).
 pub const TAB_BAR_COMPONENT: &str = "nsh/tab-bar";
 
-/// The native component of `nsh/mobile`'s `SegmentedControl`, which the iOS
-/// backend registers itself (`UISegmentedControl`).
-pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
-
-/// The native component of `nsh/mobile`'s `Switch`, which the iOS backend
-/// (`UISwitch`) and the Android backend register themselves
-/// (`SwitchComponent.java`'s `NAME` keeps the same name).
-pub const SWITCH_COMPONENT: &str = "nsh/switch";
-
-/// The native component of `nsh/mobile`'s `DateTimePicker`, which the iOS
-/// backend (`UIDatePicker`) and the Android backend register themselves
-/// (`DateTimePickerComponent.java`'s `NAME` keeps the same name).
-pub const DATE_TIME_PICKER_COMPONENT: &str = "nsh/date-time-picker";
-
 /// The native component of `nsh/base`'s `MenuButton`, which the iOS backend
 /// registers itself (a `UIButton` showing its `UIMenu` as its primary
 /// action), and the Android backend (a button showing the system's popup

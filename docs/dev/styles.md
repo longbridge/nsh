@@ -241,8 +241,8 @@
   nothing (they inherit already).
 - **Accent** (`accentColor`, Tailwind's `accent-*`): CSS's `accent-color`, the color a system control shows its state in.
   The core passes a native component's own `accentColor` to it as its `accentColor` prop (`Core::sync_accent`), and
-  the control prefers it over the theme color it is otherwise given. Set on the control, not inherited. `nsh/mobile`'s
-  `Switch` reads it (its track when on); the system's segmented control and tab bar could later.
+  the control prefers it over the theme color it is otherwise given. Set on the control, not inherited. A system
+  switch's native component reads it (its track when on); the tab bar could later.
 - **Text style inheritance** (CSS-like): a view's text properties (color, font, size, alignment, ...) pass to the texts and inputs
   inside it, so `class="text-white"` on a button styles its label. So do its `whitespace-*` / `text-wrap` / `text-nowrap` / `text-pretty`
   (and `truncate`'s no wrapping; typed `.whitespace_nowrap()` / `.whitespace_normal()` / `.text_pretty()`, which have no
