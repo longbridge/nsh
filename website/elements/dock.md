@@ -224,10 +224,12 @@ A tab dragged over a group shows where it would land, and the drop puts it there
 | The middle of a group's content | Joins that group |
 | An edge of a group's content (its outer 35% on each side) | Splits that group: a new group of its own on that side |
 
-While a drag hovers, the area shows the drop indicator over the part of the group the panel would take (all of its
+While a drag hovers a group's content, the area shows the drop indicator over the part of the group the panel would take (all of its
 content to join, half of it to split): a part the
 app styles (`dropIndicatorClass`), with content of its own if the app renders some (`renderDropIndicator`, told the
-`group`, the `side` it splits off or the tab bar `index`). It moves to each new place natively, easing there and fading in on another group as the last one fades out (at once when the user asks for less motion). What follows the pointer or finger is the app's too
+`group` and the `side` it splits off). While a drag runs along a tab bar (the compact strip's too), the area draws an
+insertion line instead, between the tabs where the panel would land: a 2-point line as tall as the bar (across a
+vertical bar), in the theme's `ring` color, and the content is not tinted. It moves to each new place natively, easing there and fading in on another group as the last one fades out (at once when the user asks for less motion). What follows the pointer or finger is the app's too
 (`renderDragPreview`). A drop is one change of the layout, reported once; a drop that would change nothing changes nothing.
 
 A locked area, a zoomed one, and a group's last panel when nothing sits beside the group drag nothing.
@@ -367,7 +369,7 @@ rest of the area.
 | `renderTab` | `.render_tab(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | the key | What a tab shows. |
 | `renderToolbar` | `.render_toolbar(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | The toolbar at the end of a group's tab bar, for its displayed tab: that panel's actions (a new tab, a zoom button). |
 | `renderTabBarPrefix` | `.render_tab_bar_prefix(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | What a group's tab bar starts with, before its tabs, for its displayed tab. |
-| `renderDropIndicator` | `.render_drop_indicator(\|drop\| ..)` | `(drop: DockDropIndicator) => JSX.Element` | none | What is inside the drop indicator: `group`, `side`, `index`. |
+| `renderDropIndicator` | `.render_drop_indicator(\|drop\| ..)` | `(drop: DockDropIndicator) => JSX.Element` | none | What is inside the drop indicator over a group's content: `group`, `side` (not called over a tab bar, which shows the insertion line). |
 | `renderDock` | `.render_dock(\|dock\| ..)` | `(dock: DockInfo) => JSX.Element` | none | A dock's own chrome, before its layout: `placement`, `open` (shown in the current presentation), `size`, `collapsible`. |
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | none | What an empty center shows. |
 | `renderDragPreview` | `.render_drag_preview(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | What follows the pointer or finger while a tab is dragged. |
@@ -411,7 +413,7 @@ rest of the area.
 | A handle's indicator | between a split's groups, at a dock's edge | `handleClass`, `handleStyle` | `group-hover:`, `group-active:` |
 | A handle's thumb | centered on a handle's line | `handleThumbClass`, `handleThumbStyle` | `group-hover:`, `group-active:` (pressed until the drag ends) |
 | A dock | an edge | `dockClass`, `dockStyle`; `renderDock` | |
-| The drop indicator | over a group during a drag | `dropIndicatorClass`, `dropIndicatorStyle`; `renderDropIndicator` | |
+| The drop indicator | over a group's content during a drag (a tab bar shows an insertion line) | `dropIndicatorClass`, `dropIndicatorStyle`; `renderDropIndicator` | |
 | The drag preview | under the pointer or finger | `renderDragPreview` | |
 | The empty center | the center | `renderEmpty` | |
 | A drawer, the sheet, the backdrop | over the center, compact | `drawerClass`, `sheetClass`, `backdropClass` (and their styles) | |
