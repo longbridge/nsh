@@ -9,6 +9,7 @@
 
 use std::{
     fs::{self, File, TryLockError},
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant},
@@ -46,12 +47,14 @@ impl Session {
         Ok(Some(session.owned(&dir, port, &identity(app), stop)?))
     }
 
-    /// Owns the port of `app`'s last session or the first free one, returning
-    /// it. With every port in the range taken, the OS allocates one.
-    pub(crate) fn acquire_free(app: &Path) -> anyhow::Result<(Option<Self>, u16)> {
+    /// Owns the port of `app`'s last session or the first free one on
+    /// `host` (the address the server will listen on), returning it. With
+    /// every port in the range taken, the OS allocates one.
+    pub(crate) fn acquire_free(app: &Path, host: Ipv4Addr) -> anyhow::Result<(Option<Self>, u16)> {
         let dir = crate::check::cache()?.join("dev-sessions");
         let app = &identity(app);
-        match Self::free_in_dir(&dir, DEFAULT_PORT, app, WAIT, port_is_free)? {
+        let is_free = |port| port_is_free(host, port);
+        match Self::free_in_dir(&dir, DEFAULT_PORT, app, WAIT, is_free)? {
             Some((session, port, stop)) => Ok((Some(session.owned(&dir, port, app, stop)?), port)),
             None => Ok((None, 0)),
         }
@@ -164,9 +167,12 @@ fn app_file(dir: &Path, port: u16) -> PathBuf {
     dir.join(format!("{port}.app"))
 }
 
-/// Whether a dev server could listen on `port`, on any address.
-fn port_is_free(port: u16) -> bool {
-    std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
+/// Whether a dev server could listen on `port` at `host`. A local server
+/// probes the loopback address only: listening on every address, even for
+/// a moment, has Windows Firewall ask the user to allow the command line
+/// on the network.
+fn port_is_free(host: Ipv4Addr, port: u16) -> bool {
+    std::net::TcpListener::bind((host, port)).is_ok()
 }
 
 fn open(path: &Path) -> anyhow::Result<File> {
@@ -321,5 +327,14 @@ mod tests {
         let (second, _) = Session::in_dir(&dir.0, 8791, WAIT).unwrap();
         assert!(!stop.exists());
         drop((first, second));
+    }
+
+    #[test]
+    fn a_local_probe_sees_a_port_taken_on_the_loopback_address() {
+        let taken = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = taken.local_addr().unwrap().port();
+        assert!(!port_is_free(Ipv4Addr::LOCALHOST, port));
+        drop(taken);
+        assert!(port_is_free(Ipv4Addr::LOCALHOST, port));
     }
 }

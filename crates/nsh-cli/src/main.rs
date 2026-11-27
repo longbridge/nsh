@@ -846,6 +846,21 @@ fn parse_limits(spec: &str) -> Result<nsh_core::js::HostLimits, String> {
     nsh_core::js::HostLimits::parse(spec)
 }
 
+/// Owns `port`, or picks a free one on `host` (where the server will
+/// listen) and records it in `port`.
+fn acquire_port(
+    entry: &std::path::Path,
+    port: &mut Option<u16>,
+    host: Ipv4Addr,
+) -> anyhow::Result<Option<dev_port::Session>> {
+    if let Some(port) = port {
+        return dev_port::Session::acquire(*port, entry);
+    }
+    let (session, free) = dev_port::Session::acquire_free(entry, host)?;
+    *port = Some(free);
+    Ok(session)
+}
+
 /// Refuses `--limits` for an app of Rust only: they are its JS VM's, and it
 /// runs no JS.
 fn no_limits_for_rust(
@@ -955,14 +970,22 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             let port = port.get_or_insert(nsh_dev::protocol::DEFAULT_PORT);
             dev_port::Session::acquire(*port, entry)?
         }
-        Command::Run { entry, port, .. } | Command::Dev { entry, port, .. } => match port {
-            Some(port) => dev_port::Session::acquire(*port, entry)?,
-            None => {
-                let (session, free) = dev_port::Session::acquire_free(entry)?;
-                *port = Some(free);
-                session
-            }
-        },
+        Command::Run {
+            entry,
+            port,
+            target,
+            ..
+        } => acquire_port(entry, port, dev::Listen::new(0, target.uses_network()).host)?,
+        Command::Dev {
+            entry,
+            port,
+            host,
+            target,
+            ..
+        } => {
+            let listen = dev::Listen::new(0, target.uses_network());
+            acquire_port(entry, port, host.unwrap_or(listen.host))?
+        }
         _ => None,
     };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
