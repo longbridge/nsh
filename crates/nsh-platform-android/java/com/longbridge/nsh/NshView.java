@@ -1374,6 +1374,20 @@ public class NshView extends FrameLayout {
         });
     }
 
+    /** {@code nsh::native_view}: the view of node {@code id}, or null. UI thread. */
+    View nativeView(int id) {
+        return mounter.view(id);
+    }
+
+    /**
+     * {@code nsh::presenting_activity}: the activity the view shows in, or null when it is in none that can show
+     * anything (finishing or destroyed). UI thread.
+     */
+    Activity presentingActivity() {
+        Activity activity = activity(getContext());
+        return activity == null || activity.isFinishing() || activity.isDestroyed() ? null : activity;
+    }
+
     void reportError(String message) {
         android.util.Log.e("nsh", message);
         main.post(() -> {

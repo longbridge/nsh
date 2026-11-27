@@ -623,7 +623,11 @@ impl Surface {
                         f();
                     }
                 }
-                Message::Run(task) => task.run(),
+                // A module's main-thread function: this surface is current
+                // while it runs (`crate::native_view`, `crate::presenting_window`).
+                Message::Run(task) => {
+                    crate::presenting::run_for(Rc::downgrade(self), || task.run())
+                }
                 Message::RootResized(id, size) => crate::window::laid_out(self, id, size),
             }
         }

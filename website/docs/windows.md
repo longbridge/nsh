@@ -176,6 +176,17 @@ Native components are registered with `AppView::register_component`; see
 engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
 makes), so the TSX a view loads imports your Rust components and modules too.
 
+## Presenting from Rust
+
+Rust code that shows system UI (a menu, a dialog, a share flyout) shows it from the surface whose code asked. In a
+main-thread task (`run_on_main_thread`), `nsh_platform_windows::presenting_window()` is the top-level window to own
+UI that no element anchors: the surface's visible window the user is in; `None` when the surface shows in no visible
+window. NSH draws its elements itself, so an element has no window of its own: `element_bounds(node)` gives the window
+an element of that surface shows in (the node of its `ref`, a `NodeRef` argument of a module function; `ROOT_ID` for
+the surface's root), its bounds in that window's client area in points, and the window's scale factor, for a menu
+that opens at the element. Read both while the task runs. They are for anchoring and presenting system UI only: a
+module never changes, re-parents, restyles or destroys a window NSH owns, nor draws into it.
+
 ## What differs on Windows
 
 The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop

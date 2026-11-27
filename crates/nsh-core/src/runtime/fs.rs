@@ -749,16 +749,16 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
     ))
 }
 
-/// The real path of the file at `path` the app may share (`Share.show`'s
-/// `files`): granted to read as `fs/promises` reads it, resolved through
-/// its links and still inside the root that grants it, and a file that
-/// exists. Rejects as `fs/promises` would: `ERR_ACCESS_DENIED` for a path
-/// no grant covers (or a link leading out of its root), `ENOENT` for one
-/// that is no file.
+/// [`System::readable_file`]: the real path of the file at `path`, granted
+/// to read as `fs/promises` reads it, resolved through its links and still
+/// inside the root that grants it, and a file that exists: a folder is
+/// `EISDIR`, a FIFO or device `EINVAL`, as `confined::open_file` has them.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn shared_file(sys: &System, path: &str) -> Result<PathBuf, JsError> {
+pub(crate) fn readable_file(sys: &System, path: &str) -> Result<PathBuf, JsError> {
     let grant = grant(sys, path, false)?;
     let mut escaped = false;
+    // What is there instead of a file, when something is.
+    let mut other = std::io::ErrorKind::NotFound;
     for (root, relative) in &grant.within {
         let (Ok(real), Ok(real_root)) = (
             crate::access::canonicalize(&root.join(relative)),
@@ -770,29 +770,29 @@ pub(crate) fn shared_file(sys: &System, path: &str) -> Result<PathBuf, JsError> 
             escaped = true;
             continue;
         }
-        if real.is_file() {
-            return Ok(real);
+        match std::fs::metadata(&real) {
+            Ok(meta) if meta.is_file() => return Ok(real),
+            Ok(meta) if meta.is_dir() => other = std::io::ErrorKind::IsADirectory,
+            Ok(_) => other = std::io::ErrorKind::InvalidInput,
+            Err(_) => {}
         }
     }
     if escaped {
         return Err(JsError::access_denied(
-            format!("share: `{path}` leads out of the roots capabilities.fs.read grants"),
+            format!("`{path}` leads out of the roots capabilities.fs.read grants"),
             "fs",
             path,
         ));
     }
-    Err(
-        JsError::from(std::io::Error::from(std::io::ErrorKind::NotFound))
-            .with_code("ENOENT")
-            .with("path", path),
-    )
+    Err(JsError::from(std::io::Error::from(other)).with("path", path))
 }
 
-/// Browsers' pages share no local files: their files are the page's own.
+/// A page's files are the browser's, never a native path the system takes
+/// (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`).
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn shared_file(_sys: &System, path: &str) -> Result<PathBuf, JsError> {
+pub(crate) fn readable_file(_sys: &System, path: &str) -> Result<PathBuf, JsError> {
     Err(JsError::Error(format!(
-        "share: this platform shares no local files (`{path}`)"
+        "this platform has no native files to hand over (`{path}`)"
     ))
     .with_code(codes::UNAVAILABLE))
 }
@@ -1850,6 +1850,76 @@ mod tests {
             super::through_links(&root, Path::new("dir/new.txt"), true),
             Path::new("real/new.txt")
         );
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// `System::readable_file`, a module's check of a file the app hands
+    /// it: a file in a granted root by its path or its placeholder, a
+    /// pasted one at its exact path; refused outside the roots, through a
+    /// link out of its root, `EISDIR` for a folder, and `ENOENT` for a
+    /// missing one.
+    #[cfg(unix)]
+    #[test]
+    fn modules_read_the_files_fs_promises_reads() {
+        use std::{os::unix::fs::symlink, sync::Arc};
+
+        use crate::{
+            access::{Access, Capabilities, TrustedPaths},
+            element::{JsError, Quotas, System, codes},
+        };
+        let base = std::env::temp_dir().join(format!("nsh-fs-readable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let data = base.join("data");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(data.join("docs")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(data.join("docs/report.pdf"), "report").unwrap();
+        std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+        std::fs::write(outside.join("pasted.txt"), "pasted").unwrap();
+        symlink(outside.join("secret.txt"), data.join("away.txt")).unwrap();
+        let data = crate::access::canonicalize(&data).unwrap();
+        let outside = crate::access::canonicalize(&outside).unwrap();
+        let mut declared = Capabilities::default();
+        declared.fs.read = vec!["${dataDir}".into()];
+        let sys = System::new(
+            Arc::new(Access {
+                declared,
+                granted: None,
+            }),
+            Some(data.clone()),
+            TrustedPaths::default(),
+            Quotas::default(),
+        );
+        let report = data.join("docs/report.pdf");
+        assert_eq!(sys.readable_file(report.to_str().unwrap()).unwrap(), report);
+        assert_eq!(
+            sys.readable_file("${dataDir}/docs/report.pdf").unwrap(),
+            report
+        );
+        let code =
+            |r: Result<std::path::PathBuf, JsError>| r.unwrap_err().code().map(str::to_owned);
+        let secret = outside.join("secret.txt");
+        assert_eq!(
+            code(sys.readable_file(secret.to_str().unwrap())).as_deref(),
+            Some(codes::ACCESS_DENIED)
+        );
+        assert_eq!(
+            code(sys.readable_file("${dataDir}/away.txt")).as_deref(),
+            Some(codes::ACCESS_DENIED)
+        );
+        assert_eq!(
+            code(sys.readable_file("${dataDir}/missing.pdf")).as_deref(),
+            Some("ENOENT")
+        );
+        assert_eq!(
+            code(sys.readable_file("${dataDir}/docs")).as_deref(),
+            Some("EISDIR")
+        );
+        let pasted = outside.join("pasted.txt");
+        let pasted = pasted.to_str().unwrap();
+        assert!(sys.readable_file(pasted).is_err());
+        super::grant_user_files(&sys.locals, &[crate::platform::clipboard::file_url(pasted)]);
+        assert_eq!(sys.readable_file(pasted).unwrap().to_str(), Some(pasted));
         std::fs::remove_dir_all(&base).unwrap();
     }
 

@@ -126,12 +126,16 @@ and the renames decided so far).
   camera, the photo library, push notifications, speech recognition): a module of `nsh-extra` (`crates/nsh-extra`, an nshm apps install with `nsh add
   nsh-extra --features <name>`), one Cargo feature per module, its TS namespace the name in PascalCase, what the
   packaged app needs declared under the feature in `[package.metadata.nsh]`. It is built on the platform crates'
-  public extension points (iOS: `presenting_controller`, `prepare_image`, the application delegate's callbacks
-  `on_application_event`, and `nsh-platform-apple`'s `set_foreign_handler` for the notifications NSH did not show;
-  Android: `activity`, `permissions`,
-  `picker::prepare_image`, `with_env`, and `proxy` for a Java listener or callback implemented in Rust), the same
+  public extension points (iOS: `presenting_controller`, `native_view`, `prepare_image`, the application delegate's
+  callbacks `on_application_event`, and `nsh-platform-apple`'s `set_foreign_handler` for the notifications NSH did not
+  show; macOS: `presenting_view`, `native_view`; Android: `activity` (with `content_uri`), `permissions`,
+  `picker::prepare_image`, `with_env`, `presenting_activity`, `native_view`, `proxy` for a Java listener or callback
+  and `receiver` for a broadcast, both implemented in Rust; Windows: `presenting_window`, `element_bounds` (NSH draws
+  its elements, so an element is its window and bounds there); Linux: `presenting_window`, `native_view`; every
+  platform: `System::readable_file` for a file the app hands over), the same
   ones any third-party nshm uses; NSH's runtime gets only such
-  generic hooks, never the feature itself. A module whose state or system calls are the process's checks the calling
+  generic hooks, never the feature itself. The native views and windows they give are for anchoring and presenting
+  system UI only: a module never changes, re-parents, restyles or removes a view NSH owns. A module whose state or system calls are the process's checks the calling
   VM's capability in each function of its JS face (`sys: System`, as `Push` checks `notifications`, `Photos`
   `picker` and `Speech` `speech`), and its Rust API checks the engine's (`nsh_core::element::access()`): the Cargo
   feature says what the app links, not which of its VMs may use it. A module that would reach a device in tests

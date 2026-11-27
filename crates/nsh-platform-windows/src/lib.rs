@@ -56,6 +56,7 @@ mod navigation;
 mod notifications;
 mod picker;
 mod presence;
+mod presenting;
 mod render;
 mod richedit;
 mod scroll;
@@ -98,5 +99,6 @@ pub use crate::{
         ComponentContext, ComponentFactory, Components, NativeComponent, Pointer, PointerKind,
         Wheel,
     },
+    presenting::{ElementBounds, element_bounds, presenting_window},
     text::DWriteTextEngine,
 };
