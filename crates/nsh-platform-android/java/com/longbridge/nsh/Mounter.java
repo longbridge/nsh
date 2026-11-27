@@ -81,9 +81,8 @@ final class Mounter {
     final int[] dialogColors = new int[10];
     /**
      * The language the app's text shows in ({@code encode.rs} {@code Command::TextLocale}), which
-     * the state words services read ({@link A11y}) and the date and time pickers' values and
-     * dialogs ({@link DateTimePickerComponent}) follow; null until the core names one (English state
-     * words, the system's language for the pickers).
+     * the state words services read ({@link A11y}) follow; null until the core names one (English
+     * state words).
      */
     java.util.Locale textLocale;
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
@@ -375,9 +374,6 @@ final class Mounter {
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
-        components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
-        components.put(DateTimePickerComponent.NAME,
-                c -> new DateTimePickerComponent(context, c, this::night, () -> textLocale));
         components.put(MenuButtonComponent.NAME, c -> new MenuButtonComponent(context, c, this::night));
         components.put(ContextMenuComponent.NAME, c -> new ContextMenuComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
@@ -592,12 +588,6 @@ final class Mounter {
                         View v = views.valueAt(i);
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
-                        }
-                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof SwitchComponent) {
-                            ((SwitchComponent) ((ComponentBox) v).component).appearanceChanged();
-                        }
-                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
-                            ((DateTimePickerComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
                         if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
@@ -2341,19 +2331,13 @@ final class Mounter {
     /**
      * The activity goes, to be made again for a configuration change ({@link NshView#leaveActivity}): what the app
      * shows in windows of the activity's own goes off it now, or the activity would leak with them. Dialogs and
-     * alerts come back in {@link #enterWindows}; menus and date pickers close, as when the user leaves them.
+     * alerts come back in {@link #enterWindows}; menus close, as when the user leaves them.
      */
     void leaveWindows() {
         moving = true;
         movedKeyboard = fieldWithKeyboard();
         movedFocus = host.findFocus();
         SystemMenus.dismissOf(context);
-        for (int i = 0; i < views.size(); i++) {
-            View v = views.valueAt(i);
-            if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
-                ((DateTimePickerComponent) ((ComponentBox) v).component).closeDialog();
-            }
-        }
         java.util.ArrayList<java.util.function.Supplier<Runnable>> alerts = new java.util.ArrayList<>();
         for (int i = 0; i < dialogMoves.size(); i++) alerts.add(dialogMoves.valueAt(i));
         for (java.util.function.Supplier<Runnable> alert : alerts) movedDialogs.add(alert.get());
@@ -3065,19 +3049,6 @@ final class Mounter {
                 Share.show(context, request);
                 break;
             }
-            case 59: {
-                // `encode.rs` `Command::AuthSession`: the request, the page, the callback scheme, ephemeral.
-                int request = b.getInt();
-                String url = (String) objects[b.getInt()];
-                String scheme = (String) objects[b.getInt()];
-                boolean ephemeral = b.getInt() != 0;
-                AuthSession.open(context, this, request, url, scheme, ephemeral);
-                break;
-            }
-            case 61:
-                // `encode.rs` `Command::CloseAuthSession`: the request the app closed.
-                AuthSession.close(b.getInt());
-                break;
             case 26: {
                 int request = b.getInt();
                 String url = (String) objects[b.getInt()];
@@ -3190,13 +3161,6 @@ final class Mounter {
             }
             case 64: {
                 textLocale = java.util.Locale.forLanguageTag((String) objects[b.getInt()]);
-                // Date and time pickers show their values in it.
-                for (int i = 0; i < views.size(); i++) {
-                    View view = views.valueAt(i);
-                    if (view instanceof ComponentBox && ((ComponentBox) view).component instanceof DateTimePickerComponent) {
-                        ((DateTimePickerComponent) ((ComponentBox) view).component).textLocaleChanged();
-                    }
-                }
                 // Services keep copies of the nodes: those with state words read them again.
                 android.view.accessibility.AccessibilityManager manager = host.accessibility();
                 // Without a running service there is no copy to refresh.

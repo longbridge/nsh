@@ -481,6 +481,9 @@ Things that were found the hard way. Read the section of the area you change bef
   little faster, but on the gallery's index they kept the GPU cache ~50 MB over its 125 MB budget on a Pixel 10 Pro,
   where the corners' squares bring it under (performance). A box
   too small for a middle between its corners' squares takes one layer; a software canvas still clips by path.
+  So does a box with a child drawn through a layer of its own (a `filter`, a blend mode: `Effects.layered`): hwui
+  filters a layer again for every clip it is drawn under, and the seven pieces made the gallery's Aurora card (four
+  blurred, drifting gradients) blur 28 times a frame, 75–85 % janky frames on a Pixel 10 Pro; 13–20 % in one layer.
 - **Android, backdrop blur**: `Backdrop` records what lies behind the view into a `RenderNode` before every frame,
   and hwui draws that whole node into a layer and blurs it every frame. The node is recorded at the size where the
   blur's deviation is 4 px (Skia's GPU blur scales its input down to that before blurring anyway) and stretched
@@ -489,7 +492,12 @@ Things that were found the hard way. Read the section of the area you change bef
   (`getGlobalVisibleRect`) records nothing. Four glass views of about the screen's size, without shadows, slid at
   34 ms a frame on an emulator, 12 ms after. Every blurred view still records and blurs its backdrop again on
   every frame, also when nothing behind it changed: a drawer sliding over blurred panes makes each of them blur
-  again (31 ms a frame on the emulator, 17 ms with the panes not blurred).
+  again (31 ms a frame on the emulator, 17 ms with the panes not blurred). A blurred view's display list holds its
+  backdrop node, so a backdrop that records it holds everything behind it a second time, and hwui's `prepareTree`
+  walks a node once for every display list that draws it: the five stacked layers of a progressive blur (the
+  gallery's Styles page) walked the window 31 times a frame, 37 ms of a Pixel 10 Pro's RenderThread while scrolling
+  and 808 ms in the first frame. A view that draws nothing but its blurred backdrop (`Backdrop.onlyBlurs`) is left
+  out of the backdrops behind it, which then blur what lies behind the whole stack: about 3 ms a frame.
 - **Android, hidden views lose their display lists**: HWUI drops the display list of a RenderNode no longer drawn,
   and `setVisibility` tells every view under the one that changes, whose background `Drawable.setVisible` calls
   `invalidateSelf`. A whole screen hidden and shown again therefore records all of its views again (22–36 ms for the

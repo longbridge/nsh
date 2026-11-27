@@ -1592,6 +1592,13 @@ struct Hit {
     native: Option<Retained<objc2_app_kit::NSView>>,
 }
 
+/// Whether a press at `(x, y)` (root coordinates) lands on a view in
+/// `root` that takes it, the root aside, as if it were `box-none`: where a
+/// window whose `pointerEvents` is `"box-none"` takes the pointer.
+pub(crate) fn takes_pointer(root: &NshView, x: f32, y: f32) -> bool {
+    pick(root, x, y).is_some_and(|hit| hit.native.is_some() || hit.view.id() != root.id())
+}
+
 /// The innermost view at `(x, y)` (root coordinates).
 fn pick(root: &NshView, x: f32, y: f32) -> Option<Hit> {
     pick_in(root, (x, y))

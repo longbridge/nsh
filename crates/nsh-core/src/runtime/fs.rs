@@ -490,6 +490,11 @@ pub(crate) struct Grant {
     within: Vec<(PathBuf, PathBuf)>,
     /// A write creates its root when it does not exist yet.
     write: bool,
+    /// Its root is opened to look names up in, never to list: the folder
+    /// of a file the user pasted or dropped, which the platform may keep
+    /// from the app (on macOS, a screenshot's floating thumbnail is written
+    /// to a folder no app may list, and the drag grants the file alone).
+    search: bool,
     name: String,
     /// The path as the call gave it (an error's `path`).
     path: String,
@@ -628,6 +633,36 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
                 .with_code(codes::UNAVAILABLE),
         );
     }
+    // A file the user pasted or dropped: read at its exact path, still
+    // within the host's grant when the host narrows the app's. Before the
+    // declared roots: a root that holds it would open every folder on the
+    // way for reading, and the user granted the file, not its folders.
+    #[cfg(not(target_arch = "wasm32"))]
+    if !write && available {
+        let data = sys.data_dir.clone().unwrap_or_default();
+        if let Ok(requested) = requested_path(sys, path, &data)
+            && let Some((folder, name)) = user_file(sys, &requested)
+        {
+            let real = folder.join(&name);
+            let hosted = access.granted.as_ref().is_none_or(|host| {
+                let roots_of = sys.locals.get::<Roots>();
+                host.fs.read.iter().any(|r| {
+                    roots_of
+                        .get(sys, r)
+                        .is_some_and(|root| in_root(&real, &root).is_some())
+                })
+            });
+            if hosted {
+                return Ok(Grant {
+                    within: vec![(folder, name.clone())],
+                    write,
+                    search: true,
+                    name: name.display().to_string(),
+                    path: path.to_owned(),
+                });
+            }
+        }
+    }
     // By the path's text and the VM's resolved roots: no disk work on the
     // engine thread. A symlink inside a root cannot lead outside it: the
     // work runs in the opened root (cap-std).
@@ -690,36 +725,10 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
             return Ok(Grant {
                 within,
                 write,
+                search: false,
                 name,
                 path: path.to_owned(),
             });
-        }
-    }
-    // A file the user pasted or dropped: read at its exact path, still
-    // within the host's grant when the host narrows the app's.
-    #[cfg(not(target_arch = "wasm32"))]
-    if !write && available {
-        let data = sys.data_dir.clone().unwrap_or_default();
-        if let Ok(requested) = requested_path(sys, path, &data)
-            && let Some((folder, name)) = user_file(sys, &requested)
-        {
-            let real = folder.join(&name);
-            let hosted = access.granted.as_ref().is_none_or(|host| {
-                let roots_of = sys.locals.get::<Roots>();
-                host.fs.read.iter().any(|r| {
-                    roots_of
-                        .get(sys, r)
-                        .is_some_and(|root| in_root(&real, &root).is_some())
-                })
-            });
-            if hosted {
-                return Ok(Grant {
-                    within: vec![(folder, name.clone())],
-                    write,
-                    name: name.display().to_string(),
-                    path: path.to_owned(),
-                });
-            }
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -937,7 +946,12 @@ impl Grant {
     fn open(&self, follow: bool) -> std::io::Result<(cap_std::fs::Dir, PathBuf)> {
         let mut failed = None;
         for (root, relative) in &self.within {
-            match confined::open_root(root) {
+            let opened = if self.search {
+                confined::open_folder(root)
+            } else {
+                confined::open_root(root)
+            };
+            match opened {
                 Ok(dir) => return Ok((dir, through_links(root, relative, follow))),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
@@ -1457,6 +1471,20 @@ pub(crate) mod confined {
     /// cannot redirect the root.
     #[cfg(unix)]
     pub(crate) fn open_root(path: &Path) -> io::Result<Dir> {
+        open_root_as(path, false)
+    }
+
+    /// Opens a canonical folder as [`open_root`] does, but only to look
+    /// names up in (search, `O_SEARCH` on Apple's), never to list it: the
+    /// folder of one granted file, which the platform may let the app open
+    /// files in but not read (macOS's `com.apple.macl`).
+    #[cfg(unix)]
+    pub(crate) fn open_folder(path: &Path) -> io::Result<Dir> {
+        open_root_as(path, true)
+    }
+
+    #[cfg(unix)]
+    fn open_root_as(path: &Path, search_only: bool) -> io::Result<Dir> {
         use std::{
             ffi::CString,
             os::{fd::AsRawFd, unix::ffi::OsStrExt},
@@ -1468,14 +1496,18 @@ pub(crate) mod confined {
             return Err(io::ErrorKind::InvalidInput.into());
         }
         // A sandbox may permit traversing / without permitting its contents to be listed.
-        let mut current = open_dir_at(libc::AT_FDCWD, c"/", parts.peek().is_some())?;
+        let mut current = open_dir_at(libc::AT_FDCWD, c"/", search_only || parts.peek().is_some())?;
         while let Some(part) = parts.next() {
             let Component::Normal(name) = part else {
                 return Err(io::ErrorKind::InvalidInput.into());
             };
             let name = CString::new(name.as_bytes())
                 .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-            current = open_dir_at(current.as_raw_fd(), &name, parts.peek().is_some())?;
+            current = open_dir_at(
+                current.as_raw_fd(),
+                &name,
+                search_only || parts.peek().is_some(),
+            )?;
         }
         Ok(Dir::from_std_file(current))
     }
@@ -1517,6 +1549,13 @@ pub(crate) mod confined {
     #[cfg(not(unix))]
     pub(crate) fn open_root(path: &Path) -> io::Result<Dir> {
         Dir::open_ambient_dir(path, cap_std::ambient_authority())
+    }
+
+    /// [`open_root`]: other platforms have no folder that opens its files
+    /// but not its listing.
+    #[cfg(not(unix))]
+    pub(crate) fn open_folder(path: &Path) -> io::Result<Dir> {
+        open_root(path)
     }
 
     /// Opens a regular file to read or to write (created when missing). On
@@ -1679,6 +1718,69 @@ mod tests {
         let wider = sys(Some(host));
         super::grant_user_files(&wider.locals, &[url(file)]);
         assert!(super::grant(&wider, file, false).is_ok());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A pasted or dropped file in a folder the app may search but not list
+    /// (mode `--x` here; on macOS, the folder of a screenshot's floating
+    /// thumbnail, whose `com.apple.macl` lets no app list it) is read: its
+    /// folder is opened for search only. A declared root that also holds
+    /// the file does not take over: it would open each folder on the way
+    /// for reading where the platform has no `O_PATH` (macOS).
+    #[cfg(unix)]
+    #[test]
+    fn a_pasted_file_in_an_unlistable_folder_is_read() {
+        use std::{os::unix::fs::PermissionsExt, sync::Arc};
+
+        use crate::{
+            access::{Access, Capabilities, TrustedPaths},
+            element::{Quotas, System},
+        };
+        // Permissions do not hold back root.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("nsh-fs-unlistable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let data = base.join("data");
+        let shot = base.join("shot");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&shot).unwrap();
+        std::fs::write(shot.join("Screenshot.png"), "picture").unwrap();
+        std::fs::set_permissions(&shot, std::fs::Permissions::from_mode(0o111)).unwrap();
+        let file = shot.join("Screenshot.png");
+        let file = file.to_str().unwrap();
+        let app = |roots: Vec<String>| {
+            let mut declared = Capabilities::default();
+            declared.fs.read = roots;
+            let app = System::new(
+                Arc::new(Access {
+                    declared,
+                    granted: None,
+                }),
+                Some(data.clone()),
+                TrustedPaths::default(),
+                Quotas::default(),
+            );
+            super::grant_user_files(&app.locals, &[crate::platform::clipboard::file_url(file)]);
+            app
+        };
+        let read = |app: &System| {
+            let grant = super::grant(app, file, false).unwrap();
+            assert!(grant.search, "the pasted file's own grant");
+            let (dir, relative) = grant.open(true).unwrap();
+            assert_eq!(dir.metadata(&relative).unwrap().len(), 7);
+            dir.read_to_string(&relative).unwrap()
+        };
+        assert_eq!(read(&app(vec!["${dataDir}".into()])), "picture");
+        assert_eq!(
+            read(&app(vec![
+                "${dataDir}".into(),
+                base.to_str().unwrap().into()
+            ])),
+            "picture"
+        );
+        std::fs::set_permissions(&shot, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::remove_dir_all(&base).unwrap();
     }
 

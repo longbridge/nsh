@@ -1360,8 +1360,6 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.audio = true;
     // A chooser over `ACTION_SEND` (`Share.java`).
     environment.share = true;
-    // A Custom Tab, ended by the callback link (`AuthSession.java`).
-    environment.auth_session = true;
     // The app's details in the system's settings (`SystemUi.java`
     // `openAppSettings`).
     environment.app_settings = true;

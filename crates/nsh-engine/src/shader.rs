@@ -54,7 +54,7 @@ use nsh_core::{
 };
 use rustc_hash::FxHashMap;
 
-use crate::frames::{FrameTarget, texture_format};
+use crate::frames::{FrameTarget, Submission, Writes, texture_format};
 #[cfg(windows)]
 pub use crate::shader_frame::SharedTexture;
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
@@ -131,6 +131,20 @@ pub struct Renderer {
     /// The worker thread's queue, started with the first pipeline asked for
     /// (the thread ends when the renderer is dropped).
     worker: OnceLock<Option<mpsc::Sender<Job>>>,
+    /// Apple: the thread that finishes and submits the frames encoded on
+    /// the main thread, and asks the GPU to tell when they are done
+    /// ([`Renderer::when_done`]), in order; started with the first frame
+    /// (it ends when the renderer is dropped).
+    #[cfg(target_vendor = "apple")]
+    submitter: OnceLock<Option<mpsc::Sender<Submit>>>,
+}
+
+/// Work for the submitting thread ([`Renderer::submitter`]).
+#[cfg(target_vendor = "apple")]
+enum Submit {
+    Frame(Submission),
+    /// Once the frames sent before are submitted.
+    WhenDone(Box<dyn FnOnce() + Send>),
 }
 
 /// The backends to open a device on, in order: the renderer takes the
@@ -319,6 +333,8 @@ impl Renderer {
             sampler,
             cache: Default::default(),
             worker: OnceLock::new(),
+            #[cfg(target_vendor = "apple")]
+            submitter: OnceLock::new(),
         })
     }
 
@@ -411,6 +427,20 @@ impl Renderer {
     /// they are [`ShaderView::pending`]. `false` (and `f` dropped) where the
     /// device cannot tell: the backend polls.
     pub fn when_done(&self, f: impl FnOnce() + Send + 'static) -> bool {
+        // After the frames still on the submitting thread, which asks.
+        #[cfg(target_vendor = "apple")]
+        if let Some(thread) = self.submitter() {
+            if !crate::shader_surfaces::is_metal(&self.queue) {
+                return false;
+            }
+            return match thread.send(Submit::WhenDone(Box::new(f))) {
+                Ok(()) => true,
+                Err(mpsc::SendError(Submit::WhenDone(f))) => {
+                    crate::shader_surfaces::when_done(&self.queue, f)
+                }
+                Err(_) => false,
+            };
+        }
         #[cfg(target_vendor = "apple")]
         return crate::shader_surfaces::when_done(&self.queue, f);
         #[cfg(not(target_vendor = "apple"))]
@@ -454,6 +484,52 @@ impl Renderer {
         // No worker: compiled here, as before there was one.
         compile(&self.device, &self.cache, job);
         self.pipeline(layer, format)
+    }
+
+    /// Apple: the submitting thread's queue, its thread started the first
+    /// time (`None` without one: frames are submitted where they are
+    /// encoded).
+    #[cfg(target_vendor = "apple")]
+    fn submitter(&self) -> Option<&mpsc::Sender<Submit>> {
+        self.submitter
+            .get_or_init(|| {
+                let (tx, rx) = mpsc::channel::<Submit>();
+                let queue = self.queue.clone();
+                let spawned = std::thread::Builder::new()
+                    .name("nsh-shader-submit".into())
+                    .spawn(move || {
+                        // Ends once the renderer (the sender) is dropped.
+                        while let Ok(work) = rx.recv() {
+                            match work {
+                                Submit::Frame(frame) => frame.run(&queue),
+                                Submit::WhenDone(f) => {
+                                    crate::shader_surfaces::when_done(&queue, f);
+                                }
+                            }
+                        }
+                    });
+                match spawned {
+                    Ok(_) => Some(tx),
+                    Err(e) => {
+                        log::warn!("shaders: no thread to submit frames on ({e})");
+                        None
+                    }
+                }
+            })
+            .as_ref()
+    }
+
+    /// Sends `frame` to the submitting thread, or submits it here without
+    /// one.
+    fn submit(&self, frame: Submission) {
+        #[cfg(target_vendor = "apple")]
+        if let Some(thread) = self.submitter() {
+            if let Err(mpsc::SendError(Submit::Frame(frame))) = thread.send(Submit::Frame(frame)) {
+                frame.run(&self.queue);
+            }
+            return;
+        }
+        frame.run(&self.queue);
     }
 
     /// The worker's queue, its thread started the first time.
@@ -1070,21 +1146,19 @@ impl ShaderView {
         let overflow = layer.overflow;
         let scale = width as f32 / (self.size.width.0 + 2.0 * overflow.0).max(f32::MIN_POSITIVE);
         let time = self.clock.time(now);
-        renderer.queue.write_buffer(
-            &bindings.builtins,
-            0,
-            &words_bytes(&builtins(
+        // Written with the frame, wherever it is submitted.
+        let mut writes: Writes = vec![(
+            bindings.builtins.clone(),
+            words_bytes(&builtins(
                 self.size,
                 time,
                 scale,
                 Percentage(progress),
                 overflow,
             )),
-        );
+        )];
         if let Some(buffer) = &bindings.uniforms {
-            renderer
-                .queue
-                .write_buffer(buffer, 0, &words_bytes(&self.words));
+            writes.push((buffer.clone(), words_bytes(&self.words)));
         }
         let view = self.frames.view(destination);
         let mut encoder = renderer
@@ -1111,7 +1185,13 @@ impl ShaderView {
             pass.set_bind_group(0, &bindings.group, &[]);
             pass.draw(0..3, 0..1);
         }
-        self.frames.submit(&renderer.queue, destination, encoder);
+        self.frames.submit_on(
+            &renderer.queue,
+            Some(&|frame| renderer.submit(frame)),
+            destination,
+            encoder,
+            writes,
+        );
         self.dirty = false;
         let _ = renderer.device.poll(wgpu::PollType::Poll);
         self.frames.collect() || collected
@@ -1373,6 +1453,55 @@ mod tests {
             let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
         }
         panic!("no frame");
+    }
+
+    /// The main thread's cost of rendering an animated shader on surfaces,
+    /// as the display link does each frame (`cargo test -p nsh-engine --lib
+    /// main_thread_cost -- --ignored --nocapture`).
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    #[ignore = "a measurement"]
+    fn main_thread_cost_of_an_animated_frame_on_surfaces() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut views: Vec<ShaderView> = (0..3)
+            .map(|_| {
+                let mut view = ShaderView::default();
+                view.show_on_surfaces(true);
+                view.set_size(size(px(64.0), px(14.0)), 2.0);
+                view.set_layer(Some(layer(
+                    "struct Uniforms { color: vec4f }\n\
+                     fn shade(uv: vec2f) -> vec4f { return uniforms.color * fract(nsh.time + uv.x); }",
+                    &[("color", UniformValue::Color(Color(0xff0000ff)))],
+                )));
+                prepare(&mut view, &renderer);
+                view
+            })
+            .collect();
+        let start = Instant::now();
+        let mut spent = Vec::new();
+        let mut shown = 0;
+        for i in 0..400u32 {
+            let now = start + Duration::from_millis(u64::from(i) * 8);
+            let t = Instant::now();
+            for view in &mut views {
+                shown += usize::from(view.render(&renderer, now));
+            }
+            spent.push(t.elapsed().as_secs_f64() * 1000.0);
+            std::thread::sleep(Duration::from_millis(8));
+        }
+        spent.sort_by(f64::total_cmp);
+        let at = |q: f64| spent[((spent.len() - 1) as f64 * q) as usize];
+        eprintln!(
+            "3 views, ms per display frame: p50 {:.3} p95 {:.3} max {:.3}; {shown} frames shown",
+            at(0.5),
+            at(0.95),
+            at(1.0)
+        );
+        // Frames are not skipped for want of a free surface.
+        assert!(shown > 3 * 350, "{shown} frames shown");
     }
 
     #[cfg(target_vendor = "apple")]

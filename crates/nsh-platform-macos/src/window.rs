@@ -962,6 +962,15 @@ fn apply(
     }
     if let Some(pointer) = a.pointer_events {
         window.setIgnoresMouseEvents(pointer == WindowPointerEvents::None);
+        // Not the window of a host the app is embedded in: it holds the
+        // host's own views too.
+        let own = id != ROOT_ID || surface.standalone.get();
+        crate::box_none::set(
+            surface,
+            id,
+            window,
+            own && pointer == WindowPointerEvents::BoxNone,
+        );
     }
     if let Some(shadow) = a.shadow {
         window.setHasShadow(shadow);
@@ -1332,6 +1341,7 @@ fn order_front(surface: &Surface, window: &NSWindow, activate: bool, key: bool, 
         // shows (a test's app never activates).
         window.orderFrontRegardless();
     }
+    crate::box_none::shown(window);
 }
 
 /// How [`order_front`] activates the app (and [`panel_window`], for an
@@ -1647,6 +1657,7 @@ fn opening_position(
 /// A batch was applied: the windows waiting for their first frame show
 /// once one laid out at their size is in.
 pub(crate) fn batch_applied(surface: &Surface) {
+    crate::box_none::batch_applied(surface);
     let ready: Vec<NodeId> = {
         let Ok(windows) = surface.windows.try_borrow() else {
             return;
@@ -2271,6 +2282,7 @@ pub(crate) fn close_all(surface: &Surface) {
 }
 
 fn close(w: AppWindow) {
+    crate::box_none::forget(&w.window);
     w.watch.stop();
     w.view.set_window_of(std::rc::Weak::new());
     w.view.ns().unregisterDraggedTypes();
@@ -2515,6 +2527,24 @@ define_class!(
                 });
             }
             Bool::YES
+        }
+
+        // No notification says so: only the delegate hears that a full
+        // screen transition failed (`crate::window_state`).
+        #[unsafe(method(windowDidFailToEnterFullScreen:))]
+        fn window_did_fail_to_enter_full_screen(&self, _window: &NSWindow) {
+            let (key, id) = *self.ivars();
+            if let Some(surface) = Surface::with_key(key) {
+                crate::window_state::failed_to_enter_full_screen(&surface, Target::Own(id));
+            }
+        }
+
+        #[unsafe(method(windowDidFailToExitFullScreen:))]
+        fn window_did_fail_to_exit_full_screen(&self, _window: &NSWindow) {
+            let (key, id) = *self.ivars();
+            if let Some(surface) = Surface::with_key(key) {
+                crate::window_state::failed_to_leave_full_screen(&surface, Target::Own(id));
+            }
         }
 
         #[unsafe(method(windowDidResignKey:))]

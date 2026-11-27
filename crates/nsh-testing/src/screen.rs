@@ -204,13 +204,6 @@ pub struct Screen {
     shares: Vec<nsh_core::share::ShareSheet>,
     /// The shares to answer.
     share_answers: Vec<u32>,
-    /// The web sign-in sessions the app opened in the app, in order.
-    auth_sessions: Vec<nsh_core::auth_session::AuthSessionPage>,
-    /// The sign-in sessions to answer.
-    auth_session_answers: Vec<u32>,
-    /// The sign-in session showing: not answered, closed by the app nor
-    /// replaced yet.
-    auth_session_showing: Option<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
     file_requests: Vec<nsh_core::file_dialog::FileRequest>,
@@ -961,13 +954,6 @@ impl Screen {
                 self.shares.push((**sheet).clone());
                 self.share_answers.push(*id);
             }
-            // Recorded, never shown: a test's machine signs in nowhere.
-            Command::AuthSession { id, page } => {
-                self.auth_sessions.push((**page).clone());
-                self.auth_session_answers.push(*id);
-                self.auth_session_showing = Some(*id);
-            }
-            Command::CloseAuthSession(id) => self.auth_session_ended(*id),
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
             Command::FileRequest { id, request } => {
@@ -2095,35 +2081,6 @@ impl Screen {
     /// [`nsh_core::platform::Environment::share`]).
     pub fn shares(&self) -> &[nsh_core::share::ShareSheet] {
         &self.shares
-    }
-
-    /// The web sign-in sessions the app opened in the app
-    /// ([`nsh_core::element::open_auth_session`]), in order: those that
-    /// reached the platform, past the request's checks (only once the
-    /// environment has [`nsh_core::platform::Environment::auth_session`];
-    /// elsewhere the page is in [`Screen::opened_urls`]).
-    pub fn auth_sessions(&self) -> &[nsh_core::auth_session::AuthSessionPage] {
-        &self.auth_sessions
-    }
-
-    /// Whether a sign-in session the app opened in the app still shows:
-    /// the user has not ended it (as
-    /// [`crate::Headless::keep_auth_sessions_open`] leaves it), and the app
-    /// has not closed it ([`nsh_core::element::close_auth_session`]).
-    pub fn auth_session_showing(&self) -> bool {
-        self.auth_session_showing.is_some()
-    }
-
-    /// Sign-in session `id` is no longer showing.
-    pub(crate) fn auth_session_ended(&mut self, id: u32) {
-        if self.auth_session_showing == Some(id) {
-            self.auth_session_showing = None;
-        }
-    }
-
-    /// The sign-in sessions to answer since the last call.
-    pub(crate) fn take_auth_session_answers(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.auth_session_answers)
     }
 
     /// The share requests to answer since the last call.
