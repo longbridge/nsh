@@ -63,6 +63,22 @@ fn a_code_block_with_a_language_is_highlighted() {
 }
 
 #[test]
+fn a_language_with_a_fences_suffix_is_highlighted() {
+    // Documents from other editors can keep a fence's whole info string
+    // as the language: its first word names it.
+    let mut app = start(json!({"type": "doc", "content": [
+        {"type": "codeBlock", "attrs": {"language": "rust,ignore"},
+         "content": [{"type": "text", "text": "fn main() { let ok = 1; }"}]},
+        {"type": "codeBlock", "attrs": {"language": "ts title=\"a.ts\""},
+         "content": [{"type": "text", "text": "const s = \"x\";"}]},
+    ]}));
+    let (keyword, title) = settled_pair(&mut app, "fn main", "main()");
+    assert_ne!(keyword, title, "`rust,ignore` colors the block");
+    let (keyword, string) = settled_pair(&mut app, "const s", "\"x\"");
+    assert_ne!(keyword, string, "`ts title=\"a.ts\"` colors the block");
+}
+
+#[test]
 fn without_the_extension_code_stays_plain() {
     let mut app = start_session(
         || {

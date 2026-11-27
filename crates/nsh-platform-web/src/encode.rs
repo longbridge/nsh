@@ -1547,6 +1547,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         Command::Focus => out.item("cmd").num(id).str("focus").end(),
         Command::Blur => out.item("cmd").num(id).str("blur").end(),
         Command::ClearSelection => out.item("cmd").num(id).str("clearSelection").end(),
+        Command::SelectAll => out.item("cmd").num(id).str("selectAll").end(),
         Command::ScrollTo { x, y, animated } => {
             out.item("cmd")
                 .num(id)

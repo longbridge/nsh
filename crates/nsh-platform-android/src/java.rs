@@ -63,6 +63,9 @@ pub(crate) struct Java {
     /// view's new frame, whether it replaces the view's children and the
     /// pixels it overflows by (UI thread).
     pub(crate) view_shader_frame: JMethodID,
+    /// `shadersInSight(int[])`: which of these shader views can be seen
+    /// (UI thread).
+    pub(crate) view_shaders_in_sight: JMethodID,
     pub(crate) view_app_stopped: JMethodID,
     pub(crate) view_host_message: JMethodID,
     pub(crate) view_open_url_message: JMethodID,
@@ -196,6 +199,7 @@ pub(crate) fn init(vm: JavaVM) -> jni::errors::Result<()> {
             "shaderFrame",
             "(ILjava/nio/ByteBuffer;IIZF)V",
         )?,
+        view_shaders_in_sight: env.get_method_id(view_class, "shadersInSight", "([I)[Z")?,
         view_app_stopped: env.get_method_id(view_class, "appStopped", "()V")?,
         view_host_message: env.get_method_id(
             view_class,

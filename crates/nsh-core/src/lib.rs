@@ -13,7 +13,6 @@ pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
 pub mod audio;
-pub mod auth_session;
 pub mod canvas;
 pub mod clipboard;
 pub mod color;

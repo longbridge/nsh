@@ -1251,11 +1251,8 @@ desktop OS a press shows the same items with `popup_menu`; on the web the conten
 `ContextMenuComponent.java`) shows the system's menu from `MenuButton`'s item data, and `menu.rs` reports it with the
 drawn menu's events. Android has no context menu a held finger opens by itself, so `menu.rs` keeps the drawn menu's
 hold there and asks the component with `open` (and `at`, the held point); elsewhere, and without items, the menu is
-the drawn one. `nsh/mobile`'s `SegmentedControl` is the same kind of native
-component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is; so is its `Switch`,
-`nsh/switch` (`system_switch.rs` on iOS, `SwitchComponent.java` on Android), and its `DateTimePicker`,
-`nsh/date-time-picker` (iOS `system_date_time_picker.rs`, Android `DateTimePickerComponent.java`): values cross to the
-platforms as their fields, never as strings to parse, and come back the same way.
+the drawn one. System-styled form controls (a segmented control, a switch, a date and time picker) are not native
+components of NSH's: they live in an nshm (`nsh-system-controls`), which registers its own native components.
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
 pointer is followed by Rust listeners, `onMouseEnter` / `onMouseLeave` on the `trigger` slot (the app's element) and on

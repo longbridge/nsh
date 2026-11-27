@@ -125,7 +125,10 @@ jobs:
     needs: plan
     if: needs.plan.outputs.build == 'true'
     strategy:
-      fail-fast: false
+      # A release or a nightly needs every platform: the first build that
+      # fails cancels the rest instead of leaving them to run for an hour
+      # for nothing. Re-running the failed jobs re-runs the cancelled ones.
+      fail-fast: true
       matrix:
         # The CLI, the desktop runtime and the GPUI and terminal hosts are
         # built for the runner's processor, so each architecture has a runner
@@ -244,10 +247,12 @@ jobs:
           test -f "$ANDROID_HOME/platforms/android-35/android.jar"
           ls "$ANDROID_HOME/ndk" || true
 
+      # rust-toolchain.toml lists Apple silicon's iOS targets; an Intel Mac
+      # builds the simulator and Mac Catalyst runtimes for x86_64.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown${{ matrix.name == 'macos-x86_64' && ',x86_64-apple-ios,x86_64-apple-ios-macabi' || '' }}
 
       # The web runtime's C code (zstd) needs upstream LLVM: Apple's clang
       # does not target wasm32. Check the C tools before building runtimes.

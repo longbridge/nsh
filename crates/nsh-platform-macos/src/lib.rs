@@ -28,6 +28,7 @@ mod agent;
 mod animation;
 mod app;
 mod blur;
+mod box_none;
 mod canvas;
 mod chrome;
 mod decor;

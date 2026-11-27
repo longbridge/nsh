@@ -2276,7 +2276,13 @@ class Player {
     this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
       this.frameAt = performance.now();
-      this.call((w) => w.nsh_frame(this.frameTime(now), 1));
+      // What the frame changes is drawn in it (`drawSoon`).
+      this.inFrame = true;
+      try {
+        this.call((w) => w.nsh_frame(this.frameTime(now), 1));
+      } finally {
+        this.inFrame = false;
+      }
     });
   }
 
@@ -4144,6 +4150,8 @@ class Player {
    * the root with a screen effect) as they show without the effect.
    */
   paintHost(cx, host, r, stop, owner) {
+    // A canvas changed since the last frame shows its new drawing.
+    this.flushDraws();
     this.watchPaint();
     // What changed since the last picture: its styles are read again.
     this.touchAll(this._paintObserver.takeRecords());
@@ -5659,13 +5667,35 @@ class Player {
     this.drawSoon(el);
   }
 
+  /**
+   * Draws canvas view `el` once before the next paint. Each input event,
+   * timer or socket message is a task with a batch of its own, and several
+   * can come between two frames (pointer moves, a stream of updates): each
+   * replays the whole drawing, only the last of them is ever shown, and the
+   * replays hold the main thread the input waits on. So a change waits for
+   * the next frame, and the canvases changed before it draw once there. A
+   * change made in a frame (the engine's `nsh_frame` stepping an animated
+   * value) draws at the end of its callback, before that frame's paint: a
+   * `requestAnimationFrame` asked for there would come a frame late.
+   */
   drawSoon(el) {
-    if (el._drawQueued) return;
-    el._drawQueued = true;
-    queueMicrotask(() => {
-      el._drawQueued = false;
-      this.draw(el);
-    });
+    (this.drawQueue ??= new Set()).add(el);
+    if (this.drawQueued) return;
+    this.drawQueued = true;
+    const run = () => {
+      this.drawQueued = false;
+      this.flushDraws();
+    };
+    if (this.inFrame) queueMicrotask(run);
+    else requestAnimationFrame(run);
+  }
+
+  /** Draws the canvases waiting for a frame (`drawSoon`) now: a picture of them (`paintHost`) shows what they draw. */
+  flushDraws() {
+    const queue = this.drawQueue;
+    if (!queue?.size) return;
+    this.drawQueue = new Set();
+    for (const el of queue) this.draw(el);
   }
 
   draw(el) {
@@ -7647,6 +7677,13 @@ class Player {
         const anchor = sel?.rangeCount ? sel.anchorNode : null;
         const area = anchor && this.areaOf(anchor.nodeType === 1 ? anchor : anchor.parentElement);
         if (el && area && (el.contains(area) || area.contains(el))) sel.removeAllRanges();
+        break;
+      }
+      case "selectAll": {
+        // All the texts of the selectable view `el` is or is in, as Ctrl+A
+        // does there: `selectionchange` then reports them.
+        const area = el && this.areaOf(el);
+        if (area) getSelection()?.selectAllChildren(area);
         break;
       }
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;

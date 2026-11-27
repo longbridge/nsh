@@ -688,6 +688,7 @@ fn show_launched(window: &NSWindow, surface: &Surface, background: bool) {
         window.makeFirstResponder(Some(surface.root.ns()));
         NSApplication::sharedApplication(surface.mtm).activate();
     }
+    crate::box_none::shown(window);
 }
 
 /// The window of the standalone app whose surface is `surface`, while a
@@ -962,6 +963,28 @@ define_class!(
             true
         }
 
+        // No notification says so: only the delegate hears that a full
+        // screen transition failed (`crate::window_state`).
+        #[unsafe(method(windowDidFailToEnterFullScreen:))]
+        fn did_fail_to_enter_full_screen(&self, window: &NSWindow) {
+            if let Some(surface) = running_surface(window) {
+                crate::window_state::failed_to_enter_full_screen(
+                    &surface,
+                    crate::window_state::Target::Main,
+                );
+            }
+        }
+
+        #[unsafe(method(windowDidFailToExitFullScreen:))]
+        fn did_fail_to_exit_full_screen(&self, window: &NSWindow) {
+            if let Some(surface) = running_surface(window) {
+                crate::window_state::failed_to_leave_full_screen(
+                    &surface,
+                    crate::window_state::Target::Main,
+                );
+            }
+        }
+
         #[unsafe(method(windowWillClose:))]
         fn window_will_close(&self, _notification: &NSNotification) {
             stop_running();
@@ -975,6 +998,17 @@ define_class!(
         }
     }
 );
+
+/// The surface of the standalone app's main window, when it is `window`.
+fn running_surface(window: &NSWindow) -> Option<Rc<Surface>> {
+    RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .filter(|running| &*running.window == window)
+            .map(|running| running.view.surface().clone())
+    })
+}
 
 /// Closes the standalone app's main window (surface `key`'s) without
 /// asking the app again: hidden with [`AppOptions::keep_alive_on_close`],

@@ -699,15 +699,11 @@ impl AppView {
         crate::rt::flush(cx);
     }
 
-    /// Files dragged in from another application were dropped.
-    fn drop_files(
-        &mut self,
-        paths: &gpui::ExternalPaths,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (x, y) = self.root_point(window.mouse_position());
-        crate::file_drop::perform(&self.surface, x, y, paths.paths());
+    /// Files dragged in from another application were dropped at `position`.
+    fn drop_files(&mut self, position: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        let paths = crate::file_drop::take_paths(&self.surface);
+        let (x, y) = self.root_point(position);
+        crate::file_drop::perform(&self.surface, x, y, &paths);
         crate::rt::flush(cx);
     }
 
@@ -953,6 +949,9 @@ impl Render for AppView {
         // The window's chrome (title bar, menu bar) goes around the surface.
         let content = crate::chrome::render(&self.surface, surface, window, cx);
         let dragging = cx.has_active_drag();
+        if !dragging {
+            crate::file_drop::forget_paths(&self.surface);
+        }
         // A file drag that left the window, or ended without a drop, leaves
         // its destination (GPUI redraws the window as it ends).
         if !dragging && crate::file_drop::take_needs_clear(&self.surface) {
@@ -977,15 +976,64 @@ impl Render for AppView {
             // GPUI does not tell what is dragged, so the layer comes with any
             // drag; it listens only to `ExternalPaths`, and its hitbox does
             // not block the mouse, so the surface under it stays hovered.
+            // The drop is the release over the layer's own hitbox, not
+            // GPUI's `on_drop`: that one asks whether the hitbox is hovered,
+            // which no hitbox is after a key press, and a file drag's events
+            // do not turn the window's input back to the mouse (#3459).
             .when(dragging, |div| {
+                let view = cx.entity().downgrade();
                 div.child(
                     gpui::div()
                         .absolute()
                         .inset_0()
                         .on_drag_move(cx.listener(Self::drag_files))
-                        .on_drop(cx.listener(Self::drop_files)),
+                        .child(
+                            gpui::canvas(
+                                |bounds, window, _| {
+                                    window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal)
+                                },
+                                move |_, hitbox, window, _| {
+                                    window.on_mouse_event(move |event, phase, window, cx| {
+                                        drop_on_release(&view, &hitbox, event, phase, window, cx)
+                                    });
+                                },
+                            )
+                            .size_full(),
+                        ),
                 )
             })
+    }
+}
+
+/// The drop layer's release (`render`): over the layer's hitbox, during a
+/// file drag that moved over the surface, it drops the drag's files.
+fn drop_on_release(
+    view: &gpui::WeakEntity<AppView>,
+    hitbox: &gpui::Hitbox,
+    event: &gpui::MouseUpEvent,
+    phase: gpui::DispatchPhase,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    if phase != gpui::DispatchPhase::Bubble
+        || !cx.has_active_drag()
+        || !hitbox.is_hovered_at(event.position, window)
+    {
+        return;
+    }
+    let Some(view) = view.upgrade() else {
+        return;
+    };
+    let dropped = view.update(cx, |view, cx| {
+        let held = crate::file_drop::holds_paths(&view.surface);
+        if held {
+            view.drop_files(event.position, cx);
+        }
+        held
+    });
+    if dropped {
+        cx.stop_active_drag(window);
+        cx.stop_propagation();
     }
 }
 

@@ -299,6 +299,7 @@ fn windows(cx: &mut TestAppContext) {
     presses_carry_where_the_pointer_was(cx);
     a_click_that_focuses_a_field_selecting_on_focus_selects_its_text(cx);
     files_dropped_from_outside_reach_the_view_under_them(cx);
+    files_dropped_after_a_key_press_still_reach_the_view_under_them(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
     mouse_events_carry_the_position_button_and_modifiers(cx);
     a_view_removed_under_the_mouse_hears_no_leave(cx);
@@ -1224,6 +1225,61 @@ fn a_click_that_focuses_a_field_selecting_on_focus_selects_its_text(cx: &mut Tes
     cx.simulate_click(second, gpui::Modifiers::shift());
     cx.simulate_input("z");
     wait_for(&view, cx, "xyz");
+}
+
+/// A key press turns GPUI's input modality to keyboard, under which no hitbox
+/// counts as hovered, and a file drag's events do not turn it back: the drop
+/// must still reach the view under the pointer (#3459).
+fn files_dropped_after_a_key_press_still_reach_the_view_under_them(cx: &mut TestAppContext) {
+    let source = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+const log = signal<string[]>([]);
+const add = (entry: string) => log.set([...log(), entry]);
+mount(() => <View style={{ flex: 1 }}>
+  <View
+    onFileDragEnter={() => add("enter")}
+    onFileDragLeave={() => add("leave")}
+    onFileDrop={(e) => add("drop " + e.uris.join(";"))}
+    style={{ height: 100 }}
+  />
+  <Input autoFocus readonly value={log().join(", ") || "none"} style={{ height: 30 }} />
+</View>);
+"#;
+    let code = nsh_bundler::compile_module("App.tsx", source, &[]).unwrap();
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "none");
+    let origin = view.read_with(cx, |view, _| view.surface().origin.get());
+    let at = gpui::point(gpui::px(origin.0 + 10.0), gpui::px(origin.1 + 50.0));
+    // The pointer rests over the destination, then a key is pressed.
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::default());
+    cx.simulate_keystrokes("right");
+    let send = |cx: &mut VisualTestContext, event: gpui::FileDropEvent| {
+        cx.update(|window, cx| {
+            window.dispatch_event(gpui::PlatformInput::FileDrop(event), cx);
+        });
+        cx.run_until_parked();
+    };
+    let paths = gpui::ExternalPaths(
+        vec![std::path::PathBuf::from(crate::file_drop::test_path(
+            "k.txt",
+        ))]
+        .into(),
+    );
+    send(
+        cx,
+        gpui::FileDropEvent::Entered {
+            position: at,
+            paths,
+        },
+    );
+    send(cx, gpui::FileDropEvent::Pending { position: at });
+    wait_for(&view, cx, "enter");
+    send(cx, gpui::FileDropEvent::Submit { position: at });
+    let dropped = crate::file_drop::test_url("k.txt");
+    wait_for(&view, cx, &format!("enter, drop {dropped}, leave"));
 }
 
 fn files_dropped_from_outside_reach_the_view_under_them(cx: &mut TestAppContext) {
