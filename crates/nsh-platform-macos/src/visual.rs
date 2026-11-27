@@ -32,9 +32,9 @@ use objc2::{
     runtime::{AnyClass, AnyObject},
 };
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSColor, NSResponder, NSUserInterfaceItemIdentification as _,
-    NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
-    NSVisualEffectView, NSWindowOrderingMode,
+    NSColor, NSResponder, NSUserInterfaceItemIdentification as _, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
+    NSWindowOrderingMode,
 };
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGMutablePath;
@@ -145,6 +145,9 @@ struct Backdrop {
     glass_style: GlassEffect,
     /// The tint `glass` was given.
     tint: Option<Color>,
+    /// The size `glass` was given: the box's, or larger while the box's
+    /// frame animates ([`glass_size`]).
+    glass_size: CGSize,
     /// The material, blending and state `view` was given (material only).
     material: MacOsBackdrop,
     /// The frame and corners `view` (and its layer) were last shaped to:
@@ -575,7 +578,8 @@ impl Visual {
 
     /// Shapes the effect layers of `view` (in its own `layer`) after
     /// `style`; `filled`: an opaque fill layer covers the box; `corner`: the
-    /// decoration's corner mask when it is on `layer` (see [`Self::set_masks`]).
+    /// decoration's corner mask when it is on `layer` (see [`Self::set_masks`]);
+    /// `heading`: the size a running layout animation takes the box to.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply(
         &mut self,
@@ -587,6 +591,7 @@ impl Visual {
         text: bool,
         filled: bool,
         corner: Option<&CALayer>,
+        heading: Option<CGSize>,
     ) {
         let effects = style.effects.as_deref();
         let shadows = effects.map_or(&[][..], |e| &e.box_shadows[..]);
@@ -640,7 +645,7 @@ impl Visual {
                 .sum::<f32>()
         });
         let masked = effects.is_some_and(|e| !e.mask_images.is_empty());
-        self.set_backdrop(view, style, blur, masked, local, radii);
+        self.set_backdrop(view, style, blur, masked, local, radii, heading);
         // Last: the masks cover everything above, the backdrop's view
         // included.
         self.set_masks(
@@ -1016,6 +1021,7 @@ impl Visual {
     /// written to it (only changes are), and switching between glass, a
     /// material and a blur drops the old native view instead of leaving it
     /// stale behind the new one.
+    #[allow(clippy::too_many_arguments)]
     fn set_backdrop(
         &mut self,
         view: &NshView,
@@ -1024,6 +1030,7 @@ impl Visual {
         masked: bool,
         local: CGRect,
         radii: CornerRadii,
+        heading: Option<CGSize>,
     ) {
         let kind = backdrop_kind(style, radius, masked, glass_class().is_some());
         if self.backdrop.as_ref().is_some_and(|b| Some(b.kind) != kind) {
@@ -1072,6 +1079,19 @@ impl Visual {
                     if b.tint != style.glass_tint_color {
                         set_glass_tint(glass, style.glass_tint_color);
                         b.tint = style.glass_tint_color;
+                    }
+                    // The glass lays its SwiftUI content out again for every
+                    // size it is given, which made up most of a layout
+                    // animation's frame where one resized on each (Noop's
+                    // composer beside its sidebar). While the box's frame
+                    // animates, the glass takes the larger of where the box
+                    // is and where it is heading, once, and the host's
+                    // rounded clip below shows the box as it moves; the
+                    // animation's last frame gives it the box's size.
+                    let size = glass_size(local.size, b.glass_size, heading);
+                    if size != b.glass_size {
+                        glass.setFrame(CGRect::new(CGPoint::ZERO, size));
+                        b.glass_size = size;
                     }
                     // The glass draws its own rounded shape.
                     if b.shape.is_none_or(|(_, old)| old != radii) {
@@ -1131,6 +1151,7 @@ fn new_backdrop(
                 glass: None,
                 glass_style: GlassEffect::None,
                 tint: None,
+                glass_size: CGSize::ZERO,
                 material,
                 shape: None,
             }
@@ -1147,17 +1168,16 @@ fn new_backdrop(
                 glass: None,
                 glass_style: GlassEffect::None,
                 tint: None,
+                glass_size: CGSize::ZERO,
                 material,
                 shape: None,
             }
         }
         BackdropKind::Glass => {
+            // Sized by `set_backdrop`, not by its host's autoresizing.
             let glass = new_glass(style.glass_effect, CGRect::new(CGPoint::ZERO, local.size))?;
-            glass.setAutoresizingMask(
-                NSAutoresizingMaskOptions::ViewWidthSizable
-                    | NSAutoresizingMaskOptions::ViewHeightSizable,
-            );
             let host = GlassBackdrop::new(local, view.mtm());
+            host.setAutoresizesSubviews(false);
             host.addSubview(&glass);
             Backdrop {
                 view: Retained::into_super(host),
@@ -1165,6 +1185,7 @@ fn new_backdrop(
                 glass: Some(glass),
                 glass_style: style.glass_effect,
                 tint: None,
+                glass_size: local.size,
                 material: MacOsBackdrop::default(),
                 shape: None,
             }
@@ -1178,6 +1199,21 @@ fn new_backdrop(
     view.ns()
         .addSubview_positioned_relativeTo(&backdrop.view, NSWindowOrderingMode::Below, None);
     Some(backdrop)
+}
+
+/// The size a glass view takes in a box of `size`: the box's own, or, while
+/// the box's frame animates towards `heading`, the largest of that, the
+/// box's and the size `given` the glass already, so that it changes size
+/// (and lays its content out again) once as the animation starts and once
+/// as it ends instead of on every frame.
+fn glass_size(size: CGSize, given: CGSize, heading: Option<CGSize>) -> CGSize {
+    match heading {
+        None => size,
+        Some(to) => CGSize::new(
+            size.width.max(to.width).max(given.width),
+            size.height.max(to.height).max(given.height),
+        ),
+    }
 }
 
 /// Makes `l` cast `s`'s shadow of `path`, moved by `(x, y)`.
@@ -1428,6 +1464,34 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    /// A glass keeps the box's size, except while the box's frame animates:
+    /// then it takes the largest size of the animation at once and keeps it
+    /// until the last frame.
+    #[test]
+    fn glass_sizes_once_per_layout_animation() {
+        let size = |w, h| CGSize::new(w, h);
+        assert_eq!(
+            glass_size(size(300.0, 40.0), size(280.0, 40.0), None),
+            size(300.0, 40.0)
+        );
+        // Shrinking: keeps the size it started at.
+        let start = size(900.0, 40.0);
+        let heading = Some(size(640.0, 40.0));
+        assert_eq!(glass_size(start, start, heading), start);
+        assert_eq!(glass_size(size(700.0, 40.0), start, heading), start);
+        // Growing: the end size at once.
+        let heading = Some(size(900.0, 56.0));
+        assert_eq!(
+            glass_size(size(640.0, 40.0), size(640.0, 40.0), heading),
+            size(900.0, 56.0)
+        );
+        // The last frame: the box's size.
+        assert_eq!(
+            glass_size(size(640.0, 40.0), start, None),
+            size(640.0, 40.0)
+        );
+    }
 
     /// The view style that asks for `radius`'s backdrop blur.
     fn blur_style(radius: f32) -> ViewStyle {

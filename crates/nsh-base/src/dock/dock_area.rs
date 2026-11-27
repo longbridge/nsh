@@ -116,8 +116,8 @@ pub struct DockPanel {
     pub id: PanelId,
 }
 
-/// A tab, as `renderTab`, `renderDragPreview` and `renderToolbar` render
-/// it.
+/// A tab, as `renderTab`, `renderDragPreview`, `renderToolbar` and
+/// `renderTabBarPrefix` render it.
 #[derive(Clone, Debug, Default, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct DockTab {
@@ -281,6 +281,10 @@ pub struct DockAreaProps {
     /// The toolbar at the end of a tab group's tab bar, given its displayed
     /// tab: that panel's actions (as a GPUI dock panel's toolbar buttons).
     pub render_toolbar: Prop<Option<Renderer<DockTab>>>,
+    /// What a tab group's tab bar starts with, before its tabs, given its
+    /// displayed tab: room or controls that stay put while the tabs scroll
+    /// (`TabBar::prefix` in GPUI Kit).
+    pub render_tab_bar_prefix: Prop<Option<Renderer<DockTab>>>,
     /// What shows where a drag would land, placed over the part of the
     /// group it would take. Not called for a tab bar's slot: there the area
     /// draws an insertion line between the tabs instead.

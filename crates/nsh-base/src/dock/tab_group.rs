@@ -41,7 +41,7 @@ use std::{
 
 use nsh_core::{
     AccessibilityState, RevealOptions, ScrollAlignment,
-    element::{LayoutAnimation, LayoutCurve, LayoutTransition},
+    element::{LayoutAnimation, LayoutCurve, LayoutTransition, Renderer},
     geometry::{Bounds, Point, Points, Size},
     prelude::*,
 };
@@ -90,12 +90,27 @@ pub(crate) fn tab_value(a: AreaCx, panel: &PanelId) -> Option<DockTab> {
 /// The toolbar at the end of the tab bar of `group`: what `renderToolbar`
 /// draws for its displayed tab, nothing without the prop or a shown panel.
 pub(crate) fn toolbar(a: AreaCx, group: Memo<Option<Group>>) -> AnyElement {
+    bar_part(a, group, |a| a.props.render_toolbar.get())
+}
+
+/// The content at the start of the tab bar of `group`, before its tabs:
+/// what `renderTabBarPrefix` draws for its displayed tab, nothing without
+/// the prop or a shown panel.
+pub(crate) fn prefix(a: AreaCx, group: Memo<Option<Group>>) -> AnyElement {
+    bar_part(a, group, |a| a.props.render_tab_bar_prefix.get())
+}
+
+fn bar_part(
+    a: AreaCx,
+    group: Memo<Option<Group>>,
+    renderer: impl Fn(AreaCx) -> Option<Renderer<DockTab>> + 'static,
+) -> AnyElement {
     let value = computed(move || {
         let shown = group.with(|g| g.as_ref().and_then(|g| shown_of(a, g)))?;
         tab_value(a, &shown)
     });
     dynamic(move || {
-        let render = a.props.render_toolbar.get()?;
+        let render = renderer(a)?;
         let value = value.get()?;
         Some(render.render(value.panel.to_string(), value))
     })
@@ -150,6 +165,7 @@ pub(crate) fn tab_group(a: AreaCx, node: NodeId) -> AnyElement {
                 .element_ref(&refs.bar)
                 .app_class(a.props.tab_bar_class)
                 .inline_style(a.props.tab_bar_style)
+                .child(prefix(a, group))
                 .child(tab_strip(each(
                     move || tabs.get(),
                     |panel: &PanelId| panel.clone(),

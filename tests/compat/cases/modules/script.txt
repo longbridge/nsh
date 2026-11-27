@@ -325,18 +325,11 @@ tap id:tab-next
 expect Tab: 1
 tap id:tab-rename
 frame id:tab-bar 0 784 390 60
+# A native component's accent, from its style.
+style id:tab-bar accentColor #34c759ff
 covers [nsh/mobile] isAvailable
 covers [nsh/mobile] TabBar
-covers [nsh/mobile] SegmentedControl
-# The system's switch shows the app's value, in its style's accent.
-expect Wi-Fi: true
-style id:wifi accentColor #34c759ff
-covers [nsh/mobile] Switch
 covers [styles] accentColor
-
-# The system's date and time picker shows the app's value.
-expect When: 2026-11-17T09:30
-covers [nsh/mobile] DateTimePicker
 # mod-haptics
 tap id:case-mod-haptics
 # every call goes through; a name Haptics does not know throws.

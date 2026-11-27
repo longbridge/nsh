@@ -174,6 +174,10 @@ actions and the ref's `toggleZoom(tab.group)` acts on its group. It is a child o
 view, so it keeps its place while the tabs scroll and the bar's own layout places it (`ml-auto` on what it returns
 pushes it to the end of a `flex-row` bar). In the compact presentation the one tab bar ends with the shown tab's.
 
+`renderTabBarPrefix` is its counterpart at the start of the bar, before the tabs' scroll view, with the same
+`DockTab`: room or controls that stay put while the tabs scroll, such as space for window controls over the
+top-left group only (`tabBarStyle` would give every group that space).
+
 ```tsx
 renderToolbar={(tab) => (
   <View class="ml-auto flex-row items-center gap-2 px-2">
@@ -364,6 +368,7 @@ rest of the area.
 | `renderPanel` | `.render_panel(\|panel\| ..)` | `(panel: DockPanel) => JSX.Element` | none | A panel's content, by its key (`panel.id`). |
 | `renderTab` | `.render_tab(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | the key | What a tab shows. |
 | `renderToolbar` | `.render_toolbar(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | The toolbar at the end of a group's tab bar, for its displayed tab: that panel's actions (a new tab, a zoom button). |
+| `renderTabBarPrefix` | `.render_tab_bar_prefix(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | What a group's tab bar starts with, before its tabs, for its displayed tab. |
 | `renderDropIndicator` | `.render_drop_indicator(\|drop\| ..)` | `(drop: DockDropIndicator) => JSX.Element` | none | What is inside the drop indicator over a group's content: `group`, `side` (not called over a tab bar, which shows the insertion line). |
 | `renderDock` | `.render_dock(\|dock\| ..)` | `(dock: DockInfo) => JSX.Element` | none | A dock's own chrome, before its layout: `placement`, `open` (shown in the current presentation), `size`, `collapsible`. |
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | none | What an empty center shows. |
@@ -402,6 +407,7 @@ rest of the area.
 | A tab group | a region | `groupClass`, `groupStyle` | |
 | A tab bar | a group | `tabBarClass`, `tabBarStyle` | |
 | A tab | a tab bar | `tabClass`, `tabStyle`; `renderTab` | `selected:`, `active:`, `hover:` |
+| Tab bar prefix | the start of a tab bar | `renderTabBarPrefix` | |
 | Toolbar | the end of a tab bar | `renderToolbar` | |
 | A group's content | a group | `contentClass`, `contentStyle`; `renderPanel` | |
 | A handle's indicator | between a split's groups, at a dock's edge | `handleClass`, `handleStyle` | `group-hover:`, `group-active:` |

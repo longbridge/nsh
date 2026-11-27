@@ -175,6 +175,7 @@ import type {
   NavStackProps,
   NavStackState,
   OtpInputProps,
+  OtpInputValidationType,
   PaginationItemState,
   PaginationProps,
   ProgressProps,

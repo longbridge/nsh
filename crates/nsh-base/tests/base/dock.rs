@@ -1211,6 +1211,7 @@ fn Toolbar(props: ToolbarProps) -> impl IntoElement {
                     .child(text(format!("Tab {}", tab.panel)))
             })
             .render_toolbar(|tab: &DockTab| text(format!("Toolbar {} of {}", tab.panel, tab.index)))
+            .render_tab_bar_prefix(|tab: &DockTab| text(format!("Prefix {}", tab.panel)))
             .size_full(),
     )
 }
@@ -1240,9 +1241,15 @@ fn a_tab_bar_ends_with_the_toolbar_of_its_displayed_tab() {
     app.wait_for("Toolbar a of 0").unwrap();
     app.wait_for("Toolbar c of 0").unwrap();
     app.wait_for("Toolbar files of 0").unwrap();
+    // And starts with its displayed tab's prefix, before the tabs.
+    app.wait_for("Prefix a").unwrap();
+    app.wait_for("Prefix c").unwrap();
+    app.wait_for("Prefix files").unwrap();
     // It follows the group: another tab displayed.
     app.press("id:tab-b").unwrap();
     app.wait_for("Toolbar b of 1").unwrap();
+    app.wait_for("Prefix b").unwrap();
+    assert_eq!(app.screen().count("text:Prefix a"), Ok(0));
     assert_eq!(app.screen().count("text:Toolbar a of 0"), Ok(0));
     app.wait_for("Toolbar c of 0").unwrap();
 

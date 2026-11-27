@@ -82,9 +82,6 @@ pub fn registries() -> &'static [Registry] {
         let mut mobile = Registry::runtime("nsh/mobile");
         mobile
             .register::<crate::mobile::TabBar>()
-            .register::<crate::mobile::SegmentedControl>()
-            .register::<crate::mobile::Switch>()
-            .register::<crate::mobile::DateTimePicker>()
             .module::<android::BackHandler>()
             .module::<haptics::Haptics>()
             .module::<app_settings::AppSettings>();
