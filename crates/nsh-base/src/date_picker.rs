@@ -12,13 +12,15 @@
 //!   with `timePrecision` for a single date, a time field (`time_field.rs`)
 //!   under it.
 //! - **Picking** (`DatePickerState::select_date`): a complete date (a day,
-//!   a range's end) is the value and closes the popup; with `timePrecision`
-//!   the popup stays open for the time on the desktops, every change is
-//!   reported, and a press on the selected day again closes it, while on
-//!   touch screens (the sheet) a tap on a day picks it at its time and
-//!   closes the sheet, as without a time. A preset is the value and
-//!   closes it. The clear button (`cleanable`) and Delete / Backspace on
-//!   the trigger clear it.
+//!   a range's end) is the value and closes the popup; a range's start
+//!   keeps it open for the end, reported by `onChangeStart` as
+//!   `Calendar`'s (a start the app does not set as `value` goes when the
+//!   popup closes); with `timePrecision` the popup stays open for the time
+//!   on the desktops, every change is reported, and a press on the
+//!   selected day again closes it, while on touch screens (the sheet) a
+//!   tap on a day picks it at its time and closes the sheet, as without a
+//!   time. A preset is the value and closes it. The clear button
+//!   (`cleanable`) and Delete / Backspace on the trigger clear it.
 //! - **The value** is `value` and `onChange({ value })`: ISO dates, as
 //!   HTML's `<input type="date">` (`"2026-10-28"`, `[start, end]`), or with
 //!   `timePrecision` dates and times as `datetime-local`'s
@@ -539,12 +541,19 @@ pub struct DatePickerProps {
 
 /// The events of a [`DatePicker`].
 #[derive(Debug, Clone, PartialEq, Event)]
+#[non_exhaustive]
 pub enum DatePickerEvent {
     /// The user changed the value (a day, a range's end, a preset, the
     /// time, the clear button). With `timePrecision`, every edit while the
     /// popup is open.
     #[args(value)]
     Change(PickedDate),
+    /// The user started a range in the popup (`[start, null]`, as
+    /// `Calendar`'s `onChangeStart`): the popup stays open for its end,
+    /// reported by `onChange`. A start the app does not set as `value`
+    /// goes when the popup closes.
+    #[args(value)]
+    ChangeStart(PickedDate),
     /// The popup opened or closed, with why: set `open` to follow it.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
@@ -575,7 +584,8 @@ fn display_format(precision: Option<TimePrecision>, cycle: HourCycle) -> String 
 /// day again closes it), while on touch screens a tap on a day closes it.
 /// `presets` add buttons that set the value, `cleanable` a button that
 /// clears it. The value is `value` and `onChange` (or the
-/// picker's own, from `defaultValue`). Every prop of `Calendar` passes on
+/// picker's own, from `defaultValue`); `onChangeStart` reports a range's
+/// start while its end is still to pick. Every prop of `Calendar` passes on
 /// to its calendar. It looks like nothing: the app styles every part.
 ///
 /// In a terminal the trigger shows a `Select`'s marks over the end of its
@@ -776,6 +786,14 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
             let picked: Rc<dyn Fn(Date)> = {
                 let change = change.clone();
                 Rc::new(move |d: Date| {
+                    // A range's start: the popup stays for its end.
+                    if !d.is_complete() {
+                        cx.emit(DatePickerEvent::ChangeStart(PickedDate {
+                            value: with_times(d),
+                            time_precision: props.time_precision.get_untracked(),
+                        }));
+                        return;
+                    }
                     // On the desktops the popup stays for the time and a
                     // press on the selected day again confirms it
                     // (`gpui-component`'s double click). A touch screen
