@@ -346,7 +346,26 @@ code plain. Typing in a long block does not wait for the colors: they are worked
 a moment later. On the web the syntaxes come from the page once, the first time a block needs them, shared with
 `TextView`; they are not in the first download. Without the platform's feature `highlight` code stays plain.
 
+A block that names no language stays plain, unless the extension names one for it. `defaultLanguage` (Tiptap's
+option) gives every such block a language: `CodeBlockHighlight.configure({ defaultLanguage: "rust" })`, or
+`StarterKit.configure({ codeBlockHighlight: { defaultLanguage: "rust" } })`. The language only colors the block: the
+document keeps no language, so collaborators and saved content see no change.
+
 In Rust it is `kit::code_block_highlight()`, part of `kit::starter_kit()` and of `starter::plugins`.
+`kit::code_block_highlight_with(options)` also takes `CodeBlockHighlightOptions`: `default_language`, and
+`detect_language`, the app's own guess of a block's language from its code, as Tiptap's `CodeBlockLowlight` guesses one
+when no `defaultLanguage` is set. A block's own `language` comes first, then `detect_language`, then
+`default_language`; when none gives one, the block stays plain. `detect_language` is asked once each time an unlabelled
+block's code changes, on the engine thread, so keep it quick. It is Rust only: functions in a built-in extension's TSX
+options would run JS while typing.
+
+```rust
+let mut options = CodeBlockHighlightOptions::default();
+options.detect_language = Some(Arc::new(|code: &str| {
+    code.trim_start().starts_with("fn ").then(|| "rust".to_owned())
+}));
+let highlight = kit::code_block_highlight_with(options);
+```
 
 Each extension adds Tiptap's commands, which `command(name, args)` runs: `toggleBold`, `setItalic`,
 `unsetStrike`, `toggleHeading({ level })`, `setParagraph`, `toggleBlockquote`, `toggleBulletList`,
