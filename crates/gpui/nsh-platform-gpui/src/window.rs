@@ -967,10 +967,8 @@ pub(crate) fn main_request(surface: &Rc<Surface>, r: &WindowRequest) {
 
 /// A request for window `w` of the app's own.
 fn own_request(surface: &Rc<Surface>, w: &Rc<AppWindow>, r: WindowRequest) {
-    match r {
-        WindowRequest::Show => {
-            w.hidden.set(false);
-        }
+    let was_hidden = match r {
+        WindowRequest::Show | WindowRequest::Focus => w.hidden.replace(false),
         // Closing it is removing its root, which the app does: until then
         // it hides, and the app hears it closed.
         WindowRequest::Close => {
@@ -983,8 +981,8 @@ fn own_request(surface: &Rc<Surface>, w: &Rc<AppWindow>, r: WindowRequest) {
             hide(surface, w);
             return;
         }
-        _ => {}
-    }
+        _ => false,
+    };
     if w.handle.get().is_none() {
         w.queued.borrow_mut().push(r);
         return;
@@ -994,6 +992,9 @@ fn own_request(surface: &Rc<Surface>, w: &Rc<AppWindow>, r: WindowRequest) {
     with_window(w, move |gw, cx| {
         if let Some(surface) = s.upgrade() {
             request(&surface, Some(&window), gw, r, cx);
+            if was_hidden {
+                report_state(&surface, &window, gw, cx, true);
+            }
         }
     });
 }
@@ -1035,9 +1036,10 @@ fn request(
         surface.chrome.opening_mode.take();
     }
     match r {
-        WindowRequest::Show => {
+        WindowRequest::Show | WindowRequest::Focus => {
             restore(window, cx);
-            let activate = own.is_none_or(|w| w.flag(|a| a.activate, true));
+            let activate = matches!(r, WindowRequest::Focus)
+                || own.is_none_or(|w| w.flag(|a| a.activate, true));
             // As its first frame shows a window.
             show_window(window, activate, cx);
             if own.is_none() {
@@ -1048,13 +1050,6 @@ fn request(
         WindowRequest::Hide => {
             native::hide(window);
             lost_key(window.window_handle(), surface.chrome.window(), cx);
-        }
-        WindowRequest::Focus => {
-            restore(window, cx);
-            focus_window(window, cx);
-            if own.is_none() {
-                main_opened(surface, window);
-            }
         }
         WindowRequest::Close => {}
         // A minimized window keeps the keyboard it would have in a
