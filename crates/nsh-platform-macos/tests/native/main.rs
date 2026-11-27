@@ -73,6 +73,8 @@ mod modal_fade;
 #[cfg(target_os = "macos")]
 mod modal_focus;
 #[cfg(target_os = "macos")]
+mod momentum_bounce;
+#[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
 mod navigation_unmount;
@@ -262,6 +264,8 @@ fn main() {
                 nested_bounce::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
+            } else if std::env::var_os("NSH_MOMENTUM_BOUNCE_CHECK_ONLY").is_some() {
+                momentum_bounce::run();
             } else if std::env::var_os("NSH_NESTED_RUN_LOOP_CHECK_ONLY").is_some() {
                 nested_run_loop::run();
             } else if std::env::var_os("NSH_WINDOW_MODE_LAYOUT_CHECK_ONLY").is_some() {
@@ -327,8 +331,9 @@ fn main() {
                 selection_keys::run();
                 nested_bounce::run();
                 nested_run_loop::run();
-                // Last: it leaves the app an accessory, never activated.
+                // Last: they leave the app an accessory, never activated.
                 press_momentum::run();
+                momentum_bounce::run();
                 tap_feedback::run();
             }
         }
