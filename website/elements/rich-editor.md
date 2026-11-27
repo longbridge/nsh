@@ -345,6 +345,9 @@ colors fenced code, with the same syntaxes and palette: that is `CodeBlockHighli
 code plain. Typing in a long block does not wait for the colors: they are worked out off the engine thread and arrive
 a moment later. On the web the syntaxes come from the page once, the first time a block needs them, shared with
 `TextView`; they are not in the first download. Without the platform's feature `highlight` code stays plain.
+A block's `language` takes the names highlight.js and lowlight use (`objectivec`, `plist`, `shellsession`, ...), and a
+whole fence info string is read by its first word (`ts title="a.ts"`, `rust,ignore`), so documents from other editors
+keep their colors.
 
 A block that names no language stays plain, unless the extension names one for it. `defaultLanguage` (Tiptap's
 option) gives every such block a language: `CodeBlockHighlight.configure({ defaultLanguage: "rust" })`, or
