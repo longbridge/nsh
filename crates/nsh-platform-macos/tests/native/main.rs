@@ -41,6 +41,8 @@ mod ime;
 #[cfg(all(target_os = "macos", feature = "js"))]
 mod implicit_quit;
 #[cfg(target_os = "macos")]
+mod input_baseline;
+#[cfg(target_os = "macos")]
 mod input_clip;
 #[cfg(target_os = "macos")]
 mod input_focus;
@@ -183,6 +185,8 @@ fn main() {
                 window_alert::run();
             } else if std::env::var_os("NSH_FOCUS_SELECTION_CHECK_ONLY").is_some() {
                 focus_selection::run();
+            } else if std::env::var_os("NSH_INPUT_BASELINE_CHECK_ONLY").is_some() {
+                input_baseline::run();
             } else if std::env::var_os("NSH_INPUT_FOCUS_CHECK_ONLY").is_some() {
                 input_focus::run();
             } else if std::env::var_os("NSH_IMAGE_PLACEHOLDER_CHECK_ONLY").is_some() {
@@ -282,6 +286,7 @@ fn main() {
                 image_placeholder::run();
                 fitting_input::run();
                 input_focus::run();
+                input_baseline::run();
                 input_line_height::run();
                 input_restyle::run();
                 removed_focus::run();

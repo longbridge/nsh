@@ -9734,17 +9734,23 @@ class Player {
   }
 
   /** Where the selection starts in the copy of all of `area` (UTF-16
-   * units): what maps it back to the document the area shows. */
+   * units): what maps it back to the document the area shows. The copy up
+   * to the selection's end less the selection's own: at the start of a
+   * text, the break a copy puts before that text comes before it, as on
+   * the native platforms (a copy only up to the start would leave it
+   * out). */
   selectionStart(area) {
     const sel = getSelection();
     if (!sel?.rangeCount) return 0;
     const range = sel.getRangeAt(0);
     if (!area.contains(range.startContainer)) return 0;
-    const before = document.createRange();
-    before.setStart(area, 0);
-    before.setEnd(range.startContainer, range.startOffset);
-    if (before.collapsed) return 0;
-    return (this.selectedText(area, before) ?? "").length;
+    const upTo = document.createRange();
+    upTo.setStart(area, 0);
+    if (area.contains(range.endContainer)) upTo.setEnd(range.endContainer, range.endOffset);
+    else upTo.setEnd(area, area.childNodes.length);
+    const all = (this.selectedText(area, upTo) ?? "").length;
+    const own = (this.selectedText(area, range) ?? "").length;
+    return Math.max(0, all - own);
   }
 
   /** The box around the selection's characters in `area` (`[x, y, width,
