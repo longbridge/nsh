@@ -33,6 +33,9 @@ pub(crate) fn run_for(mounter: Option<SharedMounter>, f: impl FnOnce()) {
 /// belongs to an element: a popover's source view, a menu's anchor. Take
 /// it while the function runs and keep it as long as the UI needs it.
 ///
+/// For anchoring and presenting system UI only: a module never changes,
+/// re-parents, restyles or removes a view NSH owns.
+///
 /// `None` outside such a function, when no view of the surface carries
 /// `node` (not rendered, or removed since), or while a batch is being
 /// applied to the surface. The view may be out of a window (a screen not
@@ -47,6 +50,9 @@ pub fn native_view(mtm: MainThreadMarker, node: NodeId) -> Option<Retained<UIVie
 /// on the main thread (`run_on_main_thread`): the top one of the window of
 /// the surface that ran it, else of the application's key window. `None`
 /// when there is no window to present over.
+///
+/// For presenting system UI only: a module presents over it and never
+/// changes, re-parents, restyles or removes a view NSH owns.
 pub fn presenting_controller(mtm: MainThreadMarker) -> Option<Retained<UIViewController>> {
     if let Some(view) = native_view(mtm, ROOT_ID)
         && let Some(top) = crate::system::top_controller(&view)

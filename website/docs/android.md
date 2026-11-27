@@ -419,6 +419,16 @@ file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI e
 logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
 (`crates/nsh-extra/src/camera/android.rs`) uses all of them.
 
+## Presenting from Rust
+
+Rust code that shows system UI (a popup menu, a dialog, a share sheet) shows it from the surface whose code asked. In
+a UI-thread task (`run_on_main_thread`), `nsh::presenting_activity(env)` is the activity that surface's view is in, to
+show UI over when no element anchors it (`None` when the view is in no activity that can show anything), and
+`nsh::native_view(env, node)` is the `View` of an element of that surface (the node of its `ref`, a `NodeRef` argument
+of a module function; `ROOT_ID` for the surface's root view), in the surface or one of its modals: the anchor of a
+popup that belongs to the element. Both give a global reference, `None` outside such a task, or the JNI error. Take
+them while the task runs. They are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a view NSH owns.
+
 ## Java listeners in Rust
 
 An Android API that calls back through an interface (a `Runnable` posted to the UI thread, a framework's

@@ -259,7 +259,7 @@ view.load(Bundle::source(code).into());
 `nsh_platform_macos::presenting_view(mtm)` 是没有元素作为锚点时显示它的视图：surface 中用户所在的可见窗口的内容视图，被嵌入时是
 surface 自己的视图；surface 不在任何可见窗口里时为 `None`。`native_view(mtm, node)` 是这个 surface 中某个元素的 `NSView`（元素
 `ref` 的节点，即模块函数的 `NodeRef` 参数；`ROOT_ID` 是 surface 的根视图），无论它在 surface 的哪个窗口里：属于这个元素的菜单从它弹出。
-NSH 的视图是翻转坐标的（flipped）。两者都要在任务运行时取得。
+NSH 的视图是翻转坐标的（flipped）。两者都要在任务运行时取得。它们只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的视图。
 
 ## 来自其他代码的通知
 

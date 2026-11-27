@@ -321,7 +321,7 @@ no element anchors it: the content of the surface's visible window the user is i
 is embedded; `None` when the surface shows in no visible window. `native_view(mtm, node)` is the `NSView` of an
 element of that surface (the node of its `ref`, a `NodeRef` argument of a module function; `ROOT_ID` for the
 surface's root view), in whatever window of the surface it is: the view a menu that belongs to the element opens
-from. NSH's views are flipped. Take both while the task runs.
+from. NSH's views are flipped. Take both while the task runs. They are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a view NSH owns.
 
 ## Notifications from other code
 

@@ -611,13 +611,15 @@ crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStri
 | 检查应用传入的文件路径，规则与 `fs/promises` 读取相同 | `sys.readable_file(path)`（`sys: System` 参数）：在 `capabilities.fs.read` 内或用户粘贴、拖入的文件时返回真实路径，否则为 `ERR_ACCESS_DENIED`、`ENOENT`，Web 上为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
 | 在什么之上弹出（iOS） | `run_on_main_thread` 任务里的 `nsh_platform_ios::presenting_controller(mtm)`（[iOS](./ios.md#在-rust-中弹出视图)） |
 | 从哪里显示（macOS） | `run_on_main_thread` 任务里的 `nsh_platform_macos::presenting_view(mtm)`（[macOS](./macos.md#在-rust-中显示系统界面)） |
-| 某个元素的视图，供属于它的 popover 或菜单使用 | `nsh_platform_ios` 或 `nsh_platform_macos` 的 `native_view(mtm, node)`，传入元素 `ref` 的节点（`NodeRef` 参数） |
+| 在什么之上显示（Android） | `run_on_main_thread` 任务里的 `nsh::presenting_activity(env)`（[Android](./android.md#在-rust-中显示系统界面)） |
+| 拥有它的窗口（Windows、Linux） | `run_on_main_thread` 任务里 `nsh_platform_windows`（`HWND`）或 `nsh_platform_linux`（`gtk::Window`）的 `presenting_window()`（[Windows](./windows.md#在-rust-中显示系统界面)、[Linux](./linux.md#在-rust-中显示系统界面)） |
+| 某个元素的视图，供属于它的 popover 或菜单使用 | `native_view`，传入元素 `ref` 的节点（`NodeRef` 参数）：`nsh_platform_ios` 或 `nsh_platform_macos` 的 `native_view(mtm, node)`，Android 上的 `nsh::native_view(env, node)`，`nsh_platform_linux::native_view(node)`；Windows 上 NSH 自己绘制元素，用 `nsh_platform_windows::element_bounds(node)`：元素所在的窗口和它在其中的边界 |
 | 启动另一个应用并取回结果（Android） | `nsh::activity::start_for_result`（[Android](./android.md#在-rust-中启动-activity)） |
 | 让另一个应用读取应用存储中的文件（Android） | `nsh::activity::content_uri(env, path)` |
 | Java 监听器或回调（Android） | `nsh::proxy::implement`（[Android](./android.md#用-rust-实现-java-监听器)） |
 | API 以广播作答（Android） | `nsh::receiver::register(env, action, handler)`（[Android](./android.md#在-rust-中接收广播)） |
 
-先检查路径再交出：应用无权读取的文件不会到达另一个应用。
+先检查路径再交出：应用无权读取的文件不会到达另一个应用。原生视图和窗口只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的视图。
 
 ### 封装原生 SDK
 

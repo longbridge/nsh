@@ -385,6 +385,14 @@ file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`conte
 `ActivityError::NoActivity` 失败。`nsh-extra` 的相机
 （`crates/nsh-extra/src/camera/android.rs`）用到了它们全部。
 
+## 在 Rust 中显示系统界面
+
+需要显示系统界面（弹出菜单、对话框、分享面板）的 Rust 代码，从发起调用的那个 surface 显示它。在 UI 线程任务（`run_on_main_thread`）里，
+`nsh::presenting_activity(env)` 是这个 surface 的视图所在的 activity，没有元素作为锚点时在它之上显示（视图不在任何能显示界面的 activity
+里时为 `None`）；`nsh::native_view(env, node)` 是这个 surface 中某个元素的 `View`（元素 `ref` 的节点，即模块函数的 `NodeRef` 参数；
+`ROOT_ID` 是 surface 的根视图），无论它在 surface 里还是在某个 modal 里：属于这个元素的弹出窗口以它为锚点。两者都返回全局引用，
+不在这样的任务里时为 `None`，JNI 出错时返回该错误。两者都要在任务运行时取得。它们只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的视图。
+
 ## 用 Rust 实现 Java 监听器
 
 通过接口回调的 Android API（投递到 UI 线程的 `Runnable`、框架的各种 `...Listener`）可以接收

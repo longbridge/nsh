@@ -1020,7 +1020,9 @@ impl Surface {
                 }
             }
             Message::Resized(..) => self.resize_late.set(false),
-            Message::Run(task) => task.run(),
+            // A module's main-thread function: this surface is current
+            // while it runs (`crate::element_bounds`, `crate::presenting_window`).
+            Message::Run(task) => crate::presenting::run_for(Rc::downgrade(self), || task.run()),
         }
         false
     }

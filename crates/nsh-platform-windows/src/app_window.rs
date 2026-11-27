@@ -151,8 +151,9 @@ pub(crate) fn hwnds(surface: &Surface) -> Vec<HWND> {
     surface.windows.borrow().iter().map(|w| w.hwnd).collect()
 }
 
-/// The app window with the keyboard focus, for test steps that act on the
-/// focused window (the host is not one).
+/// The app window with the keyboard focus (the host is not one): what test
+/// steps act on, and what owns a module's system UI
+/// ([`crate::presenting_window`]).
 pub(crate) fn focused_hwnd(surface: &Surface) -> Option<HWND> {
     surface
         .windows

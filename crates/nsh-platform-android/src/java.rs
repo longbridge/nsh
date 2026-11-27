@@ -65,6 +65,12 @@ pub(crate) struct Java {
     /// `runMainThreadTasks()`: posts `Native.runMainThreadTasks` to the UI
     /// thread, after the batches before it.
     pub(crate) view_run_main_thread_tasks: JMethodID,
+    /// `nativeView(int)`: the view of a node, or null (UI thread;
+    /// [`crate::native_view`]).
+    pub(crate) view_native_view: JMethodID,
+    /// `presentingActivity()`: the activity the view shows in, or null
+    /// (UI thread; [`crate::presenting_activity`]).
+    pub(crate) view_presenting_activity: JMethodID,
     /// `shaderFrame(int, ByteBuffer, int, int, boolean, float)`: a shader
     /// view's new frame, whether it replaces the view's children and the
     /// pixels it overflows by (UI thread).
@@ -217,6 +223,12 @@ pub(crate) fn init(vm: JavaVM) -> jni::errors::Result<()> {
         view_read_asset: env.get_method_id(view_class, "readAsset", "(Ljava/lang/String;)[B")?,
         view_request_frame: env.get_method_id(view_class, "requestJsFrame", "()V")?,
         view_run_main_thread_tasks: env.get_method_id(view_class, "runMainThreadTasks", "()V")?,
+        view_native_view: env.get_method_id(view_class, "nativeView", "(I)Landroid/view/View;")?,
+        view_presenting_activity: env.get_method_id(
+            view_class,
+            "presentingActivity",
+            "()Landroid/app/Activity;",
+        )?,
         view_shader_frame: env.get_method_id(
             view_class,
             "shaderFrame",

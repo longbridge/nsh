@@ -741,13 +741,17 @@ same public hooks NSH's own modules use, so it behaves as they do:
 | A file path the app passes, checked as `fs/promises` reads it | `sys.readable_file(path)` (a `sys: System` argument): the real path within `capabilities.fs.read` or a file the user pasted or dropped, else `ERR_ACCESS_DENIED`, `ENOENT`, or `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` on the web |
 | What to present over (iOS) | `nsh_platform_ios::presenting_controller(mtm)` in a `run_on_main_thread` task ([iOS](./ios.md#presenting-from-rust)) |
 | What to show from (macOS) | `nsh_platform_macos::presenting_view(mtm)` in a `run_on_main_thread` task ([macOS](./macos.md#presenting-from-rust)) |
-| The view of an element, for a popover or a menu that belongs to it | `native_view(mtm, node)` of `nsh_platform_ios` or `nsh_platform_macos`, with the node of the element's `ref` (a `NodeRef` argument) |
+| What to show over (Android) | `nsh::presenting_activity(env)` in a `run_on_main_thread` task ([Android](./android.md#presenting-from-rust)) |
+| The window that owns it (Windows, Linux) | `presenting_window()` of `nsh_platform_windows` (an `HWND`) or `nsh_platform_linux` (a `gtk::Window`) in a `run_on_main_thread` task ([Windows](./windows.md#presenting-from-rust), [Linux](./linux.md#presenting-from-rust)) |
+| The view of an element, for a popover or a menu that belongs to it | `native_view` with the node of the element's `ref` (a `NodeRef` argument): `native_view(mtm, node)` of `nsh_platform_ios` or `nsh_platform_macos`, `nsh::native_view(env, node)` on Android, `nsh_platform_linux::native_view(node)`; on Windows, where NSH draws its elements, `nsh_platform_windows::element_bounds(node)`: the element's window and its bounds there |
 | Another app, started for a result (Android) | `nsh::activity::start_for_result` ([Android](./android.md#activities-from-rust)) |
 | A file of the app's storage another app reads (Android) | `nsh::activity::content_uri(env, path)` |
 | A Java listener or callback (Android) | `nsh::proxy::implement` ([Android](./android.md#java-listeners-in-rust)) |
 | A broadcast an API answers with (Android) | `nsh::receiver::register(env, action, handler)` ([Android](./android.md#broadcasts-in-rust)) |
 
-Check the path first, then hand it on: a file the app may not read never reaches the other app.
+Check the path first, then hand it on: a file the app may not read never reaches the other app. Native views and
+windows are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a
+view NSH owns.
 
 ### Wrapping a native SDK
 

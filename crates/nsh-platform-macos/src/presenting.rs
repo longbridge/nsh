@@ -34,6 +34,9 @@ pub(crate) fn run_for(surface: Weak<Surface>, f: impl FnOnce()) {
 /// popover's positioning view. NSH's views are flipped (`isFlipped`). Take
 /// it while the function runs and keep it as long as the UI needs it.
 ///
+/// For anchoring and presenting system UI only: a module never changes,
+/// re-parents, restyles or removes a view NSH owns.
+///
 /// `None` outside such a function, when no view of the surface carries
 /// `node` (not rendered, or removed since), or while a batch is being
 /// applied to the surface. The view may be out of a window (a screen not
@@ -55,6 +58,9 @@ pub fn native_view(mtm: MainThreadMarker, node: NodeId) -> Option<Retained<NSVie
 /// is in a visible window of its own (an embedded surface). `None` outside
 /// such a function and when the surface shows in no visible window, where
 /// AppKit would show nothing.
+///
+/// For presenting system UI only: a module never changes, re-parents,
+/// restyles or removes a view NSH owns.
 pub fn presenting_view(mtm: MainThreadMarker) -> Option<Retained<NSView>> {
     let _ = mtm;
     let surface = current()?;
