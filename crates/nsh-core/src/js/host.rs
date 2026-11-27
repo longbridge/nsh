@@ -685,6 +685,14 @@ export interface CaretEvent {
   pageBounds: Bounds;
 }
 
+/** One end of a selection across a list's items: `onSelectionChange`'s `anchor` and `focus`. */
+export interface TextSelectionEndpoint {
+  /** The item's key, as the list names it (`keyExtractor`, else the item's `key` or `id`, else its index). */
+  key: string;
+  /** Where the end is in the item's text, as a copy of the whole item gives it (UTF-16 units). */
+  offset: number;
+}
+
 /** What the user pasted into an input: the payload of `onPaste`. The platform read the clipboard as the user pasted; the app never reads it for this. */
 export interface PasteEvent {
   /** The plain text, `""` when there was none. */
@@ -1029,8 +1037,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::SelectionChange,
         on::VIEW,
-        "(e: { text: string; start?: number; bounds?: Bounds; pageBounds?: Bounds }) => void",
-        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it; `bounds` is the box around the selected text in the view and `pageBounds` in the root view it is in, as of the event (an `Overlay`'s `anchor`: a bar of actions on the selection), while something is selected and the platform knows them. Only the outermost selectable view of an area reports it.",
+        "(e: { text: string; start?: number; bounds?: Bounds; pageBounds?: Bounds; anchor?: TextSelectionEndpoint; focus?: TextSelectionEndpoint }) => void",
+        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it; `bounds` is the box around the selected text in the view and `pageBounds` in the root view it is in, as of the event (an `Overlay`'s `anchor`: a bar of actions on the selection), while something is selected and the platform knows them. `anchor` (where the selection started) and `focus` (where it goes now, before `anchor` when the user selected backward) name the `List` item each end is in by its key, with the offset in that item's text, while something is selected and the end is in a list item. Only the outermost selectable view of an area reports it.",
     ),
     (
         EventKind::Paste,

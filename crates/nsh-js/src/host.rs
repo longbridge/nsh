@@ -10,7 +10,7 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, NodeId, Op, PayloadValue, TouchPhase, js::Limits,
-    platform::Environment, time::Instant,
+    platform::Environment, selection::ListItemKey, time::Instant,
 };
 use rquickjs::{
     AsyncRuntime, CatchResultExt, Ctx, Function, Module, Persistent, Promise, Value, function::Opt,
@@ -618,6 +618,13 @@ impl Host {
                         | EventKind::PressUp,
                         EventPayload::None,
                     ) => payload_object(&cx, &EventPayload::Press(nsh_core::PressEvent::default())),
+                    // A selectable view's `onSelectionChange`: the ends of
+                    // the selection in the list items, each `{ key, offset }`.
+                    (EventKind::SelectionChange, EventPayload::Map(fields))
+                        if fields.iter().any(|(k, _)| *k == "text") =>
+                    {
+                        text_selection(&cx, fields)
+                    }
                     // A video's `onLoad`: `{ duration, size }` of the
                     // platforms' `duration`, `width` and `height`.
                     (EventKind::Load, EventPayload::Map(fields))
@@ -679,6 +686,27 @@ impl Host {
             });
             self.run_jobs();
         });
+    }
+
+    /// What row `index` of virtual list `list` is called: the key of a
+    /// `List`'s item (`keyExtractor`, else the item's `key` or `id`, else
+    /// its index), where a selection across the list starts and ends
+    /// (`onSelectionChange`'s `anchor` and `focus`).
+    /// [`ListItemKey::NotMine`] for a list that is not the runtime's;
+    /// [`ListItemKey::Failed`] when the list has no key for the row: a
+    /// `keyExtractor` that throws (reported as an uncaught exception) or
+    /// gives neither a string nor a number, a row past the items, or a VM
+    /// that stopped.
+    pub fn list_item_key(&self, list: NodeId, index: u32) -> ListItemKey {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::list::row_key(cx.as_raw().as_ptr(), list, index).unwrap_or_else(|()| {
+                    self.report::<()>(&cx, Err(rquickjs::Error::Exception));
+                    ListItemKey::Failed
+                })
+            })
+        })
+        .unwrap_or(ListItemKey::Failed)
     }
 
     /// Resolves the promises of finished (or interrupted) native animations.
@@ -1298,6 +1326,32 @@ fn grant_user_files(raw: *mut qjs::JSContext, event: EventKind, payload: &EventP
         _ => return,
     };
     nsh_core::runtime::grant_user_files(&crate::dom::shared(raw).system_locals, uris);
+}
+
+/// A selectable view's `onSelectionChange` event: the payload's fields,
+/// the ends' keys and offsets ([`nsh_core::selection::ITEM_FIELDS`]) as
+/// `anchor` and `focus` objects (`{ key, offset }`).
+fn text_selection<'js>(
+    cx: &Ctx<'js>,
+    fields: &[(&'static str, nsh_core::PayloadValue)],
+) -> rquickjs::Result<Value<'js>> {
+    let ends = nsh_core::selection::ITEM_FIELDS;
+    let obj = rquickjs::Object::new(cx.clone())?;
+    for (key, value) in fields {
+        if !ends.iter().any(|(k, o)| key == k || key == o) {
+            obj.set(*key, payload_value(cx, value)?)?;
+        }
+    }
+    let field = |name: &str| fields.iter().find(|(k, _)| *k == name).map(|(_, v)| v);
+    for ((key, offset), name) in ends.into_iter().zip(["anchor", "focus"]) {
+        if let (Some(key), Some(offset)) = (field(key), field(offset)) {
+            let end = rquickjs::Object::new(cx.clone())?;
+            end.set("key", payload_value(cx, key)?)?;
+            end.set("offset", payload_value(cx, offset)?)?;
+            obj.set(name, end)?;
+        }
+    }
+    Ok(obj.into_value())
 }
 
 /// The JS object handed to event handlers.
