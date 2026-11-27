@@ -310,6 +310,7 @@ fn windows(cx: &mut TestAppContext) {
     js_and_rust_view_shortcuts_fire_together_in_either_order(cx);
     each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
     quit_and_close_requests_go_to_the_handler_instead_of_acting(cx);
+    the_quit_shortcut_asks_the_app_without_quitting(cx);
     an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx);
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
     the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx);
@@ -1487,6 +1488,35 @@ impl gpui::Render for Framed {
         use gpui::ParentElement as _;
         div().size_full().child(self.0.clone())
     }
+}
+
+fn the_quit_shortcut_asks_the_app_without_quitting(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+import { mount, signal } from "nsh";
+import { Input } from "nsh/base";
+import { Application } from "nsh/desktop";
+
+function App() {
+    const status = signal("waiting");
+    Application.on("quitRequest", () => status.set("quit requested"));
+    return <Input autoFocus value={status()} style={{ height: 30 }} />;
+}
+mount(App);
+"#,
+        &[],
+    )
+    .unwrap();
+    let (view, cx) = owned_view(cx, inline_options(), code, |_| {});
+    wait_for(&view, cx, "waiting");
+    flush_engine(&view, cx);
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-q"
+    } else {
+        "ctrl-q"
+    });
+    wait_for(&view, cx, "quit requested");
 }
 
 /// Opens a window whose root holds an [`AppView`] that owns the window,

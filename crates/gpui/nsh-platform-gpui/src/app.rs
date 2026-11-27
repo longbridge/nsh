@@ -1142,6 +1142,7 @@ fn open(
     let handle = cx.open_window(window_options, move |window, cx| {
         let view: Entity<AppView> = cx.new(|cx| AppView::new(options, window, cx));
         view.read(cx).own_window(window, cx);
+        crate::chrome::refresh_native_menu_later(view.read(cx).surface());
         view.read(cx)
             .surface()
             .chrome
