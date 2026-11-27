@@ -238,7 +238,7 @@ An attribute a platform's windows do not have is kept and has no effect there: t
 
 A popup that grows and shrinks often opens in a transparent window sized for its largest state. With `pointerEvents: "box-none"` the window takes a click only where it lands on one of its views; a click on the empty area around the panel reaches the window below, which takes the focus, so a popup that closes when it loses the focus (`closeOnBlur`) closes.
 
-The window's root is `box-none`, as a view's: its views follow their own `pointerEvents`, `hidden` and `hitSlop`, and a view that fills the window still takes the clicks on it. Mark such a wrapper `box-none` too; a background does not decide where the window takes clicks.
+The window's root is `box-none`, as a view's: its views follow their own `pointerEvents`, `hidden` and `hitSlop`, and a view that fills the window still takes the clicks on it. Mark such a wrapper `box-none` too; a background does not decide where the window takes clicks. The window's own title bar and frame let clicks through as well, so use it on frameless windows.
 
 ```tsx
 <Window id="palette" kind="popup" transparent defaultSize={{ width: 640, height: 480 }} pointerEvents="box-none">

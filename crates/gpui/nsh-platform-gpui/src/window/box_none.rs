@@ -291,12 +291,17 @@ mod win {
         area: Area,
         /// Its scale when it last drew (physical pixels per point).
         scale: Cell<f32>,
+        /// Where the cursor was in it (pixels) and the [`LAYOUT`] when it
+        /// last decided: the same again, the decision stands.
+        decided: Cell<Option<(i32, i32, u64)>>,
     }
 
     thread_local! {
         static WINDOWS: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) };
         /// The timer following the cursor while one of them shows.
         static TIMER: Cell<usize> = const { Cell::new(0) };
+        /// A count that moves as the windows draw.
+        static LAYOUT: Cell<u64> = const { Cell::new(0) };
     }
 
     /// The window takes the pointer only over the views `area` finds, or
@@ -316,6 +321,7 @@ mod win {
                 hwnd: h as isize,
                 area,
                 scale: Cell::new(window.scale_factor()),
+                decided: Cell::new(None),
             })
         });
         follow_while_shown();
@@ -338,6 +344,7 @@ mod win {
                 .is_some()
         });
         if known {
+            LAYOUT.set(LAYOUT.get().wrapping_add(1));
             follow_while_shown();
             follow(Some(key));
         }
@@ -406,6 +413,7 @@ mod win {
         if unsafe { GetCursorPos(&mut cursor) } == 0 {
             return;
         }
+        let layout = LAYOUT.get();
         let entries: Vec<(isize, Area, f32)> = WINDOWS.with_borrow(|e| {
             e.iter()
                 .filter(|e| only.is_none_or(|o| o == e.hwnd))
@@ -420,6 +428,17 @@ mod win {
             let mut p = cursor;
             // SAFETY: a window of this thread; an in-out point.
             if unsafe { ScreenToClient(h, &mut p) } == 0 {
+                continue;
+            }
+            // The cursor where it was in the window, the window laid out as
+            // it was: the decision stands (the timer finds this most of the
+            // time).
+            let now = Some((p.x, p.y, layout));
+            if WINDOWS.with_borrow(|e| {
+                e.iter()
+                    .find(|e| e.hwnd == key)
+                    .is_some_and(|e| e.decided.replace(now) == now)
+            }) {
                 continue;
             }
             match area.takes(p.x as f32 / scale, p.y as f32 / scale) {
@@ -488,9 +507,13 @@ mod linux {
         let region: Vec<gpui::Bounds<Pixels>> = rects
             .iter()
             .map(|r| {
+                // Out to whole pixels: GPUI cuts each field down.
+                let (x, y) = (r.origin.x.0.floor(), r.origin.y.0.floor());
+                let right = (r.origin.x.0 + r.size.width.0).ceil();
+                let bottom = (r.origin.y.0 + r.size.height.0).ceil();
                 gpui::Bounds::new(
-                    gpui::point(px(r.origin.x.0), px(r.origin.y.0)),
-                    gpui::size(px(r.size.width.0), px(r.size.height.0)),
+                    gpui::point(px(x), px(y)),
+                    gpui::size(px(right - x), px(bottom - y)),
                 )
             })
             .collect();

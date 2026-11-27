@@ -1568,7 +1568,7 @@ fn rects_in(
                 s.kind,
                 ViewKind::Scroll | ViewKind::Image | ViewKind::Stack | ViewKind::Input
             );
-        let bound = if clip {
+        if clip {
             Some(mapped(0.0, 0.0, w, h))
         } else if laid_out(s.kind, s.id) {
             let around = match s.overflow {
@@ -1588,8 +1588,7 @@ fn rects_in(
             ))
         } else {
             None
-        };
-        bound
+        }
     };
     let limit = match bound {
         None => limit,

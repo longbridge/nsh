@@ -1799,7 +1799,7 @@ fn rects_in(
     }
     // Where its children are looked into ([`input::hit_area`]); a bound
     // that cannot be mapped (behind the viewer) lets nothing in.
-    let bound = if clipped {
+    let bound = if s.clips() {
         Some(frame)
     } else if laid_out(s.kind, s.id) {
         let around = match s.overflow {
@@ -3900,6 +3900,19 @@ mod tests {
             ..Default::default()
         }));
         view(&cut, 26, ViewKind::View, rect(0.0, 40.0, 60.0, 60.0));
+        // A `clipPath` reaching 20 past the view: what is in it outside the
+        // view (through its overflow area) is taken up to the clip.
+        let wide = view(&fill, 28, ViewKind::View, rect(320.0, 300.0, 40.0, 40.0));
+        {
+            let mut w = wide.state_mut();
+            w.style.effects = Some(std::sync::Arc::new(nsh_core::Effects {
+                clip_path: Some(nsh_core::ClipInset::new().inset(Points(-20.0))),
+                ..Default::default()
+            }));
+            w.overflow = Some(rect(0.0, 0.0, 80.0, 40.0));
+        }
+        view(&wide, 30, ViewKind::View, rect(45.0, 0.0, 10.0, 10.0));
+        view(&wide, 32, ViewKind::View, rect(65.0, 0.0, 10.0, 10.0));
         let rects = pointer_rects(&root);
         // The rectangles are exactly where a press is taken.
         for y in (0..400).step_by(5) {
@@ -3919,6 +3932,11 @@ mod tests {
         assert!(!in_rects(&rects, 325.0, 50.0), "outside a clip path");
         assert!(!in_rects(&rects, 350.0, 100.0), "below a clip path");
         assert!(in_rects(&rects, 350.0, 50.0), "inside a clip path");
+        assert!(
+            in_rects(&rects, 370.0, 305.0),
+            "past the view, inside its clip path"
+        );
+        assert!(!in_rects(&rects, 390.0, 305.0), "past its clip path");
     }
 
     #[test]

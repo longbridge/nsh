@@ -238,7 +238,7 @@ let Some(doc) = open_window(
 
 会变大变小的弹出面板，常常放在按最大状态设定尺寸的透明窗口里。设置 `pointerEvents: "box-none"` 后，窗口只接收落在它的视图上的点击；点在面板周围空白处的点击会到达下面的窗口，由那个窗口获得焦点，因此失去焦点时关闭的弹出窗口（`closeOnBlur`）会关闭。
 
-窗口的根视图如同视图的 `box-none`：其中的视图按各自的 `pointerEvents`、`hidden` 和 `hitSlop` 决定，铺满窗口的视图仍然会接收落在它上面的点击。把这样的外层容器也设为 `box-none`；有没有背景并不决定窗口在哪里接收点击。
+窗口的根视图如同视图的 `box-none`：其中的视图按各自的 `pointerEvents`、`hidden` 和 `hitSlop` 决定，铺满窗口的视图仍然会接收落在它上面的点击。把这样的外层容器也设为 `box-none`；有没有背景并不决定窗口在哪里接收点击。窗口自己的标题栏和边框同样会让点击穿过，因此请用于无边框窗口。
 
 ```tsx
 <Window id="palette" kind="popup" transparent defaultSize={{ width: 640, height: 480 }} pointerEvents="box-none">

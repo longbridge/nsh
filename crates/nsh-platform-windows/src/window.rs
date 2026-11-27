@@ -2477,10 +2477,7 @@ impl Drop for Ticker {
 /// surface's own top-level window (`ROOT_ID`); none for an embedded one.
 pub(crate) fn root_id(hwnd: HWND) -> Option<NodeId> {
     let data = data(hwnd)?;
-    match data.window {
-        Some(id) => Some(id),
-        None => data.top_level.then_some(ROOT_ID),
-    }
+    data.window.or(data.top_level.then_some(ROOT_ID))
 }
 
 /// The surface window `hwnd` (its own or one of the app's own) is of

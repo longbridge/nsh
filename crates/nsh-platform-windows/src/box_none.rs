@@ -39,12 +39,21 @@ struct Entry {
     hwnd: isize,
     surface: Weak<Surface>,
     id: NodeId,
+    /// Where the cursor was in it (pixels) and the [`LAYOUT`] when it last
+    /// decided: the same again, the decision stands.
+    decided: Cell<Option<(i32, i32, u64)>>,
 }
 
 thread_local! {
     static WINDOWS: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) };
     /// The timer following the cursor while one of them shows.
     static TIMER: Cell<usize> = const { Cell::new(0) };
+    /// A count that moves as the windows' views or the windows change.
+    static LAYOUT: Cell<u64> = const { Cell::new(0) };
+}
+
+fn layout_changed() {
+    LAYOUT.set(LAYOUT.get().wrapping_add(1));
 }
 
 /// Window `id` of `surface` (`hwnd`) is `"box-none"` (`on`) or no longer
@@ -60,6 +69,7 @@ pub(crate) fn set(surface: &Rc<Surface>, id: NodeId, hwnd: HWND, on: bool) {
             hwnd: hwnd.0 as isize,
             surface: Rc::downgrade(surface),
             id,
+            decided: Cell::new(None),
         })
     });
     shown_or_hidden(hwnd);
@@ -80,6 +90,7 @@ pub(crate) fn shown_or_hidden(hwnd: HWND) {
     if !WINDOWS.with_borrow(|w| w.iter().any(|e| e.hwnd == key)) {
         return;
     }
+    layout_changed();
     follow_cursor();
     if showing(hwnd) {
         follow(Some(key));
@@ -89,6 +100,10 @@ pub(crate) fn shown_or_hidden(hwnd: HWND) {
 /// A batch moved `surface`'s views: its `"box-none"` windows follow their
 /// new layout under the cursor where it rests.
 pub(crate) fn batch_applied(surface: &Surface) {
+    if WINDOWS.with_borrow(Vec::is_empty) {
+        return;
+    }
+    layout_changed();
     let windows: Vec<isize> = WINDOWS.with_borrow(|w| {
         w.iter()
             .filter(|e| std::ptr::eq(e.surface.as_ptr(), surface))
@@ -146,6 +161,7 @@ fn follow(only: Option<isize>) {
     if unsafe { GetCursorPos(&mut cursor) }.is_err() {
         return;
     }
+    let layout = LAYOUT.get();
     let entries: Vec<(isize, Weak<Surface>, NodeId)> = WINDOWS.with_borrow(|w| {
         w.iter()
             .filter(|e| only.is_none_or(|o| o == e.hwnd))
@@ -172,6 +188,16 @@ fn follow(only: Option<isize>) {
         let mut p = cursor;
         // SAFETY: a window of this thread; an in-out point.
         if !unsafe { ScreenToClient(hwnd, &mut p) }.as_bool() {
+            continue;
+        }
+        // The cursor where it was in the window, the window laid out as it
+        // was: the decision stands (the timer finds this most of the time).
+        let now = Some((p.x, p.y, layout));
+        if WINDOWS.with_borrow(|w| {
+            w.iter()
+                .find(|e| e.hwnd == key)
+                .is_some_and(|e| e.decided.replace(now) == now)
+        }) {
             continue;
         }
         let takes = crate::input::takes_pointer(&root, p.x as f32 / scale, p.y as f32 / scale);
