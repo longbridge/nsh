@@ -112,7 +112,8 @@ nothing. Over a content frame the drop indicator part covers what the panel woul
 (`DropPlaceholderBounds::for_placement`); over a tab bar (the compact strip's too) the target carries an insertion
 line instead (`DropAt::line`, `tab_group.rs` `slot_line`: 2 points across, the bar's height, centered on the boundary
 between the measured tabs around the slot, kept inside the bar; horizontal on a vertical bar), drawn by `drop_line` in
-the theme's `ring` color (one Cell of `terminal::ACCENT` in a terminal), and neither the indicator nor
+the theme's `ring` color (in a terminal, which draws no fills, one Cell across with a border in `terminal::ACCENT`:
+`│` across a row of tabs, `─` down a column), and neither the indicator nor
 `renderDropIndicator` is drawn for it. Each is one overlay in the root view, under the drag preview (overlays stack
 in the order they open, and the indicator opens once the drag has a target, so the preview is mounted again after it, a
 row keyed by `AreaCx::indicator_shown`: a region run again keeps its node and its place), placed with the content frame the drag measured, so it draws above the handles, whose lines lie over

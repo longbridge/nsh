@@ -324,7 +324,14 @@ pub(crate) fn drop_line(a: AreaCx) -> AnyElement {
         move || line.with(Option::is_some),
         move || {
             indicator_overlay(a, move || line.get()).map(|v| match terminal {
-                true => v.bg(crate::terminal::ACCENT),
+                // A terminal draws no fills: the line is a Cell's border
+                // in the accent, `│` across a row of tabs (`─` down a
+                // column of them).
+                true => match line.with(|l| l.is_some_and(|l| l.size.width > l.size.height)) {
+                    true => v.border_t(px(1.0)),
+                    false => v.border_l(px(1.0)),
+                }
+                .border_color(crate::terminal::ACCENT),
                 false => v
                     .bg(move || crate::theme::theme().ring)
                     .rounded(LINE_THICKNESS * 0.5),
@@ -741,9 +748,12 @@ impl AreaCx {
     fn resolve_bar(self, drag: &TabDrag, zone: &Zone, at: Point<Points>) -> Option<DropAt> {
         let bar = zone.bar?;
         let (index, others) = slot_at(bar, &zone.tabs, &drag.panel, at);
-        let thickness = match crate::terminal::is_terminal() {
-            true => px(1.0),
-            false => LINE_THICKNESS,
+        // One Cell in a terminal: a Cell is wider and taller than a point,
+        // and a thinner line covers no Cell at all.
+        let thickness = match (crate::terminal::is_terminal(), is_vertical(bar)) {
+            (true, true) => crate::terminal::cell_height(),
+            (true, false) => crate::terminal::cell_width(),
+            (false, _) => LINE_THICKNESS,
         };
         let frames: Vec<Bounds<Points>> = others.iter().map(|(_, b)| *b).collect();
         let line = Some(slot_line(bar, &frames, index, thickness));
