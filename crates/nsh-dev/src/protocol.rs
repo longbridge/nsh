@@ -370,6 +370,9 @@ pub enum ServerMessage {
         /// data.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         app_id: Option<String>,
+        /// Checked claims for URL events, also carried by development/test bundles.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        url_schemes: Vec<String>,
         /// The main window's launch-time options (`nsh.json` `"window"`,
         /// JSON): `nsh_engine::Bundle::with_main_window` reads them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1341,6 +1344,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_bundles_have_no_scheme_claims_and_new_claims_round_trip() {
+        let old = r#"{"type":"bundle","version":1,"format":"source"}"#;
+        let message: ServerMessage = serde_json::from_str(old).unwrap();
+        assert!(
+            matches!(message, ServerMessage::Bundle { url_schemes, .. } if url_schemes.is_empty())
+        );
+        let new = r#"{"type":"bundle","version":2,"format":"source","url_schemes":["claim-test"]}"#;
+        let message: ServerMessage = serde_json::from_str(new).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&message).unwrap())
+                .unwrap()["url_schemes"],
+            serde_json::json!(["claim-test"])
+        );
+    }
+
+    #[test]
     fn wire_format_is_stable() {
         let msg = ServerMessage::Bundle {
             version: 3,
@@ -1348,6 +1367,7 @@ mod tests {
             source_map: true,
             capabilities: None,
             app_id: None,
+            url_schemes: Vec::new(),
             window: None,
             application: None,
             limits: None,

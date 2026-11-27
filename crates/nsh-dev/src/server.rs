@@ -92,6 +92,8 @@ pub struct AppInfo {
     pub window: Option<String>,
     /// The app's lifecycle (`nsh.json` `"application"`, JSON).
     pub application: Option<String>,
+    /// Checked URL schemes claimed by the app, as in its packaged bundle.
+    pub url_schemes: Vec<String>,
 }
 
 struct Bundle {
@@ -101,6 +103,7 @@ struct Bundle {
     source_map: Option<axum::body::Bytes>,
     capabilities: Option<String>,
     app_id: Option<String>,
+    url_schemes: Vec<String>,
     window: Option<String>,
     application: Option<String>,
     /// The UI sets it imports.
@@ -463,6 +466,7 @@ impl DevServer {
             source_map: source_map.map(Into::into),
             capabilities: app.capabilities,
             app_id: app.id,
+            url_schemes: app.url_schemes,
             window: app.window,
             application: app.application,
             ui_sets,
@@ -1399,6 +1403,7 @@ async fn send_event(
                     source_map: bundle.source_map.is_some(),
                     capabilities: bundle.capabilities.clone(),
                     app_id: bundle.app_id.clone(),
+                    url_schemes: bundle.url_schemes.clone(),
                     window: bundle.window.clone(),
                     application: bundle.application.clone(),
                     limits,
