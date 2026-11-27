@@ -214,37 +214,13 @@ fn open_notes() {
 
 ## 在网页上登录
 
-`open_auth_session` 打开服务方的登录页（OAuth 授权地址），结果是登录页跳回的回调地址：iOS 用
-`ASWebAuthenticationSession` 弹层显示（`.ephemeral(true)` 不与用户的 Safari 共用数据），Android 用 Custom Tab，
-macOS、Windows 和 Linux 后端用系统浏览器。iOS 以外，回调以应用声明的 scheme（`nsh.json` 的 `schemes`）的链接回到应用，
-由会话收下，`next_url_scheme_open` 收不到它。结果是 `Completed(url)` 或 `Cancelled`（用户关掉了页面，或没登录就回到应用）；
-回调回不到应用时立即以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 失败：scheme 不是应用声明的会话如此；网页、GPUI
-和终端后端收不到应用 scheme 的链接，那里的每个会话都如此。登录页的地址同 `open_url` 一样要 `openUrl` 能力。
+登录会话（打开 OAuth 2 授权页、再跳回应用）已从 NSH core 移到 [nsh-oauth2](https://github.com/longbridge/nsh-oauth2) 这个 nshm。Rust 和 TSX 都能用：iOS 用 `ASWebAuthenticationSession`，Android 用 Custom Tab，桌面端用系统浏览器。
 
-登录页还开着、应用已从别处得知用户登录了（在不会跳回的页面上批准了设备码）时，`close_auth_session()` 关掉它：会话以
-`Cancelled` 结束，iOS 和 Android 收起页面、回到应用；桌面浏览器里的页面不动。没有会话在等时什么也不做。
-
-```rust
-use nsh_core::{
-    auth_session::{AuthSessionOutcome, AuthSessionRequest},
-    prelude::*,
-};
-
-fn sign_in(authorize_url: String) {
-    let session = open_auth_session(AuthSessionRequest::new(authorize_url, "myapp"));
-    spawn(async move {
-        match session.await {
-            Ok(AuthSessionOutcome::Completed(callback)) => log::info!("signed in: {callback}"),
-            Ok(_) => {} // 取消了。
-            Err(error) => log::warn!("no sign-in page: {error}"),
-        }
-    });
-}
+```sh
+nsh add github:longbridge/nsh-oauth2
 ```
 
-测试里 `Headless::on_auth_session` 让平台有应用内会话、每个会话按给定的结果结束，`keep_auth_sessions_open` 则让
-每个会话一直开着、直到应用关掉它（`screen().auth_session_showing()`）；都不设时登录页记在 `opened_urls()` 里，用
-`open_with_url` 送回调（以网页身份运行的测试除外：会话立即失败）。
+core 已删除 `nsh_core::element::open_auth_session` 和 `close_auth_session`。请改用 `nsh_oauth2::open_auth_session` 和 `nsh_oauth2::close_auth_session`，请求、结果和错误类型与原来一致。
 
 ## 用 TSX 扩展 Rust 应用
 
