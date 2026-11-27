@@ -65,6 +65,8 @@ pub(crate) struct Host {
     granted: Mutex<Option<nsh_engine::Capabilities>>,
     /// The VM limits of loaded apps (`NshView.setLimits`).
     limits: Mutex<nsh_engine::Limits>,
+    /// Where loaded apps report their errors (`NshView.setErrorReporting`).
+    error_reporting: Mutex<Option<nsh_engine::ErrorReporting>>,
     /// Whether scroll views make their content's native views only near
     /// their viewport (`NshView.setContentCulling`, on by default).
     content_culling: AtomicBool,
@@ -267,7 +269,7 @@ impl Host {
             picker: None,
             audio: None,
             windows: None,
-            error_reporting: None,
+            error_reporting: self.error_reporting.lock().expect("reporting").clone(),
             login_item: None,
         };
         let density = self.density.clone();
@@ -697,6 +699,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         epoch: Instant::now(),
         granted: Mutex::new(None),
         limits: Mutex::new(nsh_engine::Limits::default()),
+        error_reporting: Mutex::new(None),
         content_culling: AtomicBool::new(true),
         runtime: Mutex::new(None),
         support_dir,
@@ -789,6 +792,49 @@ extern "system" fn Java_com_longbridge_nsh_Native_setStandaloneLimits(
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     host.set_limits(nsh_engine::Limits::standalone());
+}
+
+/// Where the apps loaded next report their errors (`NshView.setErrorReporting`):
+/// the tracker's DSN (null: not reported), the environment (null: the
+/// tracker's default) and tags as name, value pairs.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setErrorReporting(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    dsn: JString<'_>,
+    environment: JString<'_>,
+    tags: JObjectArray<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let reporting = (|| -> jni::errors::Result<Option<nsh_engine::ErrorReporting>> {
+        if dsn.is_null() {
+            return Ok(None);
+        }
+        let mut reporting = nsh_engine::ErrorReporting::new(String::from(env.get_string(&dsn)?));
+        if !environment.is_null() {
+            reporting = reporting.environment(String::from(env.get_string(&environment)?));
+        }
+        if !tags.is_null() {
+            let len = env.get_array_length(&tags)?;
+            for i in (0..len - 1).step_by(2) {
+                let name = JString::from(env.get_object_array_element(&tags, i)?);
+                let value = JString::from(env.get_object_array_element(&tags, i + 1)?);
+                if name.is_null() || value.is_null() {
+                    continue;
+                }
+                let name = String::from(env.get_string(&name)?);
+                let value = String::from(env.get_string(&value)?);
+                reporting = reporting.tag(name, value);
+            }
+        }
+        Ok(Some(reporting))
+    })();
+    match reporting {
+        Ok(reporting) => *host.error_reporting.lock().expect("reporting") = reporting,
+        Err(err) => log::error!("invalid error reporting: {err}"),
+    }
 }
 
 /// Whether scroll views make the native views of their content only near

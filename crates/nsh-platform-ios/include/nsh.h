@@ -56,6 +56,16 @@ void nsh_app_set_limits(NshApp *app, uint32_t memory_mb, uint32_t stack_kb, uint
 /// and the apps `app` loads next.
 void nsh_app_set_content_culling(NshApp *app, bool enabled);
 
+/// Reports the errors of the apps `app` loads next to the Sentry-protocol
+/// tracker of `dsn` (NULL: not reported), filed under `environment` (NULL:
+/// the tracker's default), with `tag_count` tags: `tags` holds their names
+/// and values in turn. Applies from the next load. Returns why the settings
+/// are invalid, or NULL.
+char *_Nullable nsh_app_set_error_reporting(NshApp *app, const char *_Nullable dsn,
+                                            const char *_Nullable environment,
+                                            const char *_Nullable const *_Nullable tags,
+                                            size_t tag_count);
+
 /// Gives the address of the apps `app` loads (`UrlScheme.setUrl`) to the
 /// system as the current `NSUserActivity`, for Handoff. An address that
 /// is no web page needs `<bundle id>.url` in the app's Info.plist

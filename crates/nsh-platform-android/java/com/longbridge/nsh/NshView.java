@@ -283,6 +283,31 @@ public class NshView extends FrameLayout {
     }
 
     /**
+     * Reports the errors of the apps this view loads next (load failures,
+     * uncaught exceptions, stopped VMs, unhandled promise rejections) to a
+     * Sentry-protocol tracker, such as Sentry or Beacon. Events carry the
+     * stack mapped to the app's sources, the package's
+     * {@code id@version+build} as release and {@code tags}, and go through
+     * the app's network stack. Off by default.
+     *
+     * @param dsn the project's DSN ({@code https://<public key>@<host>/<project id>}); null turns reporting off
+     * @param environment the environment the events are filed under ({@code production}, {@code sit}); null: the tracker's default
+     * @param tags tags added to every event (the embedding app's version, channel); may be null
+     */
+    public void setErrorReporting(String dsn, String environment, java.util.Map<String, String> tags) {
+        String[] pairs = null;
+        if (tags != null) {
+            pairs = new String[tags.size() * 2];
+            int i = 0;
+            for (java.util.Map.Entry<String, String> tag : tags.entrySet()) {
+                pairs[i++] = tag.getKey();
+                pairs[i++] = tag.getValue();
+            }
+        }
+        Native.setErrorReporting(handle, dsn, environment, pairs);
+    }
+
+    /**
      * Whether scroll views make the views of their content only near their
      * viewport (true, the default), or all of it (false). Turned off, what is
      * not made yet is made in the next frames, e.g. to draw a whole scroll
