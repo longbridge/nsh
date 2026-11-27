@@ -39,7 +39,7 @@
 //! (`foo.`) is still the word alone. A double click selects the word alone, as
 //! desktops and browsers do.
 
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use crate::{
     AttributedText,
@@ -727,23 +727,27 @@ impl SelectionModel {
     /// [`Self::text`] gives once everything is selected), in UTF-16 code
     /// units: what maps it back to the document the texts show.
     pub fn start_offset(&self, texts: &impl SelectionTexts) -> u32 {
-        let Some((start, _)) = self.bounds() else {
-            return 0;
-        };
-        if texts.is_empty() || (start.text == 0 && start.offset == 0) {
-            return 0;
+        self.bounds()
+            .map_or(0, |(start, _)| copy_offset(texts, start))
+    }
+
+    /// The anchor and the focus, in the order the user made them (a drag
+    /// upward has its focus first): each as the key of its text
+    /// ([`SelectionTexts::key`], the text's view node) and the UTF-16
+    /// offset in it. `None` while nothing is selected. The core turns them
+    /// into the list items they are in (`onSelectionChange`'s `anchor` and
+    /// `focus`, [`end_fields`]).
+    pub fn ends(&self, texts: &impl SelectionTexts) -> Option<[(u64, u32); 2]> {
+        if self.is_empty() {
+            return None;
         }
-        let before = Self {
-            anchor: Some(TextPosition { text: 0, offset: 0 }),
-            focus: Some(start),
-            ..Self::default()
-        };
-        let mut len = utf16_len(&before.text(texts));
-        // A selection from the start of a text: the break before it.
-        if start.offset == 0 && len > 0 {
-            len += 1;
-        }
-        len
+        let (anchor, focus) = (self.anchor?, self.focus?);
+        (anchor.text < texts.len() && focus.text < texts.len()).then(|| {
+            [
+                (texts.key(anchor.text), anchor.offset),
+                (texts.key(focus.text), focus.offset),
+            ]
+        })
     }
 
     /// Puts the anchor at `pos` and selects the unit of `granularity`
@@ -781,8 +785,210 @@ impl SelectionModel {
     }
 }
 
+/// Where `pos` is in the copy of all of `texts` (what
+/// [`SelectionModel::text`] gives once everything is selected), in UTF-16
+/// code units.
+pub fn copy_offset(texts: &impl SelectionTexts, pos: TextPosition) -> u32 {
+    if texts.is_empty() || (pos.text == 0 && pos.offset == 0) {
+        return 0;
+    }
+    let copied = |to: TextPosition| {
+        let before = SelectionModel {
+            anchor: Some(TextPosition { text: 0, offset: 0 }),
+            focus: Some(to),
+            ..SelectionModel::default()
+        };
+        utf16_len(&before.text(texts))
+    };
+    if pos.offset > 0 || pos.text >= texts.len() {
+        return copied(pos);
+    }
+    // The start of a text: where its part begins in a copy up to its end
+    // (after the break before it, a line, a blank line or a tab, and
+    // before its marker).
+    let end = utf16_len(texts.content(pos.text));
+    if end > 0 {
+        let own = SelectionModel {
+            anchor: Some(pos),
+            focus: Some(TextPosition::new(pos.text, end)),
+            ..SelectionModel::default()
+        };
+        return copied(TextPosition::new(pos.text, end)) - utf16_len(&own.text(texts));
+    }
+    // An empty text: a line after what comes before it.
+    match copied(pos) {
+        0 => 0,
+        len => len + 1,
+    }
+}
+
+/// The payload keys of a selectable view's `onSelectionChange` that carry
+/// [`SelectionModel::ends`] from a platform to the core: the anchor's and
+/// the focus's text node and the UTF-16 offset in it. The core replaces
+/// them with the list items they are in (`Core::name_selection_ends`).
+/// Hidden: a backend's wire to the core, which [`end_fields`] writes.
+#[doc(hidden)]
+pub const END_FIELDS: [(&str, &str); 2] = [
+    ("anchorNode", "anchorNodeOffset"),
+    ("focusNode", "focusNodeOffset"),
+];
+
+/// [`SelectionModel::ends`] as the fields of a platform's
+/// `onSelectionChange` payload ([`END_FIELDS`]).
+#[doc(hidden)]
+pub fn end_fields(ends: [(u64, u32); 2]) -> [(&'static str, crate::PayloadValue); 4] {
+    let number = |n: u64| crate::PayloadValue::Number(n as f64);
+    let [(anchor, anchor_offset), (focus, focus_offset)] = END_FIELDS;
+    let [(a, a_at), (f, f_at)] = ends;
+    [
+        (anchor, number(a)),
+        (anchor_offset, number(u64::from(a_at))),
+        (focus, number(f)),
+        (focus_offset, number(u64::from(f_at))),
+    ]
+}
+
+/// The payload keys of an end as listeners take it: the item's key and the
+/// offset in the copy of the item
+/// ([`crate::element::TextSelectionEvent::anchor`]). `tests/compat/`
+/// reports events with these keys, so the compatibility record freezes
+/// them as it freezes the keys of the other events.
+#[doc(hidden)]
+pub const ITEM_FIELDS: [(&str, &str); 2] =
+    [("anchorKey", "anchorOffset"), ("focusKey", "focusOffset")];
+
+/// What the app's runtime calls a row of a virtual list: the key a
+/// selection's end names the row's item by (`onSelectionChange`'s `anchor`
+/// and `focus`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ListItemKey {
+    /// The item's key, as the list names its items (a TSX `List`'s
+    /// `keyExtractor`, else the item's `key` or `id`, else its index).
+    Named(String),
+    /// The list is not the runtime's (a Rust component's `virtual_list`):
+    /// a list around it may name the item, else the row goes by its index.
+    NotMine,
+    /// The list is the runtime's but has no key for the row: its
+    /// `keyExtractor` threw (reported as the runtime reports exceptions)
+    /// or gave neither a string nor a number, or the row is past its
+    /// items. The end is left out rather than named by a guess.
+    Failed,
+}
+
 /// U+FFFC, which stands for an attachment in a text's content.
 const OBJECT_REPLACEMENT: char = '\u{FFFC}';
+
+/// A tree of views a backend lists a selectable view's texts from
+/// ([`list_texts`]): the views the platform shows, or the core's nodes
+/// (the texts of a list item, for `onSelectionChange`'s ends), so both
+/// list them alike.
+pub trait TextTree {
+    /// A view.
+    type View: Clone;
+
+    /// Whether `view` is hidden: it and its subtree take no part.
+    fn hidden(&self, view: &Self::View) -> bool;
+
+    /// `view`'s text, when it draws one: its content and its content box
+    /// in `view`'s coordinates.
+    fn text(&self, view: &Self::View) -> Option<(Arc<AttributedText>, Bounds<Points>)>;
+
+    /// `view`'s children in mount order, each with its frame in `view`'s
+    /// content (before `view` scrolls it).
+    fn children(&self, view: &Self::View, out: &mut Vec<(Self::View, Bounds<Points>)>);
+
+    /// How `view` moves its content: its scroll offset (in the content's
+    /// points) and zoom. None and 1 by default.
+    fn content_offset(&self, view: &Self::View) -> (Point<Points>, f32) {
+        let _ = view;
+        (Point::default(), 1.0)
+    }
+}
+
+/// A text [`list_texts`] listed.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ListedText<V> {
+    /// Its view.
+    pub view: V,
+    /// Its content.
+    pub text: Arc<AttributedText>,
+    /// Where its view's top left is in the root.
+    pub origin: Point<Points>,
+    /// The zoom it shows at there (of the scroll views around it).
+    pub zoom: f32,
+    /// Its content box in the root's coordinates ([`SelectionTexts::frame`]).
+    pub frame: Bounds<Points>,
+    /// The list marker beside it ([`marker_of`], [`SelectionTexts::marker`]).
+    pub marker: Option<String>,
+}
+
+/// The texts of `root`'s subtree that take part in a selection, in document
+/// order: the subtree depth first, each view's children in reading order
+/// ([`reading_order`]: a virtual list's recycled cells by their tops);
+/// hidden views with their subtrees and texts kept out (`selectable={false}`)
+/// left out, the latter maybe the marker of the next. Frames are in
+/// `root`'s coordinates, the scroll offsets and zooms of the views between
+/// applied.
+pub fn list_texts<T: TextTree>(tree: &T, root: &T::View) -> Vec<ListedText<T::View>> {
+    fn walk<T: TextTree>(
+        tree: &T,
+        view: &T::View,
+        origin: Point<Points>,
+        zoom: f32,
+        out: &mut Vec<ListedText<T::View>>,
+        chrome: &mut Option<(String, Bounds<Points>)>,
+    ) {
+        if tree.hidden(view) {
+            return;
+        }
+        if let Some((text, content)) = tree.text(view) {
+            let frame = Bounds::new(
+                point(
+                    origin.x + content.origin.x * zoom,
+                    origin.y + content.origin.y * zoom,
+                ),
+                size(content.size.width * zoom, content.size.height * zoom),
+            );
+            if text.selectable == Some(false) {
+                // A list marker, maybe: the next text's copy starts with it.
+                *chrome = Some((text.text.clone(), frame));
+            } else {
+                let marker = marker_of(chrome.take().as_ref(), frame);
+                out.push(ListedText {
+                    view: view.clone(),
+                    text,
+                    origin,
+                    zoom,
+                    frame,
+                    marker,
+                });
+            }
+        }
+        let (offset, own_zoom) = tree.content_offset(view);
+        let inner = zoom * own_zoom;
+        let mut children = Vec::new();
+        tree.children(view, &mut children);
+        let start = out.len();
+        let mut runs = Vec::with_capacity(children.len());
+        for (child, frame) in children {
+            let at = point(
+                origin.x + (frame.origin.x - offset.x) * inner,
+                origin.y + (frame.origin.y - offset.y) * inner,
+            );
+            let from = out.len();
+            walk(tree, &child, at, inner, out, chrome);
+            runs.push((frame, from..out.len()));
+        }
+        if let Some(order) = reading_order(&runs) {
+            reorder(out, start, &order);
+        }
+    }
+    let mut out = Vec::new();
+    walk(tree, root, Point::default(), 1.0, &mut out, &mut None);
+    out
+}
 
 /// The order of the texts a backend listed child by child, in mount order:
 /// `runs` are the children's frames (in their parent) and the ranges of
@@ -2492,6 +2698,37 @@ mod tests {
         fn key(&self, i: usize) -> u64 {
             self.1[i]
         }
+    }
+
+    #[test]
+    fn the_ends_keep_the_order_the_user_made_them_in() {
+        let texts = Keyed(column(), vec![10, 20, 30]);
+        let mut model = SelectionModel::new();
+        assert_eq!(model.ends(&texts), None);
+        // A drag upward: from "Last" back into "Second line".
+        model.press(&texts, at(16.0, 105.0), 1, false);
+        assert_eq!(model.ends(&texts), None, "a caret has no ends");
+        model.drag(&texts, at(8.0, 45.0));
+        assert_eq!(model.ends(&texts), Some([(30, 2), (20, 1)]));
+        assert_eq!(
+            end_fields([(30, 2), (20, 1)]).map(|(k, _)| k),
+            [
+                "anchorNode",
+                "anchorNodeOffset",
+                "focusNode",
+                "focusNodeOffset"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_copy_offset_counts_the_breaks_a_copy_puts_between_texts() {
+        let texts = column();
+        // "Hello world" and a blank line (a block gap) before "Second".
+        assert_eq!(copy_offset(&texts, pos(0, 0)), 0);
+        assert_eq!(copy_offset(&texts, pos(1, 0)), 13);
+        assert_eq!(copy_offset(&texts, pos(1, 3)), 16);
+        assert_eq!(copy_offset(&texts, pos(2, 0)), 13 + 21 + 2);
     }
 
     #[test]

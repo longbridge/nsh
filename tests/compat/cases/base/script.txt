@@ -810,6 +810,12 @@ event id:area onSelectionChange text=first
 expect Area selected: first
 event id:area onSelectionChange text=
 expect Area selected: nothing
+# The list items the ends are in (`anchor`, `focus`: a key and the offset
+# in the item's text), the focus first after a drag upward.
+event id:area onSelectionChange text=tests anchorKey=row-b anchorOffset=10 focusKey=row-a focusOffset=4
+expect Area selected: tests from row-b@10 to row-a@4
+event id:area onSelectionChange text=
+expect Area selected: nothing
 event id:own onSelectionChange text=Own
 expect Own selected: Own
 expect Own read: Own | **Own** | <p><strong>Own</strong></p>
