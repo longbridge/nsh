@@ -388,6 +388,12 @@ fn push(surface: &Surface, op: Op) {
 
 /// A desktop command for the main window (on the root).
 pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
+    // The tray belongs to the application, not the window chrome. An
+    // embedding host can provide it without delegating its window.
+    if let DesktopCommand::SetTray(tray) = command {
+        surface.tray.set(surface, tray.as_ref());
+        return;
+    }
     let c = &surface.chrome;
     // The embedding app owns its window: only context menus work there.
     if !c.standalone.get()
@@ -433,9 +439,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             };
             menus::open(surface, menus::Kind::App, items.clone(), anchor, false);
         }
-        // The host app owns the tray and global shortcuts.
-        DesktopCommand::SetTray(_)
-        | DesktopCommand::RegisterGlobalShortcut { .. }
+        // The host app owns global shortcuts.
+        DesktopCommand::RegisterGlobalShortcut { .. }
         | DesktopCommand::UnregisterGlobalShortcut(_) => {}
         // Commands added later.
         #[allow(unreachable_patterns)]

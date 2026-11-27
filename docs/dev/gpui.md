@@ -490,6 +490,14 @@ elsewhere on each desktop. A host's window an embedded surface draws in is left 
 on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
 buttons and the frame's edges.
 
+GPUI does not create a native tray itself. A host can set `AppOptions::tray` to
+an implementation of `TrayHost` to present the app's `SetTray` configuration,
+even when it owns the embedding window or the app has no visible windows. The
+host reports menu selections and icon clicks through `TrayActivation`; icon
+clicks may include screen-point bounds. The host's removal callback runs when
+the tray is replaced, cleared, or the app view stops. Callbacks from an old
+tray can no longer send events to the app.
+
 Window and display rectangles mean what they do on the other desktop backends: points from the primary display's
 top left corner. GPUI measures them from each display's own corner on macOS, so `window/screen.rs` converts what is
 reported and opens a window at a point on the display holding it; native moves wait until the GPUI update that asks

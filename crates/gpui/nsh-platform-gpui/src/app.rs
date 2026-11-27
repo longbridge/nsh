@@ -183,6 +183,9 @@ pub struct AppOptions {
     /// same app itself. The apps' `windows` capability limits what they
     /// may open either way.
     pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
+    /// The embedding app's system tray implementation. Without one the view
+    /// does not present a tray. Applies to this view, not the GPUI app.
+    pub tray: Option<Rc<dyn crate::TrayHost>>,
     /// Runs [`run_app`]'s app in the background: it never becomes the
     /// active app (on macOS its activation policy is `Prohibited`) and its
     /// windows show without taking the keyboard from the app the user works
@@ -242,6 +245,7 @@ impl std::fmt::Debug for AppOptions {
             .field("host", &self.host)
             .field("transparent", &self.transparent)
             .field("windows", &self.windows.is_some())
+            .field("tray", &self.tray.is_some())
             .field("background", &self.background)
             .field("display", &self.display)
             .field("keep_size", &self.keep_size)
@@ -269,6 +273,7 @@ impl Default for AppOptions {
             host: nsh_engine::HostChannel::default(),
             transparent: false,
             windows: None,
+            tray: None,
             background: false,
             display: None,
             keep_size: false,
@@ -381,6 +386,7 @@ impl AppView {
             .detach();
         bind_keys(cx);
         let surface = Surface::new(initial_environment());
+        surface.tray.set_host(options.tray.clone());
         crate::chrome::set_app_name(&surface, &options.title);
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
