@@ -485,8 +485,13 @@ fn place(window: &AppWindow, open: &OpenWindow) {
         }
         Some(WindowPosition::Center) => (None, None),
         None if options.display.is_some() => (None, None),
-        // Where the system places it.
-        None => return crate::window_state::size_content(hwnd, content),
+        // Where the system places it, unless that leaves it outside the
+        // work area (a default size larger than a small or scaled display).
+        None => {
+            crate::window_state::size_content(hwnd, content);
+            crate::window_state::open_in_work_area(hwnd, content);
+            return;
+        }
     };
     crate::window_state::open_at(hwnd, content, origin, center_on, options.display);
 }

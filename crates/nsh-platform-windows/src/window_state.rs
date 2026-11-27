@@ -640,17 +640,30 @@ pub(crate) fn opening_rect(
         let shown = |a: i32, b: i32| Points((a - b).max(0) as f32 / screen.scale);
         let (l, t) = (shown(extents.0, hidden.0), shown(extents.1, hidden.1));
         let (r, b) = (shown(extents.2, hidden.2), shown(extents.3, hidden.3));
-        // A window placed by NSH (not at an origin the app gave) fits the
-        // work area: one larger than it is shrunk ([`fit_size`]).
-        let content = match origin {
-            Some(_) => content,
-            None => fit_size(content, screen.display.visible_bounds.size, (l, t, r, b)),
+        // An opening window stays inside its display's work area: one
+        // larger than it is shrunk ([`fit_size`]) and an origin that would
+        // put an edge off it moved in (the first window comes at the hidden
+        // host's size and origin, which a small or scaled display has no
+        // room for).
+        let work = screen.display.visible_bounds;
+        let content = fit_size(content, work.size, (l, t, r, b));
+        let (outer_w, outer_h) = (l + content.width + r, t + content.height + b);
+        let area = center_on.unwrap_or(work);
+        let at = match origin {
+            Some(at) => {
+                let keep = |v: Points, start: Points, room: Points, size: Points| {
+                    Points(v.0.min(start.0 + room.0 - size.0).max(start.0))
+                };
+                point(
+                    keep(at.x, work.origin.x, work.size.width, outer_w),
+                    keep(at.y, work.origin.y, work.size.height, outer_h),
+                )
+            }
+            None => point(
+                area.origin.x + (area.size.width - outer_w) / 2.0,
+                area.origin.y + (area.size.height - outer_h) / 2.0,
+            ),
         };
-        let area = center_on.unwrap_or(screen.display.visible_bounds);
-        let at = origin.unwrap_or(point(
-            area.origin.x + (area.size.width - (l + content.width + r)) / 2.0,
-            area.origin.y + (area.size.height - (t + content.height + b)) / 2.0,
-        ));
         let inner = screen.native_bounds(Bounds::new(point(at.x + l, at.y + t), content));
         Some(outset(inner, extents))
     })
