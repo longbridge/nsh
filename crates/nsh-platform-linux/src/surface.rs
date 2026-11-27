@@ -391,13 +391,11 @@ impl Surface {
     }
 
     /// Its key ([`Surface::by_key`]).
-    #[cfg(feature = "dev")]
     pub(crate) fn key(&self) -> u64 {
         self.key
     }
 
     /// The surface `key` names, while it exists.
-    #[cfg(feature = "dev")]
     pub(crate) fn by_key(key: u64) -> Option<Rc<Surface>> {
         SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
     }
