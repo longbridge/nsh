@@ -166,9 +166,10 @@ fn files_are_granted_and_resolved_as_fs_promises_reads_them() {
     std::fs::create_dir_all(base.join("outside")).unwrap();
     std::fs::write(base.join("data/kyoto.txt"), "Saturday: Fushimi Inari").unwrap();
     std::fs::write(base.join("outside/secret.txt"), "secret").unwrap();
-    // The real paths (`/tmp` is a link on macOS).
-    let data = std::fs::canonicalize(base.join("data")).unwrap();
-    let outside = std::fs::canonicalize(base.join("outside")).unwrap();
+    // The real paths as `fs/promises` resolves them (`/tmp` is a link on
+    // macOS; Windows paths come without the `\\?\` prefix).
+    let data = nsh_core::access::canonicalize(&base.join("data")).unwrap();
+    let outside = nsh_core::access::canonicalize(&base.join("outside")).unwrap();
     let kyoto = data.join("kyoto.txt");
 
     let request = ShareContent::files(&["${dataDir}/kyoto.txt", kyoto.to_str().unwrap()])
