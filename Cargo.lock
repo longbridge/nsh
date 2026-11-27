@@ -3960,6 +3960,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-macos-editor"
+version = "0.7.1"
+dependencies = [
+ "imara-diff",
+ "log",
+ "nsh-base",
+ "nsh-core",
+ "regex",
+ "ropey",
+ "rustc-hash 2.1.3",
+ "unicode-linebreak",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "nsh-macos-host"
 version = "0.7.1"
 dependencies = [
@@ -3968,6 +3984,27 @@ dependencies = [
  "nsh-dev",
  "nsh-engine",
  "nsh-platform-macos",
+]
+
+[[package]]
+name = "nsh-macos-linked"
+version = "0.7.1"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "nsh-macos-app",
+ "nsh-macos-editor",
+ "nsh-macos-plot",
+ "nsh-platform-macos",
+]
+
+[[package]]
+name = "nsh-macos-plot"
+version = "0.7.1"
+dependencies = [
+ "log",
+ "nsh-base",
+ "nsh-core",
 ]
 
 [[package]]

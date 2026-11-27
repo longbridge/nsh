@@ -1,0 +1,32 @@
+[package]
+name = "nsh-macos-editor"
+description = "Prototype (#1644): `Editor` and `DiffView` as a static part of the macOS runner."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["editor"]
+# The sources' own gate: they are built here, not in `nsh/base`.
+editor = []
+# Not built: the core has no syntax highlighting either.
+highlight = []
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-core.workspace = true
+nsh-base = { workspace = true, default-features = false }
+log.workspace = true
+regex.workspace = true
+rustc-hash.workspace = true
+ropey.workspace = true
+imara-diff.workspace = true
+unicode-linebreak.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true

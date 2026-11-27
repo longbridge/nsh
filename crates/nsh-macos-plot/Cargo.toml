@@ -1,0 +1,18 @@
+[package]
+name = "nsh-macos-plot"
+description = "Prototype (#1644): the charts (`nsh/base/plot`) as a static part of the macOS runner."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-core.workspace = true
+nsh-base = { workspace = true, default-features = false }
+log.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "nsh-macos-linked"
+description = "Prototype (#1644): the macOS release runner linked by `nsh package` from prebuilt static parts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-base.workspace = true
+nsh-core.workspace = true
+nsh-platform-macos = { workspace = true, default-features = false, features = ["js", "svg"] }
+nsh-macos-app = { path = "../nsh-macos-app", default-features = false, features = ["js", "svg"] }
+nsh-macos-editor = { path = "../nsh-macos-editor" }
+nsh-macos-plot = { path = "../nsh-macos-plot" }
