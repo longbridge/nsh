@@ -243,7 +243,9 @@ fn span_at(spans: &[TextSpan], index: u32) -> usize {
 /// Metrics of a font a run is set in.
 #[derive(Debug)]
 struct FontInfo {
-    /// `Font::describe_with_absolute_size`, to load it on the main thread.
+    /// `Font::describe_with_absolute_size`, then a newline and the font's
+    /// file when Fontconfig knows it: the main thread loads that same file
+    /// (#3583).
     desc: Arc<str>,
     /// Em size (points).
     size: f32,
@@ -645,8 +647,13 @@ impl PangoTextEngine {
         // scaled to the size asked for.
         desc.set_absolute_size(f64::from(size) * f64::from(pango::SCALE));
         let metrics = font.metrics(None);
+        let mut desc = desc.to_str().to_string();
+        if let Some(file) = font_file_of(font) {
+            desc.push('\n');
+            desc.push_str(&file);
+        }
         let info = Arc::new(FontInfo {
-            desc: desc.to_str().as_str().into(),
+            desc: desc.into(),
             size,
             underline: (
                 from_pango(metrics.underline_position()),
@@ -1210,11 +1217,20 @@ mod fontconfig {
         pub(super) fn FcInitLoadConfigAndFonts() -> *mut c_void;
         pub(super) fn FcConfigDestroy(config: *mut c_void);
         pub(super) fn FcConfigAppFontAddFile(config: *mut c_void, file: *const c_char) -> c_int;
+        pub(super) fn FcConfigCreate() -> *mut c_void;
+        pub(super) fn FcPatternGetString(
+            pattern: *mut c_void,
+            object: *const c_char,
+            n: c_int,
+            value: *mut *const u8,
+        ) -> c_int;
     }
 
     #[link(name = "pangoft2-1.0")]
     unsafe extern "C" {
         pub(super) fn pango_fc_font_map_get_type() -> usize;
+        pub(super) fn pango_fc_font_get_type() -> usize;
+        pub(super) fn pango_fc_font_get_pattern(font: *mut c_void) -> *mut c_void;
         #[cfg(test)]
         pub(super) fn pango_fc_font_map_get_config(map: *mut c_void) -> *mut c_void;
         pub(super) fn pango_fc_font_map_set_config(map: *mut c_void, config: *mut c_void);
@@ -1267,6 +1283,69 @@ fn set_font_files(map: &pango::FontMap, files: &[PathBuf]) -> Result<(), String>
     Ok(())
 }
 
+/// The file Fontconfig loaded `font` from, if it is a Fontconfig font.
+fn font_file_of(font: &pango::Font) -> Option<String> {
+    let ptr: *mut pango::ffi::PangoFont = font.to_glib_none().0;
+    // SAFETY: a GType query, then an instance check on the live `font`.
+    let is_fc = unsafe {
+        let fc_type = fontconfig::pango_fc_font_get_type();
+        gtk::glib::gobject_ffi::g_type_check_instance_is_a(ptr.cast(), fc_type as _) != 0
+    };
+    if !is_fc {
+        return None;
+    }
+    // SAFETY: `ptr` is a PangoFcFont; the pattern is owned by it and the
+    // string by the pattern, both alive while `font` is.
+    unsafe {
+        let pattern = fontconfig::pango_fc_font_get_pattern(ptr.cast());
+        let mut file = std::ptr::null();
+        if pattern.is_null()
+            || fontconfig::FcPatternGetString(pattern, c"file".as_ptr(), 0, &mut file) != 0
+            || file.is_null()
+        {
+            return None;
+        }
+        let file = std::ffi::CStr::from_ptr(file.cast()).to_str().ok()?;
+        (!file.contains('\n')).then(|| file.to_owned())
+    }
+}
+
+/// A font map whose Fontconfig configuration holds only `file`, without
+/// the user's rules: a description resolves to a face of that file, never
+/// to another font a `<match>` rule prefers (#3583).
+fn single_file_font_map(file: &str) -> Option<pango::FontMap> {
+    struct Config(*mut c_void);
+    impl Drop for Config {
+        fn drop(&mut self) {
+            // SAFETY: our owned reference to a non-null FcConfig.
+            unsafe { fontconfig::FcConfigDestroy(self.0) };
+        }
+    }
+    let path = std::ffi::CString::new(file).ok()?;
+    // SAFETY: an owned, empty config, not the process's current one.
+    let config = unsafe { fontconfig::FcConfigCreate() };
+    if config.is_null() {
+        return None;
+    }
+    let config = Config(config);
+    // SAFETY: the config is ours alone; the path outlives the call.
+    if unsafe { fontconfig::FcConfigAppFontAddFile(config.0, path.as_ptr()) } == 0 {
+        return None;
+    }
+    let map: pango::FontMap = pangocairo::FontMap::new().upcast();
+    let ptr: *mut pango::ffi::PangoFontMap = map.to_glib_none().0;
+    // SAFETY: as in set_font_files; pangocairo's map on Linux is a
+    // PangoFcFontMap (checked), which takes its own reference.
+    unsafe {
+        let fc_type = fontconfig::pango_fc_font_map_get_type();
+        if gtk::glib::gobject_ffi::g_type_check_instance_is_a(ptr.cast(), fc_type as _) == 0 {
+            return None;
+        }
+        fontconfig::pango_fc_font_map_set_config(ptr.cast(), config.0);
+    }
+    Some(map)
+}
+
 /// Writes font data to `<user cache>/nsh/fonts/<hash>.ttf` (once).
 fn font_file(data: &[u8]) -> std::io::Result<PathBuf> {
     use std::hash::{Hash, Hasher};
@@ -1287,6 +1366,8 @@ fn font_file(data: &[u8]) -> std::io::Result<PathBuf> {
 struct MainFonts {
     context: pango::Context,
     fonts: FxHashMap<Arc<str>, Option<pango::Font>>,
+    /// A context per font file, see [`single_file_font_map`].
+    files_contexts: FxHashMap<Box<str>, Option<pango::Context>>,
     /// How many of [`FONT_FILES`] were added to the font map.
     files: usize,
 }
@@ -1301,6 +1382,7 @@ fn main_font(desc: &Arc<str>) -> Option<pango::Font> {
         let fonts = fonts.get_or_insert_with(|| MainFonts {
             context: context(&pangocairo::FontMap::default(), font_rendering(), true),
             fonts: FxHashMap::default(),
+            files_contexts: FxHashMap::default(),
             files: 0,
         });
         if let Some(font) = fonts.fonts.get(desc) {
@@ -1317,8 +1399,25 @@ fn main_font(desc: &Arc<str>) -> Option<pango::Font> {
             fonts.context.changed();
         }
         drop(files);
-        let font = fonts.context.font_map().and_then(|map| {
-            map.load_font(&fonts.context, &pango::FontDescription::from_string(desc))
+        let (description, file) = desc.split_once('\n').unwrap_or((desc, ""));
+        let description = pango::FontDescription::from_string(description);
+        let mut font = None;
+        if !file.is_empty() {
+            if fonts.files_contexts.len() >= 64 {
+                fonts.files_contexts.clear();
+            }
+            let file_context = fonts.files_contexts.entry(file.into()).or_insert_with(|| {
+                single_file_font_map(file).map(|map| context(&map, font_rendering(), true))
+            });
+            font = file_context
+                .as_ref()
+                .and_then(|c| c.font_map()?.load_font(c, &description));
+        }
+        let font = font.or_else(|| {
+            fonts
+                .context
+                .font_map()
+                .and_then(|map| map.load_font(&fonts.context, &description))
         });
         if font.is_none() {
             log::warn!("cannot load font {desc}");
@@ -3069,6 +3168,56 @@ mod tests {
             "{}",
             l.runs[0].font.desc
         );
+    }
+
+    /// Fontconfig rules like these make a description of the CJK face the
+    /// text was shaped in resolve to a Latin one; the main thread must draw
+    /// with the shaped face's file anyway (#3583). Runs itself in a child
+    /// process, as the rules must be in place before Fontconfig starts.
+    #[test]
+    fn the_main_thread_draws_with_the_shaped_face() {
+        const RULES: &str = r#"<?xml version="1.0"?><fontconfig>
+<include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+<match target="pattern"><test name="family"><string>sans-serif</string></test>
+<edit name="family" mode="prepend" binding="strong"><string>Noto Sans CJK SC</string><string>Noto Sans</string></edit></match>
+<match target="pattern"><test name="lang" compare="contains"><string>en</string></test>
+<test name="family" compare="contains"><string>Noto Sans CJK</string></test>
+<edit name="family" mode="prepend" binding="strong"><string>Noto Sans</string></edit></match>
+</fontconfig>"#;
+        if std::env::var_os("NSH_TEST_FONT_RULES").is_none() {
+            let dir = std::env::temp_dir().join(format!("nsh-3583-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let conf = dir.join("fonts.conf");
+            std::fs::write(&conf, RULES).unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "text::tests::the_main_thread_draws_with_the_shaped_face",
+                ])
+                .args(["--nocapture", "--test-threads=1"])
+                .env("NSH_TEST_FONT_RULES", "1")
+                .env("FONTCONFIG_FILE", &conf)
+                .env("LC_ALL", "en_US.UTF-8")
+                .env("LANGUAGE", "en_US")
+                .status()
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(status.success());
+            return;
+        }
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let t = text(&[("中文", ResolvedTextStyle::default())]);
+        let prepared = engine.prepare(&t);
+        let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+        let l = layout.downcast::<LinuxLayout>().unwrap();
+        let desc = &l.runs[0].font.desc;
+        if !desc.starts_with("Noto Sans CJK") {
+            eprintln!("skipped: Noto Sans CJK is not installed ({desc})");
+            return;
+        }
+        let (_, shaped) = desc.split_once('\n').expect("the shaped face's file");
+        let drawn = main_font(desc).expect("a font");
+        assert_eq!(font_file_of(&drawn).as_deref(), Some(shaped));
     }
 
     #[test]
