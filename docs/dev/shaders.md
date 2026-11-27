@@ -493,6 +493,9 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
   the process about as often as keeping it running at the screen's rate. A view that only changed
   (`ShaderView::animates` false, no pictures) renders after the batch and is collected when the GPU tells, so the
   display link stays paused.
+- **Copying a read-back frame byte by byte.** `Frame::tight` once collected the rows' bytes one at a time into a
+  growing `Vec`: on a Pixel 10 Pro the gallery's Shader page spent about 40 % of its UI thread there (and in the
+  reallocations), every frame of every view. It copies whole rows into one allocation.
 - **A CGImage per frame on macOS and iOS.** Read back, a frame became a `CGImage` in sRGB; Core Animation converted each one to
   the display's colour space (Display P3) on the main thread at commit (`CA::Render::copy_image`, vImage), and with
   the copy out of the read-back buffer a window-sized animated shader took 70 % of a core at 120 Hz. macOS and iOS
