@@ -5506,7 +5506,10 @@ class Player {
     const el = this.view(id);
     if (!el || el._kind !== "scroll" || el._horizontal) return;
     this.ensureLayer(el);
+    const was = !!el._refreshing;
     el._refreshing = refreshing;
+    if (refreshing) el._refreshDismissing = false;
+    else if (was && el._pull > 0) el._refreshDismissing = true;
     if (!el._pulling) {
       if (refreshing && el.scrollTop <= 0.5) this.animatePull(el, this.refreshSpace(el));
       else if (!refreshing && el._pull > 0) this.animatePull(el, 0);
@@ -5549,6 +5552,7 @@ class Player {
       if (!start.pulling) {
         start.pulling = true;
         el._pulling = true;
+        if (!el._refreshing) el._refreshDismissing = false;
         cancelAnimationFrame(el._pullAnimation);
       }
       this.dragPull(el, v);
@@ -5582,6 +5586,7 @@ class Player {
     if (!el._refreshing && el._events.has("onRefresh") && el._pull >= this.refreshThreshold(el)) {
       // Shown right away, as UIRefreshControl does; JS turns it off.
       el._refreshing = true;
+      el._refreshDismissing = false;
       this.event(el._id, "onRefresh");
     }
     this.animatePull(el, el._refreshing && el._pull > 0 ? this.refreshSpace(el) : 0);
@@ -5590,6 +5595,7 @@ class Player {
   setPull(el, pull) {
     if (pull === el._pull) return;
     el._pull = pull;
+    if (pull <= 0) el._refreshDismissing = false;
     this.placeLayer(el);
     this.updateSpinner(el);
     this.scrolled(el);
@@ -5609,13 +5615,17 @@ class Player {
     el._pullAnimation = requestAnimationFrame(step);
   }
 
-  /** The spinner above the content: its spokes appear as it is pulled, and turn while refreshing. */
+  /** The spinner above the content: its spokes appear as it is pulled, turn while refreshing, and keep turning while fading out on dismiss. */
   updateSpinner(el) {
     // Off, the app draws its own (from `pullValue`).
     const shown = el._pull > 0 && !el._behavior?.refreshIndicator;
     let spinner = el._spinner;
     if (!shown) {
-      spinner?.classList.add("nsh-gone");
+      if (spinner) {
+        spinner.classList.add("nsh-gone");
+        spinner.classList.remove("spin", "full");
+        spinner.style.opacity = "";
+      }
       return;
     }
     if (!spinner) {
@@ -5627,13 +5637,16 @@ class Player {
       el.append(spinner);
     }
     spinner.classList.remove("nsh-gone");
-    spinner.style.top = `${el._pull - this.refreshSpace(el) / 2 - 10}px`;
-    const progress = el._refreshing ? 1 : Math.min(1, el._pull / this.refreshThreshold(el));
+    const space = this.refreshSpace(el);
+    spinner.style.top = `${el._pull - space / 2 - 10}px`;
+    const active = !!(el._refreshing || el._refreshDismissing);
+    const progress = active ? 1 : Math.min(1, el._pull / this.refreshThreshold(el));
     const count = Math.min(8, Math.ceil(progress * 8));
     [...spinner.children].forEach((spoke, i) => spoke.classList.toggle("nsh-hidden", i >= count));
     // Pulled all the way, the spokes fade behind the lead one.
     spinner.classList.toggle("full", progress >= 1);
-    spinner.classList.toggle("spin", !!el._refreshing);
+    spinner.classList.toggle("spin", active);
+    spinner.style.opacity = el._refreshDismissing ? String(Math.min(1, el._pull / space)) : "";
   }
 
 
