@@ -4243,7 +4243,6 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         screen_color: env.screen_color,
         clipboard_write_result: env.clipboard_write_result,
         canvas_render: env.canvas_render,
-        share: env.share,
         app_settings: env.app_settings,
         scheme_links: env.scheme_links(),
         file_requests: env.file_requests,

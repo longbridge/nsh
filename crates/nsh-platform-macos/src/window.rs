@@ -440,7 +440,9 @@ pub(crate) struct AppWindow {
     /// It takes its parent's input while it shows.
     modal: bool,
     held: Held,
-    watch: Watch,
+    /// Shared, so a mode or a placement applies outside the borrow of the
+    /// surface's windows ([`with_watch`]).
+    watch: Rc<Watch>,
     /// The size last reported to the core.
     reported: Cell<Option<Size<Points>>>,
     /// The state last reported to the app.
@@ -587,7 +589,15 @@ impl Sight {
     /// Whether some of the window shows on a screen now: AppKit fires its
     /// views' display links only then ([`link_window`]).
     fn seen(self) -> bool {
-        self.shown && !self.minimized && self.on_screen && !self.occluded
+        self.placed() && !self.occluded
+    }
+
+    /// Whether the window is ordered in on a screen and not minimized: it
+    /// shows unless covered. Its occlusion may be reported late or not at
+    /// all (#3505), so its link may fire although the window server says
+    /// it is covered; a hidden window's never does.
+    fn placed(self) -> bool {
+        self.shown && !self.minimized && self.on_screen
     }
 }
 
@@ -641,7 +651,11 @@ struct LinkCandidate {
 /// follows now, so a new link is made only when needed, then any. While
 /// none shows, no link fires wherever it is made: it stays on the window
 /// it follows (the main window when that one closed), and moves when one
-/// shows again.
+/// shows again. Only, while the main window is not even placed (the
+/// hidden host of window model v2), one of the app's own that is placed
+/// but said to be covered goes before it: its occlusion may never be
+/// reported as visible although it shows (#3505), and a link of the
+/// hidden main window never fires.
 fn link_window<T>(
     main: Option<Sight>,
     own: impl IntoIterator<Item = (T, LinkCandidate)>,
@@ -649,8 +663,10 @@ fn link_window<T>(
     if main.is_some_and(Sight::seen) {
         return None;
     }
+    let main_placed = main.is_some_and(Sight::placed);
     // The best so far, by rank: 0 key and seen (taken at once), 1 followed
-    // now and seen, 2 seen, 3 followed now and out of sight.
+    // now and seen, 2 seen, 3 followed now and out of sight, 4 placed but
+    // said to be covered while the main window is not placed.
     let mut best: Option<(u8, T)> = None;
     for (window, c) in own {
         let rank = match (c.sight.seen(), c.key, c.current) {
@@ -658,6 +674,7 @@ fn link_window<T>(
             (true, false, true) => 1,
             (true, false, false) => 2,
             (false, _, true) => 3,
+            (false, _, false) if !main_placed && c.sight.placed() => 4,
             (false, _, false) => continue,
         };
         if best.as_ref().is_none_or(|(r, _)| rank < *r) {
@@ -763,14 +780,17 @@ pub(crate) fn window_of(surface: &Surface, id: NodeId) -> Option<Retained<NSWind
         .map(|w| w.window.clone())
 }
 
-/// `f` with the watch of window `id`.
+/// `f` with the watch of window `id`, outside the borrow of the surface's
+/// windows: a zoom or a full screen transition `f` starts resizes the
+/// window within the call, and that resize waits for the layout at the new
+/// size only while the windows are not borrowed ([`Surface::await_layout`]).
 pub(crate) fn with_watch<R>(
     surface: &Surface,
     id: NodeId,
     f: impl FnOnce(&Watch) -> R,
 ) -> Option<R> {
-    let windows = surface.windows.try_borrow().ok()?;
-    windows.get(&id).map(|w| f(&w.watch))
+    let watch = surface.windows.try_borrow().ok()?.get(&id)?.watch.clone();
+    Some(f(&watch))
 }
 
 /// `f` with the title bar of window `id` (the main window's for the root).
@@ -1179,6 +1199,27 @@ fn set_look(
 
 /// A request to window `id`.
 fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
+    // A mode or a placement asked for by a batch, which holds the mounter,
+    // waits for the main queue's next turn. Leaving full screen, AppKit
+    // resizes the window within `toggleFullScreen:`: in the batch, that
+    // resize could not wait for the layout at the windowed size
+    // (`Surface::await_layout`), and the shrink animation showed the full
+    // screen content (#3494). A zoom runs its animation's run loop within
+    // `zoom:` (#3175).
+    if matches!(
+        request,
+        WindowRequest::SetMode(_) | WindowRequest::SetPlacement(_)
+    ) && surface.mounter.try_borrow_mut().is_err()
+    {
+        let key = surface.key();
+        let request = request.clone();
+        DispatchQueue::main().exec_async(move || {
+            if let Some(surface) = Surface::with_key(key) {
+                self::request(&surface, id, &request);
+            }
+        });
+        return;
+    }
     let Some(window) = window_of(surface, id) else {
         return log::debug!("window: no window for {id}");
     };
@@ -1529,7 +1570,7 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
             parent,
             modal: options.modal && parent.is_some(),
             held,
-            watch: Watch::default(),
+            watch: Rc::default(),
             reported: Cell::new(None),
             state: Cell::new(None),
             title_bar_area: Cell::new(None),
@@ -3004,6 +3045,78 @@ mod tests {
             // ...or on the main window, as when the one it followed closed.
             assert_eq!(link_window(main, [("a", own(hidden, true, false))]), None);
             assert_eq!(link_window::<&str>(main, []), None);
+        }
+        // The main window placed but covered: a covered window of the
+        // app's own does not take its place.
+        assert_eq!(
+            link_window(Some(covered), [("a", own(covered, true, false))]),
+            None
+        );
+    }
+
+    /// A window whose occlusion is never reported as visible although it
+    /// shows (#3505): while the main window is not even placed (the hidden
+    /// host of window model v2), the link follows it, not the main window,
+    /// whose link never fires.
+    #[test]
+    fn the_link_leaves_a_hidden_main_window_for_a_placed_one() {
+        let seen = Sight {
+            shown: true,
+            minimized: false,
+            on_screen: true,
+            occluded: false,
+        };
+        let covered = Sight {
+            occluded: true,
+            ..seen
+        };
+        let hidden = Sight {
+            shown: false,
+            occluded: true,
+            ..seen
+        };
+        let minimized = Sight {
+            minimized: true,
+            occluded: true,
+            ..seen
+        };
+        let own = |sight, key, current| LinkCandidate {
+            sight,
+            key,
+            current,
+        };
+        for main in [Some(hidden), Some(minimized), None] {
+            assert_eq!(
+                link_window(main, [("a", own(covered, false, false))]),
+                Some("a")
+            );
+            // One that shows, or the one followed now, still goes first.
+            assert_eq!(
+                link_window(
+                    main,
+                    [
+                        ("a", own(covered, true, false)),
+                        ("b", own(seen, false, false))
+                    ]
+                ),
+                Some("b")
+            );
+            assert_eq!(
+                link_window(
+                    main,
+                    [
+                        ("a", own(covered, true, false)),
+                        ("b", own(hidden, false, true))
+                    ]
+                ),
+                Some("b")
+            );
+            // A hidden or minimized one is still passed over.
+            assert_eq!(link_window(main, [("a", own(hidden, false, false))]), None);
+            assert_eq!(
+                link_window(main, [("a", own(minimized, false, false))]),
+                None
+            );
         }
     }
 }

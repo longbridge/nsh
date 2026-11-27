@@ -1773,27 +1773,34 @@ fn window_api(
         }
         WM_SIZING => {
             let attrs = shell.attrs();
-            let ratio = attrs.aspect_ratio?;
             // SAFETY: `lparam` is the drag's RECT, which the handler may change.
             let rect = unsafe { &mut *(lparam.0 as *mut RECT) };
-            let scale = dpi(hwnd) as f32 / 96.0;
-            let (l, t, r, b) = frame_extents(hwnd);
-            let extra = (l + r, t + b);
-            let limits = crate::shell::track_sizes(&attrs, scale, extra);
-            let (left, top, right, bottom) = crate::shell::aspect_sizing(
-                (rect.left, rect.top, rect.right, rect.bottom),
-                wparam.0 as u32,
-                ratio,
-                extra,
-                limits,
-            );
-            *rect = RECT {
-                left,
-                top,
-                right,
-                bottom,
-            };
-            Some(Some(LRESULT(1)))
+            let result = attrs.aspect_ratio.map(|ratio| {
+                let scale = dpi(hwnd) as f32 / 96.0;
+                let (l, t, r, b) = frame_extents(hwnd);
+                let extra = (l + r, t + b);
+                let limits = crate::shell::track_sizes(&attrs, scale, extra);
+                let (left, top, right, bottom) = crate::shell::aspect_sizing(
+                    (rect.left, rect.top, rect.right, rect.bottom),
+                    wparam.0 as u32,
+                    ratio,
+                    extra,
+                    limits,
+                );
+                *rect = RECT {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                };
+                Some(LRESULT(1))
+            });
+            if attrs.frameless()
+                && let Some(id) = data.window
+            {
+                crate::app_window::prepare_resize(surface, id, *rect);
+            }
+            result
         }
         WM_SYSCOMMAND => {
             let command = (wparam.0 & 0xFFF0) as u32;

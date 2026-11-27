@@ -3,7 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { keymap, platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, plural, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
+import { alpha, backdrop, Badge, plural, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderBubbleClass, sliderBubbleText, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -1867,10 +1867,12 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     // The presets from today: the coming weekend, the next week and month.
     const today = new Date();
     const saturday = addDays(today, (6 - today.getDay() + 7) % 7);
+    // Each with the dates it stands for under its label.
+    const span = (label: string, start: Date, end: Date): DateRangePreset => ({ label, value: [iso(start), iso(end)], description: `${monthDay(iso(start))} – ${monthDay(iso(end))}` });
     const trips: DateRangePreset[] = [
-      { label: "Weekend", value: [iso(saturday), iso(addDays(saturday, 1))] },
-      { label: "Next 7 days", value: [iso(today), iso(addDays(today, 6))] },
-      { label: "Next 30 days", value: [iso(today), iso(addDays(today, 29))] },
+      span("Weekend", saturday, addDays(saturday, 1)),
+      span("Next 7 days", today, addDays(today, 6)),
+      span("Next 30 days", today, addDays(today, 29)),
     ];
     const tripTitle = () => {
       const r = trip();
@@ -1930,6 +1932,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               contentStyle={content}
               presetsStyle={calendarLook.presets}
               presetStyle={calendarLook.preset}
+              presetDescriptionStyle={calendarLook.presetDescription}
               presetClass={calendarLook.presetClass}
               calendarStyle={calendar}
               headerStyle={header}
@@ -2720,7 +2723,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             </View>
           </Level>
           <Level label="Price" detail={`${listings(price())} listings between the two`} value={`$${price()[0]} – $${price()[1]}`}>
-            {/* How many listings each price has: the bars in the range light up as the thumbs move.
+            {/* How many listings each price has: the bars in the range light up as the thumbs move, and the
+                thumb under the pointer, dragged or focused shows its price in a bubble over the bars.
                 A terminal's two rows would draw them as blank Cells: the count in the label says it. */}
             <If when={!terminal}>
               <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
@@ -2751,6 +2755,11 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               onChange={({ value }) => price.set(value as [number, number])}
               onChangeEnd={({ value }) => last.set(`Price: ${(value as [number, number]).join(" to ")}`)}
               rangeStyle={sliderFill(price()[0] / 500, price()[1] / 500)}
+              renderThumb={({ start }) => (
+                <View class={sliderBubbleClass()}>
+                  <Text class={sliderBubbleText}>{`$${price()[start ? 0 : 1]}`}</Text>
+                </View>
+              )}
               {...sliderLook()}
             />
           </Level>
@@ -3452,6 +3461,42 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     );
   }
 
+  function EmailCode() {
+    const CODE = "AB12CD34";
+    const code = signal("");
+    const verdict = signal("");
+    const tone = (): Tone | undefined => (verdict() === "Verified" ? "up" : verdict() ? "danger" : undefined);
+    // Eight cells fit a phone's width a size down from the six-digit ones.
+    const eightCells = pointer ? "w-8 h-10 text-base" : "w-9 h-11 text-lg";
+    return (
+      <Card title="Email code" subtitle="Eight letters and digits, typed in any case and shown in capitals">
+        <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
+          <OtpInput
+            length={8}
+            groups={2}
+            validationType="alphanumeric"
+            value={code()}
+            onChange={({ value: next }) => {
+              code.set(next);
+              verdict.set("");
+              last.set(`Email code: ${next || "empty"}`);
+            }}
+            onComplete={({ value }) => {
+              verdict.set(value === CODE ? "Verified" : "That code is not right");
+              last.set(`Email code complete: ${value}`);
+            }}
+            accessibilityLabel="Email code, 8 letters and digits"
+            class={codeClass}
+            groupClass={groupClass}
+            {...otpCellLook({ cells: eightCells, tone: () => tone() })}
+          />
+          <CodeSpace />
+          <Message label={verdict() || `The code is ${CODE}`} tone={tone()} />
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -3472,7 +3517,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     Progress: [Transfers, Uploads, Steps, Meters],
     Slider: [Levels, Equalizer],
     NumberInput: [Quantities, Cart, Units],
-    OtpInput: [Verify, SignIn, Pin],
+    OtpInput: [Verify, SignIn, Pin, EmailCode],
   };
   // `firsts`: the first card of each named control on one page, above one last event (the TUI host's acceptance tests).
   const shown = props.firsts ? props.firsts.map((control) => cards[control][0]) : cards[props.show];

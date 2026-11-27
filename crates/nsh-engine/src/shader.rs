@@ -1540,6 +1540,10 @@ mod tests {
         let rows = surface_frame(&mut view, &renderer);
         assert_eq!(rows[1][0], [0, 255, 0, 255]);
         assert_ne!(view.surface().map(|s| s as *const _), first);
+
+        view.set_layer(None);
+        assert!(view.surface().is_none(), "the cleared layer has no surface");
+        assert!(!view.collect_frame(&renderer), "no stale frame can show");
     }
 
     #[cfg(target_vendor = "apple")]
@@ -1573,6 +1577,16 @@ mod tests {
         let rows = surface_frame(&mut view, &renderer);
         assert_eq!(rows[0][0], [0, 0, 255, 255]);
         assert_eq!(rows[0][1], [0, 0, 255, 255]);
+
+        view.set_size(size(px(0.0), px(0.0)), 1.0);
+        assert!(
+            view.render(&renderer, Instant::now()),
+            "the shown frame changed"
+        );
+        assert!(
+            view.surface().is_none(),
+            "a zero-sized shader has no surface"
+        );
     }
 
     #[test]

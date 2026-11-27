@@ -2662,6 +2662,11 @@ expect Week
 prop label:Week role button
 style label:Week backgroundColor #00ff00ff
 style parent:label:Week backgroundColor #0000ffff
+# Its description: a second line in the look of its own part, which
+# screen readers read after the label.
+expect Oct 19-25
+prop label:Week accessibilityDescription Oct 19-25
+style text:"Oct 19-25" color #ff0000ff
 tap label:Week
 expect Trip: ["2026-10-19","2026-10-25"]
 absent Week
@@ -2672,6 +2677,7 @@ covers [props] DatePicker.itemClass
 covers [props] DatePicker.presets
 covers [props] DatePicker.presetsStyle
 covers [props] DatePicker.presetStyle
+covers [props] DatePicker.presetDescriptionStyle
 # A date and time (`timePrecision`) on a 12-hour clock (`hourCycle`):
 # heard with the time; the popup holds the app's label of the time and
 # the field's segments (`renderSegment`, `segmentStyle`).
@@ -2911,6 +2917,38 @@ covers [props] Select.searchTestID
 covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty
+# The app's query (`query`, `onQueryChange`): typing in the search field is
+# reported, the app's query filters, and the app's rows mark the match from
+# it; the app clears it once the list is gone (`onClose`).
+tap id:ask
+expect Apple
+type label:AskField rr
+expect Query: rr
+expect Che_rr_y
+expect Ca_rr_ot
+absent Apple
+event label:Cherry onCancel
+absent Che_rr_y
+expect Query: none
+tap id:ask
+expect Apple
+expect Cherry
+tap below:parent:scroll:label:Apple
+absent Apple
+covers [props] Select.query
+covers [events] Select.onQueryChange
+# The field's own query starts each opening from `defaultQuery`.
+tap id:preset
+expect Carrot
+absent Apple
+event label:Carrot onCancel
+absent Carrot
+tap id:preset
+expect Carrot
+absent Apple
+event label:Carrot onCancel
+absent Carrot
+covers [props] Select.defaultQuery
 
 # base-color-picker
 tap id:case-base-color-picker
@@ -3082,16 +3120,40 @@ prop label:Volume accessibilityValue min=0 max=100 now=60 text=60
 frame label:Volume 120 2 10 10
 # A range: a thumb each, the start's value up to the end, the end's from
 # the start. A press on the track moves the nearer thumb there (at 75%,
-# past the middle of the two at 40%: the end's).
+# past the middle of the two at 40%: the end's), which is dragging from
+# the press to the release: the content `renderThumb` draws in it shows
+# `group-data-dragging:`, the start's not (see below).
 expect Price 200-600
 prop label:"Min price" accessibilityValue min=0 max=600 now=200 text=200
 prop label:"Max price" accessibilityValue min=200 max=1000 now=600 text=600
 frame label:"Min price" 40 2 10 10
 frame label:"Max price" 120 2 10 10
+nostyle id:max-bubble backgroundColor
 touch start parent:parent:label:"Max price" 150 10
+style id:max-bubble backgroundColor #ff0000ff
+nostyle id:min-bubble backgroundColor
 touch end
+nostyle id:max-bubble backgroundColor
 expect Price 200-750
 prop label:"Min price" accessibilityValue min=0 max=750 now=200 text=200
+# Content in each thumb (`renderThumb`, told which it is), in its corner:
+# it follows its own thumb's states through `group-*:` classes. A press
+# on a thumb marks it dragging (`group-data-dragging:`) before it moves,
+# the other not; the release ends it. The pointer over a thumb is its
+# `group-hover:`.
+frame id:max-bubble 0 0 4 4
+nostyle id:max-bubble backgroundColor
+touch start label:"Max price" 5 5
+style id:max-bubble backgroundColor #ff0000ff
+nostyle id:min-bubble backgroundColor
+touch end
+nostyle id:max-bubble backgroundColor
+expect Price 200-750
+state label:"Min price" hovered
+style id:min-bubble backgroundColor #00ff00ff
+nostyle id:max-bubble backgroundColor
+state label:"Min price" none
+nostyle id:min-bubble backgroundColor
 # Its own value, on a logarithmic scale along a vertical axis: a screen
 # reader's increment steps it by 1.
 prop label:Zoom accessibilityValue min=1 max=1000 now=10 text=10
@@ -3133,6 +3195,7 @@ covers [props] Slider.rangeClass
 covers [props] Slider.rangeStyle
 covers [props] Slider.thumbClass
 covers [props] Slider.thumbStyle
+covers [props] Slider.renderThumb
 covers [events] onChange
 covers [events] Slider.onChangeEnd
 

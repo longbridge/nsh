@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, webNetwork, webShareAllowed } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, webNetwork, webShareAllowed };`)}`
+const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, webNetwork } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, webNetwork };`)}`
 );
 
 test("the network is the browser's link, none while it is offline", () => {
@@ -1785,6 +1785,97 @@ test("a press in a dialog over the window reports its place in the window", () =
       assert.deepEqual(payload.position, { x: 42, y: 21 });
       assert.deepEqual(payload.pagePosition, pagePosition);
     }
+  });
+});
+
+test("a press on a text field is its input's, after the focus it gives", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  inPage(() => {
+    globalThis.document.elementFromPoint = () => null;
+    globalThis.document.hasFocus = () => true;
+    const { player, sent } = dialogPlayer(false);
+    const focused = [];
+    const field = {
+      classList: { contains: (name) => name === "nsh-field" },
+      closest: () => null,
+      focus: () => focused.push("field"),
+    };
+    player.editable = (target) => target === field;
+    const view = (id, events, input) => ({
+      _id: id,
+      _events: new Set(events),
+      _props: {},
+      _tracked: 0,
+      _field: input ? field : undefined,
+      getBoundingClientRect: () => ({ left: 600, top: 300, right: 700, bottom: 340 }),
+      closest: () => null,
+    });
+    const row = view(8, ["onPress"], false);
+    const listening = view(9, ["onPress"], true);
+    const quiet = view(10, [], true);
+    /** Presses `input` (in a pressable row) with `pointerType`, on its
+     * field or on the padding around it (`at` the input itself). */
+    const press = (input, pointerType, at = field) => {
+      sent.length = 0;
+      player.viewOf = (target) => (target === field || target === input ? input : null);
+      player.ancestors = () => [input, row];
+      const e = { pointerId: 1, pointerType, button: 0, buttons: 1, clientX: 640, clientY: 320, target: at };
+      player.pointerDown(e);
+      player.pointerUp({ ...e, buttons: 0 }, false);
+      return sent.map(([name]) => name);
+    };
+    // A click focuses the field as it goes down: the input hears the press
+    // as it ends, the row around it nothing; so on the padding around the
+    // field.
+    globalThis.document.activeElement = field;
+    assert.deepEqual(press(listening, "mouse"), ["onPress"]);
+    assert.deepEqual(press(listening, "mouse", listening), ["onPress"]);
+    // A click whose focus went elsewhere (the app moved it) is pressed all
+    // the same: it waits for nothing.
+    globalThis.document.activeElement = null;
+    assert.deepEqual(press(listening, "mouse"), ["onPress"]);
+    assert.equal(player.fieldPress, null);
+    // An input that does not listen leaves the press to no one, on its
+    // field or around it.
+    assert.deepEqual(press(quiet, "mouse"), []);
+    assert.deepEqual(press(quiet, "mouse", quiet), []);
+    assert.deepEqual(press(quiet, "touch"), []);
+    assert.deepEqual(press(quiet, "touch", quiet), []);
+    // A tap on an unfocused field: the browser focuses it after the finger
+    // lifts, and the press follows that focus, once.
+    assert.deepEqual(press(listening, "touch"), []);
+    player.fieldPressed(field);
+    player.fieldPressed(field);
+    assert.deepEqual(sent.map(([name]) => name), ["onPress"]);
+    // So does one on the padding around the field.
+    assert.deepEqual(press(listening, "touch", listening), []);
+    player.fieldPressed(field);
+    assert.deepEqual(sent.map(([name]) => name), ["onPress"]);
+    // A tap whose focus did not come is pressed by its click on the input.
+    assert.deepEqual(press(listening, "touch"), []);
+    player.fieldClicked({ target: listening });
+    assert.deepEqual(sent.map(([name]) => name), ["onPress"]);
+    // One whose focus never came is dropped by the next press, by a click
+    // elsewhere, or once the mouse events of its tap are over: a focus
+    // that comes later reports none.
+    assert.deepEqual(press(listening, "touch"), []);
+    player.pointerDown({ pointerId: 2, pointerType: "touch", button: 0, clientX: 10, clientY: 10, target: {} });
+    player.fieldPressed(field);
+    assert.deepEqual(press(listening, "touch"), []);
+    player.fieldClicked({ target: {} });
+    player.fieldPressed(field);
+    assert.deepEqual(press(listening, "touch"), []);
+    t.mock.timers.tick(999);
+    assert.notEqual(player.fieldPress, null);
+    t.mock.timers.tick(1);
+    player.fieldPressed(field);
+    assert.deepEqual(sent, []);
+    // The mouse down of a press on the padding around a field gives the
+    // field the focus, and no view around it does.
+    let prevented = false;
+    player.mouseDown({ target: listening, button: 0, preventDefault: () => (prevented = true) });
+    assert.ok(prevented);
+    assert.deepEqual(focused, ["field"]);
   });
 });
 
@@ -5060,52 +5151,6 @@ test("a web view's relative URL is the site's where the page names its base", ()
   }
 });
 
-test("share reports shared, dismissed and unavailable, never shared when it could not", async () => {
-  const { player } = fakePlayer();
-  const got = [];
-  player.event = (_, name, value) => got.push([name, value]);
-  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  const browser = (share, canShare) =>
-    Object.defineProperty(globalThis, "navigator", { value: { share, canShare }, configurable: true });
-  try {
-    const shared = [];
-    browser(async (data) => { shared.push(data); });
-    await player.share(1, "Docs", null, "https://example.com/docs", false);
-    assert.deepEqual(shared, [{ title: "Docs", url: "https://example.com/docs" }]);
-    browser(async () => { throw Object.assign(new Error("closed"), { name: "AbortError" }); });
-    await player.share(2, null, "Hello", null, false);
-    // Files never reach the browser.
-    browser(async () => assert.fail("shared files"));
-    await player.share(3, null, "Hello", null, true);
-    browser(async () => assert.fail("shared what it cannot"), () => false);
-    await player.share(4, null, "Hello", null, false);
-    browser(undefined);
-    await player.share(5, null, "Hello", null, false);
-    browser(async () => { throw Object.assign(new Error("no activation"), { name: "NotAllowedError" }); });
-    await player.share(6, null, "Hello", null, false);
-    // An earlier share's sheet still open.
-    browser(async () => { throw Object.assign(new Error("in progress"), { name: "InvalidStateError" }); });
-    await player.share(7, null, "Hello", null, false);
-    // Anything else is a failure without a code.
-    browser(async () => { throw new TypeError("bad data"); });
-    await player.share(8, null, "Hello", null, false);
-    const unavailable = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
-    assert.deepEqual(got.map(([name, v]) => [name, v.id, v.action ?? v.code ?? "error"]), [
-      ["onShare", 1, "shared"],
-      ["onShare", 2, "dismissed"],
-      ["onShare", 3, unavailable],
-      ["onShare", 4, unavailable],
-      ["onShare", 5, unavailable],
-      ["onShare", 6, unavailable],
-      ["onShare", 7, unavailable],
-      ["onShare", 8, "error"],
-    ]);
-  } finally {
-    if (saved) Object.defineProperty(globalThis, "navigator", saved);
-    else delete globalThis.navigator;
-  }
-});
-
 test("window blur resets hoverButtons and cancels all active pointers", () => {
   const windowListeners = new Map();
   const savedWindow = globalThis.window;
@@ -5275,47 +5320,3 @@ test("point, corner, wheel, context menu, pinch, and scrollbar drag undo ancesto
   }
 });
 
-test("sharing is available when the browser says the document may share", () => {
-  const share = () => {};
-  const canShare = (answer) => (data) => {
-    assert.equal(typeof data.text, "string", "canShare gets valid share data");
-    return answer;
-  };
-  // No share sheet at all.
-  assert.equal(webShareAllowed({}, {}), false);
-  assert.equal(webShareAllowed(undefined, {}), false);
-  // `canShare` is the answer, and a throw is "no".
-  assert.equal(webShareAllowed({ share, canShare: canShare(true) }, {}), true);
-  assert.equal(webShareAllowed({ share, canShare: canShare(false) }, {}), false);
-  assert.equal(
-    webShareAllowed({ share, canShare: () => { throw new TypeError("no"); } }, {}),
-    false,
-  );
-  // With `canShare` the policy is never asked by name (that is what logs
-  // "Unrecognized feature").
-  const asked = [];
-  const policy = { features: () => [], allowsFeature: (name) => (asked.push(name), false) };
-  assert.equal(webShareAllowed({ share, canShare: canShare(true) }, { permissionsPolicy: policy }), true);
-  assert.deepEqual(asked, []);
-});
-
-test("without canShare the permissions policy decides, and an unlisted name is not asked", () => {
-  const nav = { share() {} };
-  const asked = [];
-  const policy = (features, allowed) => ({
-    features: () => features,
-    allowsFeature: (name) => (asked.push(name), allowed),
-  });
-  // Listed: the policy's answer, for `permissionsPolicy` and the older `featurePolicy`.
-  assert.equal(webShareAllowed(nav, { permissionsPolicy: policy(["web-share"], true) }), true);
-  assert.equal(webShareAllowed(nav, { permissionsPolicy: policy(["web-share"], false) }), false);
-  assert.equal(webShareAllowed(nav, { featurePolicy: policy(["web-share"], false) }), false);
-  assert.deepEqual(asked, ["web-share", "web-share", "web-share"]);
-  // Not listed: the browser does not gate sharing on it; no lookup, no console warning.
-  asked.length = 0;
-  assert.equal(webShareAllowed(nav, { permissionsPolicy: policy(["camera"], false) }), true);
-  assert.deepEqual(asked, []);
-  // No policy API at all.
-  assert.equal(webShareAllowed(nav, {}), true);
-  assert.equal(webShareAllowed(nav, undefined), true);
-});

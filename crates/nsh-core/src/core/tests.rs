@@ -3796,8 +3796,9 @@ fn list_renders_window_and_recycles_cells() {
     );
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    // Estimated 50 pt rows: viewport + one screen of overscan = 17 rows.
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 100.0), 17);
+    // Estimated 50 pt rows: the viewport, its screen of overscan and the
+    // one the start leaves empty above it = 25 rows.
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 100.0), 25);
     let batch = c.commit().unwrap();
     // Rows are really 100 pt: positioned by measured sizes.
     assert_eq!(
@@ -3808,10 +3809,10 @@ fn list_renders_window_and_recycles_cells() {
         MountItem::ScrollContent { id: 2, size } => Some(size.height.0),
         _ => None,
     });
-    assert_eq!(content, Some(17.0 * 100.0 + 983.0 * 50.0));
+    assert_eq!(content, Some(25.0 * 100.0 + 975.0 * 50.0));
 
     // Scroll far down into unmeasured (50 pt estimated) rows: the window
-    // needs 25 rows; all 17 existing cells are reused and 8 are added.
+    // needs 25 rows; the 25 existing cells are reused, none are added.
     c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
     c.commit();
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
@@ -4462,7 +4463,7 @@ fn spare_list_cells_are_hidden_until_placed_again() {
     thousand_rows(&mut c);
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     let batch = c.commit().unwrap();
     for &cell in &cells {
         assert_eq!(
@@ -4513,7 +4514,7 @@ fn spare_list_cells_are_hidden_until_placed_again() {
         }],
     );
     c.commit();
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 14);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 22);
     let batch = c.commit().unwrap();
     let mut rows: Vec<f32> = cells[3..]
         .iter()
@@ -4529,32 +4530,37 @@ fn spare_list_cells_are_hidden_until_placed_again() {
     rows.sort_by(f32::total_cmp);
     assert_eq!(
         rows,
-        (3..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+        (3..25).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
     );
 
-    // Far down, the window takes all 17 cells and 8 more; back at the
-    // top, the 8 it no longer needs stay where the window left them,
-    // showing their own rows there, out of sight. Screen readers skip the
-    // cells the window left behind (the rows there may have moved since
-    // they were laid out) until their new rows are bound: nothing else is
-    // mounted before.
+    // Far down, the rows are 30 pt: the window takes all 25 cells and
+    // more; back at the top, the ones it no longer needs stay where the
+    // window left them, showing their own rows there, out of sight. Screen
+    // readers skip the cells the window left behind (the rows there may
+    // have moved since they were laid out) until their new rows are bound:
+    // nothing else is mounted before.
     c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
     c.commit();
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 30.0), 25);
     c.commit();
+    while render_binds(&mut c, &mut next_id, &mut cells, 30.0) > 0 {
+        c.commit();
+    }
+    let made = cells.len();
+    assert!(made > 25, "{made}");
     c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
     let left = c.commit().expect("the cells left behind");
     for &cell in &cells {
         assert_eq!(hidden_in(&left, cell), (None, Some(true)), "cell {cell}");
         assert_eq!(frame_of(&left, cell), None, "cell {cell}");
     }
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     let placed = c.commit().unwrap();
     let mut spare = Vec::new();
     for &cell in &cells {
         match frame_of(&placed, cell) {
             Some(frame) => {
-                assert!(frame.origin.y.0 <= 800.0, "cell {cell} at {frame:?}");
+                assert!(frame.origin.y.0 <= 1200.0, "cell {cell} at {frame:?}");
                 assert_eq!(hidden_in(&placed, cell), (None, Some(false)), "cell {cell}");
             }
             None => {
@@ -4563,7 +4569,7 @@ fn spare_list_cells_are_hidden_until_placed_again() {
             }
         }
     }
-    assert_eq!(spare.len(), 8);
+    assert_eq!(spare.len(), made - 25);
     // Once the items change, the rows they show may be gone: hidden.
     apply(
         &mut c,
@@ -4656,7 +4662,7 @@ fn a_list_under_display_none_keeps_its_window_and_cells() {
     );
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     c.commit();
 
     // A page kept alive under `display: none`: its list has no size, which
@@ -4689,7 +4695,7 @@ fn a_list_under_display_none_keeps_its_window_and_cells() {
     rows.sort_by(f32::total_cmp);
     assert_eq!(
         rows,
-        (0..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+        (0..25).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
     );
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 0);
 }
@@ -4700,7 +4706,7 @@ fn list_cells_unbound_before_they_are_placed_are_hidden() {
     thousand_rows(&mut c);
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     // The data shrinks before the new cells were placed: those without a
     // row show the content made for it, with no frame to move them away.
     apply(
@@ -4732,9 +4738,9 @@ fn spare_list_cells_waiting_for_a_paced_bind_show_when_it_lands() {
     thousand_rows(&mut c);
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     c.commit();
-    // Shrunk to 3 rows, the other 14 cells are hidden; grown back, the
+    // Shrunk to 3 rows, the other 22 cells are hidden; grown back, the
     // viewport's rows bind at once and the overscan's wait.
     apply(
         &mut c,
@@ -4772,9 +4778,9 @@ fn spare_list_cells_waiting_for_a_paced_bind_show_when_it_lands() {
             other => panic!("cell {cell}: {other:?}"),
         }
     }
-    assert_eq!(waiting.len(), 9);
+    assert_eq!(waiting.len(), 17);
     // The paced binds land: those cells show, at their rows.
-    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 9);
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
     assert!(!c.has_paced_list_binds());
     let batch = c.commit().unwrap();
     let mut rows: Vec<f32> = waiting
@@ -4791,7 +4797,7 @@ fn spare_list_cells_waiting_for_a_paced_bind_show_when_it_lands() {
     rows.sort_by(f32::total_cmp);
     assert_eq!(
         rows,
-        (8..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+        (8..25).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
     );
 }
 
@@ -9625,6 +9631,46 @@ fn dark_mode_and_breakpoints_restyle_natively() {
     c.set_viewport(size_pt(1024.0, 768.0));
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 32.0);
+}
+
+/// Under the window model the host's root view keeps its size while the
+/// app's primary window is resized: width variants follow the window the
+/// platform reports, as `windowSize()` does (#3526).
+#[test]
+fn breakpoints_follow_the_reported_window_not_the_host_root() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "p-2 max-[900px]:p-6");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("height", StyleValue::Number(5.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.set_viewport(size_pt(1200.0, 800.0));
+    let window = |width| crate::element::Environment {
+        window: size_pt(width, 600.0),
+        ..Default::default()
+    };
+    c.set_environment(window(1100.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 8.0);
+    // The window narrows below 900 while the host root stays 1200 wide.
+    c.set_environment(window(760.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 24.0);
+    // And widens again.
+    c.set_environment(window(1136.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 8.0);
 }
 
 #[test]
@@ -19198,8 +19244,9 @@ mod components {
     /// other cell does, or nothing, so a row's elements are found once.
     #[test]
     fn spare_list_cells_never_show_a_row_another_cell_shows() {
-        // The window holds 34 rows in the middle of the list, 23 at either
-        // end: scrolled from the middle to an end, 11 cells are spare.
+        // The window holds about 34 rows wherever it is (one more in the
+        // middle, where both its edges cut a row): scrolled from the middle
+        // to an end, a cell is spare.
         let cases: [(&str, usize, &[f32], RowsChange); 8] = [
             // At the end: the gone row's cell stays spare, the rows after
             // it move up into theirs.
@@ -19293,7 +19340,10 @@ mod components {
                 settle(&mut c);
                 check(&c, format!("then at {y}"));
             }
-            if made != 0 {
+            // Two rows gone, one spare cell: the second new row takes a
+            // cell whose row went, and makes its content (a view, a text).
+            let allowed = if name == "drop two" { 2 } else { 0 };
+            if made != allowed {
                 failures.push(format!("{name}: {made} views made"));
             }
             // Back at the start, the rows in the viewport show, once each.
@@ -20672,101 +20722,6 @@ mod components {
         );
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 0")));
         assert_eq!(shown.last().unwrap(), "picked 0 []");
-    }
-
-    /// Shares a link from a button in a modal, pointing at the button, and
-    /// shows each answer in the order it came.
-    #[component]
-    fn Sharer() -> impl IntoElement {
-        let shown = signal(String::new());
-        let button = element_ref();
-        view()
-            .child(text(move || format!("shares{}", shown.get())))
-            .child(
-                // `nsh_base::dialog` is this, and nsh-base depends on the core.
-                #[allow(deprecated)]
-                modal().child(
-                    view()
-                        .h(px(10.0))
-                        .element_ref(&button)
-                        .on_press(move |_: &()| {
-                            let request = crate::share::ShareRequest::new()
-                                .url("https://example.com/trip")
-                                .anchor(&button);
-                            let answer = share(request);
-                            spawn(async move {
-                                let line = match answer.await {
-                                    Ok(outcome) => outcome.action.as_str().to_owned(),
-                                    Err(error) => error.message,
-                                };
-                                shown.set(format!("{} {line}", untracked(|| shown.get())));
-                            });
-                        }),
-                ),
-            )
-    }
-
-    /// Presses the share button and returns the shares that reached the
-    /// platform: their ids and anchors.
-    fn press_sharer(c: &mut Core<FakeEngine>, button: NodeId) -> Vec<(u32, Option<NodeId>)> {
-        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
-        let items = c.commit().map(|b| b.items).unwrap_or_default();
-        items
-            .into_iter()
-            .filter_map(|i| match i {
-                MountItem::Command {
-                    id: ROOT_ID,
-                    command: Command::Share { id, sheet },
-                } => Some((id, sheet.anchor)),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn a_share_names_its_anchor_and_replaces_one_never_answered() {
-        let mut c = core();
-        c.set_environment(crate::element::Environment {
-            share: true,
-            ..Default::default()
-        });
-        c.mount_root(&crate::element::Root::new::<Sharer>(|| ()));
-        let batch = c.commit().unwrap();
-        let button = batch
-            .items
-            .iter()
-            .find_map(|i| match i {
-                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
-                _ => None,
-            })
-            .expect("the button");
-        // The anchor is the button itself, inside its modal: the platform
-        // places the sheet at its native view, not at a place in the root.
-        let first = press_sharer(&mut c, button);
-        assert_eq!(first.len(), 1);
-        assert_eq!(first[0].1, Some(button));
-        // The platform never answers it; the next share still reaches the
-        // platform, and the first ends as dismissed.
-        let second = press_sharer(&mut c, button);
-        assert_eq!(second.len(), 1);
-        assert_ne!(second[0].0, first[0].0);
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t == "shares dismissed"));
-        assert_eq!(shown.last().unwrap(), "shares dismissed");
-        assert!(c.component_event(
-            ROOT_ID,
-            EventKind::Share,
-            &crate::share::ShareOutcome::shared(Some("mail".into())).payload(second[0].0)
-        ));
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t == "shares dismissed shared"));
-        assert_eq!(shown.last().unwrap(), "shares dismissed shared");
-        // A late answer of the replaced share settles nothing.
-        assert!(c.component_event(
-            ROOT_ID,
-            EventKind::Share,
-            &crate::share::ShareOutcome::shared(None).payload(first[0].0)
-        ));
-        c.run_component_tasks();
-        assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
     }
 
     /// Asks whether the app's settings page opens here and opens it when
@@ -26196,6 +26151,116 @@ mod views {
         let mut shown = texts(&batch);
         shown.sort();
         assert_eq!(shown, ["mail 2", "new 3 (last)"]);
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ReplacedListProps {
+        #[prop(default)]
+        refresh_replacement: crate::element::Prop<bool>,
+    }
+
+    #[component]
+    fn ReplacedList(props: ReplacedListProps) -> impl IntoElement {
+        let refresh_replacement = props.refresh_replacement.get_untracked();
+        let rows = signal(vec![(0, "old")]);
+        let replacement = signal(false);
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move || {
+                // Queue an update from the old binding before replacing its scope.
+                rows.set(vec![(0, "new")]);
+                replacement.set(true);
+            }))
+            .child(dynamic(move || {
+                let replaced = replacement.get();
+                let source = if replaced { "second" } else { "first" };
+                let list = virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        text(move || rows.with(|r| format!("{source}: {}", r[at.index()].1)))
+                            .h(px(40.0))
+                    },
+                )
+                .keys(move || rows.with(|r| r.iter().map(|row| row.0).collect::<Vec<_>>()))
+                .flex_1();
+                let refresh = (replaced && refresh_replacement).then(|| {
+                    // Runs after the new list binds, before its reused cells render.
+                    dynamic(move || rows.set(vec![(0, "latest")]))
+                });
+                let mut children = vec![list.into_element()];
+                children.extend(refresh);
+                children
+            }))
+    }
+
+    #[test]
+    fn replacing_a_lists_row_scope_while_its_rows_update_keeps_the_visible_row() {
+        let mut c = core();
+        c.mount_root(&Root::of::<ReplacedList>());
+        let initial = c.commit().unwrap();
+        assert_eq!(texts(&initial), ["first: old"]);
+        let replace = pressable(&initial)[0];
+        assert!(c.component_event(replace, EventKind::Press, &EventPayload::None));
+        let updated = c.commit().unwrap();
+        assert_eq!(texts(&updated), ["second: new"]);
+    }
+
+    #[test]
+    fn a_replacement_lists_own_patch_keeps_the_visible_row() {
+        let mut c = core();
+        c.mount_root(&Root::new::<ReplacedList>(|| ReplacedListProps {
+            refresh_replacement: true.into(),
+        }));
+        let initial = c.commit().unwrap();
+        assert_eq!(texts(&initial), ["first: old"]);
+        let replace = pressable(&initial)[0];
+        assert!(c.component_event(replace, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["second: latest"]);
+    }
+
+    #[component]
+    fn ReplacedListLayout() -> impl IntoElement {
+        let padding = signal(0.0);
+        let replacement = signal(false);
+        view()
+            .flex_1()
+            .child(view().on_press(move || {
+                padding.set(100.0);
+                replacement.set(true);
+            }))
+            .child(view().on_press(move || padding.set(100.0)))
+            .child(dynamic(move || {
+                let replaced = replacement.get();
+                let list = virtual_list(1, move |_| {
+                    text(if replaced { "new" } else { "old" }).h(px(40.0))
+                })
+                .flex_1();
+                if replaced {
+                    list.content_padding_top(px(0.0))
+                } else {
+                    list.content_padding_top(move || px(padding.get()))
+                }
+            }))
+    }
+
+    #[test]
+    fn a_replacement_list_uses_its_own_layout() {
+        for commit_old_padding in [false, true] {
+            let mut c = core();
+            c.mount_root(&Root::of::<ReplacedListLayout>());
+            let initial = c.commit().unwrap();
+            let buttons = pressable(&initial);
+            if commit_old_padding {
+                assert!(c.component_event(buttons[1], EventKind::Press, &EventPayload::None));
+                c.commit().unwrap();
+            }
+            assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+            let updated = c.commit().unwrap();
+            let row = text_node(&updated, "new");
+            let cell = native_parent(&c, row).unwrap();
+            let key = c.key(cell).unwrap();
+            assert_eq!(c.nodes[key as usize].frame.origin.y, px(0.0));
+        }
     }
 
     #[test]
@@ -43712,14 +43777,16 @@ mod built_in_scrollbars {
                     stack.apply(&batch);
                 }
                 render_binds(&mut c, &mut next_id, &mut cells, 50.0);
-                let batch = c.commit().unwrap();
-                // Every set the list pins keeps its bar, last (on top).
-                for item in &batch.items {
-                    if let MountItem::StickyCells { id: 2, cells } = item {
-                        assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                // Nothing to commit when the window already held the rows.
+                if let Some(batch) = c.commit() {
+                    // Every set the list pins keeps its bar, last (on top).
+                    for item in &batch.items {
+                        if let MountItem::StickyCells { id: 2, cells } = item {
+                            assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                        }
                     }
+                    stack.apply(&batch);
                 }
-                stack.apply(&batch);
                 assert_eq!(
                     stack.views.last(),
                     Some(&bar),
@@ -57007,4 +57074,97 @@ fn allow_navigation_reaches_the_web_view() {
         denied.iter().any(|m| m.starts_with("`allowNavigation`")),
         "{denied:?}"
     );
+}
+
+/// A tab bar (a horizontal scroll view) that gets 60 tabs in one turn,
+/// past the 45 it has: every tab's views are made within a few display
+/// frames, the turns between them making none (NsVim's `nsvim *.rs`).
+#[test]
+fn a_tab_bar_makes_every_tab_added_in_one_turn_over_frames() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        Op::SetProp {
+            id: 2,
+            prop: Prop::Horizontal(true),
+        },
+        style_op(2, &[("height", StyleValue::Number(30.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // A tab: a row of an icon, a label and a close button, narrow enough
+    // for all 105 to be in content culling's window (a viewport past the
+    // bar's), so pacing alone holds them back.
+    let tab = |ops: &mut Vec<Op>, i: u32| {
+        let id = 1000 + i * 10;
+        ops.extend(child_view(
+            id,
+            2,
+            30.0,
+            &[
+                ("width", StyleValue::Number(6.0)),
+                ("flexDirection", StyleValue::Str("row")),
+            ],
+        ));
+        for (n, w) in [1.0, 4.0, 1.0].into_iter().enumerate() {
+            ops.extend(child_view(
+                id + 1 + n as u32,
+                id,
+                30.0,
+                &[("width", StyleValue::Number(w))],
+            ));
+        }
+    };
+    for i in 0..45 {
+        tab(&mut ops, i);
+    }
+    apply(&mut c, ops);
+    let mut made = Vec::new();
+    let frame = |c: &mut Core<FakeEngine>, made: &mut Vec<NodeId>| {
+        // A turn between two frames (a timer), then the frame's.
+        c.begin_mount_turn();
+        c.hold_paced_mounts();
+        if let Some(batch) = c.commit() {
+            made.extend(created_in(&batch));
+        }
+        c.begin_mount_turn();
+        if let Some(batch) = c.commit() {
+            made.extend(created_in(&batch));
+        }
+    };
+    for _ in 0..20 {
+        frame(&mut c, &mut made);
+        if !c.has_paced_mounts() {
+            break;
+        }
+    }
+    assert!(!c.has_paced_mounts());
+    assert_eq!(made.iter().filter(|&&id| id >= 1000).count(), 45 * 4);
+    let mut ops = Vec::new();
+    for i in 45..105 {
+        tab(&mut ops, i);
+    }
+    apply(&mut c, ops);
+    let mut frames = 0;
+    loop {
+        frame(&mut c, &mut made);
+        frames += 1;
+        if !c.has_paced_mounts() {
+            break;
+        }
+        assert!(frames < 40, "still waiting after {frames} frames");
+    }
+    assert!(frames > 1, "the tabs were paced over frames ({frames})");
+    for i in 0..105u32 {
+        for n in 0..4 {
+            let id = 1000 + i * 10 + n;
+            assert!(made.contains(&id), "tab {i} view {n} was never made");
+        }
+    }
 }

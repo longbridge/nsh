@@ -313,6 +313,16 @@ Native components are registered with `AppView::register_component`; see
 engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
 makes), so the TSX a view loads imports your Rust components and modules too.
 
+## Presenting from Rust
+
+Rust code that shows system UI (a share menu, a popover, a sheet) shows it from the surface whose code asked. In a
+main-thread task (`run_on_main_thread`), `nsh_platform_macos::presenting_view(mtm)` is the view to show it from when
+no element anchors it: the content of the surface's visible window the user is in, or the surface's own view when it
+is embedded; `None` when the surface shows in no visible window. `native_view(mtm, node)` is the `NSView` of an
+element of that surface (the node of its `ref`, a `NodeRef` argument of a module function; `ROOT_ID` for the
+surface's root view), in whatever window of the surface it is: the view a menu that belongs to the element opens
+from. NSH's views are flipped. Take both while the task runs. They are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a view NSH owns.
+
 ## Notifications from other code
 
 Remote notifications, and those other native code schedules, never reach `Notifications`' `press`: they go to the
@@ -327,7 +337,7 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 (`platform.idiom` is `"desktop"`), `os_version()` (`platform.version`) is the macOS version, and dark mode follows the system's appearance live. See
 [Device and environment](./device-and-environment.md).
 
-Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
+Input is a desktop's: the mouse, the trackpad (scrolling with momentum, stretching past the edges and springing back as in AppKit's scroll views, pinch and rotation) and the keyboard.
 Trackpad tap-to-click briefly shows the app’s `active:` feedback even when the press and release arrive together; press callbacks run at release. Reduced motion keeps immediate visual release.
 A zoomable scroll view zooms with a trackpad pinch or Control + wheel around the pointer, and scrolls both ways while
 zoomed.

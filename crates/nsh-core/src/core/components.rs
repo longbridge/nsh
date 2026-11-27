@@ -890,10 +890,6 @@ pub(super) struct Components {
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
     next_screen_color: u32,
-    /// The shares waiting for the platform's answer
-    /// ([`crate::EventKind::Share`]), by request.
-    shares:
-        FxHashMap<u32, AnswerSlot<Result<crate::share::ShareOutcome, crate::share::ShareError>>>,
     /// Requests on local paths (`pick_paths`, `open_path`, ...), by
     /// request id: their answers.
     file_requests: FxHashMap<u32, FileAnswer>,
@@ -1044,7 +1040,6 @@ impl Default for Components {
             next_app_settings_open: 1,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
-            shares: FxHashMap::default(),
             file_requests: FxHashMap::default(),
             next_file_request: 1,
             next_clipboard_read: 1,
@@ -1599,7 +1594,13 @@ impl<M: TextEngine> Core<M> {
             self.needs_layout = true;
         }
         let ratio = self.components.environment.pixel_ratio;
+        let window = self.components.environment.window;
         self.components.environment = environment;
+        // Width and orientation variants follow the window `windowSize()`
+        // reports (`Core::class_window`).
+        if window != environment.window {
+            self.restyle_where(crate::tailwind::deps::WIDTH | crate::tailwind::deps::HEIGHT);
+        }
         if ratio != environment.pixel_ratio {
             self.repick_images(ratio, environment.pixel_ratio);
         }
@@ -3240,6 +3241,11 @@ impl<M: TextEngine> Core<M> {
         }
         // Bound parts are bound first: what they read now is applied with
         // the static parts.
+        let applied_layout = if matches!(el.kind, ElKind::VirtualList(_)) {
+            self.components.list_layouts.remove(&host)
+        } else {
+            None
+        };
         let bound = super::views::Bound::take(&mut el).map(|bound| {
             self.bind_parts(host, host, bound, &mut el);
         });
@@ -3343,6 +3349,7 @@ impl<M: TextEngine> Core<M> {
         let (list, part) = match std::mem::replace(&mut el.kind, ElKind::Plain) {
             ElKind::VirtualList(list) => {
                 let config = list.config;
+                let old_list = applied_layout.unwrap_or(old_list);
                 self.update_virtual_list(self.native_id(host), host, *list, &old_list);
                 (Some(Box::new(config)), Part::VirtualList)
             }
@@ -4240,9 +4247,11 @@ impl<M: TextEngine> Core<M> {
                         .is_some_and(|o| o.part == Part::Slot && o.id == node)
                 });
                 let prev = at.and_then(|j| old[j].take());
-                let old_config = prev
-                    .as_ref()
-                    .and_then(|p| p.list.as_deref().copied())
+                let old_config = self
+                    .components
+                    .list_layouts
+                    .remove(&node)
+                    .or_else(|| prev.as_ref().and_then(|p| p.list.as_deref().copied()))
                     .unwrap_or_default();
                 // Its bound layout is a binding.
                 let parts = std::mem::take(&mut el.bound_list);
@@ -5027,6 +5036,12 @@ impl<M: TextEngine> Core<M> {
                 )
             }
         };
+        // The element snapshot predates any applied layout binding patches.
+        let old_list = if matches!(el.kind, ElKind::VirtualList(_)) {
+            self.components.list_layouts.remove(&id).unwrap_or(old_list)
+        } else {
+            old_list
+        };
         let bound = bound.map(|bound| self.bind_parts(host, id, bound, &mut el));
         let (component, virtual_list) = match std::mem::replace(&mut el.kind, ElKind::Plain) {
             ElKind::Component(c) => (Some(c), None),
@@ -5305,6 +5320,7 @@ impl<M: TextEngine> Core<M> {
                     count_signal.set(count as usize);
                     patches.borrow_mut().push(super::views::Patch::Rows {
                         list: id,
+                        binding: crate::element::Owner::current(),
                         count,
                         keys,
                     });
@@ -5336,16 +5352,7 @@ impl<M: TextEngine> Core<M> {
         state.moves = moves;
         state.separator = list.separator;
         state.min_view = list.min_view_time;
-        let marked: Vec<NodeId> = state
-            .cells
-            .iter()
-            .chain(&state.contents)
-            .copied()
-            .filter(|&c| c != 0)
-            .collect();
-        for cell in marked {
-            self.components.mark(cell);
-        }
+        self.sync_virtual_cells(id, true);
     }
 
     /// Sends list `id` its rows' changes from `before` (none: a new list):
@@ -5386,30 +5393,32 @@ impl<M: TextEngine> Core<M> {
         let state = self.components.virtual_lists.get_mut(&id).expect("list");
         state.count = count;
         state.keys = keys;
-        let parts: Vec<NodeId> = state
-            .cells
-            .iter()
-            .chain(&state.contents)
-            .copied()
-            .filter(|&c| c != 0)
-            .collect();
-        for part in parts {
-            let Some(inst) = self.components.instances.get_mut(&part) else {
-                continue;
-            };
-            let Some(signal) = inst.row_index else {
-                continue;
-            };
-            let live = inst.cell_owner.is_some_and(|o| o.is_live());
-            if let Inner::VirtualRow { index, .. } | Inner::Row { index, .. } = &mut inst.inner {
-                *index = if live {
-                    signal.get_untracked()
-                } else {
-                    usize::MAX
+        self.sync_virtual_cells(id, false);
+    }
+
+    fn sync_virtual_cells(&mut self, id: NodeId, rebuild: bool) {
+        let key = self.key(id).expect("virtual list node");
+        let slots = &self.nodes[key as usize].list.as_ref().expect("list").slots;
+        let state = &self.components.virtual_lists[&id];
+        for (slot, (&cell, &content)) in state.cells.iter().zip(&state.contents).enumerate() {
+            for part in [cell, content].into_iter().filter(|&part| part != 0) {
+                let Some(inst) = self.components.instances.get_mut(&part) else {
+                    continue;
                 };
-            }
-            if !live {
-                self.components.mark(part);
+                let remake = rebuild || !inst.cell_owner.is_some_and(|o| o.is_live());
+                if let Inner::VirtualRow { index, .. } | Inner::Row { index, .. } = &mut inst.inner
+                {
+                    if remake {
+                        // The content owner can die while the slot still has a row.
+                        *index = slots[slot].requested.map_or(usize::MAX, |i| i as usize);
+                    } else if let Some(position) = inst.row_index {
+                        *index = position.get_untracked();
+                    }
+                }
+                if remake && !inst.dirty {
+                    inst.dirty = true;
+                    self.components.dirty.push(part);
+                }
             }
         }
     }
@@ -6980,11 +6989,6 @@ impl<M: TextEngine> Core<M> {
                     command: Command::PickScreenColor { id },
                 });
             }
-            Action::Share(request, answer) => self.start_share(request, answer),
-            Action::ShareAvailable(answer) => {
-                let available = self.components.environment.share && self.access.allows_share();
-                answer.borrow_mut().deliver(available);
-            }
             Action::RenderCanvas(request, answer) => self.start_canvas_render(*request, answer),
             Action::FileRequest(request, answer) => {
                 use crate::file_dialog::FileRequest;
@@ -7017,61 +7021,6 @@ impl<M: TextEngine> Core<M> {
                 });
             }
         }
-    }
-
-    /// Checks `request` and sends it to the platform's share sheet
-    /// ([`crate::share`]); `answer` gets how it ended. Request ids are
-    /// unique in the process, as offscreen renders' are: a sheet still
-    /// open when a hot reload replaced the core must not answer the new
-    /// core's request of the same number.
-    fn start_share(
-        &mut self,
-        request: crate::share::ShareRequest,
-        answer: AnswerSlot<Result<crate::share::ShareOutcome, crate::share::ShareError>>,
-    ) {
-        use crate::share::{ShareError, ShareOutcome};
-        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let refused = if !self.components.environment.share {
-            Some(ShareError::unavailable("this platform has no share sheet"))
-        } else if !self.access.allows_share() {
-            Some(ShareError {
-                code: Some(crate::element::codes::ACCESS_DENIED.into()),
-                message: crate::share::NOT_GRANTED.into(),
-            })
-        } else {
-            request.check().err().map(ShareError::failed)
-        };
-        if let Some(error) = refused {
-            answer.borrow_mut().deliver(Err(error));
-            return;
-        }
-        // One sheet at a time: the one still showing ends as dismissed and
-        // the platform replaces it, so a sheet the platform never answered
-        // cannot hold every later share back.
-        for (_, earlier) in self.components.shares.drain() {
-            earlier.borrow_mut().deliver(Ok(ShareOutcome::dismissed()));
-        }
-        // The anchor goes to the platform as a view it shows, which it
-        // places the sheet at wherever that view is (a modal, a window).
-        let anchor = request.anchor.filter(|&node| {
-            self.key(node).is_ok_and(|key| {
-                self.nodes[key as usize].created && (key == self.root || self.in_tree(key))
-            })
-        });
-        let id = loop {
-            let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if id != 0 {
-                break id;
-            }
-        };
-        self.components.shares.insert(id, answer);
-        let _ = self.apply_op(Op::Command {
-            id: crate::ROOT_ID,
-            command: Command::Share {
-                id,
-                sheet: Box::new(crate::share::ShareSheet::new(request, anchor)),
-            },
-        });
     }
 
     /// Applies what the downloads ask of the core
@@ -7945,15 +7894,6 @@ impl<M: TextEngine> Core<M> {
                 let color = number("color").map(|packed| crate::Color(packed as u32).into());
                 if let Some(answer) = self.components.screen_colors.remove(&(request as u32)) {
                     answer.borrow_mut().deliver(color);
-                }
-                true
-            }
-            EventKind::Share if id == crate::ROOT_ID => {
-                let Some((request, result)) = crate::share::answer_from_payload(payload) else {
-                    return false;
-                };
-                if let Some(answer) = self.components.shares.remove(&request) {
-                    answer.borrow_mut().deliver(result);
                 }
                 true
             }

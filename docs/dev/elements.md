@@ -278,7 +278,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
   moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). A binding that takes
   them over a pointer's focus (`KeyOptions::over_focused`'s `OverFocused::Pointer`, TS's `overFocused: "pointer"`: a media player's Space)
-  fires instead, before the focus' own, while a pointer gave the focus: the core notes it as the focus is reported
+  fires instead, before the focus' own, when it is eligible in the current window and a pointer gave the focus: the core notes it as the focus is reported
   (the input modality then, or a popup a press opened giving it back, `Core::pointer_focus_back`) and mounts the
   keymap again as it changes, carrying it (`Keymap::pointer_focus`), only while a binding asks; the platforms ask
   `Keymap::find_with` or, matching the bindings themselves (GTK), `Keymap::gives_way`. Return and Space press

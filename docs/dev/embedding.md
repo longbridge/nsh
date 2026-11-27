@@ -87,6 +87,8 @@
   initial default; explicit main-window attributes and later window updates take precedence. Standard hosts
   leave that option false but can request transparency through their window configuration. A view's
   `behindWindow` material does not enable window transparency. An `AppView` never changes its host's window.
+  An embedded macOS `AppView` (not `run_app`'s) mounts a plain JS root (`mount(App)`, no `<Window>`) in itself,
+  as it does a Rust app, rather than in an implicit `main` window (#3514); the app's `<Window>`s still open windows.
   GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): set `AppOptions::inline_root`
   to `true`, create the view with `cx.new(|cx| AppView::new(options, window, cx))` inside a window, load the plain JS
   root with `view.read(cx).load(App::Js(bundle))`, then put the entity in any element tree (in a GPUI Kit window, as

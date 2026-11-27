@@ -658,7 +658,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `Checkbox` | `[✓]` (the `✓` in the accent), `[ ]` (muted) or `[–]` (the dash in the accent) and a space in place of the indicator, then the children in a view of their own beside it (a column: a choice card's title over its description) |
 | `Radio` | `[●]` (the dot in the accent) or `[ ]` (muted), a checkbox's width, and a space before the children, in a row (an app's own dot among its children is the app's to leave out) |
 | `Switch` | a checkbox's mark and a space in place of the track and thumb: on `[✓]`, off `[ ]`, as terminal apps show an on / off setting (a knob on a track would read as a slider); the role stays a switch for screen readers |
-| `Slider` | one row of `─` as wide as the slider, `━` from `min` to the value (a range: between its thumbs) in the accent, the rest muted, a `●` view per thumb on its value's Cell (focus, keys, drags and screen readers as elsewhere); vertical: a column of `│` / `┃` |
+| `Slider` | one row of `─` as wide as the slider, `━` from `min` to the value (a range: between its thumbs) in the accent, the rest muted, a `●` view per thumb on its value's Cell (focus, keys, drags and screen readers as elsewhere; no `renderThumb` content); vertical: a column of `│` / `┃` |
 | `Progress` | one row as wide as the bar: full Cells `█`, the partial Cell by eighths `▏▎▍▌▋▊▉`, then `░`, the filled Cells in the accent; indeterminate: a four-Cell segment moving one Cell every 120 ms (only while indeterminate; reduced motion: `░` only) |
 | `ColorSlider` | one row of Cells over the slider's width, each filled with the channel's color at that point of the track (role `Image`, hidden from screen readers: the terminal paints it as the color itself, quantized at 256 colors, no fill where it paints none) the thumb a `│` on the Cell of the value (`terminal::COLOR_THUMB`), no line along the track; the slider is the focusable adjustable control, keys as elsewhere, a press or a drag on a Cell picks its value (`color_picker/tui.rs`) |
 | `ColorArea` | a grid of such Cells filling the area, as many as its width and its whole rows hold (at most 240 by 64): the hue at each column's saturation and each row's brightness, the picked Cell `◆`; keys, presses and drags as elsewhere |
@@ -907,7 +907,11 @@ what changed.
 
 ## Children, slots and rows
 
-- JS inserts a component's children into the host; the core places them where the view's `Children` is, before the
+- A value prop named `children`, such as `children: Prop<SharedString>`, receives the JSX child as a typed value.
+  The compiler supplies it as `props.children`, and the JS face reads it in the ordinary prop effect, including
+  when a signal read by its getter changes. The generated TypeScript declaration for `Prop<SharedString>` is
+  `children: string`. Read `props.children.get()` in a Rust binding or computation to track the value.
+- For a `Children` slot, JS inserts a component's children into the host; the core places them where the view's `Children` is, before the
   node that follows it (or keeps them out of the tree while the view has none: a `Children` in a region that is not
   shown). The core sets the `Prop<Children>` when JS adds the first child or removes the last, so
   `props.children.get().is_empty()` in a binding follows it. With `children_each`, the children are an `Each` keyed by the child's node over a signal of the host's JS

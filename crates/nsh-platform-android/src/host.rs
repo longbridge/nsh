@@ -1358,8 +1358,6 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.os = nsh_engine::Os::Android;
     environment.notifications = true;
     environment.audio = true;
-    // A chooser over `ACTION_SEND` (`Share.java`).
-    environment.share = true;
     // The app's details in the system's settings (`SystemUi.java`
     // `openAppSettings`).
     environment.app_settings = true;
@@ -2256,7 +2254,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_runMainThreadTasks(
         .unwrap_or_else(|e| e.into_inner())
         .pop_front();
     if let Some(task) = task {
-        task.run();
+        // A module's UI-thread function: this surface is current while it
+        // runs (`crate::native_view`, `crate::presenting_activity`).
+        crate::presenting::run_for(host.view.clone(), || task.run());
     }
 }
 

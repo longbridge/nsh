@@ -73,13 +73,19 @@ mod modal_fade;
 #[cfg(target_os = "macos")]
 mod modal_focus;
 #[cfg(target_os = "macos")]
+mod momentum_bounce;
+#[cfg(target_os = "macos")]
 mod mount;
+#[cfg(target_os = "macos")]
+mod multi_view;
 #[cfg(target_os = "macos")]
 mod navigation_unmount;
 #[cfg(target_os = "macos")]
 mod nested_bounce;
 #[cfg(target_os = "macos")]
 mod nested_run_loop;
+#[cfg(target_os = "macos")]
+mod presenting;
 #[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
@@ -120,6 +126,8 @@ mod window_frames;
 mod window_hover;
 #[cfg(target_os = "macos")]
 mod window_layout;
+#[cfg(target_os = "macos")]
+mod window_mode_layout;
 #[cfg(target_os = "macos")]
 mod window_press;
 #[cfg(target_os = "macos")]
@@ -179,6 +187,8 @@ fn main() {
             } else if std::env::var_os("NSH_TRAY_OWNER_CHECK_ONLY").is_some() {
                 window_press::run();
                 tray_owner::run();
+            } else if std::env::var_os("NSH_MULTI_VIEW_CHECK_ONLY").is_some() {
+                multi_view::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
@@ -258,8 +268,14 @@ fn main() {
                 nested_bounce::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
+            } else if std::env::var_os("NSH_MOMENTUM_BOUNCE_CHECK_ONLY").is_some() {
+                momentum_bounce::run();
             } else if std::env::var_os("NSH_NESTED_RUN_LOOP_CHECK_ONLY").is_some() {
                 nested_run_loop::run();
+            } else if std::env::var_os("NSH_WINDOW_MODE_LAYOUT_CHECK_ONLY").is_some() {
+                window_mode_layout::run();
+            } else if std::env::var_os("NSH_PRESENTING_CHECK_ONLY").is_some() {
+                presenting::run();
             } else {
                 quit_requests::run();
                 #[cfg(feature = "js")]
@@ -286,6 +302,8 @@ fn main() {
                 tray_owner::run();
                 window_frames::run();
                 window_layout::run();
+                window_mode_layout::run();
+                presenting::run();
                 keyboard::run();
                 ime::run();
                 input_hidden::run();
@@ -310,6 +328,7 @@ fn main() {
                 download_redirect::run();
                 web_load_wait::run();
                 mount::run();
+                multi_view::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();
                 input_wheel_chain::run();
@@ -317,8 +336,9 @@ fn main() {
                 selection_keys::run();
                 nested_bounce::run();
                 nested_run_loop::run();
-                // Last: it leaves the app an accessory, never activated.
+                // Last: they leave the app an accessory, never activated.
                 press_momentum::run();
+                momentum_bounce::run();
                 tap_feedback::run();
             }
         }

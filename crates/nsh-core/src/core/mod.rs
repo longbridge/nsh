@@ -2359,7 +2359,7 @@ impl<M: TextEngine> Core<M> {
             let root = self.nodes[self.root as usize].layout.expect("root layout");
             self.layout.set_style(root, root_style(viewport));
             self.needs_layout = true;
-            self.restyle_where(crate::tailwind::deps::WIDTH | crate::tailwind::deps::HEIGHT);
+            // Restyles what follows the window's size (`apply_environment`).
             self.components_viewport(viewport);
         }
     }
@@ -13292,7 +13292,6 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::OpenUrl { .. }
                 | C::OpenAppSettings { .. }
                 | C::PickScreenColor { .. }
-                | C::Share { .. }
                 | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
                 | C::Audio { .. }

@@ -32,7 +32,6 @@ mod notifications;
 mod os;
 mod picker;
 mod process;
-mod share;
 mod storage;
 mod updater;
 mod url_scheme;
@@ -68,7 +67,6 @@ pub fn registries() -> &'static [Registry] {
             .module::<accessibility::Accessibility>()
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
-            .module::<share::Share>()
             .class::<audio::Sound>()
             .class::<audio::AudioPlayer>()
             .module::<notifications::Notifications>()

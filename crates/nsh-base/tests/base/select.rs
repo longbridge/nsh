@@ -3,7 +3,8 @@
 //! and search find items, Escape, back and presses outside close it and
 //! give the trigger the keyboard back, the highlighted row is revealed once
 //! per move, screen readers hear the combobox, the listbox and its options,
-//! and the value and the open state are the app's when it sets them.
+//! and the value, the open state and the search's query are the app's when
+//! it sets them.
 
 use std::{
     collections::HashMap,
@@ -47,6 +48,10 @@ struct HarnessProps {
     /// The app binds Space (`space` in the log), taking it over a control
     /// a pointer focused when true (`OverFocused::Pointer`).
     space: Option<bool>,
+    /// The app sets `query`, following `onQueryChange`.
+    controlled_query: bool,
+    /// What each opening's query starts with (`defaultQuery`).
+    default_query: Option<String>,
 }
 
 fn fruits() -> Vec<SelectItem> {
@@ -82,14 +87,17 @@ fn props(items: Vec<SelectItem>) -> HarnessProps {
         invalid: false,
         cover: None,
         space: None,
+        controlled_query: false,
+        default_query: None,
     }
 }
 
 /// A select of `props`' items under a 160 × 30 trigger, rows drawn as
 /// their titles (`renderItem`) and at half opacity while highlighted
-/// (`focus:`); what the app heard as `Log: …`, its value as `Value: …`; F5
-/// replaces the items with Celery and Kiwi; F6 toggles the `invalid` the
-/// app's trigger says.
+/// (`focus:`); what the app heard as `Log: …`, its value as `Value: …`, the
+/// query `onQueryChange` reported as `Query: …`; F5 replaces the items with
+/// Celery and Kiwi; F6 toggles the `invalid` the app's trigger says; F7
+/// toggles `searchable`; F8 sets the app's query to `ri`.
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let value = signal(props.value.clone().map(SharedString::from));
@@ -100,6 +108,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let invalid = signal(props.invalid);
     let searchable = signal(props.searchable);
     on_key("f7", move |_| searchable.update(|s| *s = !*s));
+    let query = signal(SharedString::default());
+    on_key("f8", move |_| query.set("ri".into()));
     // Only the trigger that starts invalid is busy too, so that the other
     // tests' trigger carries no state of the app's.
     let busy = props.invalid;
@@ -165,6 +175,10 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                 }
             }
         })
+        .on_query_change(move |q: &SharedString| {
+            push(format!("query:{q}"));
+            query.set(q.clone());
+        })
         .on_open(move || push("open".into()))
         .on_close(move || push("close".into()))
         .on_cancel(move || push("cancel".into()))
@@ -180,6 +194,12 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     if let Some(cover) = props.cover {
         el = el.cover(cover);
     }
+    if props.controlled_query {
+        el = el.query(move || Some(query.get()));
+    }
+    if let Some(q) = props.default_query.clone() {
+        el = el.default_query(SharedString::from(q));
+    }
     view()
         .pt(px(100.0))
         .pl(px(40.0))
@@ -194,6 +214,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .child(text(move || {
             format!("Value: {}", value.get().as_deref().unwrap_or("none"))
         }))
+        .child(text(move || format!("Query: {}", query.get())))
         .child(text(move || format!("Log: {}", log.get().join(" "))))
 }
 
@@ -953,6 +974,103 @@ fn search_filters_the_items_and_their_sections() {
     app.key("enter");
     app.gone("role:listbox");
     app.see("Value: rice");
+}
+
+#[test]
+fn typing_in_the_search_field_is_reported_and_a_new_opening_is_not() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        ..props(fruits())
+    });
+    app.open_list();
+    app.type_text("Search", "ce").unwrap();
+    app.log_ends("query:c query:ce");
+    app.see("Query: ce");
+    app.see_row(">Celery");
+    assert!(!app.shows("Apple"));
+    // The field's own query starts empty again at the next opening, which
+    // is no typing to report (as `Combobox`'s).
+    app.key("escape");
+    app.gone("role:listbox");
+    app.open_list();
+    app.see("Apple");
+    app.log_ends("query:ce cancel openChange:false:Cancel close openChange:true:TriggerPress open");
+}
+
+#[test]
+fn the_query_is_the_apps_when_it_sets_one() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        controlled_query: true,
+        ..props(fruits())
+    });
+    app.open_list();
+    app.type_text("Search", "ce").unwrap();
+    app.see("Query: ce");
+    app.log_ends("query:c query:ce");
+    // The app's query filters the rows, its first match highlighted.
+    app.see_row(">Celery");
+    assert!(!app.shows("Apple"));
+    // A query the app sets on its own does the same, in the field too.
+    app.key("f8");
+    app.see_row(">Rice");
+    assert!(!app.shows("Celery"));
+    app.wait_for("text:ri").unwrap();
+    // It stays the app's across openings: the app clears it when it wants.
+    app.key("escape");
+    app.gone("role:listbox");
+    app.open_list();
+    app.see("Rice");
+    assert!(!app.shows("Apple"));
+}
+
+#[test]
+fn each_opening_starts_from_the_default_query() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        default_query: Some("ce".into()),
+        ..props(fruits())
+    });
+    app.open_list();
+    // The opening's own query, not a new one: opened by a press with
+    // nothing chosen, no row is highlighted (as without a query).
+    app.see_row("Celery");
+    app.see_row("Rice");
+    assert_eq!(app.highlighted(), None);
+    assert!(!app.shows("Apple"));
+    app.type_text("text:ce", "x").unwrap();
+    app.see("No match");
+    app.key("escape");
+    app.gone("role:listbox");
+    app.open_list();
+    app.see("Celery");
+    assert!(!app.shows("Apple"));
+    // Opened by Down, the first item the query shows.
+    let mut app = focused(HarnessProps {
+        searchable: true,
+        default_query: Some("ce".into()),
+        ..props(fruits())
+    });
+    app.key("down");
+    app.see_row(">Celery");
+    assert!(!app.shows("Apple"));
+}
+
+#[test]
+fn without_a_search_field_the_apps_query_filters_nothing() {
+    let mut app = desktop(HarnessProps {
+        controlled_query: true,
+        ..props(fruits())
+    });
+    app.key("f8");
+    app.open_list();
+    app.see("Apple");
+    app.see("Rice");
+    // With the field, it filters.
+    app.key("f7");
+    app.wait_for("id:food-search").unwrap();
+    app.see("Rice");
+    app.gone("role:option[Apple]");
 }
 
 #[test]

@@ -10,7 +10,9 @@
 //! linker's arguments with `${KIT}` for the kit's own directory, and the
 //! objects and libraries they name, rustc's metadata taken out. Linking
 //! again with the gates of the parts nothing imports resolved to
-//! `nsh_part_none` makes the linker drop those parts' code.
+//! `nsh_part_none` makes the linker drop those parts' code. The kit's
+//! linker, `bin/ld.lld.exe`, is a component of the distribution
+//! (`windows-linker`), added the first time an app is packaged.
 
 use std::{
     fs,
@@ -89,9 +91,30 @@ fn part_of_gate(arg: &str) -> Option<&str> {
     (have == format!("nsh_have_{part}")).then_some(part)
 }
 
-/// The linker: the kit's own, else the `rust-lld` of a Rust toolchain.
+/// Adds the kit's linker, the component `windows-linker`, when `kit` is
+/// an installed distribution's and has no linker yet: the linker
+/// (`rust-lld`) comes with the first app packaged, not with nsh.
+pub(crate) fn ensure_linker(kit: &Path) -> anyhow::Result<()> {
+    let own = own_linker(kit);
+    if own.is_file() || std::env::var_os("NSH_LLD").is_some() {
+        return Ok(());
+    }
+    match crate::component::distribution() {
+        Some(root) if kit.starts_with(root.join("runtime")) => {
+            crate::component::ensure(&root, "windows-linker", &own)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn own_linker(kit: &Path) -> PathBuf {
+    kit.join("bin").join("ld.lld.exe")
+}
+
+/// The linker: the kit's own, else `NSH_LLD`, else the `rust-lld` of a
+/// Rust toolchain.
 fn linker(kit: &Path) -> anyhow::Result<PathBuf> {
-    let own = kit.join("bin").join("ld.lld.exe");
+    let own = own_linker(kit);
     if own.is_file() {
         return Ok(own);
     }

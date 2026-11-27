@@ -290,6 +290,11 @@ pub struct DateRangePreset {
     pub label: SharedString,
     /// What it sets: a date, a range or dates and times (kept as given).
     pub value: DateTime,
+    /// A second line under the label (the dates it stands for, "Sep 1 –
+    /// Sep 30"), a part of its own (`presetDescriptionClass`), which
+    /// screen readers read after the label.
+    #[prop(skip_none)]
+    pub description: Option<SharedString>,
 }
 
 impl DateRangePreset {
@@ -298,6 +303,7 @@ impl DateRangePreset {
         Self {
             label: label.into(),
             value: date.into(),
+            description: None,
         }
     }
 
@@ -306,6 +312,7 @@ impl DateRangePreset {
         Self {
             label: label.into(),
             value: (start, end).into(),
+            description: None,
         }
     }
 
@@ -314,7 +321,14 @@ impl DateRangePreset {
         Self {
             label: label.into(),
             value: value.into(),
+            description: None,
         }
+    }
+
+    /// A second line under the label, which screen readers read after it.
+    pub fn description(mut self, description: impl Into<SharedString>) -> Self {
+        self.description = Some(description.into());
+        self
     }
 }
 
@@ -443,6 +457,12 @@ pub struct DatePickerProps {
     /// too, which its label inherits.
     #[prop(default)]
     pub preset_style: Prop<TextPartStyle>,
+    /// The classes of each preset's description, its second line.
+    pub preset_description_class: Prop<Option<SharedString>>,
+    /// The inline style of each preset's description, over its classes
+    /// and the text styles it inherits from the preset.
+    #[prop(default)]
+    pub preset_description_style: Prop<TextPartStyle>,
     /// The classes of the calendar.
     pub calendar_class: Prop<Option<SharedString>>,
     /// The inline style of the calendar, over its classes.
@@ -830,9 +850,13 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                         .map(|p| {
                             let change = change.clone();
                             let label = p.label.clone();
+                            let description = p.description.clone();
                             view()
                                 .role(AccessibilityRole::Button)
                                 .label(label.clone())
+                                .when_some(description.clone(), |v, d| {
+                                    v.accessibility_description(d)
+                                })
                                 // Not a stop of Tab (`gpui-component`'s
                                 // `tab_stop(false)`).
                                 .focusable(false)
@@ -851,6 +875,15 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                                     }
                                 })
                                 .child(text(label))
+                                .when_some(description, |v, d| {
+                                    v.child(
+                                        text(d)
+                                            .app_class(props.preset_description_class)
+                                            .inline_style(move || {
+                                                props.preset_description_style.get()
+                                            }),
+                                    )
+                                })
                                 .into_element()
                         })
                         .collect::<Vec<_>>();

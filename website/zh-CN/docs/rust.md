@@ -374,13 +374,21 @@ Rust 值：对象被回收时释放，或调用 `ledger.dispose()`（也可以 `
 Rust 的修改会重新构建并重启应用。CLI 根据 crate 的描述知道它导出了什么，自己打包和编译 TSX；开发宿主和 `nsh test` 的
 无界面运行器则与你的 crate 和 QuickJS 一起构建。
 
-仓库中的 `examples/rust-exports` 是导出的参考示例：一个小型 TSX 应用，它的 crate 导出一个组件（必填、有默认值和可选的
-props，一个事件，子元素）、一个模块（每种函数各一个）和一个类（构造函数、方法、getter 和 setter、静态成员、`async` 成员、以另一个实例为参数、
+仓库中的 `examples/rust-exports` 是导出的参考示例：一个小型 TSX 应用，它的 crate 导出组件（必填、有默认值和可选的
+props，一个事件，以及节点或字符串形式的 children）、一个模块（每种函数各一个）和一个类（构造函数、方法、getter 和 setter、静态成员、`async` 成员、以另一个实例为参数、
 Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简短的文档注释；它的测试（Rust 的，以及 TypeScript 的 `App.test.tsx`）在应用中逐一点按，并检查每个导出显示的内容。
 
 仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
 （或 `ios`、`android` 等）运行它的根组件，`nsh test examples/gallery-rs` 以无界面方式运行它的测试，`cargo run -p gallery-native`
 在桌面后端上启动它。
+
+### 读取字符串 children
+
+在 Rust 组件的 `#[derive(Props)]` 结构体中声明 `pub children: Prop<SharedString>`，就能接收 JSX 标签之间的字符串。
+生成的 TypeScript props 包含 `children: string`。例如，`<TextChild>**bold**</TextChild>` 和
+`<TextChild>{source()}</TextChild>` 都会把字符串传给 Rust，Markdown 的星号等字符会保留。若 `source` 是信号，
+在响应式绑定或计算中调用 `props.children.get()` 就能跟踪更新。要把调用方传入的 JSX 节点放进组件的视图，使用
+`Prop<Children>` 插槽。
 
 ### 渲染函数与应用的类
 

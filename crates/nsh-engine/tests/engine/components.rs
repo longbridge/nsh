@@ -6158,6 +6158,125 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
     assert!(after.iter().any(|b| shows(b, "Price 21-75")));
 }
 
+const BASE_SLIDER_THUMBS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Slider } from "nsh/base";
+
+function App() {
+  const price = signal<[number, number]>([20, 60]);
+  return (
+    <View>
+      <Slider
+        value={price()}
+        onChange={({ value: next }) => price.set(next as [number, number])}
+        accessibilityLabel="Maximum price"
+        startAccessibilityLabel="Minimum price"
+        class="w-[200px]"
+        trackClass="h-[20px] justify-center"
+        indicatorClass="h-[4px]"
+        thumbClass="w-[10px] h-[10px]"
+        renderThumb={({ start }) => (
+          <Text class="absolute bottom-[12px]">{`${start ? "Low" : "High"} ${price()[start ? 0 : 1]}`}</Text>
+        )}
+      />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Slider` drawing content in each thumb with the app's
+/// `renderThumb`: told which thumb it is (`{ start }`), the content is
+/// placed in that thumb, and follows the app's value in place, with no
+/// view made again.
+#[test]
+fn a_base_slider_draws_the_apps_content_in_each_thumb() {
+    use nsh_core::AccessibilityRole;
+    let (engine, rx) = start(BASE_SLIDER_THUMBS);
+    let (mut low_seen, mut high_seen) = (false, false);
+    let batches = until(&rx, |b| {
+        low_seen |= shows(b, "Low 20");
+        high_seen |= shows(b, "High 60");
+        low_seen && high_seen
+    });
+    let text = |wanted: &str| {
+        batches
+            .iter()
+            .find_map(|b| text_ids(b, wanted))
+            .unwrap_or_else(|| panic!("{wanted} shown"))
+    };
+    let (low, high) = (text("Low 20"), text("High 60"));
+    let items: Vec<&MountItem> = batches.iter().flat_map(|b| b.items.iter()).collect();
+    let thumb_of = |label: &str| {
+        items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == AccessibilityRole::Adjustable
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect("a thumb")
+    };
+    let (start_thumb, end_thumb) = (thumb_of("Minimum price"), thumb_of("Maximum price"));
+    // Each text is inside its own thumb.
+    let inside = |mut node: u32, thumb: u32| {
+        while let Some(parent) = items.iter().find_map(|i| match i {
+            MountItem::Insert { parent, child, .. } if *child == node => Some(*parent),
+            _ => None,
+        }) {
+            if parent == thumb {
+                return true;
+            }
+            node = parent;
+        }
+        false
+    };
+    assert!(inside(low, start_thumb) && !inside(low, end_thumb));
+    assert!(inside(high, end_thumb) && !inside(high, start_thumb));
+    // Hidden from screen readers, so the thumb is never named by its
+    // content's text: the view holding it, inside the thumb.
+    let hidden = |mut node: u32, thumb: u32| {
+        while node != thumb {
+            if items.iter().any(|i| {
+                matches!(i, MountItem::ViewProps { id, props }
+                    if *id == node && props.accessibility.hidden)
+            }) {
+                return true;
+            }
+            match items.iter().find_map(|i| match i {
+                MountItem::Insert { parent, child, .. } if *child == node => Some(*parent),
+                _ => None,
+            }) {
+                Some(parent) => node = parent,
+                None => return false,
+            }
+        }
+        false
+    };
+    assert!(hidden(low, start_thumb) && hidden(high, end_thumb));
+
+    // A step of the start's thumb: its content shows the new value in
+    // place, nothing drawn again.
+    engine.control().dispatch_event(
+        start_thumb,
+        EventKind::AccessibilityAction,
+        EventPayload::Map(vec![("actionName", PayloadValue::Str("increment".into()))]),
+    );
+    let after = until(&rx, |b| shows(b, "Low 21"));
+    assert_eq!(after.iter().find_map(|b| text_ids(b, "Low 21")), Some(low));
+    assert!(
+        !after
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .any(|i| matches!(i, MountItem::Create { .. })),
+        "no view made again"
+    );
+}
+
 const BASE_SLIDER_TENS: &str = r##"import { mount, signal, View } from "nsh";
 import { Slider } from "nsh/base";
 

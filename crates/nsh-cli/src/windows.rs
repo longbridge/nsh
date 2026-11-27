@@ -58,6 +58,9 @@ pub(crate) fn package(
     {
         let gates =
             crate::native_features::part_gates(Some(uses), &config.features, Default::default());
+        if let Err(e) = crate::windows_link::ensure_linker(&kit) {
+            ui::warn(format!("could not add the runner's linker: {e:#}"));
+        }
         fs::create_dir_all(options.out)?;
         let linked = options.out.join("nsh-windows-app.linked.exe");
         let step = ui::Step::start("linking the runner with the parts the app imports");
