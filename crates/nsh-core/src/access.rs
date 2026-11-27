@@ -704,7 +704,8 @@ pub struct WindowsGrant {
     /// How many windows it may have open at once, its first window included;
     /// `None`: any number.
     pub max: Option<u32>,
-    /// Overlays and click-through windows (`pointerEvents: "none"`).
+    /// Overlays and click-through windows (`pointerEvents: "none"` or
+    /// `"box-none"`).
     pub overlay: bool,
 }
 
@@ -2749,6 +2750,12 @@ mod tests {
             all.check_window(WindowKind::Normal, &click_through, 0)
                 .is_err()
         );
+        // Through where nothing in it takes the pointer: the same grant.
+        let box_none = WindowAttributes {
+            pointer_events: Some(WindowPointerEvents::BoxNone),
+            ..Default::default()
+        };
+        assert!(all.check_window(WindowKind::Popup, &box_none, 0).is_err());
         // Declared without `windows`: none.
         let declared = |json: &str| Access {
             declared: caps(json),
@@ -2774,6 +2781,11 @@ mod tests {
         assert!(
             overlay
                 .check_window(WindowKind::Overlay, &click_through, 0)
+                .is_ok()
+        );
+        assert!(
+            overlay
+                .check_window(WindowKind::Popup, &box_none, 0)
                 .is_ok()
         );
         // `set()` keeps what is granted and leaves out the rest.

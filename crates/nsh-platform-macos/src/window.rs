@@ -962,6 +962,7 @@ fn apply(
     }
     if let Some(pointer) = a.pointer_events {
         window.setIgnoresMouseEvents(pointer == WindowPointerEvents::None);
+        crate::box_none::set(surface, id, window, pointer == WindowPointerEvents::BoxNone);
     }
     if let Some(shadow) = a.shadow {
         window.setHasShadow(shadow);
@@ -1647,6 +1648,7 @@ fn opening_position(
 /// A batch was applied: the windows waiting for their first frame show
 /// once one laid out at their size is in.
 pub(crate) fn batch_applied(surface: &Surface) {
+    crate::box_none::batch_applied(surface);
     let ready: Vec<NodeId> = {
         let Ok(windows) = surface.windows.try_borrow() else {
             return;
@@ -2271,6 +2273,7 @@ pub(crate) fn close_all(surface: &Surface) {
 }
 
 fn close(w: AppWindow) {
+    crate::box_none::forget(&w.window);
     w.watch.stop();
     w.view.set_window_of(std::rc::Weak::new());
     w.view.ns().unregisterDraggedTypes();

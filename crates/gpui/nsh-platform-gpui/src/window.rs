@@ -1259,11 +1259,37 @@ fn apply(
         // Wayland's and X11's input regions; the others' native flags.
         window.set_input_region(through.then_some(&[][..]));
         native::set_click_through(window, through);
+        let box_none = pointer == WindowPointerEvents::BoxNone;
+        native::set_box_none(window, box_none.then(|| takes_pointer(surface, own)));
     }
     native::apply(window, attributes);
     if own.is_some() {
         follow_simulated_scheme(window);
     }
+}
+
+/// Where window `own` (none: the main window) takes the pointer with
+/// `pointerEvents: "box-none"`: over a view in its root that takes it
+/// ([`crate::input::takes_pointer`]), at a point in window coordinates.
+fn takes_pointer(surface: &Rc<Surface>, own: Option<&Rc<AppWindow>>) -> native::TakesPointer {
+    let surface = Rc::downgrade(surface);
+    let own = own.map(Rc::downgrade);
+    Box::new(move |x, y| {
+        let surface = surface.upgrade()?;
+        let (root, (ox, oy)) = match &own {
+            Some(w) => {
+                let w = w.upgrade()?;
+                (w.view.clone(), w.origin.get())
+            }
+            None => (surface.root.clone(), surface.origin.get()),
+        };
+        Some(crate::input::takes_pointer(&root, x - ox, y - oy))
+    })
+}
+
+/// The main window drew a frame ([`native::box_none_drawn`]).
+pub(crate) fn main_drawn(window: &Window) {
+    native::box_none_drawn(window);
 }
 
 /// A window of the app's own takes the scheme a test made the system's
@@ -2256,6 +2282,7 @@ impl Element for WindowElement {
             let _in = enter(&surface, Some(w.id));
             crate::access::paint(&surface, window, cx);
         }
+        native::box_none_drawn(window);
         if !w.shown.get() {
             first_frame(&surface, &w, window);
         }

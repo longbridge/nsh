@@ -335,7 +335,7 @@ for every kind but overlays, or an object that narrows it:
 | `kinds` | `string[]` | The kinds it may open: `"normal"`, `"dialog"`, `"panel"`, `"popup"`, `"overlay"`. Missing: every kind but `"overlay"`. |
 | `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
 | `max` | `number` | How many windows of its own may be open at once, the first window included. Missing: any number. |
-| `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
+| `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"` or `"box-none"`). Never granted unless declared, also for an app without `"capabilities"`. |
 
 `overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
 Every window needs the grant, the first one included: no window is privileged.

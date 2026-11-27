@@ -902,6 +902,7 @@ impl Element for SurfaceElement {
             std::mem::take(&mut dcx.drawn)
         };
         surface.items_placed(drawn);
+        crate::window::main_drawn(window);
         // Animations tick on the window's frames while they run (and stop
         // asking when idle); a change made while painting (a frame client
         // added, an item placed) is drawn in the next frame, as no entry
