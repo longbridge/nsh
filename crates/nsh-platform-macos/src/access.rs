@@ -450,6 +450,16 @@ enum Ax {
     Region,
     /// A landmark of navigation (ARIA's `navigation`).
     Navigation,
+    /// The main content's landmark (ARIA's `main`).
+    Main,
+    /// The banner landmark (ARIA's `banner`).
+    Banner,
+    /// The content information landmark (ARIA's `contentinfo`).
+    ContentInfo,
+    /// A form's landmark (ARIA's `form`).
+    Form,
+    /// A complementary landmark (ARIA's `complementary`).
+    Complementary,
     /// An item of a tree.
     TreeItem,
     /// A dialog (ARIA's `dialog`).
@@ -1200,6 +1210,20 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
                 constant(NSAccessibilityGroupRole),
                 named("AXLandmarkNavigation"),
             ),
+            Ax::Main => (constant(NSAccessibilityGroupRole), named("AXLandmarkMain")),
+            Ax::Banner => (
+                constant(NSAccessibilityGroupRole),
+                named("AXLandmarkBanner"),
+            ),
+            Ax::ContentInfo => (
+                constant(NSAccessibilityGroupRole),
+                named("AXLandmarkContentInfo"),
+            ),
+            Ax::Form => (constant(NSAccessibilityGroupRole), named("AXLandmarkForm")),
+            Ax::Complementary => (
+                constant(NSAccessibilityGroupRole),
+                named("AXLandmarkComplementary"),
+            ),
             // As WebKit maps ARIA's `dialog` and `alertdialog`: VoiceOver
             // says "web dialog" / "alert dialog" and the label as it
             // enters.
@@ -1377,6 +1401,11 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::RowGroup | Role::Group => Ax::Group,
         Role::Region => Ax::Region,
         Role::Navigation => Ax::Navigation,
+        Role::Main => Ax::Main,
+        Role::Banner => Ax::Banner,
+        Role::ContentInfo => Ax::ContentInfo,
+        Role::Form => Ax::Form,
+        Role::Complementary => Ax::Complementary,
         // A tree is a list of its items, as a listbox is (see `TreeItem`).
         Role::Tree => Ax::List,
         Role::TreeItem => Ax::TreeItem,
@@ -1526,6 +1555,29 @@ mod tests {
         );
     }
 
+    /// The landmarks are groups with WebKit's landmark subroles, as its
+    /// ARIA mapping gives them.
+    #[test]
+    fn landmark_subroles() {
+        use objc2_app_kit::NSAccessibilityGroupRole;
+        for (role, subrole) in [
+            (Ax::Region, "AXLandmarkRegion"),
+            (Ax::Navigation, "AXLandmarkNavigation"),
+            (Ax::Main, "AXLandmarkMain"),
+            (Ax::Banner, "AXLandmarkBanner"),
+            (Ax::ContentInfo, "AXLandmarkContentInfo"),
+            (Ax::Form, "AXLandmarkForm"),
+            (Ax::Complementary, "AXLandmarkComplementary"),
+        ] {
+            let (group, sub) = ax_role(role);
+            // SAFETY: immutable AppKit constants.
+            let expected_group = unsafe { Retained::from(NSAccessibilityGroupRole) };
+            assert_eq!(group.as_deref(), Some(&*expected_group));
+            let expected = NSString::from_str(subrole);
+            assert_eq!(sub.as_deref(), Some(&*expected), "{role:?}");
+        }
+    }
+
     #[test]
     fn labels_and_values() {
         // A text view reads its text as its value unless it has a label.
@@ -1630,6 +1682,11 @@ mod tests {
             (Role::Group, Ax::Group),
             (Role::Region, Ax::Region),
             (Role::Navigation, Ax::Navigation),
+            (Role::Main, Ax::Main),
+            (Role::Banner, Ax::Banner),
+            (Role::ContentInfo, Ax::ContentInfo),
+            (Role::Form, Ax::Form),
+            (Role::Complementary, Ax::Complementary),
             (Role::Tree, Ax::List),
             (Role::TreeItem, Ax::TreeItem),
             (Role::MenuItemCheckbox, Ax::MenuItem),

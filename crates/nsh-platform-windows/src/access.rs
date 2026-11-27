@@ -152,6 +152,17 @@ pub(crate) enum Control {
     Region,
     /// A group that is a navigation landmark (ARIA's `navigation`).
     Navigation,
+    /// A group that is the main content's landmark (ARIA's `main`).
+    Main,
+    /// A group that is the banner landmark (ARIA's `banner`).
+    Banner,
+    /// A group that is the content information landmark (ARIA's
+    /// `contentinfo`).
+    ContentInfo,
+    /// A group that is a form's landmark (ARIA's `form`).
+    Form,
+    /// A group that is a complementary landmark (ARIA's `complementary`).
+    Complementary,
     /// `UIA_TreeControlTypeId`.
     Tree,
     /// `UIA_TreeItemControlTypeId`.
@@ -333,6 +344,11 @@ pub(crate) fn control_for(a: &Accessibility, kind: ViewKind, pressable: bool) ->
         }
         Role::Region => Control::Region,
         Role::Navigation => Control::Navigation,
+        Role::Main => Control::Main,
+        Role::Banner => Control::Banner,
+        Role::ContentInfo => Control::ContentInfo,
+        Role::Form => Control::Form,
+        Role::Complementary => Control::Complementary,
         Role::Tree => Control::Tree,
         Role::TreeItem => Control::TreeItem,
         Role::Dialog => Control::Dialog,
@@ -1333,6 +1349,11 @@ mod tests {
             (Role::Group, Control::Group),
             (Role::Region, Control::Region),
             (Role::Navigation, Control::Navigation),
+            (Role::Main, Control::Main),
+            (Role::Banner, Control::Banner),
+            (Role::ContentInfo, Control::ContentInfo),
+            (Role::Form, Control::Form),
+            (Role::Complementary, Control::Complementary),
             (Role::Tree, Control::Tree),
             (Role::TreeItem, Control::TreeItem),
             (Role::MenuItemCheckbox, Control::MenuItem),

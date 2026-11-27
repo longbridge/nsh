@@ -448,7 +448,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   for it (UIA `FullDescription`); the other platforms have one place for what is read after the name (AppKit's help,
   UIKit's hint, AT-SPI's and AccessKit's description, Android's hint text, the web's `aria-description`), which gets
   the description and then the hint (`Accessibility::help_text`). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
-  `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`, `dialog` / `alertdialog` (`nsh-base`'s
+  `navigation`, the landmark roles `main`, `banner`, `contentinfo`, `form` and `complementary`, `tree` / `treeitem`,
+  `menuitemcheckbox` / `menuitemradio`, `dialog` / `alertdialog` (`nsh-base`'s
   `Dialog` is a `dialog` unless the app gives it another role, named by its label; the platforms map it to their own
   dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content), `tabpanel` (the content
   a tab list's selected tab shows, which the tabs name with `accessibilityControls`: a `DockArea` group's content
@@ -463,19 +464,24 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `invalid` (`aria-invalid`: the content does not pass the app's checks, a rejected field; `aria-invalid:` classes
   style it; a slot's element keeps the app's beside the component's states);
   `accessibilityLevel` (`aria-level`: a heading's level, a tree item's depth). Per platform: macOS a toggle is
-  `AXCheckBox` / `AXToggle` with its pressed value, `region` / `navigation` are `AXGroup` with WebKit's landmark
-  subroles, a tree is a list of static-text items (as options: AppKit's outline rows need its rows and columns) with
+  `AXCheckBox` / `AXToggle` with its pressed value, `region`, `navigation` and the other landmarks are `AXGroup`
+  with WebKit's landmark subroles (`AXLandmarkMain`, `AXLandmarkBanner`, `AXLandmarkContentInfo`,
+  `AXLandmarkForm`, `AXLandmarkComplementary`), a tree is a list of static-text items (as options: AppKit's outline
+  rows need its rows and columns) with
   their disclosure level, `current` and a heading's level are not exposed (AppKit has no attribute for the first, and a
   heading's value is its text, which VoiceOver reads), `invalid` is WebKit's `AXInvalid` attribute, which the view
   answers itself (`view.rs`); iOS a pressed toggle carries the selected trait (UIKit's toggle
-  trait is iOS 17's), mixed, `current` and `invalid` are spoken in the value, `group` / `region` / `navigation` / `tree` /
+  trait is iOS 17's), mixed, `current` and `invalid` are spoken in the value, `group`, `region`, `navigation`, the
+  landmarks (`main`, `banner`, `contentinfo`, `form`, `complementary`), `tree` and
   `toolbar` are semantic-group containers named by their label (never one element hiding their content), no level; Android a toggle
   is a checkable `ToggleButton`, `current` and mixed go in the state description, `invalid` there too and in
-  `setContentInvalid`, roles without a widget class in the
+  `setContentInvalid`, roles without a widget class (the landmarks among them) in the
   role description, no level; Windows a toggle has the Toggle pattern (and "toggle button"), landmarks
-  (`UIA_LandmarkTypePropertyId`), `Tree` / `TreeItem` control types, a heading's `HeadingLevel1`…`9`, a tree item's
+  (`UIA_LandmarkTypePropertyId`: main and form are UIA's, the others custom landmarks with their localized name),
+  `Tree` / `TreeItem` control types, a heading's `HeadingLevel1`…`9`, a tree item's
   `UIA_LevelPropertyId`, `current` and `invalid` in `AriaProperties`, `invalid` also as `IsDataValidForForm` false;
-  Linux GTK's roles, `Pressed` on buttons, `Level`, `Invalid` (AT-SPI's invalid entry); GPUI AccessKit's roles,
+  Linux GTK's roles (`contentinfo` and `complementary` are GTK's general landmark, which has no role for them),
+  `Pressed` on buttons, `Level`, `Invalid` (AT-SPI's invalid entry); GPUI AccessKit's roles,
   `toggled`, `level`, `aria_current`, `invalid`; the web the ARIA attributes (`aria-invalid` on an input's field
   too). `accessibilityActiveDescendant` and `accessibilityControls` (`aria-activedescendant`, `aria-controls`) name
   another element by its ref: the item active inside a focused control, the element it controls. The core looks the

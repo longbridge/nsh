@@ -1698,6 +1698,11 @@ fn role_index(role: AccessibilityRole) -> i32 {
         AlertDialog => 44,
         Textbox => 45,
         TabPanel => 46,
+        Main => 47,
+        Banner => 48,
+        ContentInfo => 49,
+        Form => 50,
+        Complementary => 51,
     }
 }
 
@@ -2194,6 +2199,18 @@ mod tests {
             role_index(AccessibilityRole::Textbox),
             role_index(AccessibilityRole::AlertDialog) + 1
         );
+    }
+
+    /// Landmarks follow the roles `A11y.java` already names, with no widget
+    /// class: their role descriptions say what they are.
+    #[test]
+    fn landmarks_follow_the_roles_a11y_java_names() {
+        use AccessibilityRole::*;
+        let mut index = role_index(TabPanel) + 1;
+        for role in [Main, Banner, ContentInfo, Form, Complementary] {
+            assert_eq!(role_index(role), index, "{role:?}");
+            index += 1;
+        }
     }
 
     /// `drawImage(uri, 1, 2)` encoded for `CanvasPainter.java`: the URI,

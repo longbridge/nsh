@@ -148,6 +148,17 @@ pub enum AccessibilityRole {
     /// `accessibilityControls`.
     #[prop(rename = "tabpanel")]
     TabPanel,
+    /// The main content of the app (a landmark).
+    Main,
+    /// The app's banner: its header (a landmark).
+    Banner,
+    /// Information about the app, usually its footer (a landmark).
+    #[prop(rename = "contentinfo")]
+    ContentInfo,
+    /// A form the user fills in (a landmark).
+    Form,
+    /// Content beside the main content: a sidebar (a landmark).
+    Complementary,
 }
 
 impl AccessibilityRole {

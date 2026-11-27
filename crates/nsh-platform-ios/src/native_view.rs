@@ -842,6 +842,13 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Group
             | AccessibilityRole::Region
             | AccessibilityRole::Navigation
+            // UIKit has no landmark traits: a landmark is a semantic group
+            // named by its label.
+            | AccessibilityRole::Main
+            | AccessibilityRole::Banner
+            | AccessibilityRole::ContentInfo
+            | AccessibilityRole::Form
+            | AccessibilityRole::Complementary
             | AccessibilityRole::Tree
             | AccessibilityRole::Toolbar
             | AccessibilityRole::Radiogroup
@@ -1089,6 +1096,22 @@ mod tests {
         assert!(is_container(
             &props(AccessibilityRole::Navigation, &[]).accessibility
         ));
+        // Landmarks are semantic groups too, as UIKit has no landmark
+        // traits.
+        for role in [
+            AccessibilityRole::Main,
+            AccessibilityRole::Banner,
+            AccessibilityRole::ContentInfo,
+            AccessibilityRole::Form,
+            AccessibilityRole::Complementary,
+        ] {
+            assert!(is_container(&props(role, &[]).accessibility), "{role:?}");
+            assert_eq!(
+                container_type(&props(role, &[]).accessibility),
+                UIAccessibilityContainerType::SemanticGroup,
+                "{role:?}"
+            );
+        }
         assert!(is_container(
             &props(AccessibilityRole::Toolbar, &[]).accessibility
         ));

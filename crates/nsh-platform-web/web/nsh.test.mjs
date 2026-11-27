@@ -142,6 +142,22 @@ test("a textbox role is ARIA's textbox", () => {
   assert.equal(el.attrs.get("role"), "textbox");
 });
 
+test("landmark roles are ARIA's landmarks", () => {
+  const { player } = fakePlayer();
+  for (const role of ["main", "banner", "contentinfo", "form", "complementary", "region", "navigation"]) {
+    const attrs = new Map();
+    const el = {
+      attrs,
+      getAttribute: (name) => attrs.get(name) ?? null,
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+    };
+    el._props = { role };
+    player.updateAria(el);
+    assert.equal(el.attrs.get("role"), role);
+  }
+});
+
 test("links the app shows no menu for keep the browser's context menu", () => {
   const { player } = fakePlayer();
   const link = {

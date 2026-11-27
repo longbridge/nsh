@@ -67,7 +67,7 @@ view()
 
 ### 角色
 
-角色（`.role(AccessibilityRole::Header)`、`role="header"`）告诉用户这是哪一类元素、如何操作。在 Rust 中它是 `AccessibilityRole` 的一个变体（`Button`、`Header`、`Switch` 等）；TSX 的取值有 `"none"`、`"button"`、`"link"`、`"search"`、`"textbox"`、`"image"`、`"imagebutton"`、`"keyboardkey"`、`"text"`、`"adjustable"`、`"header"`、`"summary"`、`"alert"`、`"checkbox"`、`"combobox"`、`"menu"`、`"menubar"`、`"menuitem"`、`"progressbar"`、`"radio"`、`"radiogroup"`、`"scrollbar"`、`"spinbutton"`、`"switch"`、`"tab"`、`"tablist"`、`"timer"`、`"toolbar"`、`"list"`、`"grid"`、`"table"`、`"rowgroup"`、`"row"`、`"columnheader"`、`"cell"`（[`Table`](../elements/table.md) 各部件的角色），以及 `"listbox"` 和 `"option"`（一组可供选择的选项，例如 [`Select`](../elements/select.md) 弹出的列表，及其中的选项，选中的那项由 `accessibilityState.selected` 标出），`"group"`（一组相关的元素），`"region"`（值得单独到达的一块区域，例如折叠面板的内容），`"navigation"`（在应用内跳转的一组链接，例如分页），`"tree"` 和 `"treeitem"`（可展开、收起的节点，各在自己的 `accessibilityLevel`），`"menuitemcheckbox"` 和 `"menuitemradio"`（可勾选的菜单项，单独勾选或在一组中单选），`"dialog"` 和 `"alertdialog"`（位于应用其余内容之上、以 `accessibilityLabel` 命名的对话框，以及请用户确认某件事的对话框；[`Dialog`](../elements/dialog.md) 默认是 `"dialog"`，除非它的 `role` 另有指定），`"tabpanel"`（标签列表中选中的标签页所显示的内容，标签页用 `accessibilityControls` 指向它；[`DockArea`](../elements/dock.md) 的每个组都是一个）。
+角色（`.role(AccessibilityRole::Header)`、`role="header"`）告诉用户这是哪一类元素、如何操作。在 Rust 中它是 `AccessibilityRole` 的一个变体（`Button`、`Header`、`Switch` 等）；TSX 的取值有 `"none"`、`"button"`、`"link"`、`"search"`、`"textbox"`、`"image"`、`"imagebutton"`、`"keyboardkey"`、`"text"`、`"adjustable"`、`"header"`、`"summary"`、`"alert"`、`"checkbox"`、`"combobox"`、`"menu"`、`"menubar"`、`"menuitem"`、`"progressbar"`、`"radio"`、`"radiogroup"`、`"scrollbar"`、`"spinbutton"`、`"switch"`、`"tab"`、`"tablist"`、`"timer"`、`"toolbar"`、`"list"`、`"grid"`、`"table"`、`"rowgroup"`、`"row"`、`"columnheader"`、`"cell"`（[`Table`](../elements/table.md) 各部件的角色），以及 `"listbox"` 和 `"option"`（一组可供选择的选项，例如 [`Select`](../elements/select.md) 弹出的列表，及其中的选项，选中的那项由 `accessibilityState.selected` 标出），`"group"`（一组相关的元素），`"region"`（值得单独到达的一块区域，例如折叠面板的内容），`"navigation"`（在应用内跳转的一组链接，例如分页），`"main"`、`"banner"`、`"contentinfo"`、`"form"` 和 `"complementary"`（地标：主要内容、页头、应用信息（通常是页脚）、用户填写的表单，以及主要内容旁边的内容（例如侧栏）），`"tree"` 和 `"treeitem"`（可展开、收起的节点，各在自己的 `accessibilityLevel`），`"menuitemcheckbox"` 和 `"menuitemradio"`（可勾选的菜单项，单独勾选或在一组中单选），`"dialog"` 和 `"alertdialog"`（位于应用其余内容之上、以 `accessibilityLabel` 命名的对话框，以及请用户确认某件事的对话框；[`Dialog`](../elements/dialog.md) 默认是 `"dialog"`，除非它的 `role` 另有指定），`"tabpanel"`（标签列表中选中的标签页所显示的内容，标签页用 `accessibilityControls` 指向它；[`DockArea`](../elements/dock.md) 的每个组都是一个）。
 
 最常用的几个：
 
@@ -75,6 +75,7 @@ view()
 - `"header"` 用于分区标题：屏幕阅读器用户会在标题之间跳转来快速浏览页面。平台能读出级别时，`accessibilityLevel` 给出它的级别（1 为最高）。
 - `"button"` 配合 `accessibilityState.pressed` 用于切换按钮，即保持开或关的按钮（工具栏里的加粗）。
 - `"navigation"` 包住在页面之间跳转的链接，当前页的链接带 `accessibilityState.current: "page"`。
+- `"main"`、`"banner"`、`"contentinfo"`、`"form"` 和 `"complementary"` 标出页面的地标，读屏用户可以跳到主要内容、页头、页脚、表单或侧栏。平台有这个地标就按地标暴露；没有专门角色时读出最接近的通用角色。
 - `"textbox"` 用于用户输入文本的输入框，当它是应用自己的视图而不是 [`Input`](../elements/input.md) 时（后者的原生输入框本身就有这个角色）。
 - `"switch"`、`"checkbox"`、`"radio"` 配合 `accessibilityState.checked`。
 - `"adjustable"` 用于滑块和步进器，配合 `accessibilityValue` 以及 `increment` / `decrement` 操作（[`Slider`](../elements/slider.md) 的每个滑块都是）。
@@ -338,7 +339,7 @@ view()
     .child(text("$120"))
 ```
 
-带标签的容器仍是容器：`"list"`、`"listbox"`、`"group"`、`"toolbar"`、`"radiogroup"`、`"tablist"`、`"navigation"`、`"region"` 或 `"dialog"` 的标签是读屏进入时念出的名字，里面的元素仍然一个个读到。VoiceOver 还会告诉用户列表从哪里开始、到哪里结束。只有要整体朗读时，才把容器设为无障碍元素。
+带标签的容器仍是容器：`"list"`、`"listbox"`、`"group"`、`"toolbar"`、`"radiogroup"`、`"tablist"`、`"navigation"`、`"region"`、地标角色或 `"dialog"` 的标签是读屏进入时念出的名字，里面的元素仍然一个个读到。VoiceOver 还会告诉用户列表从哪里开始、到哪里结束。只有要整体朗读时，才把容器设为无障碍元素。
 
 隐藏没有信息量的东西：装饰性图片、分隔线、旁边文字已经表达了同样意思的图标。
 

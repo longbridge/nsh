@@ -11408,6 +11408,11 @@ fn pressed_current_and_level_decode_from_js() {
         ("dialog", R::Dialog),
         ("alertdialog", R::AlertDialog),
         ("tabpanel", R::TabPanel),
+        ("main", R::Main),
+        ("banner", R::Banner),
+        ("contentinfo", R::ContentInfo),
+        ("form", R::Form),
+        ("complementary", R::Complementary),
     ] {
         assert_eq!(role(name), r);
     }

@@ -858,12 +858,10 @@ impl IRawElementProviderSimple_Impl for Element_Impl {
                     None => Var::empty(),
                 }
             }
-            UIA_LandmarkTypePropertyId => match control {
-                Control::Navigation => Var::i32(UIA_NavigationLandmarkTypeId.0),
-                Control::Region => Var::i32(UIA_CustomLandmarkTypeId.0),
-                _ => Var::empty(),
-            },
-            UIA_LocalizedLandmarkTypePropertyId if control == Control::Region => Var::str("region"),
+            UIA_LandmarkTypePropertyId => {
+                landmark_type(control).map_or_else(Var::empty, |t| Var::i32(t.0))
+            }
+            UIA_LocalizedLandmarkTypePropertyId => Var::opt_str(landmark_name(control)),
             // Narrator says "dialog" and the name as the focus enters one.
             UIA_IsDialogPropertyId => {
                 Var::bool(matches!(control, Control::Dialog | Control::AlertDialog))
@@ -1254,6 +1252,31 @@ fn view_size(viewport: f32, extent: f32) -> f64 {
     }
 }
 
+/// The landmark type of `c`: UIA's own where it has one, else a custom
+/// landmark named by [`landmark_name`].
+fn landmark_type(c: Control) -> Option<UIA_LANDMARKTYPE_ID> {
+    match c {
+        Control::Navigation => Some(UIA_NavigationLandmarkTypeId),
+        Control::Main => Some(UIA_MainLandmarkTypeId),
+        Control::Form => Some(UIA_FormLandmarkTypeId),
+        Control::Region | Control::Banner | Control::ContentInfo | Control::Complementary => {
+            Some(UIA_CustomLandmarkTypeId)
+        }
+        _ => None,
+    }
+}
+
+/// The localized landmark type UIA reads for a custom landmark.
+fn landmark_name(c: Control) -> Option<&'static str> {
+    Some(match c {
+        Control::Region => "region",
+        Control::Banner => "banner",
+        Control::ContentInfo => "content information",
+        Control::Complementary => "complementary",
+        _ => return None,
+    })
+}
+
 /// The UIA control type of `c`.
 fn control_type(c: Control) -> UIA_CONTROLTYPE_ID {
     match c {
@@ -1269,7 +1292,12 @@ fn control_type(c: Control) -> UIA_CONTROLTYPE_ID {
         | Control::Grid
         | Control::Group
         | Control::Region
-        | Control::Navigation => UIA_GroupControlTypeId,
+        | Control::Navigation
+        | Control::Main
+        | Control::Banner
+        | Control::ContentInfo
+        | Control::Form
+        | Control::Complementary => UIA_GroupControlTypeId,
         Control::Tree => UIA_TreeControlTypeId,
         Control::TreeItem => UIA_TreeItemControlTypeId,
         Control::CheckBox => UIA_CheckBoxControlTypeId,
@@ -1330,6 +1358,30 @@ mod tests {
         assert_eq!(control_type(Control::Dialog), UIA_PaneControlTypeId);
         assert_eq!(control_type(Control::AlertDialog), UIA_PaneControlTypeId);
         assert_eq!(control_type(Control::TabPanel), UIA_PaneControlTypeId);
+    }
+
+    #[test]
+    fn landmarks() {
+        assert_eq!(
+            landmark_type(Control::Navigation),
+            Some(UIA_NavigationLandmarkTypeId)
+        );
+        assert_eq!(landmark_type(Control::Main), Some(UIA_MainLandmarkTypeId));
+        assert_eq!(landmark_type(Control::Form), Some(UIA_FormLandmarkTypeId));
+        // UIA has no banner, content information or complementary types:
+        // they are custom landmarks read by their localized name.
+        for (control, name) in [
+            (Control::Region, "region"),
+            (Control::Banner, "banner"),
+            (Control::ContentInfo, "content information"),
+            (Control::Complementary, "complementary"),
+        ] {
+            assert_eq!(landmark_type(control), Some(UIA_CustomLandmarkTypeId));
+            assert_eq!(landmark_name(control), Some(name));
+            assert_eq!(control_type(control), UIA_GroupControlTypeId);
+        }
+        assert_eq!(landmark_type(Control::Button), None);
+        assert_eq!(landmark_name(Control::Button), None);
     }
 
     #[test]

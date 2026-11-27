@@ -418,6 +418,11 @@ prop id:role-dialog role dialog
 prop id:role-alertdialog role alertdialog
 prop id:role-textbox role textbox
 prop id:role-tabpanel role tabpanel
+prop id:role-main role main
+prop id:role-banner role banner
+prop id:role-contentinfo role contentinfo
+prop id:role-form role form
+prop id:role-complementary role complementary
 covers [props] accessible
 covers [props] accessibilityHint
 covers [props] accessibilityDescription

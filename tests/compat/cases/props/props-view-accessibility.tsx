@@ -10,7 +10,9 @@
 // toolbars, paginations, trees and checkable menu items (`"group"`,
 // `"region"`, `"navigation"`, `"tree"`, `"treeitem"`, `"menuitemcheckbox"`,
 // `"menuitemradio"`), of a text box (`"textbox"`), dialogs
-// (`"dialog"`, `"alertdialog"`) and a tab's content (`"tabpanel"`), and
+// (`"dialog"`, `"alertdialog"`), a tab's content (`"tabpanel"`) and the
+// landmark roles (`"main"`, `"banner"`, `"contentinfo"`, `"form"`,
+// `"complementary"`), and
 // `accessibilityDescribedBy`: a field whose error line's text is its
 // description while the line is there, its own description after. Its
 // script checks each.
@@ -97,6 +99,11 @@ function App() {
       <View testID="role-alertdialog" role="alertdialog" style={{ height: 4 }} />
       <View testID="role-textbox" role="textbox" accessibilityLabel="Message" style={{ height: 4 }} />
       <View testID="role-tabpanel" role="tabpanel" style={{ height: 4 }} />
+      <View testID="role-main" role="main" style={{ height: 4 }} />
+      <View testID="role-banner" role="banner" style={{ height: 4 }} />
+      <View testID="role-contentinfo" role="contentinfo" style={{ height: 4 }} />
+      <View testID="role-form" role="form" style={{ height: 4 }} />
+      <View testID="role-complementary" role="complementary" style={{ height: 4 }} />
       <View testID="plain" style={{ height: 20 }} />
     </View>
   );
