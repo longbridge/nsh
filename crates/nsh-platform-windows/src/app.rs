@@ -381,10 +381,13 @@ impl AppView {
             return;
         }
         // The content size the window has before the attributes apply (the
-        // host's `--window-size` when it was just made, else what the user
-        // left it at): hiding the title bar keeps the outer size and gives
-        // the caption's strip to the client area, which this size undoes.
-        let made = content_size(hwnd);
+        // size it was made at, else what the user left it at): a frame the
+        // attributes change (a hidden title bar, no frame, the system's
+        // again) keeps the outer size and moves the caption's strip into or
+        // out of the client area, which this size undoes. A minimized
+        // window has no client area to keep.
+        let usable = |s: &Size<nsh_core::Points>| s.width.0 >= 1.0 && s.height.0 >= 1.0;
+        let made = content_size(hwnd).filter(usable);
         crate::shell::apply(&self.surface, hwnd, &launch.attributes);
         let mode = match kept {
             Some(placement) => {
@@ -392,10 +395,7 @@ impl AppView {
                 placement.mode
             }
             None => {
-                let content = launch
-                    .default_size
-                    .filter(|s| s.width.0 >= 1.0 && s.height.0 >= 1.0)
-                    .or(made);
+                let content = launch.default_size.filter(usable).or(made);
                 match (launch.default_position, launch.display) {
                     (Some(WindowPosition::At(at)), display) => {
                         if let Some(content) = content {
