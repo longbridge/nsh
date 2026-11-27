@@ -147,9 +147,26 @@ after the trigger, not inside it, so a press on it never opens the popup; the ap
 ## Presets
 
 `presets` are buttons beside the calendar that set the value: "Today", "Last 7 days", "Tomorrow at 9". Each is
-`{ label, value }`, `value` a date, a range or dates and times, kept as given; a press sets it and closes the popup.
-`contentClass` lays out the presets' column and the calendar with the time (a row, `flex-row`); `presetsClass` styles
-the column, `presetClass` each button.
+`{ label, value, description }`, `value` a date, a range or dates and times, kept as given; a press sets it and closes
+the popup. `description` is an optional second line under the label, such as the dates a preset stands for ("Last
+month" over "Sep 1 – Sep 30"). `contentClass` lays out the presets' column and the calendar with the time (a row,
+`flex-row`); `presetsClass` styles the column, `presetClass` each button, and `presetDescriptionClass` each
+description, which takes the button's text styles until its own class changes them (a smaller, muted line). The
+button stacks the two lines in a column; a `presetClass` with `flex` makes it a row, so add `flex-col` with it
+(`flex flex-col gap-0.5`).
+
+```tsx
+<DatePicker
+  range
+  presets={[
+    { label: "Last month", value: ["2026-09-01", "2026-09-30"], description: "Sep 1 – Sep 30" },
+    { label: "This month", value: ["2026-10-01", "2026-10-31"], description: "Oct 1 – Oct 31" },
+  ]}
+  presetClass="rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+  presetDescriptionClass="text-xs text-muted-foreground"
+  trigger={<Text>Pick a range</Text>}
+/>
+```
 
 ## The calendar
 
@@ -208,6 +225,7 @@ appears and goes at once; the sheet of touch screens slides in and out on its ow
 | `contentClass`, `contentStyle` | `.content_class(..)`, `.content_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup's content: the presets beside the calendar and the time. |
 | `presetsClass`, `presetsStyle` | `.presets_class(..)`, `.presets_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The presets' column. |
 | `presetClass`, `presetStyle` | `.preset_class(..)`, `.preset_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each preset's button. |
+| `presetDescriptionClass`, `presetDescriptionStyle` | `.preset_description_class(..)`, `.preset_description_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each preset's description, its second line. |
 | `calendarClass`, `calendarStyle` | `.calendar_class(..)`, `.calendar_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The calendar. |
 | `headerClass` … `itemStyle` | as `Calendar`'s | as `Calendar`'s | none | The calendar's header, body, months, rows and items. |
 | `renderItem` | `.render_item(..)` | `(item: CalendarEntry) => JSX.Element` | none | Each item of the calendar, drawn by the app from what it is; its states are the items' classes, as `Calendar`'s. |
@@ -241,6 +259,7 @@ appears and goes at once; the sheet of touch screens slides in and out on its ow
 | The backdrop | behind the sheet (touch screens) | `backdropClass`, `backdropStyle` |
 | The content | the popup | `contentClass`, `contentStyle` |
 | The presets | the content, first (`presets`) | `presetsClass`, `presetsStyle`; each `presetClass`, `presetStyle` |
+| A preset's description | its button, under the label (`description`) | `presetDescriptionClass`, `presetDescriptionStyle` |
 | The calendar | the content | `calendarClass`, `calendarStyle`, and [Calendar](./calendar.md#parts)'s parts |
 | The time's row | under the calendar (`timePrecision`) | `timeClass`, `timeStyle`; its label `timeLabel` |
 | The time field | the time's row | `timeFieldClass`, `timeFieldStyle`, and [TimeField](./time-field.md#parts)'s parts |
@@ -262,7 +281,8 @@ time field's edit the time (see [Keyboard](./time-field.md#keyboard)).
   writes it (by default `2026/10/28`, with the time at `timePrecision`), and it says whether the popup is expanded.
   `disabled` dims it.
 - The calendar's days are buttons named by their ISO dates (see [Accessibility](./calendar.md#accessibility)); the
-  presets are buttons named by their labels; the time field is named by `timeAccessibilityLabel`.
+  presets are buttons named by their labels, which screen readers follow with their descriptions; the time field is
+  named by `timeAccessibilityLabel`.
 - The clear button is a button named by `clearButtonAccessibilityLabel`.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.

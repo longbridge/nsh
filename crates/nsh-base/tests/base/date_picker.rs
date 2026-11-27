@@ -2,7 +2,8 @@
 //! screens); a complete date is the value and closes it; a range takes two
 //! days; with a time precision the popup stays open for the time and a
 //! press on the selected day again closes it on a desktop, while on a phone
-//! a tap on a day closes it; presets set the value; the
+//! a tap on a day closes it; presets set the value, a description a
+//! second line of its own look that screen readers read after the label; the
 //! clear button and Delete clear it; Return opens and Escape closes;
 //! screen readers hear the value in the display format; on a phone one
 //! tap on a day closes the sheet, and the calendar spans it. Today is
@@ -34,6 +35,9 @@ struct HarnessProps {
     range: bool,
     time: bool,
     presets: bool,
+    /// Descriptions without a class of their own (`presetDescriptionClass`),
+    /// in the text styles of their button's.
+    plain_description: bool,
 }
 
 fn props() -> HarnessProps {
@@ -42,6 +46,7 @@ fn props() -> HarnessProps {
         range: false,
         time: false,
         presets: false,
+        plain_description: false,
     }
 }
 
@@ -80,6 +85,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .time_label(text("Time"))
         .time_accessibility_label("Due time")
         .item_class("focus:opacity-50")
+        .preset_class("text-[#00ff00]")
         .render_item(|e: &CalendarEntry| {
             text(match e.kind {
                 CalendarItemKind::Day => format!("{}-{}", e.month, e.value),
@@ -109,13 +115,17 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             }
         })
         .on_cancel(move || push("cancel".into()));
+    if !props.plain_description {
+        el = el.preset_description_class("text-[#ff0000]");
+    }
     if props.time {
         el = el.time_precision(Some(TimePrecision::Minute));
     }
     if props.presets {
         el = el.presets(vec![
             DateRangePreset::single("Today", d(2026, 10, 28)),
-            DateRangePreset::range("Last week", d(2026, 10, 19), d(2026, 10, 25)),
+            DateRangePreset::range("Last week", d(2026, 10, 19), d(2026, 10, 25))
+                .description("Oct 19 - 25"),
         ]);
     }
     if props.controlled {
@@ -397,6 +407,97 @@ fn a_preset_is_the_value_and_closes_the_popup() {
         app.log(),
         "open:true:TriggerPress 2026-10-19..2026-10-25 open:false:Select"
     );
+}
+
+#[test]
+fn a_presets_description_is_a_second_line_read_after_its_label() {
+    for os in [Os::MacOs, Os::Ios] {
+        let mut app = start_on(
+            os,
+            HarnessProps {
+                presets: true,
+                range: true,
+                ..props()
+            },
+        );
+        app.open();
+        app.see("Oct 19 - 25");
+        let screen = app.screen();
+        // Under the label, in the button, with the look of its own part.
+        let label = screen.layout("text:Last week").unwrap().unwrap().bounds;
+        let line = screen.layout("text:Oct 19 - 25").unwrap().unwrap().bounds;
+        assert!(
+            line.origin.y >= label.origin.y + label.size.height,
+            "{os:?}"
+        );
+        assert_eq!(
+            screen.press_target("text:Oct 19 - 25").unwrap(),
+            screen.press_target("label:Last week").unwrap(),
+            "{os:?}"
+        );
+        // Its own class over the button's text styles.
+        assert_eq!(
+            screen.span_style("text:Oct 19 - 25").unwrap().color,
+            nsh_core::Color(0xff00_00ff),
+            "{os:?}"
+        );
+        // A preset without one is its label alone: no view for it.
+        let nodes = screen.layout_nodes();
+        let texts_in = |selector: &str| {
+            let button = screen.press_target(selector).unwrap().unwrap();
+            nodes
+                .iter()
+                .filter(|n| n.parent == button)
+                .map(|n| n.kind)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(texts_in("text:Today"), [ViewKind::Text], "{os:?}");
+        assert_eq!(
+            texts_in("text:Last week"),
+            [ViewKind::Text, ViewKind::Text],
+            "{os:?}"
+        );
+        // Screen readers hear the label, then the description; a preset
+        // without one has none.
+        assert_eq!(
+            screen.accessibility_description("label:Last week").unwrap(),
+            Some("Oct 19 - 25".into()),
+            "{os:?}"
+        );
+        assert_eq!(
+            screen.accessibility_description("label:Today").unwrap(),
+            None,
+            "{os:?}"
+        );
+        app.press("label:Last week").unwrap();
+        app.closed();
+    }
+}
+
+#[test]
+fn a_presets_description_takes_its_buttons_text_styles_without_a_class() {
+    for os in [Os::MacOs, Os::Ios] {
+        let mut app = start_on(
+            os,
+            HarnessProps {
+                presets: true,
+                range: true,
+                plain_description: true,
+                ..props()
+            },
+        );
+        app.open();
+        app.see("Oct 19 - 25");
+        let screen = app.screen();
+        // `presetClass`'s color, as the label's.
+        for line in ["text:Last week", "text:Oct 19 - 25"] {
+            assert_eq!(
+                screen.span_style(line).unwrap().color,
+                nsh_core::Color(0x00ff_00ff),
+                "{os:?} {line}"
+            );
+        }
+    }
 }
 
 #[test]

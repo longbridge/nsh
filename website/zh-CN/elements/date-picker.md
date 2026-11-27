@@ -125,7 +125,20 @@ fn trip_dates() -> impl IntoElement {
 
 ## 预设
 
-`presets` 是日历旁边设置值的按钮："今天"、"最近 7 天"、"明天 9 点"。每个是 `{ label, value }`，`value` 为一个日期、一个范围或日期时间，按原样保存；按下它会设置值并关闭弹出层。`contentClass` 排列预设列与日历和时间（一行，`flex-row`）；`presetsClass` 为这一列设置样式，`presetClass` 为每个按钮设置样式。
+`presets` 是日历旁边设置值的按钮："今天"、"最近 7 天"、"明天 9 点"。每个是 `{ label, value, description }`，`value` 为一个日期、一个范围或日期时间，按原样保存；按下它会设置值并关闭弹出层。`description` 是标签下方可选的第二行，例如预设代表的日期（"上个月"下方的"9月1日 – 9月30日"）。`contentClass` 排列预设列与日历和时间（一行，`flex-row`）；`presetsClass` 为这一列设置样式，`presetClass` 为每个按钮设置样式，`presetDescriptionClass` 为每个说明设置样式：说明继承按钮的文字样式，由它自己的类来改变（更小、更淡的一行）。按钮把这两行排成一列；`presetClass` 带 `flex` 时会排成一行，所以要同时加上 `flex-col`（`flex flex-col gap-0.5`）。
+
+```tsx
+<DatePicker
+  range
+  presets={[
+    { label: "上个月", value: ["2026-09-01", "2026-09-30"], description: "9月1日 – 9月30日" },
+    { label: "本月", value: ["2026-10-01", "2026-10-31"], description: "10月1日 – 10月31日" },
+  ]}
+  presetClass="rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+  presetDescriptionClass="text-xs text-muted-foreground"
+  trigger={<Text>选择范围</Text>}
+/>
+```
 
 <a id="the-calendar"></a>
 
@@ -178,6 +191,7 @@ fn trip_dates() -> impl IntoElement {
 | `contentClass`、`contentStyle` | `.content_class(..)`、`.content_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层的内容：预设在日历和时间旁边。 |
 | `presetsClass`、`presetsStyle` | `.presets_class(..)`、`.presets_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 预设列。 |
 | `presetClass`、`presetStyle` | `.preset_class(..)`、`.preset_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个预设按钮。 |
+| `presetDescriptionClass`、`presetDescriptionStyle` | `.preset_description_class(..)`、`.preset_description_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个预设的说明，即第二行。 |
 | `calendarClass`、`calendarStyle` | `.calendar_class(..)`、`.calendar_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 日历。 |
 | `headerClass` … `itemStyle` | 同 `Calendar` | 同 `Calendar` | 无 | 日历的头部、主体、各月、各行和各条目。 |
 | `renderItem` | `.render_item(..)` | `(item: CalendarEntry) => JSX.Element` | 无 | 由应用根据条目本身绘制的日历条目；状态是条目的类，与 `Calendar` 的相同。 |
@@ -215,6 +229,7 @@ fn trip_dates() -> impl IntoElement {
 | 背景层 | sheet 后面（触屏设备） | `backdropClass`、`backdropStyle` |
 | 内容 | 弹出层中 | `contentClass`、`contentStyle` |
 | 预设 | 内容中的第一个（`presets`） | `presetsClass`、`presetsStyle`；每个 `presetClass`、`presetStyle` |
+| 预设的说明 | 预设按钮中，标签下方（`description`） | `presetDescriptionClass`、`presetDescriptionStyle` |
 | 日历 | 内容中 | `calendarClass`、`calendarStyle`，以及 [Calendar](./calendar.md#parts) 的部件 |
 | 时间行 | 日历下方（`timePrecision`） | `timeClass`、`timeStyle`；标签 `timeLabel` |
 | 时间输入框 | 时间行中 | `timeFieldClass`、`timeFieldStyle`，以及 [TimeField](./time-field.md#parts) 的部件 |
@@ -236,7 +251,7 @@ fn trip_dates() -> impl IntoElement {
 ## 无障碍
 
 - 触发元素对屏幕阅读器来说是一个组合框（combobox）：它的标签是 `accessibilityLabel`，值是按 `dateFormat` 写出的日期（默认 `2026/10/28`，在 `timePrecision` 时带时间），并说明弹出层是否展开。`disabled` 时它显示为不可用。
-- 日历的日期是按钮，以其 ISO 日期命名（见[无障碍](./calendar.md#accessibility)）；预设是按钮，以其标签命名；时间输入框的名称来自 `timeAccessibilityLabel`。
+- 日历的日期是按钮，以其 ISO 日期命名（见[无障碍](./calendar.md#accessibility)）；预设是按钮，以其标签命名，屏幕阅读器在标签之后读出它的说明；时间输入框的名称来自 `timeAccessibilityLabel`。
 - 清除按钮是一个按钮，名称来自 `clearButtonAccessibilityLabel`。
 
 关于标签、角色和播报的一般说明，见[无障碍](../docs/accessibility.md)。
