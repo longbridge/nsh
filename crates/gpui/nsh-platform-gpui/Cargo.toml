@@ -103,7 +103,8 @@ gstreamer-video = { workspace = true, optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 # The desktop's settings (XDG settings portal, AT-SPI).
 zbus.workspace = true
-# `shot` script steps read the window from the X server.
+# `shot` script steps read the window from the X server, and windows that
+# let the pointer through set their input shape there.
 raw-window-handle.workspace = true
 x11rb.workspace = true
 gtk = { workspace = true, optional = true }

@@ -688,6 +688,7 @@ fn show_launched(window: &NSWindow, surface: &Surface, background: bool) {
         window.makeFirstResponder(Some(surface.root.ns()));
         NSApplication::sharedApplication(surface.mtm).activate();
     }
+    crate::box_none::shown(window);
 }
 
 /// The window of the standalone app whose surface is `surface`, while a

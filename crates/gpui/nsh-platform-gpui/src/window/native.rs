@@ -21,11 +21,6 @@ fn on<T: Clone>(value: &Option<T>, f: impl FnOnce(T)) {
     }
 }
 
-/// Whether a window whose `pointerEvents` is `"box-none"` takes a press at
-/// a point (its coordinates, in points from its top left corner), or
-/// `None` once it is gone.
-pub(crate) type TakesPointer = Box<dyn Fn(f32, f32) -> Option<bool>>;
-
 /// Whether a move to `x` / `y` moves the window: a coordinate given,
 /// every one given a number.
 #[cfg_attr(target_os = "linux", allow(dead_code))]
@@ -35,20 +30,15 @@ fn valid_origin(x: Option<f32>, y: Option<f32>) -> bool {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use std::{
-        cell::{Cell, RefCell},
-        ptr::NonNull,
-    };
+    use std::cell::{Cell, RefCell};
 
-    use block2::RcBlock;
     use nsh_core::desktop::{WindowLevel, Workspaces};
-    use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
+    use objc2::{MainThreadMarker, rc::Retained};
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-        NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventMask,
-        NSRequestUserAttentionType, NSScreen, NSView, NSWindow, NSWindowButton,
-        NSWindowCollectionBehavior, NSWindowLevel, NSWindowOrderingMode, NSWindowStyleMask,
-        NSWindowTitleVisibility,
+        NSApplication, NSApplicationActivationPolicy, NSRequestUserAttentionType, NSScreen, NSView,
+        NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowLevel, NSWindowOrderingMode,
+        NSWindowStyleMask, NSWindowTitleVisibility,
     };
     use objc2_foundation::{NSNumber, NSPoint, NSRect, NSSize, ns_string};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -66,7 +56,7 @@ mod mac {
     }
 
     /// The `NSWindow` of a GPUI window.
-    fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
+    pub(in crate::window) fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
         let handle = HasWindowHandle::window_handle(window).ok()?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
             return None;
@@ -197,143 +187,6 @@ mod mac {
         }
     }
 
-    /// A window whose `pointerEvents` is `"box-none"`.
-    struct BoxNone {
-        window: Retained<NSWindow>,
-        takes: TakesPointer,
-    }
-
-    thread_local! {
-        /// The `"box-none"` windows.
-        static BOX_NONE: RefCell<Vec<BoxNone>> = const { RefCell::new(Vec::new()) };
-        /// The monitors following the pointer while there are any.
-        static MONITORS: RefCell<Vec<Retained<AnyObject>>> = const { RefCell::new(Vec::new()) };
-    }
-
-    /// The window takes the pointer only where `takes` says a press lands
-    /// on one of its views (`pointerEvents: "box-none"`), and lets it
-    /// through elsewhere; `None`: no longer (the click-through flag stays
-    /// as [`set_click_through`] left it).
-    ///
-    /// AppKit picks the window a press goes to before the window sees it,
-    /// so the window follows the pointer and lets it through or not for
-    /// where it is (`ignoresMouseEvents`).
-    pub(crate) fn set_box_none(window: &Window, takes: Option<TakesPointer>) {
-        let Some(w) = ns_window(window) else { return };
-        forget_box_none(&w);
-        if let Some(takes) = takes {
-            BOX_NONE.with_borrow_mut(|b| {
-                b.push(BoxNone {
-                    window: w.clone(),
-                    takes,
-                })
-            });
-            follow_pointer();
-            follow(Some(&w));
-        }
-    }
-
-    /// The window drew a frame: a `"box-none"` one follows its new layout
-    /// under the pointer where it rests.
-    pub(crate) fn box_none_drawn(window: &Window) {
-        if BOX_NONE.with_borrow(Vec::is_empty) {
-            return;
-        }
-        if let Some(w) = ns_window(window) {
-            follow(Some(&w));
-        }
-    }
-
-    fn forget_box_none(w: &NSWindow) {
-        let k = key(w);
-        let empty = BOX_NONE.with_borrow_mut(|b| {
-            b.retain(|e| key(&e.window) != k);
-            b.is_empty()
-        });
-        if empty {
-            stop_following();
-        }
-    }
-
-    /// Watches the pointer move over every app (the global monitor) and
-    /// this one (the local monitor), and the buttons coming up.
-    fn follow_pointer() {
-        MONITORS.with_borrow_mut(|m| {
-            if !m.is_empty() {
-                return;
-            }
-            let mask = NSEventMask::MouseMoved
-                | NSEventMask::LeftMouseUp
-                | NSEventMask::RightMouseUp
-                | NSEventMask::OtherMouseUp;
-            let local = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
-                follow(None);
-                event.as_ptr()
-            });
-            // SAFETY: the block returns the event it got; the monitor is
-            // removed when no window is `"box-none"`.
-            m.extend(unsafe {
-                NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local)
-            });
-            let global = RcBlock::new(|_: NonNull<NSEvent>| follow(None));
-            m.extend(NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
-                mask, &global,
-            ));
-        });
-    }
-
-    fn stop_following() {
-        for monitor in MONITORS.with_borrow_mut(std::mem::take) {
-            // SAFETY: a monitor `NSEvent` returned.
-            unsafe { NSEvent::removeMonitor(&monitor) };
-        }
-    }
-
-    /// Every `"box-none"` window (only `only`'s, given one) lets the
-    /// pointer through unless it is over one of its views. Not while a
-    /// button is held: the press stays with the window it went to.
-    fn follow(only: Option<&NSWindow>) {
-        if NSEvent::pressedMouseButtons() != 0 {
-            return;
-        }
-        let at = NSEvent::mouseLocation();
-        let mut changes = Vec::new();
-        let empty = BOX_NONE.with_borrow_mut(|b| {
-            b.retain(|e| {
-                let w = &e.window;
-                if only.is_some_and(|o| key(o) != key(w)) || !w.isVisible() {
-                    return true;
-                }
-                // GPUI's window coordinates: from the content's top left.
-                let p = w.convertPointFromScreen(at);
-                let height = w
-                    .contentView()
-                    .map_or(w.frame().size.height, |v| v.frame().size.height);
-                match (e.takes)(p.x as f32, (height - p.y) as f32) {
-                    Some(takes) => {
-                        if w.ignoresMouseEvents() == takes {
-                            changes.push((w.clone(), !takes));
-                        }
-                        true
-                    }
-                    None => false,
-                }
-            });
-            b.is_empty()
-        });
-        for (w, ignores) in changes {
-            w.setIgnoresMouseEvents(ignores);
-        }
-        if empty {
-            // Not from a monitor's own handler.
-            crate::rt::outside_app(|| {
-                if BOX_NONE.with_borrow(Vec::is_empty) {
-                    stop_following();
-                }
-            });
-        }
-    }
-
     thread_local! {
         /// The order-ins [`show`] left to the next turn, by window, each
         /// with its own number: a hide, a removal or another show of the
@@ -401,6 +254,7 @@ mod mac {
         if keep && w.frame() != frame {
             w.setFrame_display(frame, true);
         }
+        super::super::box_none::shown_ns(w);
     }
 
     /// The window is about to be removed: an order-in left to the next
@@ -408,7 +262,6 @@ mod mac {
     pub(crate) fn removing(window: &Window) {
         if let Some(w) = ns_window(window) {
             cancel_order_in(&w);
-            forget_box_none(&w);
         }
     }
 
@@ -646,7 +499,7 @@ mod win {
     /// `DWMWA_USE_IMMERSIVE_DARK_MODE`.
     const DARK_MODE: u32 = 20;
 
-    fn hwnd(window: &Window) -> Option<HWND> {
+    pub(in crate::window) fn hwnd(window: &Window) -> Option<HWND> {
         let handle = HasWindowHandle::window_handle(window).ok()?;
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return None;
@@ -654,7 +507,7 @@ mod win {
         Some(handle.hwnd.get() as HWND)
     }
 
-    fn set_style(hwnd: HWND, index: i32, bits: u32, on: bool) {
+    pub(in crate::window) fn set_style(hwnd: HWND, index: i32, bits: u32, on: bool) {
         // SAFETY: plain calls on a live window of this thread.
         unsafe {
             let style = GetWindowLongPtrW(hwnd, index) as u32;
@@ -755,11 +608,6 @@ mod win {
             unsafe { SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA) };
         }
     }
-
-    /// Not yet: a `"box-none"` window takes the pointer as an `"auto"` one.
-    pub(crate) fn set_box_none(_window: &Window, _takes: Option<TakesPointer>) {}
-
-    pub(crate) fn box_none_drawn(_window: &Window) {}
 
     /// Windows does not fit a window to its screen as it shows it: one
     /// that keeps its size needs nothing.
@@ -930,11 +778,6 @@ mod linux {
 
     /// The input region does it ([`Window::set_input_region`]).
     pub(crate) fn set_click_through(_window: &Window, _through: bool) {}
-
-    /// Not yet: a `"box-none"` window takes the pointer as an `"auto"` one.
-    pub(crate) fn set_box_none(_window: &Window, _takes: Option<TakesPointer>) {}
-
-    pub(crate) fn box_none_drawn(_window: &Window) {}
 
     /// GPUI shows its windows as they open.
     pub(crate) fn show(_window: &Window, _activate: bool, _keep: bool) {}

@@ -25,6 +25,7 @@
 //!   changes, moves and resizes once they settle; the main window's is the
 //!   environment's ([`observe_main`]).
 
+mod box_none;
 mod native;
 pub(crate) mod screen;
 
@@ -608,6 +609,8 @@ pub(crate) fn show_window(window: &mut Window, activate: bool, cx: &mut App) {
     if activate {
         focus_window(window, cx);
     }
+    // Before the pointer moves.
+    box_none::shown(window);
 }
 
 /// Out of the minimized state ([`native::restore`]), which on Linux
@@ -1257,10 +1260,19 @@ fn apply(
     if let Some(pointer) = attributes.pointer_events {
         let through = pointer == WindowPointerEvents::None;
         // Wayland's and X11's input regions; the others' native flags.
+        #[cfg(target_os = "linux")]
+        box_none::set_input_region(window, through.then_some(&[][..]));
+        #[cfg(not(target_os = "linux"))]
         window.set_input_region(through.then_some(&[][..]));
         native::set_click_through(window, through);
-        let box_none = pointer == WindowPointerEvents::BoxNone;
-        native::set_box_none(window, box_none.then(|| takes_pointer(surface, own)));
+        let area =
+            follows_pointer(pointer, own.is_some(), surface.chrome.standalone()).then(|| {
+                Rc::new(RootArea {
+                    surface: Rc::downgrade(surface),
+                    own: own.map(Rc::downgrade),
+                }) as box_none::Area
+            });
+        box_none::set(window, area);
     }
     native::apply(window, attributes);
     if own.is_some() {
@@ -1268,28 +1280,57 @@ fn apply(
     }
 }
 
-/// Where window `own` (none: the main window) takes the pointer with
-/// `pointerEvents: "box-none"`: over a view in its root that takes it
-/// ([`crate::input::takes_pointer`]), at a point in window coordinates.
-fn takes_pointer(surface: &Rc<Surface>, own: Option<&Rc<AppWindow>>) -> native::TakesPointer {
-    let surface = Rc::downgrade(surface);
-    let own = own.map(Rc::downgrade);
-    Box::new(move |x, y| {
-        let surface = surface.upgrade()?;
-        let (root, (ox, oy)) = match &own {
+/// Whether a window with `pointer` takes the pointer only over its views,
+/// following it: a window of the app's own (`own`), or the main window when
+/// the surface fills it (`standalone`). An embedded surface's main window
+/// is its host's, which holds the host's own views too: it is left as it
+/// is.
+fn follows_pointer(pointer: WindowPointerEvents, own: bool, standalone: bool) -> bool {
+    pointer == WindowPointerEvents::BoxNone && (own || standalone)
+}
+
+/// Where a `"box-none"` window takes the pointer: over the views in its
+/// root that take it ([`crate::input::takes_pointer`]); a window of the
+/// app's own's root, or (`own` none) the main window's, the surface's.
+struct RootArea {
+    surface: Weak<Surface>,
+    own: Option<Weak<AppWindow>>,
+}
+
+impl RootArea {
+    /// The root and where it is drawn in the window.
+    fn root(&self) -> Option<(NshView, (f32, f32))> {
+        let surface = self.surface.upgrade()?;
+        Some(match &self.own {
             Some(w) => {
                 let w = w.upgrade()?;
                 (w.view.clone(), w.origin.get())
             }
             None => (surface.root.clone(), surface.origin.get()),
-        };
-        Some(crate::input::takes_pointer(&root, x - ox, y - oy))
-    })
+        })
+    }
 }
 
-/// The main window drew a frame ([`native::box_none_drawn`]).
+impl box_none::PointerArea for RootArea {
+    fn takes(&self, x: f32, y: f32) -> Option<bool> {
+        let (root, (ox, oy)) = self.root()?;
+        Some(crate::input::takes_pointer(&root, x - ox, y - oy))
+    }
+
+    fn rects(&self) -> Option<Vec<nsh_core::Bounds<Points>>> {
+        let (root, (ox, oy)) = self.root()?;
+        let mut rects = crate::input::pointer_rects(&root);
+        for r in &mut rects {
+            r.origin.x.0 += ox;
+            r.origin.y.0 += oy;
+        }
+        Some(rects)
+    }
+}
+
+/// The main window drew a frame ([`box_none::drawn`]).
 pub(crate) fn main_drawn(window: &Window) {
-    native::box_none_drawn(window);
+    box_none::drawn(window);
 }
 
 /// A window of the app's own takes the scheme a test made the system's
@@ -1671,6 +1712,7 @@ fn destroy(surface: &Surface, w: &Rc<AppWindow>) {
             let _ = handle.update(cx, |_, window, _| {
                 native::set_parent(window, None, false, WindowKind::Normal);
                 native::removing(window);
+                box_none::removing(window);
                 window.remove_window();
             });
             lost_key(handle, main, cx);
@@ -2282,7 +2324,7 @@ impl Element for WindowElement {
             let _in = enter(&surface, Some(w.id));
             crate::access::paint(&surface, window, cx);
         }
-        native::box_none_drawn(window);
+        box_none::drawn(window);
         if !w.shown.get() {
             first_frame(&surface, &w, window);
         }
@@ -2345,6 +2387,23 @@ mod tests {
 
     fn gpui_rect(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
         Bounds::new(gpui::point(px(x), px(y)), gpui::size(px(w), px(h)))
+    }
+
+    /// A `"box-none"` window follows the pointer when it is the app's: its
+    /// own windows, and the main window of a surface that fills it; never
+    /// the window of a host the surface is embedded in.
+    #[test]
+    fn a_box_none_window_follows_the_pointer_unless_a_host_owns_it() {
+        use WindowPointerEvents as P;
+        assert!(follows_pointer(P::BoxNone, true, false));
+        assert!(follows_pointer(P::BoxNone, false, true));
+        assert!(!follows_pointer(P::BoxNone, false, false));
+        for pointer in [P::Auto, P::None] {
+            assert!(!follows_pointer(pointer, true, true));
+        }
+        // A new surface is embedded until the app owns its window.
+        let surface = Surface::new(Default::default());
+        assert!(!surface.chrome.standalone());
     }
 
     /// A notch is computed from the display's bounds in screen coordinates

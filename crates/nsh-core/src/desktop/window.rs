@@ -123,8 +123,9 @@ pub enum WindowPointerEvents {
     /// not there. Like a view's `box-none`, a view that fills the root
     /// still takes the pointer unless it is `box-none` (or `none`) itself;
     /// a background does not decide it. Needs the `windows` capability's
-    /// `overlay`. macOS lets the pointer through this way; elsewhere the
-    /// window takes it as with `auto`.
+    /// `overlay`. Every desktop lets the pointer through this way; on
+    /// Linux a rotated or skewed view and a rounded `clipPath` count by the
+    /// box around them.
     #[prop(rename = "box-none")]
     BoxNone,
 }

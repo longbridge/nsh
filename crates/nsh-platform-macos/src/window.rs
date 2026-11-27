@@ -962,7 +962,15 @@ fn apply(
     }
     if let Some(pointer) = a.pointer_events {
         window.setIgnoresMouseEvents(pointer == WindowPointerEvents::None);
-        crate::box_none::set(surface, id, window, pointer == WindowPointerEvents::BoxNone);
+        // Not the window of a host the app is embedded in: it holds the
+        // host's own views too.
+        let own = id != ROOT_ID || surface.standalone.get();
+        crate::box_none::set(
+            surface,
+            id,
+            window,
+            own && pointer == WindowPointerEvents::BoxNone,
+        );
     }
     if let Some(shadow) = a.shadow {
         window.setHasShadow(shadow);
@@ -1333,6 +1341,7 @@ fn order_front(surface: &Surface, window: &NSWindow, activate: bool, key: bool, 
         // shows (a test's app never activates).
         window.orderFrontRegardless();
     }
+    crate::box_none::shown(window);
 }
 
 /// How [`order_front`] activates the app (and [`panel_window`], for an

@@ -251,7 +251,8 @@ The window's root is `box-none`, as a view's: its views follow their own `pointe
 | Platform | What the user sees |
 |---|---|
 | macOS (AppKit and GPUI apps) | Clicks, wheels and hovers outside the views go to the window or desktop below. The window follows a layout change at once and a pointer move as it comes; a press keeps going to the window it started in until its button comes up. |
-| Windows, Linux | Not yet: the window takes every click, as with `"auto"`. |
+| Windows (Win32 and GPUI apps) | The same: clicks, wheels and hovers outside the views go to the window or desktop below, a layout change takes effect at once, and a press keeps going to the window it started in until its button comes up. The window follows the pointer about once a frame while it shows. |
+| Linux (GTK and GPUI apps, Wayland and X11) | The window takes clicks only within its views, updated with every layout change; everything else goes to the window below. A rotated or skewed view and a rounded `clipPath` count by the box around them. |
 | iOS, Android, Web, terminal | No windows: no effect. |
 
 ### currentWindow

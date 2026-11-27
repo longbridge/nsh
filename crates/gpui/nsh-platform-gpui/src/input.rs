@@ -1715,6 +1715,147 @@ pub(crate) fn takes_pointer(root: &NshView, x: f32, y: f32) -> bool {
     pick(root, x, y, true).is_some_and(|hit| hit.item.is_some() || hit.view.id() != root.id())
 }
 
+/// A rectangle in root coordinates: x, y, width, height.
+type Area = (f32, f32, f32, f32);
+
+/// The rectangles (root coordinates) a window whose `pointerEvents` is
+/// `"box-none"` takes the pointer in, as [`takes_pointer`] decides it at
+/// each point ([`pick_in`]'s rules): each view that takes the pointer by
+/// its box with its hit slop, and each item it hosts, within the areas the
+/// views around them let the pointer into. A transformed view counts by
+/// its bounds and a `clipPath` by its box.
+pub(crate) fn pointer_rects(root: &NshView) -> Vec<nsh_core::Bounds<Points>> {
+    let mut out = Vec::new();
+    rects_in(root, &crate::geom::Mat4::new(), None, true, &mut out);
+    out
+}
+
+fn rects_in(
+    view: &NshView,
+    to_root: &crate::geom::Mat4,
+    limit: Option<Area>,
+    root: bool,
+    out: &mut Vec<nsh_core::Bounds<Points>>,
+) {
+    let s = view.state();
+    if s.style.hidden
+        || s.concealed
+        || s.props.pointer_events == PointerEvents::None
+        || s.live.as_ref().is_some_and(|l| l.dying())
+    {
+        return;
+    }
+    let pe = s.props.pointer_events;
+    let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
+    let slop = s.props.hit_slop;
+    let mapped = |x: f32, y: f32, w: f32, h: f32| to_root.bounds(x, y, w, h);
+    let mut push = |area: Option<Area>, within: Option<Area>| {
+        if let Some((x, y, w, h)) = area.and_then(|a| intersect(a, within))
+            && w > 0.0
+            && h > 0.0
+        {
+            out.push(crate::geom::rect(x, y, w, h));
+        }
+    };
+    let slopped = (
+        -slop.left.0,
+        -slop.top.0,
+        w + slop.left.0 + slop.right.0,
+        h + slop.top.0 + slop.bottom.0,
+    );
+    // A `clipPath` bounds the view, its hit slop and what is in it.
+    let limit = match s.style.clip_path() {
+        Some(clip) => {
+            let b = clip.resolve(s.frame.size).0;
+            let b = mapped(b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0);
+            match b.and_then(|b| intersect(b, limit)) {
+                Some(l) => Some(l),
+                None => return,
+            }
+        }
+        None => limit,
+    };
+    // The root is `box-none`.
+    if !root && pe != PointerEvents::BoxNone {
+        push(mapped(slopped.0, slopped.1, slopped.2, slopped.3), limit);
+    }
+    let frame = mapped(0.0, 0.0, w, h);
+    let clipped = s.clips() || s.style.clip_path().is_some();
+    // Hosted items, drawn above the children and clipped with them.
+    for native in &s.natives {
+        let r = native.rect;
+        let within = if clipped {
+            frame.and_then(|f| intersect(f, limit))
+        } else {
+            limit
+        };
+        push(
+            mapped(r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
+            within,
+        );
+    }
+    if pe == PointerEvents::BoxOnly {
+        return;
+    }
+    // Where its children are looked into ([`input::hit_area`]); a bound
+    // that cannot be mapped (behind the viewer) lets nothing in.
+    let bound = if clipped {
+        Some(frame)
+    } else if laid_out(s.kind, s.id) {
+        let around = match s.overflow {
+            Some(o) => union(
+                slopped,
+                (o.origin.x.0, o.origin.y.0, o.size.width.0, o.size.height.0),
+            ),
+            None => slopped,
+        };
+        Some(mapped(around.0, around.1, around.2, around.3))
+    } else {
+        None
+    };
+    let limit = match bound {
+        None => limit,
+        Some(bound) => match bound.and_then(|b| intersect(b, limit)) {
+            Some(l) => Some(l),
+            None => return,
+        },
+    };
+    view.with_children(|kids| {
+        for child in kids {
+            let m = {
+                let c = child.state();
+                s.child_matrix(&c)
+            };
+            rects_in(
+                child,
+                &crate::geom::Mat4::mul(&m, to_root),
+                limit,
+                false,
+                out,
+            );
+        }
+    });
+}
+
+/// `a` within `b` (`None`: no bound), if they overlap.
+fn intersect(a: Area, b: Option<Area>) -> Option<Area> {
+    let Some(b) = b else { return Some(a) };
+    let x = a.0.max(b.0);
+    let y = a.1.max(b.1);
+    let right = (a.0 + a.2).min(b.0 + b.2);
+    let bottom = (a.1 + a.3).min(b.1 + b.3);
+    (right > x && bottom > y).then_some((x, y, right - x, bottom - y))
+}
+
+/// The box around `a` and `b`.
+fn union(a: Area, b: Area) -> Area {
+    let x = a.0.min(b.0);
+    let y = a.1.min(b.1);
+    let right = (a.0 + a.2).max(b.0 + b.2);
+    let bottom = (a.1 + a.3).max(b.1 + b.3);
+    (x, y, right - x, bottom - y)
+}
+
 /// What is under a point.
 struct Hit {
     /// The innermost view.
@@ -3709,6 +3850,89 @@ mod tests {
         };
         assert!(takes_pointer(&root, 200.0, 85.0));
         assert!(!takes_pointer(&root, 200.0, 95.0));
+    }
+
+    /// Whether `rects` hold `(x, y)`.
+    fn in_rects(rects: &[nsh_core::Bounds<Points>], x: f32, y: f32) -> bool {
+        rects.iter().any(|r| {
+            x >= r.origin.x.0
+                && y >= r.origin.y.0
+                && x < r.origin.x.0 + r.size.width.0
+                && y < r.origin.y.0 + r.size.height.0
+        })
+    }
+
+    #[test]
+    fn a_box_none_windows_rects_are_where_it_takes_the_pointer() {
+        let root = root();
+        // A `box-none` container filling the window, holding a panel with a
+        // hit slop and a button inside it.
+        let fill = view(&root, 2, ViewKind::View, rect(0.0, 0.0, 400.0, 400.0));
+        fill.state_mut().props.pointer_events = PointerEvents::BoxNone;
+        let panel = view(&fill, 4, ViewKind::View, rect(100.0, 20.0, 200.0, 80.0));
+        panel.state_mut().props.hit_slop = EdgeInsets {
+            bottom: Points(10.0),
+            ..Default::default()
+        };
+        view(&panel, 6, ViewKind::View, rect(10.0, 10.0, 40.0, 40.0));
+        // A menu clipped by its parent, which `overflow: hidden` cuts at
+        // its bottom edge.
+        let clip = view(&fill, 8, ViewKind::View, rect(20.0, 200.0, 100.0, 50.0));
+        clip.state_mut().style.overflow_hidden = true;
+        view(&clip, 10, ViewKind::View, rect(0.0, 30.0, 100.0, 100.0));
+        // A dropdown below its field, reached through the overflow area.
+        let field = view(&fill, 12, ViewKind::View, rect(200.0, 200.0, 100.0, 30.0));
+        field.state_mut().overflow = Some(rect(0.0, 0.0, 100.0, 90.0));
+        view(&field, 14, ViewKind::View, rect(0.0, 30.0, 100.0, 60.0));
+        // `box-only`: what is in it outside it takes nothing.
+        let only = view(&fill, 16, ViewKind::View, rect(20.0, 300.0, 50.0, 50.0));
+        only.state_mut().props.pointer_events = PointerEvents::BoxOnly;
+        view(&only, 18, ViewKind::View, rect(60.0, 0.0, 50.0, 50.0));
+        // Hidden and `none` views take nothing.
+        let hidden = view(&fill, 20, ViewKind::View, rect(300.0, 300.0, 50.0, 50.0));
+        hidden.state_mut().style.hidden = true;
+        let none = view(&fill, 22, ViewKind::View, rect(200.0, 330.0, 50.0, 50.0));
+        none.state_mut().props.pointer_events = PointerEvents::None;
+        // A `clipPath` inset by 10 cuts the view and what is in it.
+        let cut = view(&fill, 24, ViewKind::View, rect(320.0, 20.0, 60.0, 60.0));
+        cut.state_mut().style.effects = Some(std::sync::Arc::new(nsh_core::Effects {
+            clip_path: Some(nsh_core::ClipInset::new().inset(Points(10.0))),
+            ..Default::default()
+        }));
+        view(&cut, 26, ViewKind::View, rect(0.0, 40.0, 60.0, 60.0));
+        let rects = pointer_rects(&root);
+        // The rectangles are exactly where a press is taken.
+        for y in (0..400).step_by(5) {
+            for x in (0..400).step_by(5) {
+                let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+                assert_eq!(
+                    in_rects(&rects, x, y),
+                    takes_pointer(&root, x, y),
+                    "at ({x}, {y})"
+                );
+            }
+        }
+        assert!(in_rects(&rects, 150.0, 105.0), "the panel's hit slop");
+        assert!(!in_rects(&rects, 50.0, 260.0), "clipped by its parent");
+        assert!(in_rects(&rects, 250.0, 280.0), "in the overflow area");
+        assert!(!in_rects(&rects, 100.0, 320.0), "outside a box-only view");
+        assert!(!in_rects(&rects, 325.0, 50.0), "outside a clip path");
+        assert!(!in_rects(&rects, 350.0, 100.0), "below a clip path");
+        assert!(in_rects(&rects, 350.0, 50.0), "inside a clip path");
+    }
+
+    #[test]
+    fn a_transformed_view_counts_by_its_bounds() {
+        let root = root();
+        // Scaled around its center: 50..150 becomes 0..200.
+        let a = view(&root, 2, ViewKind::View, rect(50.0, 50.0, 100.0, 100.0));
+        a.state_mut()
+            .style
+            .transform
+            .push(TransformKind::Scale, 2.0);
+        let rects = pointer_rects(&root);
+        assert_eq!(rects, vec![rect(0.0, 0.0, 200.0, 200.0)]);
+        assert!(takes_pointer(&root, 10.0, 10.0));
     }
 
     #[test]

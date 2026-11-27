@@ -327,7 +327,7 @@ pub(crate) struct AppWindow {
     /// It was active since it last showed (losing the focus closes it with
     /// `closeOnBlur` only then).
     active_once: bool,
-    /// It lets the pointer through (an empty input region).
+    /// It lets the pointer through somewhere (an input region of its own).
     no_input: bool,
     /// When it last showed activated (a count): the newest is the key
     /// window when the system tells none.
@@ -347,7 +347,7 @@ pub(crate) struct MainWindow {
     closing: bool,
     /// The displays are followed.
     displays_watched: bool,
-    /// It lets the pointer through (an empty input region).
+    /// It lets the pointer through somewhere (an input region of its own).
     no_input: bool,
     /// Its state when GTK last had a size for it: where a hidden window
     /// was left, as GTK drops a hidden widget's size (and on X11 the window
@@ -845,6 +845,22 @@ fn resize(surface: &Surface, view: &NshView, width: f32, height: f32) {
 
 /// A batch was mounted: the windows whose first frame it holds show.
 pub(crate) fn batch_applied(surface: &Rc<Surface>) {
+    // The batch moved the views a `"box-none"` window takes the pointer
+    // over.
+    let box_none = |a: &WindowAttributes| a.pointer_events == Some(WindowPointerEvents::BoxNone);
+    if box_none(&surface.main_window.borrow().attributes) {
+        pass_pointer(surface, ROOT_ID);
+    }
+    let windows: Vec<NodeId> = surface
+        .windows
+        .borrow()
+        .iter()
+        .filter(|(_, w)| box_none(&w.attributes))
+        .map(|(id, _)| *id)
+        .collect();
+    for id in windows {
+        pass_pointer(surface, id);
+    }
     let ready: Vec<NodeId> = {
         let mut windows = surface.windows.borrow_mut();
         if windows.is_empty() {
@@ -1301,42 +1317,85 @@ fn decoration_layout(layout: &str, minimize: bool, maximize: bool, close: bool) 
         .join(":")
 }
 
-/// Lets the pointer through window `id` (`pointerEvents: "none"`) with an
-/// empty input region, or gives it back.
+/// Lets the pointer through window `id` where it takes none, with its
+/// input region: everywhere (`pointerEvents: "none"`, an empty region) or
+/// outside the views that take it (`"box-none"`, [`input_region`]); or
+/// gives it back.
 fn pass_pointer(surface: &Surface, id: NodeId) {
-    let none = |a: &WindowAttributes| a.pointer_events == Some(WindowPointerEvents::None);
-    // Whether it lets the pointer through, and whether it did.
-    let (window, none, was) = if id == ROOT_ID {
+    // How it lets the pointer through (`Some(box-none)`), and whether it did.
+    let mode = |a: &WindowAttributes| {
+        a.passes_pointer()
+            .then_some(a.pointer_events == Some(WindowPointerEvents::BoxNone))
+    };
+    let (window, mode, was) = if id == ROOT_ID {
         let Some(window) = main_window(surface) else {
             return;
         };
         let mut main = surface.main_window.borrow_mut();
-        let now = none(&main.attributes);
-        (window, now, std::mem::replace(&mut main.no_input, now))
+        let now = mode(&main.attributes);
+        (
+            window,
+            now,
+            std::mem::replace(&mut main.no_input, now.is_some()),
+        )
     } else {
         let mut windows = surface.windows.borrow_mut();
         let Some(w) = windows.get_mut(&id) else {
             return;
         };
-        let now = none(&w.attributes);
+        let now = mode(&w.attributes);
         (
             w.window.clone(),
             now,
-            std::mem::replace(&mut w.no_input, now),
+            std::mem::replace(&mut w.no_input, now.is_some()),
         )
     };
     let Some(gdk_surface) = window.surface() else {
         return;
     };
-    if none {
+    match mode {
         // Again after every allocation: GTK sets the surface's input
         // region itself (client-side shadows).
-        gdk_surface.set_input_region(Some(&cairo::Region::create()));
-    } else if was {
-        gdk_surface.set_input_region(None);
-        // GTK sets its own again at the next allocation.
-        window.queue_resize();
+        Some(box_none) => {
+            let region = if box_none {
+                input_region(surface, id, &window)
+            } else {
+                cairo::Region::create()
+            };
+            gdk_surface.set_input_region(Some(&region));
+        }
+        None if was => {
+            gdk_surface.set_input_region(None);
+            // GTK sets its own again at the next allocation.
+            window.queue_resize();
+        }
+        None => {}
     }
+}
+
+/// The input region (surface coordinates) of `"box-none"` window `id`
+/// (`window`): where a view in its root takes the pointer
+/// ([`crate::input::pointer_rects`]), out to whole pixels.
+fn input_region(surface: &Surface, id: NodeId, window: &gtk::Window) -> cairo::Region {
+    let Some(root) = root_view(surface, id) else {
+        return cairo::Region::create();
+    };
+    let Some(to_window) = root.compute_transform(window) else {
+        return cairo::Region::create();
+    };
+    let (sx, sy) = window.surface_transform();
+    let rects: Vec<cairo::RectangleInt> = crate::input::pointer_rects(&root)
+        .iter()
+        .map(|r| {
+            let b = to_window.transform_bounds(r);
+            let x = (b.x() as f64 + sx).floor();
+            let y = (b.y() as f64 + sy).floor();
+            let right = (b.x() as f64 + b.width() as f64 + sx).ceil();
+            let bottom = (b.y() as f64 + b.height() as f64 + sy).ceil();
+            cairo::RectangleInt::new(x as i32, y as i32, (right - x) as i32, (bottom - y) as i32)
+        })
+        .collect();
+    cairo::Region::create_rectangles(&rects)
 }
 
 // --- Requests ---------------------------------------------------------------------------

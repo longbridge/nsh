@@ -482,6 +482,12 @@ impl Chrome {
         self.attributes.borrow().close_on_press.unwrap_or(true)
     }
 
+    /// Whether the surface fills a window of its own; else it is embedded
+    /// in a window its host owns.
+    pub(crate) fn standalone(&self) -> bool {
+        self.standalone.get()
+    }
+
     /// The GPUI window, when the surface fills one of its own.
     pub(crate) fn window(&self) -> Option<AnyWindowHandle> {
         self.standalone.get().then(|| self.window.get()).flatten()
