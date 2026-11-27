@@ -38,7 +38,7 @@ use nsh_core::mobile::{TabBarItem, tab_bar};
 
 这个模块提供移动平台专属的能力，例如用于应用顶层导航的系统标签栏。通用控件属于 [`nsh/base`](./nsh-base.md)：例如 [Switch](../elements/switch.md) 在手机、桌面和 Web 上共享行为与 API，轨道、滑块和各状态的样式由应用提供。`TabBar` 服务于移动应用导航，`Tabs` 服务于跨平台的标签内容切换。这个模块仅接受具有移动平台专属交互语义的能力。系统外观、尺寸或动画本身仍属于通用控件的共享职责。这个职责区别决定哪些能力适合放在这里（[目标与设计原则](../docs/goals.md)）。
 
-系统自己的分段控件、开关和日期时间选择器在 [nshm](../docs/nshm.md) [nsh-system-controls](https://github.com/longbridge/nsh-system-controls) 中：用 `nsh add github:longbridge/nsh-system-controls` 添加，把 `SegmentedControl`、`Switch` 和 `DateTimePicker` 的导入从 `"nsh/mobile"` 改为 `"nsh-system-controls"`。要在所有平台上使用应用自己外观的控件，用 `nsh/base` 的 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md)、[Switch](../elements/switch.md)，以及 [DatePicker](../elements/date-picker.md) 或 [TimeField](../elements/time-field.md)。
+系统自己的分段控件、开关和日期时间选择器在 [nshm](../docs/nshm.md) [nsh-system-controls](https://github.com/longbridge/nsh-system-controls) 中：用 `nsh add nsh-system-controls` 添加，把 `SegmentedControl`、`Switch` 和 `DateTimePicker` 的导入从 `"nsh/mobile"` 改为 `"nsh-system-controls"`。要在所有平台上使用应用自己外观的控件，用 `nsh/base` 的 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md)、[Switch](../elements/switch.md)，以及 [DatePicker](../elements/date-picker.md) 或 [TimeField](../elements/time-field.md)。
 
 ## isAvailable
 
