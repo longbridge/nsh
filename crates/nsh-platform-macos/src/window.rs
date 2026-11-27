@@ -440,7 +440,9 @@ pub(crate) struct AppWindow {
     /// It takes its parent's input while it shows.
     modal: bool,
     held: Held,
-    watch: Watch,
+    /// Shared, so a mode or a placement applies outside the borrow of the
+    /// surface's windows ([`with_watch`]).
+    watch: Rc<Watch>,
     /// The size last reported to the core.
     reported: Cell<Option<Size<Points>>>,
     /// The state last reported to the app.
@@ -763,14 +765,17 @@ pub(crate) fn window_of(surface: &Surface, id: NodeId) -> Option<Retained<NSWind
         .map(|w| w.window.clone())
 }
 
-/// `f` with the watch of window `id`.
+/// `f` with the watch of window `id`, outside the borrow of the surface's
+/// windows: a zoom or a full screen transition `f` starts resizes the
+/// window within the call, and that resize waits for the layout at the new
+/// size only while the windows are not borrowed ([`Surface::await_layout`]).
 pub(crate) fn with_watch<R>(
     surface: &Surface,
     id: NodeId,
     f: impl FnOnce(&Watch) -> R,
 ) -> Option<R> {
-    let windows = surface.windows.try_borrow().ok()?;
-    windows.get(&id).map(|w| f(&w.watch))
+    let watch = surface.windows.try_borrow().ok()?.get(&id)?.watch.clone();
+    Some(f(&watch))
 }
 
 /// `f` with the title bar of window `id` (the main window's for the root).
@@ -1170,6 +1175,27 @@ fn set_look(
 
 /// A request to window `id`.
 fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
+    // A mode or a placement asked for by a batch, which holds the mounter,
+    // waits for the main queue's next turn. Leaving full screen, AppKit
+    // resizes the window within `toggleFullScreen:`: in the batch, that
+    // resize could not wait for the layout at the windowed size
+    // (`Surface::await_layout`), and the shrink animation showed the full
+    // screen content (#3494). A zoom runs its animation's run loop within
+    // `zoom:` (#3175).
+    if matches!(
+        request,
+        WindowRequest::SetMode(_) | WindowRequest::SetPlacement(_)
+    ) && surface.mounter.try_borrow_mut().is_err()
+    {
+        let key = surface.key();
+        let request = request.clone();
+        DispatchQueue::main().exec_async(move || {
+            if let Some(surface) = Surface::with_key(key) {
+                self::request(&surface, id, &request);
+            }
+        });
+        return;
+    }
     let Some(window) = window_of(surface, id) else {
         return log::debug!("window: no window for {id}");
     };
@@ -1519,7 +1545,7 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
             parent,
             modal: options.modal && parent.is_some(),
             held,
-            watch: Watch::default(),
+            watch: Rc::default(),
             reported: Cell::new(None),
             state: Cell::new(None),
             title_bar_area: Cell::new(None),
