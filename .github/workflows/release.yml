@@ -178,11 +178,15 @@ jobs:
           xcodebuild -version
           # Catalyst uses the macOS SDK's iOSSupport. Check all three before
           # spending time building, even if the runner's default Xcode changes.
+          # Before Xcode 26 the macOS SDK is numbered 3 below the iOS SDK
+          # (Xcode 16.4: iOS 18.5, macOS 15.5).
           for sdk in iphoneos iphonesimulator macosx; do
             version=$(xcrun --sdk "$sdk" --show-sdk-version)
             echo "$sdk SDK: $version ($(xcrun --sdk "$sdk" --show-sdk-path))"
-            if (( ${version%%.*} < ${{ matrix.ios_sdk }} )); then
-              echo "::error::$sdk SDK ${{ matrix.ios_sdk }} or newer is required for the iOS distribution"
+            min=${{ matrix.ios_sdk }}
+            if [[ $sdk == macosx ]] && (( min < 26 )); then min=$((min - 3)); fi
+            if (( ${version%%.*} < min )); then
+              echo "::error::$sdk SDK $min or newer is required for the iOS distribution"
               exit 1
             fi
           done
