@@ -2662,6 +2662,11 @@ expect Week
 prop label:Week role button
 style label:Week backgroundColor #00ff00ff
 style parent:label:Week backgroundColor #0000ffff
+# Its description: a second line in the look of its own part, which
+# screen readers read after the label.
+expect Oct 19-25
+prop label:Week accessibilityDescription Oct 19-25
+style text:"Oct 19-25" color #ff0000ff
 tap label:Week
 expect Trip: ["2026-10-19","2026-10-25"]
 absent Week
@@ -2672,6 +2677,7 @@ covers [props] DatePicker.itemClass
 covers [props] DatePicker.presets
 covers [props] DatePicker.presetsStyle
 covers [props] DatePicker.presetStyle
+covers [props] DatePicker.presetDescriptionStyle
 # A date and time (`timePrecision`) on a 12-hour clock (`hourCycle`):
 # heard with the time; the popup holds the app's label of the time and
 # the field's segments (`renderSegment`, `segmentStyle`).

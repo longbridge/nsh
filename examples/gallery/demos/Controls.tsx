@@ -1867,10 +1867,12 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     // The presets from today: the coming weekend, the next week and month.
     const today = new Date();
     const saturday = addDays(today, (6 - today.getDay() + 7) % 7);
+    // Each with the dates it stands for under its label.
+    const span = (label: string, start: Date, end: Date): DateRangePreset => ({ label, value: [iso(start), iso(end)], description: `${monthDay(iso(start))} – ${monthDay(iso(end))}` });
     const trips: DateRangePreset[] = [
-      { label: "Weekend", value: [iso(saturday), iso(addDays(saturday, 1))] },
-      { label: "Next 7 days", value: [iso(today), iso(addDays(today, 6))] },
-      { label: "Next 30 days", value: [iso(today), iso(addDays(today, 29))] },
+      span("Weekend", saturday, addDays(saturday, 1)),
+      span("Next 7 days", today, addDays(today, 6)),
+      span("Next 30 days", today, addDays(today, 29)),
     ];
     const tripTitle = () => {
       const r = trip();
@@ -1930,6 +1932,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               contentStyle={content}
               presetsStyle={calendarLook.presets}
               presetStyle={calendarLook.preset}
+              presetDescriptionStyle={calendarLook.presetDescription}
               presetClass={calendarLook.presetClass}
               calendarStyle={calendar}
               headerStyle={header}
