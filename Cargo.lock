@@ -4306,6 +4306,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-windows-linked"
+version = "0.7.1"
+dependencies = [
+ "nsh-core",
+ "nsh-windows-core",
+ "nsh-windows-editor",
+ "nsh-windows-plot",
+]
+
+[[package]]
 name = "nsh-windows-plot"
 version = "0.7.1"
 dependencies = [

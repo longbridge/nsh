@@ -10,7 +10,7 @@ publish = false
 workspace = true
 
 [lib]
-crate-type = ["dylib"]
+crate-type = ["dylib", "rlib"]
 
 [target.'cfg(windows)'.dependencies]
 nsh-windows-core = { path = "../nsh-windows-core" }
