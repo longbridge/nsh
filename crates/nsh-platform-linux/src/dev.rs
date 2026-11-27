@@ -282,6 +282,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             source_map,
             capabilities,
             app_id,
+            url_schemes,
             limits,
             window,
             application,
@@ -312,6 +313,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             bundle = match bundle
                 .with_main_window(window.as_deref())
                 .with_application(application.as_deref())
+                .with_url_schemes(url_schemes)
                 .with_app_id(app_id.as_deref())
                 .with_capabilities_json(capabilities.as_deref())
             {

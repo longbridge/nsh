@@ -316,6 +316,7 @@ impl DevSession {
                         built.source_map,
                         nsh_dev::AppInfo {
                             capabilities,
+                            url_schemes: built.url_schemes,
                             id: crate::package::app_id(&self.entry).ok(),
                             window: crate::package::window_json(&self.entry),
                             application: crate::package::application_json(&self.entry),
@@ -359,6 +360,7 @@ impl DevSession {
                     built.source_map,
                     nsh_dev::AppInfo {
                         capabilities,
+                        url_schemes: built.url_schemes,
                         id: crate::package::app_id(&self.entry).ok(),
                         window: crate::package::window_json(&self.entry),
                         application: crate::package::application_json(&self.entry),
