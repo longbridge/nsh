@@ -9,6 +9,7 @@
 
 use std::{
     fs::{self, File, TryLockError},
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant},
@@ -46,12 +47,15 @@ impl Session {
         Ok(Some(session.owned(&dir, port, &identity(app), stop)?))
     }
 
-    /// Owns the port of `app`'s last session or the first free one, returning
-    /// it. With every port in the range taken, the OS allocates one.
-    pub(crate) fn acquire_free(app: &Path) -> anyhow::Result<(Option<Self>, u16)> {
+    /// Owns the port of `app`'s last session or the first one free at `host`,
+    /// the address the dev server will listen on, returning it. With every
+    /// port in the range taken, the OS allocates one.
+    pub(crate) fn acquire_free(app: &Path, host: Ipv4Addr) -> anyhow::Result<(Option<Self>, u16)> {
+        listenable(host)?;
         let dir = crate::check::cache()?.join("dev-sessions");
         let app = &identity(app);
-        match Self::free_in_dir(&dir, DEFAULT_PORT, app, WAIT, port_is_free)? {
+        let is_free = |port| port_is_free(host, port);
+        match Self::free_in_dir(&dir, DEFAULT_PORT, app, WAIT, is_free)? {
             Some((session, port, stop)) => Ok((Some(session.owned(&dir, port, app, stop)?), port)),
             None => Ok((None, 0)),
         }
@@ -164,9 +168,21 @@ fn app_file(dir: &Path, port: u16) -> PathBuf {
     dir.join(format!("{port}.app"))
 }
 
-/// Whether a dev server could listen on `port`, on any address.
-fn port_is_free(port: u16) -> bool {
-    std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
+/// Fails for an address this machine cannot listen at (a mistyped `--host`),
+/// which fails at every port alike: the probe of each would say it is taken,
+/// and the server would fall back to the OS's port and fail there.
+fn listenable(host: Ipv4Addr) -> anyhow::Result<()> {
+    std::net::TcpListener::bind((host, 0))
+        .map(drop)
+        .with_context(|| format!("the dev server cannot listen at {host}"))
+}
+
+/// Whether a dev server could listen on `port` at `host`, the address it
+/// will listen on. Listening on every interface for a server that will
+/// listen on loopback only, even briefly, makes Windows Defender Firewall
+/// ask the user to let each new `nsh` executable on the network.
+fn port_is_free(host: Ipv4Addr, port: u16) -> bool {
+    std::net::TcpListener::bind((host, port)).is_ok()
 }
 
 fn open(path: &Path) -> anyhow::Result<File> {
@@ -210,6 +226,29 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// A port is probed at the address the server will listen on: a local
+    /// server's is loopback, so the probe never listens on every interface.
+    #[test]
+    fn a_port_is_free_at_the_address_the_server_listens_on() {
+        let held = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        assert!(!port_is_free(Ipv4Addr::LOCALHOST, port));
+        drop(held);
+        assert!(port_is_free(Ipv4Addr::LOCALHOST, port));
+    }
+
+    /// An address no machine has (TEST-NET-1) is refused before any port is
+    /// probed; loopback is not.
+    #[test]
+    fn an_address_this_machine_lacks_is_refused_at_once() {
+        let err = listenable(Ipv4Addr::new(192, 0, 2, 1)).unwrap_err();
+        assert!(
+            err.to_string().contains("cannot listen at 192.0.2.1"),
+            "{err}"
+        );
+        listenable(Ipv4Addr::LOCALHOST).unwrap();
     }
 
     #[test]

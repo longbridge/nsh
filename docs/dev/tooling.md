@@ -127,7 +127,10 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
   8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. By default `nsh run` and `nsh dev`
   bind to loopback, and `--target ios`, `android` or `web` and `nsh dev --server-only` bind to every address for other
-  machines (`dev::Listen`, `run::Target::uses_network`). `nsh dev --host <IPV4>` overrides the bind address (for example
+  machines (`dev::Listen`, `run::Target::uses_network`, decided in `main.rs`'s `dev_listen`). A port is free when the
+  server could listen on it at that address: a loopback server's port is probed on loopback, since listening on every
+  address, even for a probe, makes Windows Defender Firewall ask to let each new `nsh` executable on the network
+  (`dev_port::port_is_free`). `nsh dev --host <IPV4>` overrides the bind address (for example
   `nsh dev --server-only --host 127.0.0.1` for loopback only); with `--target android`, only `127.0.0.1` and `0.0.0.0`
   are accepted because `adb reverse` forwards the device's `127.0.0.1` to host `127.0.0.1`, and `run_android` passes
   `DevSession::loopback_url()`.
