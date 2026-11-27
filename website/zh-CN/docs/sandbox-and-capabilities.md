@@ -284,7 +284,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 | `kinds` | `string[]` | 可以打开的种类：`"normal"`、`"dialog"`、`"panel"`、`"popup"`、`"overlay"`。缺省：除 `"overlay"` 外的所有种类。 |
 | `levels` | `string[]` | 窗口可以使用的层级：`"normal"`、`"floating"`、`"aboveDock"`、`"desktopIcon"`。缺省：所有层级。 |
 | `max` | `number` | 同时可以打开的自己的窗口数，包含第一个窗口。缺省：不限。 |
-| `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+| `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"` 或 `"box-none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
 `overlay` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面。每个窗口都需要授权，第一个窗口也不例外：没有特权窗口。
 

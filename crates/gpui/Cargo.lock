@@ -5801,6 +5801,7 @@ dependencies = [
  "accesskit_consumer",
  "anyhow",
  "base64 0.22.1",
+ "block2 0.6.2",
  "crossbeam-channel",
  "fontdb 0.23.0",
  "futures-channel",

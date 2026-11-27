@@ -141,6 +141,9 @@ pub(crate) struct Surface {
     /// What the main window keeps: its attributes, its state's
     /// bookkeeping ([`crate::window`]).
     pub(crate) main_window: RefCell<crate::window::MainWindow>,
+    /// The surface is [`crate::run_app`]'s: the standalone app's, filling a
+    /// window of its own, not one embedded in another app's.
+    pub(crate) standalone: Cell<bool>,
     /// The view the screen reader's focus is on while the keyboard focus
     /// is elsewhere ([`crate::access::focus`]).
     pub(crate) reader_focus: RefCell<glib::WeakRef<NshView>>,
@@ -280,6 +283,7 @@ impl Surface {
             nav: RefCell::default(),
             windows: RefCell::default(),
             main_window: RefCell::default(),
+            standalone: Cell::new(false),
             reader_focus: RefCell::default(),
             input: Default::default(),
             file_drop: Default::default(),
@@ -387,13 +391,11 @@ impl Surface {
     }
 
     /// Its key ([`Surface::by_key`]).
-    #[cfg(feature = "dev")]
     pub(crate) fn key(&self) -> u64 {
         self.key
     }
 
     /// The surface `key` names, while it exists.
-    #[cfg(feature = "dev")]
     pub(crate) fn by_key(key: u64) -> Option<Rc<Surface>> {
         SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
     }

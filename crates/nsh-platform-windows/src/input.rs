@@ -1523,6 +1523,13 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
     }
 }
 
+/// Whether a press at `(x, y)` (root coordinates) lands on a view in
+/// `root` that takes it, the root aside, as if it were `box-none`: where a
+/// window whose `pointerEvents` is `"box-none"` takes the pointer.
+pub(crate) fn takes_pointer(root: &NshView, x: f32, y: f32) -> bool {
+    pick(root, x, y, true).is_some_and(|hit| hit.item.is_some() || hit.view.id() != root.id())
+}
+
 /// The innermost view at `(x, y)` (root coordinates); hosted items are
 /// looked at only with `items`.
 fn pick(root: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
@@ -3299,6 +3306,39 @@ mod tests {
         assert_eq!(at(&root, 25.0, 25.0), Some(2));
         a.state_mut().props.pointer_events = PointerEvents::None;
         assert_eq!(at(&root, 25.0, 25.0), Some(ROOT_ID));
+    }
+
+    #[test]
+    fn a_box_none_window_takes_the_pointer_over_its_views_only() {
+        let root = root();
+        // A panel at the top of a window larger than it.
+        let panel = view(&root, 2, ViewKind::View, rect(100.0, 0.0, 200.0, 80.0));
+        view(&panel, 4, ViewKind::View, rect(10.0, 10.0, 40.0, 40.0));
+        assert!(takes_pointer(&root, 120.0, 20.0));
+        assert!(takes_pointer(&root, 250.0, 60.0));
+        // Below and beside it: the root's own, so nothing.
+        assert!(!takes_pointer(&root, 200.0, 200.0));
+        assert!(!takes_pointer(&root, 20.0, 20.0));
+        // A view filling the root takes it, as in a `box-none` view, unless
+        // it is `box-none` itself.
+        let fill = view(&root, 6, ViewKind::View, rect(0.0, 0.0, 400.0, 400.0));
+        assert!(takes_pointer(&root, 200.0, 200.0));
+        fill.state_mut().props.pointer_events = PointerEvents::BoxNone;
+        assert!(!takes_pointer(&root, 200.0, 200.0));
+        // Views the pointer cannot reach take nothing.
+        let hidden = view(&fill, 8, ViewKind::View, rect(0.0, 300.0, 100.0, 100.0));
+        hidden.state_mut().style.hidden = true;
+        let none = view(&fill, 10, ViewKind::View, rect(200.0, 300.0, 100.0, 100.0));
+        none.state_mut().props.pointer_events = PointerEvents::None;
+        assert!(!takes_pointer(&root, 50.0, 350.0));
+        assert!(!takes_pointer(&root, 250.0, 350.0));
+        // The panel's hit slop reaches past its frame.
+        panel.state_mut().props.hit_slop = EdgeInsets {
+            bottom: Points(10.0),
+            ..Default::default()
+        };
+        assert!(takes_pointer(&root, 200.0, 85.0));
+        assert!(!takes_pointer(&root, 200.0, 95.0));
     }
 
     #[test]
