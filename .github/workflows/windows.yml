@@ -202,6 +202,7 @@ jobs:
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
       RUST_MIN_STACK: "268435456"
+      LLVM_MINGW_VERSION: "20261117"
       LLVM_MINGW: llvm-mingw-20261117-ucrt-x86_64
     steps:
       - uses: actions/checkout@v6
@@ -230,7 +231,7 @@ jobs:
         shell: bash
         run: |
           curl -sSfL -o "$RUNNER_TEMP/llvm-mingw.zip" \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW#llvm-mingw-}/$LLVM_MINGW.zip"
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$LLVM_MINGW.zip"
           unzip -q "$RUNNER_TEMP/llvm-mingw.zip" -d "$RUNNER_TEMP"
           m="$(cygpath -m "$RUNNER_TEMP/$LLVM_MINGW")"
           echo "$m/bin" >> "$GITHUB_PATH"
