@@ -353,8 +353,8 @@ document keeps no language, so collaborators and saved content see no change.
 
 In Rust it is `kit::code_block_highlight()`, part of `kit::starter_kit()` and of `starter::plugins`.
 `kit::code_block_highlight_with(options)` also takes `CodeBlockHighlightOptions`: `default_language`, and
-`detect_language`, the app's own guess of a block's language from its code, as Tiptap's `CodeBlockLowlight` guesses one
-when no `defaultLanguage` is set. A block's own `language` comes first, then `detect_language`, then
+`detect_language` (an `Arc<dyn Fn(&str) -> Option<String> + Send + Sync>`), the app's own guess of a block's language
+from its code, as Tiptap's `CodeBlockLowlight` guesses one when no `defaultLanguage` is set. A block's own `language` comes first, then `detect_language`, then
 `default_language`; when none gives one, the block stays plain. `detect_language` is asked once each time an unlabelled
 block's code changes, on the engine thread, so keep it quick. It is Rust only: functions in a built-in extension's TSX
 options would run JS while typing.

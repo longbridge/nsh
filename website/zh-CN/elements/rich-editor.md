@@ -250,7 +250,7 @@ editor.run(command("toggleBold"));
 
 没写语言的代码块不着色，除非扩展替它指定一种语言。`defaultLanguage`（Tiptap 的同名选项）给所有这样的代码块指定语言：`CodeBlockHighlight.configure({ defaultLanguage: "rust" })`，或 `StarterKit.configure({ codeBlockHighlight: { defaultLanguage: "rust" } })`。这个语言只用于着色，不写进文档，协作者和保存的内容都看不到变化。
 
-Rust 里是 `kit::code_block_highlight()`，包含在 `kit::starter_kit()` 和 `starter::plugins` 里。`kit::code_block_highlight_with(options)` 还接受 `CodeBlockHighlightOptions`：`default_language`，以及 `detect_language`，即应用自己按代码内容猜代码块的语言，相当于 Tiptap 的 `CodeBlockLowlight` 在没设 `defaultLanguage` 时做的自动识别。优先级依次是代码块自己的 `language`、`detect_language`、`default_language`；都没有给出语言时，代码块不着色。没写语言的代码块每次代码变化时调用一次 `detect_language`，在引擎线程上执行，所以要保持很快。它只在 Rust 里提供：内置扩展的 TSX 选项里如果放函数，打字时就要执行 JS。
+Rust 里是 `kit::code_block_highlight()`，包含在 `kit::starter_kit()` 和 `starter::plugins` 里。`kit::code_block_highlight_with(options)` 还接受 `CodeBlockHighlightOptions`：`default_language`，以及 `detect_language`（`Arc<dyn Fn(&str) -> Option<String> + Send + Sync>`），即应用自己按代码内容猜代码块的语言，相当于 Tiptap 的 `CodeBlockLowlight` 在没设 `defaultLanguage` 时做的自动识别。优先级依次是代码块自己的 `language`、`detect_language`、`default_language`；都没有给出语言时，代码块不着色。没写语言的代码块每次代码变化时调用一次 `detect_language`，在引擎线程上执行，所以要保持很快。它只在 Rust 里提供：内置扩展的 TSX 选项里如果放函数，打字时就要执行 JS。
 
 ```rust
 let mut options = CodeBlockHighlightOptions::default();

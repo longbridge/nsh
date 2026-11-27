@@ -19,10 +19,6 @@ use crate::rich_editor::{
 /// The key of [`code_block_highlight_plugin`].
 pub const CODE_BLOCK_HIGHLIGHT: &str = "codeBlockHighlight";
 
-/// Names the language to color a code block's code as, from its code
-/// (`None`: none).
-pub type LanguageDetector = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
 /// The options of the `codeBlockHighlight` extension
 /// (`kit::code_block_highlight_with`): the language a code block that
 /// names none is colored as. It is the view's, never written to the
@@ -40,7 +36,10 @@ pub struct CodeBlockHighlightOptions {
     /// app's own guess). Called on the engine thread while the block is
     /// drawn, once each time such a block's code changes; `None` falls
     /// back to `default_language`. Default none.
-    pub detect_language: Option<LanguageDetector>,
+    // Spelled out rather than behind a public alias: the options are the
+    // extension's only public surface.
+    #[allow(clippy::type_complexity)]
+    pub detect_language: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
 }
 
 impl std::fmt::Debug for CodeBlockHighlightOptions {
