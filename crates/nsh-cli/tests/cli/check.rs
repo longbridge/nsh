@@ -189,3 +189,78 @@ mount(() => (
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "{stderr}\n{stdout}");
 }
+
+#[test]
+fn check_warns_of_inconsistent_locales() {
+    struct Directory(std::path::PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let dir = Directory(std::env::temp_dir().join(format!(
+        "nsh-cli-i18n-warn-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )));
+    let root = &dir.0;
+    fs::create_dir_all(root.join("locales")).unwrap();
+    fs::write(root.join("nsh.json"), "{\n  \"name\": \"I18nWarn\"\n}\n").unwrap();
+    fs::write(
+        root.join("App.tsx"),
+        "import { mount, Text } from 'nsh'; mount(() => <Text>Hello</Text>);",
+    )
+    .unwrap();
+    fs::write(root.join("tsconfig.json"), "{}").unwrap();
+    fs::write(
+        root.join("locales/en.yml"),
+        "hello: Hello\nbye: Goodbye\ngreet: \"Hello, %{name}!\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("locales/zh.yml"),
+        "hello: 你好\ngreet: \"你好，%{user}！\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("locales/zh-TW.yml"),
+        "hello: 哈囉\ngreet: \"你好！\"\n",
+    )
+    .unwrap();
+
+    let tsc = root.join("tsc");
+    fs::write(&tsc, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&tsc, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_nsh"))
+        .args(["check", "--tsc"])
+        .arg(&tsc)
+        .arg(root)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "{stderr}{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr.contains("locales: `zh` is missing 1 key: \"bye\""),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "locales: `zh` key \"greet\" has placeholders `%{user}` (expected `%{name}` from `en`)"
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "locales: `zh-TW` key \"greet\" has placeholders none (expected `%{name}` from `en`)"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("`zh-TW` is missing"), "{stderr}");
+}

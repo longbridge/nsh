@@ -1052,10 +1052,11 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     // (`read_config`), it says before the type check calls the app fine.
     // A Rust app's manifest is its describing's (`root_config`), which
     // refuses what it does not know.
-    if let Command::Check { entry, .. } = &command
-        && !rust_app::is_root(entry)
-    {
-        package::read_config(entry)?;
+    if let Command::Check { entry, .. } = &command {
+        if !rust_app::is_root(entry) {
+            package::read_config(entry)?;
+        }
+        check::warn_locales(entry);
     }
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
