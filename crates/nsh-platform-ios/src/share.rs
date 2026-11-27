@@ -144,26 +144,27 @@ impl Current {
     }
 }
 
-/// Shows the share sheet for `sheet` over the top controller of `root`'s
-/// window (the surface's root view), pointing at `anchor` (the anchor
-/// node's own view, in whatever modal it is) where it is a popover, and
+/// Shows the share sheet for `sheet` over the top controller of the
+/// window of the current surface's root view, pointing at the anchor
+/// node's own view (in whatever modal it is) where it is a popover, and
 /// answers request `id` once: when it closes, or at once when it cannot
 /// be presented. The surface's share sheet still showing (`current`) is
-/// closed first, with what its target presented over it.
-pub(crate) fn show(
-    id: u32,
-    sheet: &ShareSheet,
-    root: &UIView,
-    anchor: Option<&UIView>,
-    current: &Current,
-    control: &EngineControl,
-) {
+/// closed first, with what its target presented over it. Runs with the
+/// surface current ([`crate::presenting`]), and finds its views as a
+/// module's system UI does ([`crate::native_view`]).
+pub(crate) fn show(id: u32, sheet: &ShareSheet, current: &Current, control: &EngineControl) {
     let fail = |error: ShareError| {
         control.dispatch_event(ROOT_ID, EventKind::Share, error.payload(id));
     };
     let Some(mtm) = MainThreadMarker::new() else {
         return fail(ShareError::failed("share: not on the main thread"));
     };
+    let Some(root) = crate::native_view(mtm, ROOT_ID) else {
+        return fail(ShareError::failed("share: the surface has no view"));
+    };
+    let anchor = sheet
+        .anchor
+        .and_then(|anchor| crate::native_view(mtm, anchor));
     if root.window().is_none() {
         return fail(ShareError::failed("share: the surface is in no window"));
     }
@@ -256,11 +257,11 @@ pub(crate) fn show(
         // at the middle of the surface without an arrow.
         match anchor.filter(|view| view.window().is_some()) {
             Some(view) => {
-                popover.setSourceView(Some(view));
+                popover.setSourceView(Some(&view));
                 popover.setSourceRect(view.bounds());
             }
             None => {
-                popover.setSourceView(Some(root));
+                popover.setSourceView(Some(&root));
                 let bounds = root.bounds();
                 popover.setSourceRect(CGRect::new(
                     CGPoint::new(bounds.size.width / 2.0, bounds.size.height / 2.0),
@@ -274,7 +275,7 @@ pub(crate) fn show(
         mtm,
         controller,
         phase: Rc::new(Cell::new(Phase::Waiting)),
-        root: root.retain(),
+        root,
         answer,
         waits: Cell::new(0),
         requested: Cell::new(0),

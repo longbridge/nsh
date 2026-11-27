@@ -875,7 +875,7 @@ pub(crate) struct Mounter {
     dialogs: crate::system::Dialogs,
     /// The surface's share sheet, which a new share replaces
     /// ([`crate::share`]).
-    share: crate::share::Current,
+    share: std::rc::Rc<crate::share::Current>,
     /// `SplitView`s' splits, by their native component's node
     /// ([`crate::split`]).
     splits: rustc_hash::FxHashMap<NodeId, crate::split::SplitHost>,
@@ -2411,16 +2411,26 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
             }
-            (Command::Share { id: request, sheet }, native) if id == nsh_core::ROOT_ID => {
-                let anchor = sheet.anchor.and_then(|anchor| self.ui_view(anchor));
-                crate::share::show(
-                    request,
-                    &sheet,
-                    native.view(),
-                    anchor.as_deref(),
-                    &self.share,
-                    &self.control,
-                );
+            (Command::Share { id: request, sheet }, _) if id == nsh_core::ROOT_ID => {
+                // On a later turn, with this surface current: the sheet
+                // finds the surface's root and its anchor's view as a
+                // module's system UI does (`crate::native_view`).
+                let shared = self.shared.clone();
+                DispatchQueue::main().exec_async(move || {
+                    let mtm = MainThreadMarker::new().expect("main queue");
+                    let held = shared
+                        .get(mtm)
+                        .borrow()
+                        .as_ref()
+                        .map(|mounter| (mounter.share.clone(), mounter.control.clone()));
+                    let Some((current, control)) = held else {
+                        log::warn!("share: the surface closed; request {request} is not answered");
+                        return;
+                    };
+                    crate::presenting::run_for(Some(shared), || {
+                        crate::share::show(request, &sheet, &current, &control);
+                    });
+                });
             }
             (
                 Command::RenderCanvas {

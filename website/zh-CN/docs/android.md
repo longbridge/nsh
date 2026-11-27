@@ -379,7 +379,8 @@ let application = unsafe { jni::objects::JObject::from_raw(context.context().cas
 从前台的 activity 启动它，并返回它的 `ActivityResult`（结果码和对方返回的 intent），能跨越配置变更；`can_start(env, &intent)`
 判断是否有已安装的应用响应这个 intent。Android 11+ 只让应用看到 manifest 里查询过的应用：crate 在自己的 `Cargo.toml` 里声明这些查询
 （[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。`output_file(env, name)` 在应用缓存里新建一个文件，并给出对方通过应用的
-file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`picker::prepare_image(path, name, &request)` 像
+file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`content_uri(env, path)` 是另一个应用读取应用自己存储中一个已有文件所用的
+`content://` URI 和 MIME 类型（用于分享或"用其他应用打开"intent 的 `EXTRA_STREAM`），文件不在应用存储中时为 `None`；`picker::prepare_image(path, name, &request)` 像
 `Picker.pickImages` 一样处理一个图片文件。`with_env(f)` 用当前线程的 JNI 环境运行 `f`（供应用和它的 nshm 的代码使用；其他 crate 通过上面的 `ndk-context` 获取 VM），返回它的结果或 JNI 错误（Java 异常会记录到日志并清除）。应用在后台时发起的请求以
 `ActivityError::NoActivity` 失败。`nsh-extra` 的相机
 （`crates/nsh-extra/src/camera/android.rs`）用到了它们全部。
@@ -393,6 +394,13 @@ Java 发起调用的线程上交给 `handler`（方法名和参数），所以 c
 这种方式只能实现接口：接收抽象类的 API（`UtteranceProgressListener`）需要一个 Java 子类，由 crate 作为库自带（[Java 代码](./packaging.md#java-代码)）。
 返回基本类型的方法必须得到装箱成对应类型的值（`boolean` 对应 `java.lang.Boolean`）：在这里返回 `None`，或在 `Proxy` 丢弃后被调用，都会在 Java 中抛出
 `NullPointerException`。
+
+## 在 Rust 中接收广播
+
+以广播作答的 Android API（选择器的 `IntentSender` 报告用户选中的应用、闹钟或通知发回的 `PendingIntent`、下载完成）由
+`receiver::register(env, action, handler)` 接收：一个注册在 application 上、接收这个 action 的接收器，它收到的广播在 UI 线程上交给
+`handler`（广播的 `Intent`），所以 crate 不需要自带 `BroadcastReceiver` 子类。它不导出：只接收应用自己的广播（让 `PendingIntent`
+的 intent 指向应用自己的包名）和系统的广播，不接收其他应用的。广播可能到来期间要一直持有返回的 `Receiver`；丢弃即注销。
 
 ## 来自其他代码的通知
 

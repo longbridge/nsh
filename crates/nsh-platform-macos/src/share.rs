@@ -26,7 +26,7 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    DefinedClass, MainThreadOnly, Message, define_class, msg_send,
+    DefinedClass, MainThreadOnly, define_class, msg_send,
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject},
 };
@@ -303,7 +303,10 @@ pub(crate) fn schedule(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
             return;
         };
         match surface.upgrade() {
-            Some(surface) => show(&surface, id, &sheet),
+            // With the surface current: the menu finds its views as a
+            // module's system UI does (`crate::native_view`,
+            // `crate::presenting_view`).
+            Some(live) => crate::presenting::run_for(surface, || show(&live, id, &sheet)),
             None => log::warn!("share: the surface closed; request {id} is not answered"),
         }
     });
@@ -355,22 +358,20 @@ fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
     // at the middle rather than wait.
     let anchor = sheet
         .anchor
-        .and_then(|anchor| {
-            let mounter = surface.mounter.try_borrow().ok()?;
-            mounter.views.get(&anchor).cloned()
-        })
-        .filter(|view| view.ns().window().is_some());
-    let (view, rect): (Retained<NSView>, NSRect) = match &anchor {
-        Some(anchor) => (anchor.ns().retain(), anchor.ns().bounds()),
+        .and_then(|anchor| crate::native_view(surface.mtm, anchor))
+        .filter(|view| view.window().is_some());
+    let (view, rect): (Retained<NSView>, NSRect) = match anchor {
+        Some(anchor) => {
+            let rect = anchor.bounds();
+            (anchor, rect)
+        }
         None => {
-            let root = crate::window::visible_container(surface)
-                .unwrap_or_else(|| surface.root.ns().retain());
-            if root.window().is_none_or(|w| !w.isVisible()) {
+            let Some(root) = crate::presenting_view(surface.mtm) else {
                 // AppKit shows no menu there, and so never answers.
                 return fail(ShareError::failed(
                     "share: the surface is in no visible window",
                 ));
-            }
+            };
             let rect = middle(root.bounds());
             (root, rect)
         }

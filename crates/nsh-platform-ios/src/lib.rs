@@ -118,7 +118,7 @@ mod zoom;
 
 pub use nsh_engine::{Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Root};
 pub use picker::prepare_image;
-pub use presenting::presenting_controller;
+pub use presenting::{native_view, presenting_controller};
 
 /// The UI sets apps import ([`set_ui_sets`]; by default [`default_ui_sets`]).
 static UI_SETS: std::sync::RwLock<Option<Vec<nsh_core::element::Registry>>> =

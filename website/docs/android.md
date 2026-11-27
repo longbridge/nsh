@@ -412,7 +412,9 @@ result code and the intent the other app returned), across configuration changes
 whether an installed app answers the intent. Android 11+ shows an app only the apps its manifest queries: a crate
 declares its queries in its `Cargo.toml` ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
 `output_file(env, name)` makes a new file in the app's cache with a `content://` URI the other app writes through the
-app's file provider (`MediaStore.EXTRA_OUTPUT`), and `picker::prepare_image(path, name, &request)` prepares an image
+app's file provider (`MediaStore.EXTRA_OUTPUT`); `content_uri(env, path)` is the `content://` URI and MIME type another
+app reads an existing file of the app's own storage through (`EXTRA_STREAM` of a share or an "open with" intent),
+`None` for a file outside it. `picker::prepare_image(path, name, &request)` prepares an image
 file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI environment (code of the app and its nshm; other crates reach the VM through `ndk-context` above) and returns its result, or the JNI error (a Java exception is
 logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
 (`crates/nsh-extra/src/camera/android.rs`) uses all of them.
@@ -429,6 +431,16 @@ listens to `SpeechRecognizer` this way. Only interfaces can be implemented so: a
 ([Java code](./packaging.md#java-code)). A method that returns a primitive must get a value boxed as its type
 (`java.lang.Boolean` for `boolean`): returning `None` there, or a call after the `Proxy` is dropped, throws a
 `NullPointerException` in Java.
+
+## Broadcasts in Rust
+
+An Android API that answers with a broadcast (the app a chooser's `IntentSender` reports the user chose, a
+`PendingIntent` an alarm or a notification sends back, a finished download) is heard by
+`receiver::register(env, action, handler)`: a receiver of that action, registered on the application, whose
+broadcasts reach `handler` (the broadcast `Intent`) on the UI thread, so the crate ships no `BroadcastReceiver`
+subclass. It is not exported: it hears the app's own broadcasts (aim the `PendingIntent`'s intent at the app's
+package) and the system's, never other apps'. Keep the `Receiver` it returns while the broadcast may come; dropping
+it unregisters it.
 
 ## Notifications from other code
 

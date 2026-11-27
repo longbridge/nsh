@@ -602,6 +602,23 @@ crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStri
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 
+### 在 Rust 中显示系统界面和交出文件
+
+显示系统界面（选择器、分享面板、菜单）或把文件交给系统的模块，使用与 NSH 自己的模块相同的公开扩展点，因此行为也一致：
+
+| 需要 | 扩展点 |
+|---|---|
+| 检查应用传入的文件路径，规则与 `fs/promises` 读取相同 | `sys.readable_file(path)`（`sys: System` 参数）：在 `capabilities.fs.read` 内或用户粘贴、拖入的文件时返回真实路径，否则为 `ERR_ACCESS_DENIED`、`ENOENT`，Web 上为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
+| 在什么之上弹出（iOS） | `run_on_main_thread` 任务里的 `nsh_platform_ios::presenting_controller(mtm)`（[iOS](./ios.md#在-rust-中弹出视图)） |
+| 从哪里显示（macOS） | `run_on_main_thread` 任务里的 `nsh_platform_macos::presenting_view(mtm)`（[macOS](./macos.md#在-rust-中显示系统界面)） |
+| 某个元素的视图，供属于它的 popover 或菜单使用 | `nsh_platform_ios` 或 `nsh_platform_macos` 的 `native_view(mtm, node)`，传入元素 `ref` 的节点（`NodeRef` 参数） |
+| 启动另一个应用并取回结果（Android） | `nsh::activity::start_for_result`（[Android](./android.md#在-rust-中启动-activity)） |
+| 让另一个应用读取应用存储中的文件（Android） | `nsh::activity::content_uri(env, path)` |
+| Java 监听器或回调（Android） | `nsh::proxy::implement`（[Android](./android.md#用-rust-实现-java-监听器)） |
+| API 以广播作答（Android） | `nsh::receiver::register(env, action, handler)`（[Android](./android.md#在-rust-中接收广播)） |
+
+先检查路径再交出：应用无权读取的文件不会到达另一个应用。
+
 ### 封装原生 SDK
 
 封装 Apple SDK 的 nshm 在 `#[cfg(target_os = "ios")]` 或 `#[cfg(target_os = "macos")]` 下从 Rust 调用它。通过 `objc2` 系列 crate 使用的系统 framework 无需更多设置。厂商预编译的库（`.xcframework` 或 `.a`）由 nshm 自己的 `build.rs` 链接：Cargo 会把所有依赖的 `rustc-link-lib` 和 `rustc-link-search` 传给应用的可执行文件，应用本身不用写任何配置，NSH 也没有按平台的 SDK 设置。

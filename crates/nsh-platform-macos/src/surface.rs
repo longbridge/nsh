@@ -862,7 +862,9 @@ impl Surface {
                 self.resize_late.set(false);
                 crate::window::laid_out(self, id, size);
             }
-            Message::Run(task) => task.run(),
+            // A module's main-thread function: this surface is current
+            // while it runs (`crate::native_view`, `crate::presenting_view`).
+            Message::Run(task) => crate::presenting::run_for(Rc::downgrade(self), || task.run()),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`
                 // (nsh-js) restricted it to a plain `<stem>.js`, so this

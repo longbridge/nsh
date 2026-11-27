@@ -81,6 +81,8 @@ mod nested_bounce;
 #[cfg(target_os = "macos")]
 mod nested_run_loop;
 #[cfg(target_os = "macos")]
+mod presenting;
+#[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
 mod quit_requests;
@@ -260,6 +262,8 @@ fn main() {
                 press_momentum::run();
             } else if std::env::var_os("NSH_NESTED_RUN_LOOP_CHECK_ONLY").is_some() {
                 nested_run_loop::run();
+            } else if std::env::var_os("NSH_PRESENTING_CHECK_ONLY").is_some() {
+                presenting::run();
             } else {
                 quit_requests::run();
                 #[cfg(feature = "js")]
@@ -286,6 +290,7 @@ fn main() {
                 tray_owner::run();
                 window_frames::run();
                 window_layout::run();
+                presenting::run();
                 keyboard::run();
                 ime::run();
                 input_hidden::run();

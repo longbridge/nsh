@@ -14,7 +14,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
-import java.io.File;
 import java.util.ArrayList;
 
 /**
@@ -22,8 +21,8 @@ import java.util.ArrayList;
  * Intent.ACTION_SEND} ({@code ACTION_SEND_MULTIPLE} for several files). The
  * text and the link go as {@code EXTRA_TEXT}, the title as {@code
  * EXTRA_SUBJECT} and the chooser's title, the files as {@code content:} URIs
- * the app's {@link FilesProvider} serves (only files of the app's own
- * storage). The chooser tells which app the user chose through an {@code
+ * the app's {@link FilesProvider} serves ({@link Activities#contentUri}: only
+ * files of the app's own storage). The chooser tells which app the user chose through an {@code
  * IntentSender} broadcast, which answers the root's {@code Share} event as
  * shared to that app's package; Android tells nothing of what the app then
  * does. The chooser's result without that broadcast answers dismissed.
@@ -58,7 +57,7 @@ final class Share {
         }
         Intent send;
         try {
-            send = intent(activity, request);
+            send = intent(request);
         } catch (IllegalArgumentException e) {
             fail(request, e.getMessage(), UNAVAILABLE);
             return;
@@ -83,18 +82,18 @@ final class Share {
     }
 
     /** The {@code ACTION_SEND} intent of {@code request}. */
-    private static Intent intent(Context context, Request request) {
+    private static Intent intent(Request request) {
         ArrayList<Uri> uris = new ArrayList<>();
         String type = null;
         for (String path : request.files) {
-            File file = new File(path);
-            Uri uri = FilesProvider.uriFor(context, file);
-            if (uri == null) {
+            // As a module hands a file to another app (`nsh::activity::content_uri`).
+            Object[] served = Activities.contentUri(path);
+            if (served == null || served.length == 0) {
                 throw new IllegalArgumentException(
                         "share: `" + path + "` is not in the app's own storage, which Android shares from");
             }
-            uris.add(uri);
-            String fileType = FilesProvider.typeOf(context, file);
+            uris.add((Uri) served[0]);
+            String fileType = (String) served[1];
             type = type == null || type.equals(fileType) ? fileType : commonType(type, fileType);
         }
         Intent intent = new Intent(uris.size() > 1 ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND);
