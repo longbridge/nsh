@@ -737,6 +737,7 @@ pub(crate) fn batch_applied(surface: &Rc<Surface>) {
     if surface.input.cursor_changed.take() {
         crate::window::refresh_cursor(surface);
     }
+    crate::keyboard::release_hidden_focus(surface);
 }
 
 /// `SetJsResponder` / `ClearJsResponder`. Runs while the mounter applies a
@@ -1495,7 +1496,9 @@ fn collect_stops(view: &NshView, out: &mut Vec<NshView>) {
                 s.props.accessibility.state.disabled,
             )
         };
-        !disabled && (field || crate::keyboard::is_stop(view))
+        // A field in a `display: none` view has no area, as a custom stop
+        // there has none (`keyboard::has_area`).
+        !disabled && ((field && crate::keyboard::has_area(view)) || crate::keyboard::is_stop(view))
     }));
 }
 
