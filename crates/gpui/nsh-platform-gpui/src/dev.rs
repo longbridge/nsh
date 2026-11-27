@@ -514,6 +514,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
             source_map,
             capabilities,
             app_id,
+            url_schemes,
             limits,
             window,
             application,
@@ -549,6 +550,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
             bundle = bundle.with_main_window(window.as_deref());
             bundle = bundle.with_application(application.as_deref());
             bundle = match bundle
+                .with_url_schemes(url_schemes)
                 .with_app_id(app_id.as_deref())
                 .with_capabilities_json(capabilities.as_deref())
             {

@@ -298,6 +298,7 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             source_map,
             capabilities,
             app_id,
+            url_schemes,
             window,
             application,
             limits,
@@ -325,6 +326,7 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
                 bundle = bundle.with_source_map(map);
             }
             bundle = bundle
+                .with_url_schemes(url_schemes)
                 .with_app_id(app_id.as_deref())
                 .with_main_window(window.as_deref())
                 .with_application(application.as_deref());

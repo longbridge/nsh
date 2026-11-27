@@ -136,6 +136,7 @@ impl DevSession {
                 source_map,
                 capabilities,
                 app_id,
+                url_schemes,
                 window,
                 application,
                 limits,
@@ -154,6 +155,7 @@ impl DevSession {
                         bundle = bundle.with_source_map(map);
                     }
                     let bundle = bundle
+                        .with_url_schemes(url_schemes)
                         .with_app_id(app_id.as_deref())
                         .with_main_window(window.as_deref())
                         .with_application(application.as_deref())

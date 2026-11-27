@@ -56,6 +56,7 @@ fn bundles_errors_and_logs_round_trip() {
         AppInfo {
             capabilities: Some("{\"statusBar\":true}".into()),
             id: Some("com.example.roundtrip".into()),
+            url_schemes: vec!["claim-test".into()],
             window: Some("{\"title\":\"Roundtrip\"}".into()),
             application: Some("{\"quitMode\":\"explicit\"}".into()),
         },
@@ -80,11 +81,13 @@ fn bundles_errors_and_logs_round_trip() {
             source_map,
             capabilities,
             app_id,
+            url_schemes,
             window,
             application,
             limits,
         } => {
             assert_ne!(session, 0, "the server names its run");
+            assert_eq!(url_schemes, ["claim-test"]);
             assert_eq!(window.as_deref(), Some("{\"title\":\"Roundtrip\"}"));
             assert_eq!(application.as_deref(), Some("{\"quitMode\":\"explicit\"}"));
             assert_eq!(limits.as_deref(), Some("memory=64MB,call=500ms"));
@@ -1264,4 +1267,55 @@ fn a_server_that_drops_each_session_at_once_is_retried_with_backoff() {
     let sessions = accepted.load(std::sync::atomic::Ordering::Relaxed);
     // 100 ms apart that would be ~30; backing off it is a handful.
     assert!((1..=8).contains(&sessions), "{sessions} sessions in 3 s");
+}
+
+#[test]
+fn scheme_claims_survive_source_bytecode_and_rebuilds_including_removal() {
+    let server =
+        DevServer::start("127.0.0.1:0".parse().unwrap(), "claims-bc", None, |_| {}).unwrap();
+    let publish = |schemes: Vec<String>| {
+        server.publish(
+            vec![1],
+            "export {};".into(),
+            None,
+            AppInfo {
+                url_schemes: schemes,
+                ..AppInfo::default()
+            },
+            None,
+            Vec::new(),
+        )
+    };
+    publish(vec!["claim-test".into()]);
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    let mut clients = Vec::new();
+    let mut receivers = Vec::new();
+    for (device, bytecode, format) in [
+        ("same", "claims-bc", BundleFormat::Bytecode),
+        ("source", "older", BundleFormat::Source),
+    ] {
+        let (tx, rx) = mpsc::channel();
+        clients.push(
+            DevClient::start(url.clone(), host(device, bytecode), move |event| {
+                let _ = tx.send(event);
+            })
+            .unwrap(),
+        );
+        assert!(
+            matches!(next_non_status(&rx), DevEvent::Bundle { version: 1, format: actual, url_schemes, .. } if actual == format && url_schemes == ["claim-test"])
+        );
+        receivers.push(rx);
+    }
+    publish(vec!["changed".into()]);
+    for rx in &receivers {
+        assert!(
+            matches!(next_non_status(rx), DevEvent::Bundle { version: 2, url_schemes, .. } if url_schemes == ["changed"])
+        );
+    }
+    publish(Vec::new());
+    for rx in &receivers {
+        assert!(
+            matches!(next_non_status(rx), DevEvent::Bundle { version: 3, url_schemes, .. } if url_schemes.is_empty())
+        );
+    }
 }

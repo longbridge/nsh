@@ -104,6 +104,8 @@ pub enum DevEvent {
         /// The app's id (`nsh.json` `"id"`): give it to the bundle
         /// (`Bundle::with_app_id`), as it names where the app keeps its data.
         app_id: Option<String>,
+        /// Checked URL scheme claims; an empty vector revokes earlier claims.
+        url_schemes: Vec<String>,
         /// The main window's launch-time options (`nsh.json` `"window"`,
         /// JSON): give them to the bundle (`Bundle::with_main_window`).
         window: Option<String>,
@@ -332,6 +334,7 @@ fn session(
         source_map: bool,
         capabilities: Option<String>,
         app_id: Option<String>,
+        url_schemes: Vec<String>,
         window: Option<String>,
         application: Option<String>,
         limits: Option<String>,
@@ -402,6 +405,7 @@ fn session(
                     source_map,
                     capabilities,
                     app_id,
+                    url_schemes,
                     window,
                     application,
                     limits,
@@ -413,6 +417,7 @@ fn session(
                         source_map,
                         capabilities,
                         app_id,
+                        url_schemes,
                         window,
                         application,
                         limits,
@@ -431,6 +436,7 @@ fn session(
                         source_map,
                         capabilities: None,
                         app_id: None,
+                        url_schemes: Vec::new(),
                         window: None,
                         application: None,
                         limits: None,
@@ -489,6 +495,7 @@ fn session(
                             source_map,
                             capabilities: p.capabilities,
                             app_id: p.app_id,
+                            url_schemes: p.url_schemes,
                             window: p.window,
                             application: p.application,
                             limits: p.limits,
