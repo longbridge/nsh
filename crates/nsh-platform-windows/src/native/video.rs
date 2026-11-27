@@ -679,7 +679,7 @@ impl Hosted for VideoItem {
         let (w, h) = size;
         cx.push_clip_rect(0.0, 0.0, w, h);
         if let Some(poster) = &*self.poster.borrow()
-            && let Some(bitmap) = poster.frame.bitmap(&cx.dc)
+            && let Some(bitmap) = poster.frame.bitmap(cx.dc)
         {
             let natural = (
                 poster.frame.size().0 as f32 / poster.scale,

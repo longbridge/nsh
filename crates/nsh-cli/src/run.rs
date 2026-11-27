@@ -103,6 +103,9 @@ pub(crate) struct HostFlags {
     pub(crate) fps: bool,
     /// Terminal Cell dimensions, overriding nsh.json.
     pub(crate) points_per_cell: Option<String>,
+    /// The code signing identity the macOS host is signed with (`--sign`,
+    /// as `nsh package` takes it); `None`: the host as built, signed ad hoc.
+    pub(crate) sign: Option<String>,
 }
 
 /// The host window's own options: the desktop hosts take the size
@@ -211,9 +214,13 @@ pub(crate) fn run(
         trace,
         fps,
         points_per_cell,
+        sign,
     } = flags;
     if points_per_cell.is_some() && target != Target::Tui {
         bail!("--points-per-cell needs --target tui");
+    }
+    if sign.is_some() && target != Target::Macos {
+        bail!("--sign needs --target macos (the other hosts are signed ad hoc)");
     }
     if fps
         && !matches!(
@@ -251,12 +258,13 @@ pub(crate) fn run(
                 trace,
                 fps,
                 points_per_cell,
+                sign: None,
             },
             &work,
         );
     }
     if crate::rust_app::is_root(entry) {
-        return run_rust_app(entry, listen, target, device, &work);
+        return run_rust_app(entry, listen, target, device, &work, sign.as_deref());
     }
     if target == Target::Android {
         return run_android(entry, listen, release, limits, &work, trace, device);
@@ -334,6 +342,10 @@ pub(crate) fn run(
             let config = crate::package::read_config(&entry).unwrap_or_default();
             let (app_name, id) = crate::package::name_and_id(&entry, &config);
             let name = window.name.unwrap_or(&app_name);
+            let host = match &sign {
+                Some(identity) => signed_host(&host, &work.join("signed"), identity, &id)?,
+                None => host,
+            };
             let mut command = Command::new(&host);
             command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
@@ -464,6 +476,7 @@ fn run_rust_app(
     target: Target,
     device: Option<&str>,
     work: &Path,
+    sign: Option<&str>,
 ) -> anyhow::Result<()> {
     let app =
         crate::rust_app::current().context("nsh.json: \"root\" needs \"rust\", the app's crate")?;
@@ -509,6 +522,10 @@ fn run_rust_app(
     match target {
         Target::Linux | Target::Macos | Target::Windows => {
             let runner = crate::runtime::file(target.platform(), false)?;
+            let runner = match sign {
+                Some(identity) => signed_host(&runner, &work.join("signed"), identity, &id)?,
+                None => runner,
+            };
             let dir = run.join("run/nsh");
             resources(&dir)?;
             if target == Target::Linux {
@@ -690,6 +707,7 @@ fn run_tui(
         trace,
         fps,
         points_per_cell,
+        sign: _,
     } = flags;
     let config = crate::package::read_config(entry)?;
     let cells = points_per_cell
@@ -1259,6 +1277,97 @@ fn is_stale(src: &Path, dest: &Path) -> anyhow::Result<bool> {
     Ok(src_meta.len() != dest_meta.len() || src_meta.modified()? > dest_meta.modified()?)
 }
 
+/// The macOS host `host` signed with `identity` (`nsh run --sign`), under
+/// the app's `id` as its code signing identifier, which a package's
+/// executable has too. An ad hoc signature names the binary's hash, new
+/// with every build; one made with a certificate names the identifier and
+/// the certificate, so what macOS grants the app's signature (access to
+/// its keychain items) holds across rebuilds.
+///
+/// The signed host is a copy in `dir`: the host may be an installed nsh's
+/// runtime, which every app runs. It is signed again when the host changes
+/// (Cargo built it anew) or the identity or id does.
+fn signed_host(host: &Path, dir: &Path, identity: &str, id: &str) -> anyhow::Result<PathBuf> {
+    signed_copy(host, dir, &format!("{identity}\n{id}"), |file| {
+        let step = ui::Step::start(format!("signing the development host as {identity}"));
+        let output = Command::new("codesign")
+            .args(dev_host_codesign_args(file, identity, id))
+            .stdout(Stdio::null())
+            .output()
+            .context("run codesign")?;
+        if !output.status.success() {
+            bail!(
+                "codesign failed for {}: {}",
+                host.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        step.finish();
+        Ok(())
+    })
+}
+
+/// `codesign`'s arguments for the development host. Unlike a package's
+/// ([`crate::package::codesign_macos_args`]) it has no Hardened Runtime,
+/// which would keep debuggers from attaching, and no secure timestamp,
+/// which would ask Apple's server on every rebuild.
+fn dev_host_codesign_args(file: &Path, identity: &str, id: &str) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = [
+        "--force",
+        "--sign",
+        identity,
+        "--identifier",
+        id,
+        "--timestamp=none",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    args.push(file.as_os_str().to_owned());
+    args
+}
+
+/// `host` copied into `dir` and signed there by `sign`, unless the copy
+/// there was made from this very build with the same `key` (what it is
+/// signed as). It is signed under a temporary name, then renamed over the
+/// last one, which a host still running maps: the kernel kills a process
+/// whose code changes under it.
+fn signed_copy(
+    host: &Path,
+    dir: &Path,
+    key: &str,
+    sign: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<PathBuf> {
+    let name = host.file_name().context("the host's file name")?;
+    let with_suffix = |suffix: &str| {
+        let mut name = name.to_owned();
+        name.push(suffix);
+        dir.join(name)
+    };
+    let dest = dir.join(name);
+    let stamp_file = with_suffix(".signed");
+    let meta = fs::metadata(host).with_context(|| format!("read {}", host.display()))?;
+    let modified = meta
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let stamp = format!("{key}\n{}\n{modified}\n", meta.len());
+    if dest.exists() && fs::read_to_string(&stamp_file).is_ok_and(|s| s == stamp) {
+        return Ok(dest);
+    }
+    fs::create_dir_all(dir)?;
+    let tmp = with_suffix(".tmp");
+    fs::copy(host, &tmp).with_context(|| format!("copy {}", host.display()))?;
+    if let Err(e) = sign(&tmp) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    fs::rename(&tmp, &dest)?;
+    fs::write(&stamp_file, stamp)?;
+    Ok(dest)
+}
+
 pub(crate) fn simctl(args: &[&str]) -> anyhow::Result<String> {
     simctl_with_env(args, &[])
 }
@@ -1644,6 +1753,81 @@ fn info_plist(target: Target) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// `nsh run --sign` signs a copy of the host, once per build of it
+    /// and identity: a run that changed nothing starts the host it signed
+    /// last time, and the host itself (an installed runtime) is untouched.
+    #[test]
+    fn the_signed_host_is_a_copy_signed_once_per_build_and_identity() {
+        let dir = std::env::temp_dir().join(format!("nsh-signed-host-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = dir.join("nsh-macos-host");
+        std::fs::write(&host, "build 1").unwrap();
+        let signed = dir.join("signed");
+        let signs = std::cell::Cell::new(0);
+        let sign = |key: &str| {
+            super::signed_copy(&host, &signed, key, |file| {
+                signs.set(signs.get() + 1);
+                let mut text = std::fs::read_to_string(file)?;
+                text.push_str(" signed");
+                std::fs::write(file, text)?;
+                Ok(())
+            })
+            .unwrap()
+        };
+        let copy = sign("A\ncom.example.app");
+        assert_eq!(copy, signed.join("nsh-macos-host"));
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "build 1 signed");
+        assert_eq!(std::fs::read_to_string(&host).unwrap(), "build 1");
+        assert_eq!(signs.get(), 1);
+        // Nothing changed: the copy signed last time.
+        sign("A\ncom.example.app");
+        assert_eq!(signs.get(), 1);
+        // Another identity.
+        sign("B\ncom.example.app");
+        assert_eq!(signs.get(), 2);
+        // A new build.
+        std::fs::write(&host, "build 2!").unwrap();
+        sign("B\ncom.example.app");
+        assert_eq!(signs.get(), 3);
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "build 2! signed");
+        // A failed signature leaves no copy behind, and the next run tries again.
+        std::fs::write(&host, "build 3!!").unwrap();
+        assert!(
+            super::signed_copy(&host, &signed, "B\ncom.example.app", |_| anyhow::bail!(
+                "no"
+            ))
+            .is_err()
+        );
+        assert!(!signed.join("nsh-macos-host.tmp").exists());
+        sign("B\ncom.example.app");
+        assert_eq!(signs.get(), 4);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Signed under the app's id, with no Hardened Runtime and no secure
+    /// timestamp (a package has both).
+    #[test]
+    fn the_development_host_is_signed_under_the_app_id() {
+        let args = super::dev_host_codesign_args(
+            std::path::Path::new("/w/.nsh/signed/host"),
+            "Apple Development: A (TEAM)",
+            "com.example.app",
+        );
+        assert_eq!(
+            args,
+            [
+                "--force",
+                "--sign",
+                "Apple Development: A (TEAM)",
+                "--identifier",
+                "com.example.app",
+                "--timestamp=none",
+                "/w/.nsh/signed/host",
+            ]
+        );
+    }
+
     #[test]
     fn dev_desktop_entry_never_replaces_an_installed_one() {
         let dir = std::env::temp_dir().join(format!("nsh-dev-desktop-{}", std::process::id()));

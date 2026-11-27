@@ -1756,7 +1756,7 @@ mod tests {
         sink.report_error("pumps the messages");
         sink.resized(size);
         let rx = surface.rx.borrow().clone().unwrap();
-        surface.as_the_drain(|| surface.apply_until_resized(&rx, size));
+        surface.as_the_drain(|| surface.apply_until_resized(&rx, ROOT_ID, size));
         assert!(!surface.resize_late.get(), "the layout came");
         pump();
         assert_eq!(
@@ -1862,7 +1862,7 @@ mod tests {
         let size = Size::new(Points(400.0), Points(300.0));
         sink.report_error("pumps the messages");
         sink.resized(size);
-        surface.await_layout(size);
+        surface.await_layout(ROOT_ID, size);
         assert_eq!(free.get(), Some(true), "the mounter was free");
         assert!(!surface.resize_late.get(), "the layout came");
         assert_ne!(
