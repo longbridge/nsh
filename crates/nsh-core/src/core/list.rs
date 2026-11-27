@@ -2992,7 +2992,8 @@ mod tests {
         let mut binds = Vec::new();
         l.update_window(&mut binds);
         assert_eq!(binds.first().map(|b| b.1), Some(0));
-        assert!(binds.iter().all(|b| b.1 <= 16));
+        // The overscan past the end goes the other way: items 0..=24.
+        assert!(binds.iter().all(|b| b.1 <= 24));
         // Older items load (appended): the visible content stays put.
         l.set_count(120);
         assert_eq!(l.anchor_end(0.0), 1000.0);
