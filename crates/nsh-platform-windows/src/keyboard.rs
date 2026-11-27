@@ -107,6 +107,47 @@ pub(crate) fn has_area(view: &NshView) -> bool {
     size.width.0 > 0.0 && size.height.0 > 0.0
 }
 
+/// Whether the keyboard may act on `view`: it has an area and neither it
+/// nor a view around it is `visibility: hidden` (macOS's `seen_by_keys`).
+fn seen(view: &NshView) -> bool {
+    if !has_area(view) {
+        return false;
+    }
+    let mut current = Some(view.clone());
+    while let Some(view) = current {
+        if view.state().style.hidden {
+            return false;
+        }
+        current = view.parent_view();
+    }
+    true
+}
+
+/// A batch is applied: the keyboard focus leaves a custom view, or a text
+/// field, that the batch hid (`display: none` around it lays it out at no
+/// size, or `visibility: hidden`), and its blur is reported, as on macOS
+/// (`release_hidden_focus`). Neither hides a window, so the keys would
+/// still act on what the user cannot see.
+pub(crate) fn release_hidden_focus(surface: &Surface) {
+    if let Some(field) = crate::text_input::focused(surface)
+        && field.attached()
+        && !seen(&field)
+    {
+        crate::text_input::blur(&field);
+    }
+    let hidden: Vec<NodeId> = surface
+        .keyboard
+        .focus
+        .borrow()
+        .iter()
+        .filter(|(_, view)| view.attached() && !seen(view))
+        .map(|(window, _)| *window)
+        .collect();
+    for window in hidden {
+        clear(surface, window);
+    }
+}
+
 /// Whether the pointer may reach `view` (it and its ancestors are shown,
 /// targetable and not leaving).
 fn targetable(view: &NshView) -> bool {
@@ -1697,7 +1738,8 @@ mod tests {
     }
 
     /// A stop `display: none` holds (laid out at no size) is passed by Tab,
-    /// and a focused stop that hides so gives up the focus.
+    /// and a focused stop that hides so gives up the focus once the batch
+    /// that hid it is applied, as on macOS.
     #[test]
     fn tab_passes_a_stop_at_no_size_and_a_hidden_focus_is_given_up() {
         let surface = surface();
@@ -1714,7 +1756,7 @@ mod tests {
         assert!(!is_stop(&gone));
         assert!(crate::input::tab(&surface, &key(0x09)));
         assert_eq!(focused_in(&surface, ROOT_ID).as_ref(), Some(&shown));
-        // The focused stop hides: no key goes to it any more.
+        // The focused stop hides: the batch's end takes the focus from it.
         apply(
             &surface,
             &[MountItem::Frame {
@@ -1722,7 +1764,20 @@ mod tests {
                 frame: empty,
             }],
         );
-        assert_eq!(focused_in(&surface, ROOT_ID), None);
+        release_hidden_focus(&surface);
+        assert!(surface.keyboard.focus.borrow().is_empty());
+        // `visibility: hidden` around a focused stop does too.
+        apply(
+            &surface,
+            &[MountItem::Frame {
+                id: 4,
+                frame: rect(0.0, 0.0, 100.0, 40.0),
+            }],
+        );
+        assert!(focus_control(&surface, &shown));
+        surface.root.state_mut().style.hidden = true;
+        release_hidden_focus(&surface);
+        assert!(surface.keyboard.focus.borrow().is_empty());
     }
 
     #[test]

@@ -313,8 +313,9 @@ ancestors within the same window:
   when it closes if that view is still attached, enabled and shown in a window no modal covers.
 - The raw path is only for a focused custom view: a text field (`Input`, the system's RichEdit and IME) and a hosted
   web view or native component own their keys and text, and a capture on their ancestors does not intercept them. A
-  view that is removed, concealed or disabled loses the focus (a `Blur`) without a synthetic key release, and one laid
-  out at no size (`display: none`) gives it up quietly, as one that stops being focusable does (`focused_in`); a real
+  view that is removed, concealed or disabled loses the focus (a `Blur`) without a synthetic key release, and so does
+  a custom view or a text field that a batch hid (`display: none` lays it out at no size, or `visibility: hidden`
+  around it), when the batch is applied (`keyboard::release_hidden_focus`, as macOS's); a real
   release the window gets is reported on whichever view has the focus then. `ToUnicodeEx` supplies the logical key
   from the current layout (never a US guess), always with its keyboard-state-not-changed flag (0x4), so a
   dead key read for an event (also an AltGr-layer one) is never stored and the layout's pending composition is left

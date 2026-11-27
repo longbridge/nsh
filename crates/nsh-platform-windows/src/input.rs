@@ -737,6 +737,7 @@ pub(crate) fn batch_applied(surface: &Rc<Surface>) {
     if surface.input.cursor_changed.take() {
         crate::window::refresh_cursor(surface);
     }
+    crate::keyboard::release_hidden_focus(surface);
 }
 
 /// `SetJsResponder` / `ClearJsResponder`. Runs while the mounter applies a
