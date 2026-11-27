@@ -152,6 +152,8 @@ fn as_shipped(mut bundle: Bundle, shipped: &Bundle, trial: Option<Arc<dyn Trial>
     // The app's lifecycle (its quit mode) is the installed app's: an
     // update reaches nothing it could not configure before.
     bundle.application = shipped.application;
+    // Errors go where the installed app sends them.
+    bundle.error_reporting = shipped.error_reporting.clone();
     bundle.updater_config = shipped.updater_config.clone();
     // The package's declaration, granted at most what the shipped app
     // declares: an update reaches nothing the installed app could not.

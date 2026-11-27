@@ -91,6 +91,9 @@ pub struct AppInfo {
     pub window: Option<String>,
     /// The app's lifecycle (`nsh.json` `"application"`, JSON).
     pub application: Option<String>,
+    /// Where the app's errors are reported (`nsh.json` `"errorReporting"`,
+    /// JSON).
+    pub error_reporting: Option<String>,
 }
 
 struct Bundle {
@@ -102,6 +105,7 @@ struct Bundle {
     app_id: Option<String>,
     window: Option<String>,
     application: Option<String>,
+    error_reporting: Option<String>,
     /// The UI sets it imports.
     ui_sets: Arc<[String]>,
 }
@@ -490,6 +494,7 @@ impl DevServer {
             app_id: app.id,
             window: app.window,
             application: app.application,
+            error_reporting: app.error_reporting,
             ui_sets,
         })));
     }
@@ -1222,6 +1227,7 @@ async fn send_event(
                     app_id: bundle.app_id.clone(),
                     window: bundle.window.clone(),
                     application: bundle.application.clone(),
+                    error_reporting: bundle.error_reporting.clone(),
                     limits,
                 },
             )

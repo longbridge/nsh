@@ -462,6 +462,7 @@ impl AppView {
             trace: options.trace,
             content_culling: true,
             network: Some(crate::net::network()),
+            error_reporting: None,
             websocket: None,
             refuse_connections: None,
             filesystem: None,

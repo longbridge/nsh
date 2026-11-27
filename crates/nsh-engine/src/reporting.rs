@@ -95,6 +95,57 @@ impl ErrorReporting {
         self.max_events = max;
         self
     }
+
+    /// Reads `nsh.json` `"errorReporting"`: `dsn` (required), and the
+    /// optional `environment`, `sampleRate` (0 to 1), `tags` (an object of
+    /// strings), `rejections` and `maxEvents`. Keys it does not know are
+    /// left out (a newer NSH's).
+    pub fn from_json(json: &Value) -> Result<ErrorReporting, String> {
+        let object = json.as_object().ok_or("expected an object")?;
+        let dsn = object
+            .get("dsn")
+            .and_then(Value::as_str)
+            .ok_or("`dsn` must be a string")?;
+        if Dsn::parse(dsn).is_none() {
+            return Err(format!(
+                "`dsn` `{dsn}` is not `http(s)://<key>@<host>[/<path>]/<project>`"
+            ));
+        }
+        let mut reporting = ErrorReporting::new(dsn.trim());
+        if let Some(environment) = object.get("environment") {
+            let environment = environment
+                .as_str()
+                .filter(|e| !e.trim().is_empty())
+                .ok_or("`environment` must be a non-empty string")?;
+            reporting.environment = Some(environment.trim().to_owned());
+        }
+        if let Some(rate) = object.get("sampleRate") {
+            let rate = rate
+                .as_f64()
+                .filter(|rate| (0.0..=1.0).contains(rate))
+                .ok_or("`sampleRate` must be a number from 0 to 1")?;
+            reporting.sample_rate = rate as f32;
+        }
+        if let Some(tags) = object.get("tags") {
+            let tags = tags.as_object().ok_or("`tags` must be an object")?;
+            for (name, value) in tags {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| format!("tag `{name}` must be a string"))?;
+                reporting.tags.push((name.clone(), value.to_owned()));
+            }
+        }
+        if let Some(on) = object.get("rejections") {
+            reporting.rejections = on.as_bool().ok_or("`rejections` must be true or false")?;
+        }
+        if let Some(max) = object.get("maxEvents") {
+            reporting.max_events = max
+                .as_u64()
+                .and_then(|max| u32::try_from(max).ok())
+                .ok_or("`maxEvents` must be a whole number")?;
+        }
+        Ok(reporting)
+    }
 }
 
 /// A DSN's parts: where envelopes go and the key they carry.
@@ -478,6 +529,43 @@ mod tests {
         assert!(Dsn::parse("ftp://k@h/1").is_none());
         assert!(Dsn::parse("https://h/1").is_none());
         assert!(Dsn::parse("https://k@h/").is_none());
+    }
+
+    #[test]
+    fn nsh_json_gives_the_settings() {
+        let reporting = ErrorReporting::from_json(&json!({
+            "dsn": "http://k@127.0.0.1:8787/2",
+            "environment": "sit",
+            "sampleRate": 0.5,
+            "tags": {"channel": "beta"},
+            "rejections": false,
+            "maxEvents": 10,
+            "later": true,
+        }))
+        .unwrap();
+        assert_eq!(
+            reporting,
+            ErrorReporting::new("http://k@127.0.0.1:8787/2")
+                .environment("sit")
+                .sample_rate(0.5)
+                .tag("channel", "beta")
+                .rejections(false)
+                .max_events(10)
+        );
+        assert_eq!(
+            ErrorReporting::from_json(&json!({"dsn": "https://k@h/1"})).unwrap(),
+            ErrorReporting::new("https://k@h/1")
+        );
+        for wrong in [
+            json!("https://k@h/1"),
+            json!({}),
+            json!({"dsn": "https://h/1"}),
+            json!({"dsn": "https://k@h/1", "sampleRate": 2}),
+            json!({"dsn": "https://k@h/1", "environment": ""}),
+            json!({"dsn": "https://k@h/1", "tags": {"a": 1}}),
+        ] {
+            assert!(ErrorReporting::from_json(&wrong).is_err(), "{wrong}");
+        }
     }
 
     #[test]

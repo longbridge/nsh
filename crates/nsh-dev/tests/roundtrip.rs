@@ -50,6 +50,7 @@ fn bundles_errors_and_logs_round_trip() {
             id: Some("com.example.roundtrip".into()),
             window: Some("{\"title\":\"Roundtrip\"}".into()),
             application: Some("{\"quitMode\":\"explicit\"}".into()),
+            error_reporting: Some("{\"dsn\":\"http://k@127.0.0.1:9/2\"}".into()),
         },
         None,
         vec!["app/native".into()],
@@ -74,9 +75,14 @@ fn bundles_errors_and_logs_round_trip() {
             app_id,
             window,
             application,
+            error_reporting,
             limits,
         } => {
             assert_ne!(session, 0, "the server names its run");
+            assert_eq!(
+                error_reporting.as_deref(),
+                Some("{\"dsn\":\"http://k@127.0.0.1:9/2\"}")
+            );
             assert_eq!(window.as_deref(), Some("{\"title\":\"Roundtrip\"}"));
             assert_eq!(application.as_deref(), Some("{\"quitMode\":\"explicit\"}"));
             assert_eq!(limits.as_deref(), Some("memory=64MB,call=500ms"));

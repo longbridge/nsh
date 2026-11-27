@@ -167,6 +167,7 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar, windows of its own ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
 | `window` | object | every build, `package` | Launch settings for the first window the app declares on the desktops, which it has from its first frame: `title`, `defaultSize`, `minSize`, `titleBar`, `backdrop` and the other options and attributes of a window, as `nsh/desktop`'s `WindowOptions` spells them (`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`) ([The app host and the first window](../modules/nsh-desktop.md#the-app-host-and-the-first-window)). `defaultVisible` no longer applies: the app host never shows; an app that starts without a window opens none. |
 | `application` | object | every build, `package` | The app's lifecycle: `"quitMode": "platform" \| "lastWindowClosed" \| "explicit"`. `"platform"` (the default for `<Window>` apps) keeps a macOS app running with no windows and quits Windows and Linux apps when the last window closes; `"lastWindowClosed"` quits on every platform; `"explicit"` leaves the app running with no windows. A plain `mount(App)` app's implicit main window quits on every platform when closed unless `quitMode` is explicitly set here or with `Application.setQuitMode` ([Quitting](../modules/nsh-desktop.md#quitting)). |
+| `errorReporting` | object | `run`, `build`, `package` | Sends the app's errors (uncaught exceptions, a bundle that fails to load, a stopped VM, unhandled promise rejections) to a tracker that speaks the Sentry protocol, such as Sentry or Beacon ([errorReporting](#errorreporting)). |
 | `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
 | `dependencies` | object | every command | The [nshm](./nshm.md) the app uses, by package name, which `nsh add` lists here and NSH pins in `nsh.lock`: a version requirement from crates.io (`"acme-gauge": "^1.0"`), or an object with `"github"`, `"git"` or `"path"`, optional `"version"`, `"tag"` or `"rev"`, `"features"`, the Cargo features of a Rust nshm to turn on (`"nsh-extra": { "version": "^0.6", "features": ["camera"] }`), and `"targets"`, the targets a Rust nshm is linked for by `platform.os` name (default: every target; [nshm](./nshm.md#using-an-nshm)) ([CLI: nsh add](./cli.md#nsh-add)). |
@@ -207,6 +208,34 @@ Without a `capabilities` key, an app may use the network, web views and the stat
 ```
 
 `network` covers `fetch`, remote images and video sources; local assets are always allowed. An app that embeds NSH may grant less than an app declares. The details are in [Sandbox and capabilities](./sandbox-and-capabilities.md).
+
+### errorReporting
+
+An app that runs on its own (`nsh run`, and the desktop, iOS and Android packages `nsh package` makes) reports its
+errors when `nsh.json` names the tracker's DSN; no code changes:
+
+```json
+"errorReporting": {
+  "dsn": "https://<public key>@beacon.example.com/2",
+  "environment": "sit",
+  "sampleRate": 1
+}
+```
+
+| Key | Type | Description |
+|---|---|---|
+| `dsn` | string | The project's DSN, as the tracker gives it: `http(s)://<public key>@<host>[/<path>]/<project id>`. Required. |
+| `environment` | string | The environment the events are filed under (`production`, `sit`). Default: the tracker's. |
+| `sampleRate` | number | The share of errors sent, from 0 to 1. Default: 1. |
+| `tags` | object | Tags added to every event, as strings (`{ "channel": "beta" }`). |
+| `rejections` | boolean | Whether unhandled promise rejections are sent too. Default: `true`. |
+| `maxEvents` | number | The most events one run sends; the rest are dropped. Default: 100. |
+
+Each event carries the stack mapped to the app's sources, so the tracker needs no source maps. Events go over the
+platform's network stack from a thread of their own and never slow the app down. A web page reports its own errors,
+and `nsh test` sends nothing. An app embedded in another app reports where that app's `EngineConfig::error_reporting`
+says, which takes precedence over `nsh.json` ([Embedding](./embedding.md)). A wrong value is reported as a warning
+when the app is built and reporting stays off.
 
 ## tsconfig.json and .nsh/types
 

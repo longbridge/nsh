@@ -94,10 +94,10 @@ pub use storage::{FileStorage, resolve_data_dir, support_dir};
 pub use crate::{
     cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
-    reporting::ErrorReporting,
     host_channel::{
         HostCall, HostChannel, HostReply, HostSender, HostSenderClosed, OpenUrlRequest,
     },
+    reporting::ErrorReporting,
 };
 use crate::{
     host_channel::HostRefusal,
@@ -280,6 +280,10 @@ pub struct Bundle {
     /// `app.json`, the dev server's app info): the engine sets the quit
     /// policy before the app's code runs.
     pub application: Option<nsh_core::desktop::ApplicationOptions>,
+    /// Where the app's errors are reported (`nsh.json` `"errorReporting"`,
+    /// an app's `app.json`, the dev server's app info), when the host sets
+    /// no [`EngineConfig::error_reporting`] of its own.
+    pub error_reporting: Option<ErrorReporting>,
 }
 
 /// How long an app on [`Bundle::trial`] runs past its first frame without
@@ -424,6 +428,7 @@ impl Bundle {
             trial: None,
             main_window: None,
             application: None,
+            error_reporting: None,
         }
     }
 
@@ -443,6 +448,7 @@ impl Bundle {
             trial: None,
             main_window: None,
             application: None,
+            error_reporting: None,
         }
     }
 
@@ -487,6 +493,20 @@ impl Bundle {
                 .and_then(|v| nsh_core::desktop::ApplicationOptions::from_json(&v));
             parsed
                 .map_err(|e| log::warn!("nsh.json application: {e}"))
+                .ok()
+        });
+        self
+    }
+
+    /// Where the app's errors are reported, from their JSON (`nsh.json`
+    /// `"errorReporting"`, as the dev server's app info carries it); a
+    /// wrong one is logged and left out.
+    pub fn with_error_reporting(mut self, json: Option<&str>) -> Self {
+        self.error_reporting = json.and_then(|json| {
+            serde_json::from_str(json)
+                .map_err(|e| e.to_string())
+                .and_then(|v| ErrorReporting::from_json(&v))
+                .map_err(|e| log::warn!("nsh.json errorReporting: {e}"))
                 .ok()
         });
         self
@@ -588,6 +608,15 @@ impl Bundle {
                     .map_err(|e| io::Error::other(format!("app.json: {e}")))?,
             );
         }
+        // A wrong one turns reporting off; the app still runs.
+        bundle.error_reporting = info
+            .as_ref()
+            .and_then(|info| info.get("errorReporting"))
+            .and_then(|json| {
+                ErrorReporting::from_json(json)
+                    .map_err(|e| log::warn!("app.json errorReporting: {e}"))
+                    .ok()
+            });
         if let Some(info) = &info {
             // A newer NSH's: what this runtime cannot claim is left out.
             let (links, ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(info);
@@ -2793,9 +2822,14 @@ impl<M: TextEngine + 'static> Driver<M> {
                         }),
                         host: Rc::new(host_bridge),
                         lazy_rows: config.content_culling,
-                        reporter: config.error_reporting.as_ref().and_then(|reporting| {
-                            reporting::Reporter::new(reporting, config.network.clone()?)
-                        }),
+                        // The host's, else the app's own (`nsh.json`).
+                        reporter: config
+                            .error_reporting
+                            .as_ref()
+                            .or(bundle.error_reporting.as_ref())
+                            .and_then(|reporting| {
+                                reporting::Reporter::new(reporting, config.network.clone()?)
+                            }),
                     }
                 };
                 #[cfg(not(any(

@@ -356,6 +356,7 @@ impl AppView {
             #[cfg(feature = "net")]
             network: Some(nsh_engine::net::network()),
             #[cfg(not(feature = "net"))]
+            error_reporting: None,
             network: None,
             websocket: None,
             refuse_connections: None,
