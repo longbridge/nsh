@@ -481,6 +481,9 @@ Things that were found the hard way. Read the section of the area you change bef
   little faster, but on the gallery's index they kept the GPU cache ~50 MB over its 125 MB budget on a Pixel 10 Pro,
   where the corners' squares bring it under (performance). A box
   too small for a middle between its corners' squares takes one layer; a software canvas still clips by path.
+  So does a box with a child drawn through a layer of its own (a `filter`, a blend mode: `Effects.layered`): hwui
+  filters a layer again for every clip it is drawn under, and the seven pieces made the gallery's Aurora card (four
+  blurred, drifting gradients) blur 28 times a frame, 75–85 % janky frames on a Pixel 10 Pro; 13–20 % in one layer.
 - **Android, backdrop blur**: `Backdrop` records what lies behind the view into a `RenderNode` before every frame,
   and hwui draws that whole node into a layer and blurs it every frame. The node is recorded at the size where the
   blur's deviation is 4 px (Skia's GPU blur scales its input down to that before blurring anyway) and stretched

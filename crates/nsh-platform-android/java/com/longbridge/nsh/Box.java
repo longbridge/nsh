@@ -603,12 +603,16 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
      * per corner's square, where what lies outside the corner
      * ({@link #outside}) is erased: those paths stay while the box does, so
      * their coverage is made once. A box too small for its corners' squares
-     * to leave a middle is drawn into one layer.
+     * to leave a middle is drawn into one layer, and so is one with a child
+     * drawn through a layer of its own ({@link Effects#layered}): drawn in
+     * seven pieces, each under another clip, hwui would filter the child's
+     * layer again for each (a blurred child: seven blurs a frame, the
+     * gallery's Aurora card at 75–85 % janky frames on a Pixel 10 Pro).
      */
     private void drawInCorners(Canvas canvas) {
         float left = edges[0], top = edges[1], right = edges[2], bottom = edges[3];
         float l = edges[4], t = edges[5], r = edges[6], b = edges[7];
-        if (l >= r || t >= b) {
+        if (l >= r || t >= b || layeredChild()) {
             int layer = canvas.saveLayer(left, top, right, bottom, null);
             canvas.clipRect(left, top, right, bottom);
             super.dispatchDraw(canvas);
@@ -634,6 +638,14 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             canvas.drawPath(outside[q], eraser);
             canvas.restoreToCount(layer);
         }
+    }
+
+    /** Whether a child draws through a layer of its own. */
+    private boolean layeredChild() {
+        for (int i = 0; i < getChildCount(); i++) {
+            if (Effects.layered(getChildAt(i))) return true;
+        }
+        return false;
     }
 
     /**
