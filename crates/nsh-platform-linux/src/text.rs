@@ -2488,8 +2488,45 @@ mod tests {
     /// #2504: the engine measures on its own thread while the main thread
     /// draws with cairo-ft. Over more than ten font files, cairo-ft evicts
     /// faces across threads unsafely, so the engine must not use it.
+    ///
+    /// The race runs in a process of its own (#3531): in this binary the
+    /// tests' GTK thread draws with cairo-ft too, for other tests' frames,
+    /// so racing it here would crash that thread instead of testing the
+    /// engine.
     #[test]
     fn engine_measuring_does_not_race_main_thread_cairo() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "text::tests::engine_measuring_races_main_thread_cairo_worker",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        let log = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // The worker reports whether it raced, so a filter that matches no
+        // test cannot pass silently.
+        assert!(
+            output.status.success() && log.contains(RACE_DONE),
+            "cairo race worker: {}\n{log}",
+            output.status
+        );
+    }
+
+    const RACE_DONE: &str = "cairo race worker:";
+
+    /// The race for [`engine_measuring_does_not_race_main_thread_cairo`],
+    /// run in its own process.
+    #[test]
+    #[ignore = "run in its own process by engine_measuring_does_not_race_main_thread_cairo"]
+    fn engine_measuring_races_main_thread_cairo_worker() {
         use pangocairo::cairo;
         let families: Vec<String> = {
             let map = pangocairo::FontMap::new();
@@ -2503,7 +2540,9 @@ mod tests {
             f.into_iter().take(30).collect()
         };
         if families.len() <= 10 {
-            return; // Too few fonts to reach cairo's face eviction.
+            // Too few fonts to reach cairo's face eviction.
+            println!("{RACE_DONE} skipped, {} families", families.len());
+            return;
         }
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let engine_families = families.clone();
@@ -2538,6 +2577,7 @@ mod tests {
         }
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         engine.join().unwrap();
+        println!("{RACE_DONE} raced {} families", families.len());
     }
 
     #[test]
