@@ -26198,6 +26198,43 @@ mod views {
         assert_eq!(shown, ["mail 2", "new 3 (last)"]);
     }
 
+    #[component]
+    fn ReplacedList() -> impl IntoElement {
+        let rows = signal(vec![(0, "old")]);
+        let replacement = signal(false);
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move || {
+                // Queue an update from the old binding before replacing its scope.
+                rows.set(vec![(0, "new")]);
+                replacement.set(true);
+            }))
+            .child(dynamic(move || {
+                let source = if replacement.get() { "second" } else { "first" };
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        text(move || rows.with(|r| format!("{source}: {}", r[at.index()].1)))
+                            .h(px(40.0))
+                    },
+                )
+                .keys(move || rows.with(|r| r.iter().map(|row| row.0).collect::<Vec<_>>()))
+                .flex_1()
+            }))
+    }
+
+    #[test]
+    fn replacing_a_lists_row_scope_while_its_rows_update_keeps_the_visible_row() {
+        let mut c = core();
+        c.mount_root(&Root::of::<ReplacedList>());
+        let initial = c.commit().unwrap();
+        assert_eq!(texts(&initial), ["first: old"]);
+        let replace = pressable(&initial)[0];
+        assert!(c.component_event(replace, EventKind::Press, &EventPayload::None));
+        let updated = c.commit().unwrap();
+        assert_eq!(texts(&updated), ["second: new"]);
+    }
+
     #[test]
     fn a_views_list_cells_show_other_rows_through_their_bindings() {
         let (mut c, batch) = mailbox(1000);

@@ -23,7 +23,7 @@ use super::{
 use crate::{
     NodeId, Op, Tag, TextEngine,
     element::{
-        Attrs, BoundListConfig, ElNode, ListConfig, SharedString, StyleRefinement,
+        Attrs, BoundListConfig, ElNode, ListConfig, Owner, SharedString, StyleRefinement,
         builder::BoundAttrs,
         flow::{Region, RegionElement},
         reactive::render_effect,
@@ -69,6 +69,7 @@ pub(super) enum Patch {
     /// A list's rows, its bound count or keys read again.
     Rows {
         list: NodeId,
+        binding: Owner,
         count: u32,
         keys: Option<Rc<[u64]>>,
     },
@@ -510,7 +511,19 @@ impl<M: TextEngine> Core<M> {
         }
         match patch {
             Patch::Region { region, elements } => self.reconcile_region(region, elements),
-            Patch::Rows { list, count, keys } => self.set_list_rows(list, count, keys),
+            Patch::Rows {
+                list,
+                binding,
+                count,
+                keys,
+            } => {
+                // A new region run can keep the list node after disposing its
+                // old row owners. The old binding's queued update would
+                // invalidate the cell indices the replacement needs to rebuild.
+                if binding.is_live() {
+                    self.set_list_rows(list, count, keys);
+                }
+            }
             Patch::NestedAttrs { host, attrs } => {
                 if self.is_host(host) {
                     self.set_given(host, *attrs);

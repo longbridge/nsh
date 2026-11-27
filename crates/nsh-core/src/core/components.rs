@@ -5305,6 +5305,7 @@ impl<M: TextEngine> Core<M> {
                     count_signal.set(count as usize);
                     patches.borrow_mut().push(super::views::Patch::Rows {
                         list: id,
+                        binding: crate::element::Owner::current(),
                         count,
                         keys,
                     });
