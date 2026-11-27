@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use nsh_base::{SelectEntry, SelectEvent, SelectItem, select};
+use nsh_base::{OpenChangeReason, SelectEntry, SelectEvent, SelectItem, select};
 use nsh_core::{
     AccessibilityRole, AccessibilityState, Bounds, Command, MountItem, NodeId, Size, ViewProps,
     platform::{Idiom, Os},
@@ -33,6 +33,9 @@ struct HarnessProps {
     controlled_open: bool,
     /// The app follows `onChange` and `onOpenChange` (when it controls).
     follow: bool,
+    /// With `controlled_open`, the app keeps the list open when a press
+    /// outside asks to close it.
+    refuse_press_outside: bool,
     searchable: bool,
     disabled: bool,
     /// Open at first (`defaultOpen`).
@@ -80,6 +83,7 @@ fn props(items: Vec<SelectItem>) -> HarnessProps {
         controlled: false,
         controlled_open: false,
         follow: true,
+        refuse_press_outside: false,
         searchable: false,
         disabled: false,
         default_open: false,
@@ -97,7 +101,8 @@ fn props(items: Vec<SelectItem>) -> HarnessProps {
 /// (`focus:`); what the app heard as `Log: …`, its value as `Value: …`, the
 /// query `onQueryChange` reported as `Query: …`; F5 replaces the items with
 /// Celery and Kiwi; F6 toggles the `invalid` the app's trigger says; F7
-/// toggles `searchable`; F8 sets the app's query to `ri`.
+/// toggles `searchable`; F8 sets the app's query to `ri`; F9 closes the
+/// list as the app (its `open`, when it controls it).
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let value = signal(props.value.clone().map(SharedString::from));
@@ -110,6 +115,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     on_key("f7", move |_| searchable.update(|s| *s = !*s));
     let query = signal(SharedString::default());
     on_key("f8", move |_| query.set("ri".into()));
+    on_key("f9", move |_| open.set(false));
     // Only the trigger that starts invalid is busy too, so that the other
     // tests' trigger carries no state of the app's.
     let busy = props.invalid;
@@ -134,6 +140,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         ])
     });
     let follow = props.follow;
+    let refuse_press_outside = props.refuse_press_outside;
     let mut el = select()
         .items(items)
         .searchable(searchable)
@@ -170,7 +177,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .on_open_change(move |e: &SelectEvent| {
             if let SelectEvent::OpenChange(next, reason) = e {
                 push(format!("openChange:{next}:{reason:?}"));
-                if follow {
+                let keep = refuse_press_outside && *reason == OpenChangeReason::PressOutside;
+                if follow && !keep {
                     open.set(*next);
                 }
             }
@@ -854,6 +862,33 @@ fn a_press_outside_closes_it_and_leaves_the_focus() {
     app.gone("role:listbox");
     app.log_ends("cancel openChange:false:PressOutside close");
     assert!(!app.sent(trigger, &Command::Focus));
+}
+
+#[test]
+fn closed_by_the_app_after_it_kept_it_open_the_keyboard_goes_back_to_the_trigger() {
+    let mut app = focused(HarnessProps {
+        controlled_open: true,
+        refuse_press_outside: true,
+        ..props(fruits())
+    });
+    let trigger = app.id("role:combobox");
+    app.key("down");
+    app.see_row(">Apple");
+    // A press outside asks to close it; the app keeps it open (a press on
+    // macOS leaves the keyboard on the row).
+    app.press("id:elsewhere").unwrap();
+    app.log_ends("cancel openChange:false:PressOutside");
+    app.wait(Duration::from_millis(100)).unwrap();
+    assert_eq!(app.screen().count("role:listbox").unwrap(), 1, "kept open");
+    // The app closes it itself: the keyboard goes back to the trigger,
+    // where Return opens it again.
+    app.key("f9");
+    app.gone("role:listbox");
+    app.log_ends("close");
+    assert!(app.sent(trigger, &Command::Focus));
+    app.key("enter");
+    app.wait_for("role:listbox").unwrap();
+    app.log_ends("openChange:true:TriggerPress open");
 }
 
 #[test]

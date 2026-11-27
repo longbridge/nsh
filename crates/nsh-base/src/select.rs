@@ -510,8 +510,6 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
     let width = signal(None::<Points>);
     let focused = signal(false);
     let opening = stored(Opening::Press);
-    // Why it closed last: a press outside leaves the focus where it went.
-    let closed_by = stored(None::<OpenChangeReason>);
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
         if next && props.disabled.get_untracked() {
             return;
@@ -519,14 +517,14 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         if open.get_untracked() == next {
             return;
         }
-        if !next {
-            closed_by.replace(Some(reason));
-        }
         // Reported before the state follows: `onOpen` / `onClose` come
         // after it (as `Menu`'s order says: `onCancel`, `onOpenChange`,
         // then the lifecycle), in this same turn while the popup has no
-        // looks for its states.
-        open.request(next, || cx.emit(SelectEvent::OpenChange(next, reason)));
+        // looks for its states. The reason a close keeps says where the
+        // keyboard goes (`back`).
+        open.request_for(next, reason, || {
+            cx.emit(SelectEvent::OpenChange(next, reason))
+        });
     });
     // The value of item `item`, if it can be chosen.
     let choosable = move |item: usize| {
@@ -668,9 +666,8 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         // The keyboard goes back to the trigger, unless a press outside,
         // Tab or the app's `onChange` took it somewhere else.
         back: Rc::new(move |popup| {
-            let by = closed_by.replace(None);
             if !matches!(
-                by,
+                open.take_closed_by(),
                 Some(OpenChangeReason::PressOutside | OpenChangeReason::Focus)
             ) {
                 anchor.focus_back(popup);
