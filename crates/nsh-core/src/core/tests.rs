@@ -9633,6 +9633,46 @@ fn dark_mode_and_breakpoints_restyle_natively() {
     assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 32.0);
 }
 
+/// Under the window model the host's root view keeps its size while the
+/// app's primary window is resized: width variants follow the window the
+/// platform reports, as `windowSize()` does (#3526).
+#[test]
+fn breakpoints_follow_the_reported_window_not_the_host_root() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "p-2 max-[900px]:p-6");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("height", StyleValue::Number(5.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.set_viewport(size_pt(1200.0, 800.0));
+    let window = |width| crate::element::Environment {
+        window: size_pt(width, 600.0),
+        ..Default::default()
+    };
+    c.set_environment(window(1100.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 8.0);
+    // The window narrows below 900 while the host root stays 1200 wide.
+    c.set_environment(window(760.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 24.0);
+    // And widens again.
+    c.set_environment(window(1136.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 8.0);
+}
+
 #[test]
 fn press_and_group_states() {
     let mut c = core();

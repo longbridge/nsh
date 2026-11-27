@@ -1599,7 +1599,13 @@ impl<M: TextEngine> Core<M> {
             self.needs_layout = true;
         }
         let ratio = self.components.environment.pixel_ratio;
+        let window = self.components.environment.window;
         self.components.environment = environment;
+        // Width and orientation variants follow the window `windowSize()`
+        // reports (`Core::class_window`).
+        if window != environment.window {
+            self.restyle_where(crate::tailwind::deps::WIDTH | crate::tailwind::deps::HEIGHT);
+        }
         if ratio != environment.pixel_ratio {
             self.repick_images(ratio, environment.pixel_ratio);
         }
