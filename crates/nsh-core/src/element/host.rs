@@ -1645,6 +1645,17 @@ impl WebView {
         })
     }
 
+    /// The hosts the web view may show and navigate to, narrower than
+    /// `webview.hosts`: the same host patterns (`*`, `*.example.com`, a host
+    /// name); an empty list refuses every web page
+    /// ([`crate::access::WebHosts`]). The platform refuses any other `http`
+    /// or `https` page before its request is made and reports `on_error`
+    /// with `ERR_ACCESS_DENIED`. It never widens the app's grant.
+    pub fn allow_navigation<S: Into<Arc<str>>>(self, hosts: impl IntoIterator<Item = S>) -> Self {
+        let hosts = hosts.into_iter().map(Into::into).collect();
+        self.set(Prop::Native(NativeProp::AllowNavigation(Some(hosts))))
+    }
+
     /// Runs before each page's own scripts.
     pub fn injected_java_script_before_content(self, script: impl IntoReactive<String>) -> Self {
         self.bind_prop(script, |script: String| {

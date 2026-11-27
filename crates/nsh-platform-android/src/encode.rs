@@ -1458,6 +1458,9 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             // Its one written form, which `Native.allowsWebview` reads back.
             let origin = w.allow_origin.as_ref().map(ToString::to_string);
             e.opt_string(origin.as_deref());
+            // One pattern per line, which `Native.allowsWebview` reads back.
+            let hosts = w.allow_navigation.as_ref().map(ToString::to_string);
+            e.opt_string(hosts.as_deref());
         }
         NativeProps::Video(v) => {
             e.int(4);
