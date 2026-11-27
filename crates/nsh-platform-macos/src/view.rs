@@ -696,6 +696,18 @@ define_class!(
             NshView(self.retain()).set_layer_geometry();
         }
 
+        // Its subviews are placed by nsh ([`NshView::place`]): AppKit's
+        // autoresizing pass only visits each of them to change nothing, on
+        // every frame a layout animation resizes the view. A hosted view
+        // that may follow its size ([`first_foreign`]'s mark) keeps it.
+        #[unsafe(method(resizeSubviewsWithOldSize:))]
+        fn resize_subviews(&self, old: NSSize) {
+            if self.ivars().foreign.get() {
+                // SAFETY: NSView's own autoresizing, on the main thread.
+                unsafe { msg_send![super(self), resizeSubviewsWithOldSize: old] }
+            }
+        }
+
         #[unsafe(method(viewWillStartLiveResize))]
         fn view_will_start_live_resize(&self) {
             // SAFETY: NSView's own notification.
@@ -1610,6 +1622,15 @@ define_class!(
 
         #[unsafe(method(updateLayer))]
         fn update_layer(&self) {}
+
+        // As [`ViewObj`]'s: nsh places its subviews.
+        #[unsafe(method(resizeSubviewsWithOldSize:))]
+        fn resize_subviews(&self, old: NSSize) {
+            if self.ivars().foreign.get() {
+                // SAFETY: NSView's own autoresizing, on the main thread.
+                unsafe { msg_send![super(self), resizeSubviewsWithOldSize: old] }
+            }
+        }
 
         // As [`ViewObj`]'s: what comes into its subviews.
         #[unsafe(method(didAddSubview:))]
@@ -2762,8 +2783,19 @@ impl NshView {
             let s = self.state();
             s.id == ROOT_ID && self.ivars().surface.borrow().strong_count() > 0
         };
-        let old_size = self.ns().frame().size;
-        if !root && self.ns().frame() != rect {
+        let old = self.ns().frame();
+        let old_size = old.size;
+        if !root && old != rect && old_size == rect.size {
+            // Only moved (a layout animation sliding it, a row below one
+            // that grew): `setFrameOrigin:` leaves AppKit's size handling
+            // (resizing subviews, laying them out again) alone, and what
+            // follows the view's size stays as it is.
+            self.ns().setFrameOrigin(rect.origin);
+            crate::sight::moved();
+            if self.kind() == ViewKind::Input {
+                crate::text_input::resized(self);
+            }
+        } else if !root && old != rect {
             self.ns().setFrame(rect);
             crate::sight::moved();
             self.size_container();
