@@ -21048,6 +21048,173 @@ mod components {
         ));
     }
 
+    /// Adds `line` to what `shown` says.
+    fn say(shown: Signal<String>, line: String) {
+        shown.set(format!("{} {line}", untracked(|| shown.get())));
+    }
+
+    /// Reports `url` as a link the system handed the app.
+    fn open_link(c: &mut Core<FakeEngine>, url: &str) {
+        c.component_event(
+            crate::ROOT_ID,
+            EventKind::UrlScheme,
+            &EventPayload::Map(vec![(
+                crate::url_scheme::URL,
+                crate::PayloadValue::Str(url.to_owned()),
+            )]),
+        );
+    }
+
+    /// Hears the app's links as long as it runs, as an app does, and once
+    /// more in a second task that starts after it, as a module waiting for
+    /// one link does.
+    #[component]
+    fn TwoLinkListeners() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            loop {
+                say(shown, format!("app:{}", next_url_scheme_open().await));
+            }
+        });
+        spawn(async move {
+            say(shown, format!("once:{}", next_url_scheme_open().await));
+        });
+        view().child(text(move || format!("links{}", shown.get())))
+    }
+
+    #[test]
+    fn a_later_link_listener_leaves_the_earlier_listening() {
+        let mut c = core();
+        c.set_url_schemes(["myapp"]);
+        c.mount_root(&crate::element::Root::new::<TwoLinkListeners>(|| ()));
+        c.commit();
+        c.run_component_tasks();
+        c.commit();
+        open_link(&mut c, "myapp://a");
+        run_until(&mut c, |s| s.iter().any(|t| t.contains("once:")));
+        open_link(&mut c, "myapp://b");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("app:myapp://b")));
+        // Both heard the first; the app's listener still hears the next.
+        assert_eq!(
+            shown.last().unwrap(),
+            "links app:myapp://a once:myapp://a app:myapp://b"
+        );
+    }
+
+    /// Hears the app's links as long as it runs; a press starts a sign-in
+    /// session that waits for one link of `auth`, and a second press one
+    /// it drops before the link comes.
+    #[component]
+    fn LinksAndSession() -> impl IntoElement {
+        let shown = signal(String::new());
+        let presses = std::rc::Rc::new(std::cell::Cell::new(0));
+        spawn(async move {
+            loop {
+                say(shown, format!("app:{}", next_url_scheme_open().await));
+            }
+        });
+        view()
+            .child(text(move || format!("links{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                presses.set(presses.get() + 1);
+                if presses.get() == 1 {
+                    spawn(async move {
+                        say(shown, "waits".into());
+                        let callback = next_url_scheme_open_for("Auth");
+                        say(shown, format!("session:{}", callback.await));
+                    });
+                } else {
+                    spawn(async move {
+                        drop(next_url_scheme_open_for("auth"));
+                        say(shown, "gave-up".into());
+                    });
+                }
+            }))
+    }
+
+    #[test]
+    fn a_wait_for_a_scheme_takes_its_link_and_leaves_the_app_listening() {
+        let mut c = core();
+        c.set_url_schemes(["myapp", "auth"]);
+        // Came before the session: the app's.
+        open_link(&mut c, "auth://early");
+        c.mount_root(&crate::element::Root::new::<LinksAndSession>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        run_until(&mut c, |s| s.iter().any(|t| t.contains("app:auth://early")));
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        run_until(&mut c, |s| s.iter().any(|t| t.contains("waits")));
+        open_link(&mut c, "myapp://orders/1");
+        open_link(&mut c, "AUTH://cb?code=1");
+        open_link(&mut c, "myapp://orders/2");
+        open_link(&mut c, "auth://after");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("app:auth://after")));
+        // The session took its callback alone; the app heard the rest, the
+        // scheme's links after the session ended included.
+        assert_eq!(
+            shown.last().unwrap(),
+            "links app:auth://early waits app:myapp://orders/1 session:AUTH://cb?code=1 \
+             app:myapp://orders/2 app:auth://after"
+        );
+        // The callback is not the app's address.
+        assert_eq!(c.app_url_cell().get().as_deref(), Some("auth://after"));
+        // A session that gave up takes nothing.
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        run_until(&mut c, |s| s.iter().any(|t| t.contains("gave-up")));
+        open_link(&mut c, "auth://late");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("app:auth://late")));
+        assert!(shown.last().unwrap().ends_with("gave-up app:auth://late"));
+    }
+
+    /// Waits for a link and drops the wait before it comes (as the losing
+    /// branch of a `select!`), then, on a press, listens.
+    #[component]
+    fn DroppedLinkWait() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            drop(next_url_scheme_open());
+            say(shown, "dropped".into());
+        });
+        view()
+            .child(text(move || format!("links{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                spawn(async move {
+                    say(shown, format!("heard:{}", next_url_scheme_open().await));
+                });
+            }))
+    }
+
+    #[test]
+    fn a_dropped_link_wait_leaves_the_link_for_the_next_listener() {
+        let mut c = core();
+        c.set_url_schemes(["myapp"]);
+        c.mount_root(&crate::element::Root::new::<DroppedLinkWait>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        c.run_component_tasks();
+        c.commit();
+        // Nothing listens: kept for the next listener, not given to the
+        // dropped wait.
+        open_link(&mut c, "myapp://kept");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("heard:")));
+        assert_eq!(shown.last().unwrap(), "links dropped heard:myapp://kept");
+    }
+
     /// Asks for the permission, shows a notification and sets the badge when
     /// its button is pressed; shows the answers and the presses.
     #[component]

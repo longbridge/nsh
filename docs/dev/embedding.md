@@ -47,7 +47,8 @@
   reads with the app's id (`nsh_engine::Bundle::url_schemes`; a Rust app's `Root::url_schemes`), never
   from the app's code. The platform reports every URL the system opens the app with as the root's `UrlScheme` event; the
   core drops the links of other schemes and keeps the rest until the app listens (`UrlScheme.on("open")`,
-  `next_url_scheme_open()`). Links are untrusted input: the app checks what they ask for, and nothing navigates on its own.
+  `next_url_scheme_open()`; a native module waiting for a link of one scheme, `next_url_scheme_open_for(scheme)`,
+  takes those alone while it waits). Links are untrusted input: the app checks what they ask for, and nothing navigates on its own.
   A signed package embedded in another app claims no schemes: the embedding app owns them.
 - Handoff: `nsh.json` `"handoff": true` makes `nsh package` declare `<id>.url` in `NSUserActivityTypes` on macOS and
   iOS; the release runners turn it on when their bundle declares it (`nsh_platform_apple::handoff::declared`), and an

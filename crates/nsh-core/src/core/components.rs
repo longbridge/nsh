@@ -687,8 +687,12 @@ struct UrlScheme {
     links: crate::url_scheme::AppLinks,
     /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
     pending: std::collections::VecDeque<String>,
-    /// The listener waiting for a link.
-    next: Option<AnswerSlot<String>>,
+    /// The listeners waiting for a link: each gets the next one.
+    next: Vec<AnswerSlot<String>>,
+    /// The waits for a link of one scheme (lowered), in the order they
+    /// came: the first takes the next link of its scheme, which no other
+    /// listener gets ([`crate::element::next_url_scheme_open_for`]).
+    next_of_scheme: Vec<(String, AnswerSlot<String>)>,
     /// Address moves no listener took yet
     /// ([`crate::url_scheme::AppUrlChange`]), kept once something listened
     /// ([`Self::hears_changes`]), at most [`crate::url_scheme::MAX_PENDING`].
@@ -6405,11 +6409,29 @@ impl<M: TextEngine> Core<M> {
             log::warn!("link dropped: {dropped}");
             return;
         }
-        self.components.url_schemes.address.set(url.clone());
+        let links = &mut self.components.url_schemes;
+        // A link a wait for its scheme takes is that wait's alone (a sign-in
+        // session's callback): no listener of the app's hears it, and it
+        // does not become the app's address.
+        if !quiet && change.is_none() {
+            let scheme = url.split_once(':').map_or("", |(scheme, _)| scheme);
+            links
+                .next_of_scheme
+                .retain(|(_, answer)| crate::element::task::awaited(answer));
+            if let Some(at) = links
+                .next_of_scheme
+                .iter()
+                .position(|(waited, _)| waited.eq_ignore_ascii_case(scheme))
+            {
+                let (_, answer) = links.next_of_scheme.remove(at);
+                answer.borrow_mut().deliver(url);
+                return;
+            }
+        }
+        links.address.set(url.clone());
         if quiet {
             return;
         }
-        let links = &mut self.components.url_schemes;
         if let Some(reason) = change {
             if !links.hears_changes {
                 return;
@@ -6425,8 +6447,13 @@ impl<M: TextEngine> Core<M> {
             links.changes.push_back(change);
             return;
         }
-        if let Some(answer) = links.next.take() {
-            answer.borrow_mut().deliver(url);
+        // Every listener waiting hears it; one whose answer went (its task
+        // ended) leaves it to the others, or to the next listener.
+        links.next.retain(crate::element::task::awaited);
+        if !links.next.is_empty() {
+            for answer in links.next.drain(..) {
+                answer.borrow_mut().deliver(url.clone());
+            }
             return;
         }
         if links.pending.len() == crate::url_scheme::MAX_PENDING {
@@ -6891,8 +6918,25 @@ impl<M: TextEngine> Core<M> {
                 let links = &mut self.components.url_schemes;
                 match links.pending.pop_front() {
                     Some(url) => answer.borrow_mut().deliver(url),
-                    None => links.next = Some(answer),
+                    None => {
+                        links.next.retain(crate::element::task::awaited);
+                        links.next.push(answer);
+                    }
                 }
+            }
+            Action::NextUrlSchemeOpenFor(scheme, answer) => {
+                let links = &mut self.components.url_schemes;
+                let claimed = links.links.schemes().contains(&scheme)
+                    || (scheme == "https" && !links.links.web().is_empty());
+                if !claimed {
+                    log::warn!(
+                        "next_url_scheme_open_for: the app does not claim `{scheme}` (nsh.json `schemes`), so no link of it comes"
+                    );
+                }
+                links
+                    .next_of_scheme
+                    .retain(|(_, answer)| crate::element::task::awaited(answer));
+                links.next_of_scheme.push((scheme, answer));
             }
             Action::NextOpenFiles(answer) => {
                 let files = &mut self.components.open_files;

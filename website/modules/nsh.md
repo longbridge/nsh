@@ -2291,7 +2291,24 @@ UrlScheme.on("open", ({ url }) => {
 `open` reports every link the system hands the app, at launch and while it runs. A link that comes while nothing
 listens, the one that launched the app included, waits for the next listener (up to 16, the oldest dropped), so listen
 when the app starts or once the screen that handles links is ready. Rust code awaits `next_url_scheme_open()` of
-`nsh_core::prelude`; a Rust app's generated code passes its schemes to its root (`Root::url_schemes`).
+`nsh_core::prelude`; every call waiting when a link comes gets it. A Rust app's generated code passes its schemes to
+its root (`Root::url_schemes`).
+
+A native module that waits for one link, such as a sign-in session waiting for the provider to redirect back to
+`myapp://signed-in`, awaits `next_url_scheme_open_for("myapp")` instead. While it waits, the next link of that scheme
+goes to it alone: `open` listeners and `next_url_scheme_open()` do not hear it, and `url()` does not change. Links of
+other schemes, and the scheme's links before and after the wait, reach the app as usual. Call it before opening the
+page that will send the link back, since the wait starts with the call; dropping its answer ends the wait.
+
+```rust
+use nsh_core::prelude::*;
+
+spawn(async {
+    let callback = next_url_scheme_open_for("myapp");
+    open_url("https://accounts.example.com/authorize?...").await;
+    let url = callback.await; // myapp://signed-in?code=...
+});
+```
 
 A link is input from outside the app: any page or app can open `myapp://` with any path and query. Check what a
 link asks for before acting on it (an id that exists, an action the user confirms), as for any other input. NSH only
