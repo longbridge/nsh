@@ -274,9 +274,6 @@ pub use crate::element::{background, blocking};
 pub use crate::element::{host_call, host_call_with, host_post, on_host_event};
 /// The app's page in the system's settings ([`crate::mobile`]).
 pub use crate::mobile::{app_settings_available, open_app_settings};
-// Deprecated: sign-in sessions moved to the `nsh-oauth2` nshm.
-#[allow(deprecated)]
-pub use crate::element::{close_auth_session, open_auth_session};
 pub use crate::{
     element::{
         Delay, Each, If, IntoElements, IntoReactive, KeyOptions, KeyScope, Memo, Owner, Prop,

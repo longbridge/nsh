@@ -551,23 +551,12 @@ pub struct Environment {
     /// once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`
     /// ([`crate::mobile::open_app_settings`]).
     pub app_settings: bool,
-    /// The platform shows web sign-in sessions
-    /// ([`crate::Command::AuthSession`]: iOS's
-    /// `ASWebAuthenticationSession`, Android's Custom Tabs); without it,
-    /// a session opens the system browser and waits for a link of a scheme
-    /// the app claims where the platform hands it such links
-    /// ([`Self::scheme_links()`]), and fails at once elsewhere
-    /// ([`crate::auth_session`]).
-    pub auth_session: bool,
     /// Whether the platform hands the app links of the schemes it claims
     /// (`nsh.json` `schemes`, [`crate::element::next_url_scheme_open`]).
     /// `None` (the default): as NSH's native backends on [`Self::os`],
     /// every OS but the web, where a page hears only its own address. The
     /// GPUI and terminal backends, which hear no links, say `Some(false)`,
-    /// as does a platform built outside NSH that hears none. Without it, a
-    /// sign-in session the platform does not show itself
-    /// ([`Self::auth_session`]) fails at once, since nothing could bring
-    /// its callback back ([`Self::scheme_links()`]).
+    /// as does a platform built outside NSH that hears none.
     pub scheme_links: Option<bool>,
     /// The platform handles file requests ([`crate::Command::FileRequest`]).
     /// Desktops implement the full set; mobile platforms answer the open
@@ -711,7 +700,6 @@ impl Default for Environment {
             canvas_render: false,
             share: false,
             app_settings: false,
-            auth_session: false,
             scheme_links: None,
             file_requests: false,
             notifications: false,

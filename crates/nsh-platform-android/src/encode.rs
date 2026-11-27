@@ -801,20 +801,6 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             e.string(file);
                         }
                     }
-                    // `AuthSession.java`: the request, the page, the callback
-                    // scheme and whether it is ephemeral.
-                    Command::AuthSession { id, page } => {
-                        e.int(59);
-                        e.int(id as i32);
-                        e.string(page.url);
-                        e.string(page.callback_scheme);
-                        e.bool(page.ephemeral);
-                    }
-                    // `AuthSession.java`: the request the app closed.
-                    Command::CloseAuthSession(id) => {
-                        e.int(61);
-                        e.int(id as i32);
-                    }
                     // `ClipboardReads.java`: the clip's first image
                     // (`content:` URI) as a `data:` URI and its size, read
                     // off the main thread.

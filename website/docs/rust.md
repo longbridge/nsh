@@ -245,7 +245,7 @@ Sign-in sessions (an OAuth 2 authorization page that redirects back to the app) 
 nsh add github:longbridge/nsh-oauth2
 ```
 
-`nsh_core::element::open_auth_session` and `close_auth_session` still work but are deprecated and will be removed. Move to `nsh_oauth2::open_auth_session` and `nsh_oauth2::close_auth_session`, which take the same `AuthSessionRequest` and answer with the same outcome and error types.
+`nsh_core::element::open_auth_session` and `close_auth_session` were removed from core. Use `nsh_oauth2::open_auth_session` and `nsh_oauth2::close_auth_session`, which take the same `AuthSessionRequest` and answer with the same outcome and error types.
 
 ## Extending a Rust app with TSX
 

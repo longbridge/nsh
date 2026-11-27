@@ -220,7 +220,7 @@ fn open_notes() {
 nsh add github:longbridge/nsh-oauth2
 ```
 
-`nsh_core::element::open_auth_session` 和 `close_auth_session` 暂时还能用，但已弃用，之后会删除。请改用 `nsh_oauth2::open_auth_session` 和 `nsh_oauth2::close_auth_session`，请求、结果和错误类型与原来一致。
+core 已删除 `nsh_core::element::open_auth_session` 和 `close_auth_session`。请改用 `nsh_oauth2::open_auth_session` 和 `nsh_oauth2::close_auth_session`，请求、结果和错误类型与原来一致。
 
 ## 用 TSX 扩展 Rust 应用
 

@@ -3059,19 +3059,6 @@ final class Mounter {
                 Share.show(context, request);
                 break;
             }
-            case 59: {
-                // `encode.rs` `Command::AuthSession`: the request, the page, the callback scheme, ephemeral.
-                int request = b.getInt();
-                String url = (String) objects[b.getInt()];
-                String scheme = (String) objects[b.getInt()];
-                boolean ephemeral = b.getInt() != 0;
-                AuthSession.open(context, this, request, url, scheme, ephemeral);
-                break;
-            }
-            case 61:
-                // `encode.rs` `Command::CloseAuthSession`: the request the app closed.
-                AuthSession.close(b.getInt());
-                break;
             case 26: {
                 int request = b.getInt();
                 String url = (String) objects[b.getInt()];
