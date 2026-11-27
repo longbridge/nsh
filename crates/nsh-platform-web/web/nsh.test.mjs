@@ -954,6 +954,63 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   delete globalThis.document;
 });
 
+test("an input's view is no Tab stop, pressable or focusable: its field is its one stop", () => {
+  const { player } = fakePlayer();
+  player.updateAria = () => {};
+  globalThis.document = { activeElement: null };
+  try {
+    const stop = (el) => {
+      player.updateFocusable(el);
+      return el.hasAttribute("tabindex") ? el.tabIndex : null;
+    };
+    const input = (pressable, props, field = true) =>
+      Object.assign(focusView(pressable, props), { _kind: "input", _field: field ? focusView(false, {}) : undefined });
+    assert.equal(stop(input(true, {})), null, "an input that listens for presses (a combo box's)");
+    assert.equal(stop(input(true, {}, false)), null, "its presses before its field");
+    // As on the desktops, `focusable` does not make a second stop of it.
+    assert.equal(stop(input(false, { focusable: true })), null, "focusable");
+    assert.equal(stop(input(true, { focusable: true })), null, "focusable and pressable");
+    // A view that takes presses stays a stop.
+    assert.equal(stop(Object.assign(focusView(true, {}), { _kind: "view" })), 0, "a pressable view");
+    assert.equal(stop(Object.assign(focusView(false, { focusable: true }), { _kind: "view" })), 0, "a focusable view");
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test("an input that takes presses is no button, and keeps the role its app gives it", () => {
+  const { player } = fakePlayer();
+  const element = (fields) => {
+    const attrs = new Map();
+    return {
+      attrs, style: {}, classList: { toggle() {} },
+      getAttribute: (name) => attrs.get(name) ?? null,
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+      ...fields,
+    };
+  };
+  const role = (el) => {
+    player.updateAria(el);
+    return el.attrs.get("role") ?? null;
+  };
+  const field = element({ tagName: "INPUT" });
+  const input = element({ _kind: "input", _pressable: true, _props: { label: "Search" }, _field: field });
+  assert.equal(role(input), null, "no button around its text box");
+  assert.equal(field.attrs.get("aria-label"), "Search", "its name stays on its field");
+  assert.equal(role(element({ _kind: "input", _pressable: true, _props: {} })), null, "before its field");
+  // A role of its app's still applies.
+  input._props.role = "search";
+  assert.equal(role(input), "searchbox");
+  // A combo box is its field, as before.
+  input._props.role = "combobox";
+  assert.equal(role(input), null);
+  assert.equal(field.attrs.get("role"), "combobox");
+  // A view that takes presses is still a button.
+  assert.equal(role(element({ _kind: "view", _pressable: true, _props: {} })), "button");
+  assert.equal(role(element({ _kind: "view", _pressable: true, _props: { role: "link" } })), "link");
+});
+
 test("a view laid out at no size, as in a display none subtree, is no Tab stop, nor is its field", () => {
   const { player } = fakePlayer();
   player.updateAria = () => {};
