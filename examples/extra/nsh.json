@@ -5,6 +5,8 @@
     "nsh-extra": { "path": "../../crates/nsh-extra", "features": ["speech"] }
   },
   "capabilities": {
-    "speech": true
+    "speech": true,
+    "windows": true,
+    "application": true
   }
 }
