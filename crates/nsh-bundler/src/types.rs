@@ -148,6 +148,115 @@ fn extract_placeholders(text: &str, out: &mut std::collections::BTreeSet<String>
     }
 }
 
+/// Checks `translations` across locales for missing keys (respecting BCP 47
+/// parent-tag inheritance such as `zh-TW` -> `zh`) and mismatched `%{name}`
+/// placeholders relative to `"en"` (or the first sorted locale when `"en"` is
+/// absent).
+pub fn translation_warnings(translations: &nsh_i18n::Translations) -> Vec<String> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const MAX_LISTED_KEYS: usize = 5;
+
+    if translations.len() < 2 {
+        return Vec::new();
+    }
+
+    let base = if translations.contains_key("en") {
+        "en"
+    } else {
+        translations
+            .keys()
+            .next()
+            .map(String::as_str)
+            .unwrap_or_default()
+    };
+
+    let mut reference: BTreeMap<&str, (&str, BTreeSet<String>)> = BTreeMap::new();
+    for (locale, messages) in translations {
+        for (key, text) in messages {
+            let take = reference
+                .get(key.as_str())
+                .is_none_or(|(owner, _)| locale.as_str() == base && *owner != base);
+            if take {
+                let mut params = BTreeSet::new();
+                extract_placeholders(text, &mut params);
+                reference.insert(key.as_str(), (locale.as_str(), params));
+            }
+        }
+    }
+
+    let mut warnings = Vec::new();
+    for (locale, messages) in translations {
+        for (key, text) in messages {
+            let Some(&(ref_locale, ref expected)) = reference.get(key.as_str()) else {
+                continue;
+            };
+            if locale.as_str() == ref_locale {
+                continue;
+            }
+            let mut actual = BTreeSet::new();
+            extract_placeholders(text, &mut actual);
+            if &actual != expected {
+                warnings.push(format!(
+                    "locales: `{locale}` key {key:?} has placeholders {} (expected {} from `{ref_locale}`)",
+                    format_placeholders(&actual),
+                    format_placeholders(expected),
+                ));
+            }
+        }
+
+        if has_parent_locale(translations, locale) {
+            continue;
+        }
+        let missing: Vec<&str> = reference
+            .keys()
+            .copied()
+            .filter(|k| !messages.contains_key(*k))
+            .collect();
+        if !missing.is_empty() {
+            let shown: String = missing
+                .iter()
+                .take(MAX_LISTED_KEYS)
+                .map(|k| format!("{k:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let tail = if missing.len() > MAX_LISTED_KEYS {
+                format!(" (and {} more)", missing.len() - MAX_LISTED_KEYS)
+            } else {
+                String::new()
+            };
+            let noun = if missing.len() == 1 { "key" } else { "keys" };
+            warnings.push(format!(
+                "locales: `{locale}` is missing {} {noun}: {shown}{tail}",
+                missing.len(),
+            ));
+        }
+    }
+    warnings
+}
+
+fn has_parent_locale(translations: &nsh_i18n::Translations, locale: &str) -> bool {
+    let mut tag = locale;
+    while let Some(cut) = tag.rfind(['-', '_']) {
+        tag = &tag[..cut];
+        if translations.contains_key(tag) {
+            return true;
+        }
+    }
+    false
+}
+
+fn format_placeholders(params: &std::collections::BTreeSet<String>) -> String {
+    if params.is_empty() {
+        return "none".to_owned();
+    }
+    params
+        .iter()
+        .map(|p| format!("`%{{{p}}}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// `assets.d.ts`: what importing an image, a sound, a video, a font or any
 /// file with `?url` gives (`plugin.rs`).
 fn assets() -> String {
@@ -289,5 +398,112 @@ mod tests {
             "{decl}"
         );
         assert!(!decl.contains("\"locale\": string | number"), "{decl}");
+    }
+
+    #[test]
+    fn translation_warnings_is_empty_for_consistent_or_single_locale() {
+        use std::collections::BTreeMap;
+
+        assert!(super::translation_warnings(&nsh_i18n::Translations::new()).is_empty());
+
+        let mut single = nsh_i18n::Translations::new();
+        single.insert(
+            "en".to_owned(),
+            BTreeMap::from([("hello".to_owned(), "Hello".to_owned())]),
+        );
+        assert!(super::translation_warnings(&single).is_empty());
+
+        single.insert(
+            "zh".to_owned(),
+            BTreeMap::from([("hello".to_owned(), "你好".to_owned())]),
+        );
+        assert!(super::translation_warnings(&single).is_empty());
+    }
+
+    #[test]
+    fn translation_warnings_reports_missing_keys_and_placeholder_mismatches() {
+        use std::collections::BTreeMap;
+
+        let mut translations = nsh_i18n::Translations::new();
+        translations.insert(
+            "en".to_owned(),
+            BTreeMap::from([
+                ("a".to_owned(), "A".to_owned()),
+                ("b".to_owned(), "B".to_owned()),
+                ("c".to_owned(), "C".to_owned()),
+                ("d".to_owned(), "D".to_owned()),
+                ("e".to_owned(), "E".to_owned()),
+                ("f".to_owned(), "F".to_owned()),
+                ("greet".to_owned(), "Hello, %{name}!".to_owned()),
+            ]),
+        );
+        translations.insert(
+            "zh".to_owned(),
+            BTreeMap::from([
+                ("greet".to_owned(), "你好，%{user}！".to_owned()),
+                ("zhOnly".to_owned(), "仅中文".to_owned()),
+            ]),
+        );
+
+        let warnings = super::translation_warnings(&translations);
+        assert_eq!(warnings.len(), 3, "{warnings:#?}");
+        assert!(
+            warnings[0] == "locales: `en` is missing 1 key: \"zhOnly\"",
+            "{warnings:#?}"
+        );
+        assert!(
+            warnings[1].contains(
+                "`zh` key \"greet\" has placeholders `%{user}` (expected `%{name}` from `en`)"
+            ),
+            "{warnings:#?}"
+        );
+        assert!(
+            warnings[2]
+                == "locales: `zh` is missing 6 keys: \"a\", \"b\", \"c\", \"d\", \"e\" (and 1 more)",
+            "{warnings:#?}"
+        );
+    }
+
+    #[test]
+    fn translation_warnings_respects_subtag_fallback_for_regional_overrides() {
+        use std::collections::BTreeMap;
+
+        let mut translations = nsh_i18n::Translations::new();
+        translations.insert(
+            "en".to_owned(),
+            BTreeMap::from([
+                ("app".to_owned(), "App".to_owned()),
+                ("greet".to_owned(), "Hello, %{name}!".to_owned()),
+            ]),
+        );
+        translations.insert(
+            "zh".to_owned(),
+            BTreeMap::from([
+                ("app".to_owned(), "应用".to_owned()),
+                ("greet".to_owned(), "你好，%{name}！".to_owned()),
+            ]),
+        );
+        translations.insert(
+            "zh-TW".to_owned(),
+            BTreeMap::from([("app".to_owned(), "應用程式".to_owned())]),
+        );
+
+        assert!(
+            super::translation_warnings(&translations).is_empty(),
+            "partial regional override inheriting from `zh` should not warn"
+        );
+
+        translations
+            .get_mut("zh-TW")
+            .unwrap()
+            .insert("greet".to_owned(), "哈囉！".to_owned());
+        let warnings = super::translation_warnings(&translations);
+        assert_eq!(warnings.len(), 1, "{warnings:#?}");
+        assert!(
+            warnings[0].contains(
+                "`zh-TW` key \"greet\" has placeholders none (expected `%{name}` from `en`)"
+            ),
+            "{warnings:#?}"
+        );
     }
 }

@@ -39,7 +39,8 @@ pub use minify::minify_module;
 pub use natives::{Imported, NativeUse};
 #[cfg(feature = "bundle")]
 pub use types::{
-    TSCONFIG, TSCONFIG_BASE, tokens_declaration, translations_declaration, type_definitions,
+    TSCONFIG, TSCONFIG_BASE, tokens_declaration, translation_warnings, translations_declaration,
+    type_definitions,
 };
 
 /// Compiles one module (TSX, JSX, TS or JS, as `name`'s extension says) to
