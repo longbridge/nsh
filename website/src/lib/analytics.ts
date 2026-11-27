@@ -1,4 +1,5 @@
 import { createNsMetry } from './nsmetry/index';
+import { currentVersion } from './versions';
 
 /** The host whose visits count; local builds and previews send nothing. */
 export const ANALYTICS_HOST = 'nsh.dev';
@@ -21,6 +22,8 @@ export function startAnalytics(): void {
   const nsmetry = createNsMetry({
     endpoint: 'https://nsmetry.huacnlee-account.workers.dev',
     site: 'nsh.dev',
+    // The docs version this build serves (`v0.7.1`, `main`).
+    appVersion: currentVersion,
     persistUserId: true,
     flushInterval: 30_000,
   });
