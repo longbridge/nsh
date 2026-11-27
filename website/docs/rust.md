@@ -448,8 +448,8 @@ updates, Rust edits rebuild and restart the app. The CLI bundles and compiles th
 exports from its description; the development hosts and `nsh test`'s headless runner are built with your crate and
 QuickJS.
 
-`examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports one
-component (props required, defaulted and optional, an event, children), one module (a function of each kind) and
+`examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports
+components (required, defaulted and optional props, an event, and node or string children), one module (a function of each kind) and
 one class (a constructor, methods, a getter and a setter, a static, an `async` member, another instance as an
 argument, a callback Rust posts to, `dispose()` and `using`), each with a short doc comment, and tests, in Rust and
 in TypeScript (`App.test.tsx`), that press through the app and check what each one shows.
@@ -457,6 +457,15 @@ in TypeScript (`App.test.tsx`), that press through the app and check what each o
 `examples/gallery-rs` in the repository is a complete Rust app: every demo is Rust, `nsh run examples/gallery-rs
 --target web` (or `ios`, `android`, …) runs its root, `nsh test examples/gallery-rs` runs its tests headless, and
 `cargo run -p gallery-native` starts it on the desktop backend.
+
+### Reading string children
+
+Declare `pub children: Prop<SharedString>` in a Rust component's `#[derive(Props)]` struct to receive the string
+between its JSX tags. The generated TypeScript props include `children: string`. For example, both
+`<TextChild>**bold**</TextChild>` and `<TextChild>{source()}</TextChild>` pass a string to Rust. The string keeps
+characters such as the Markdown asterisks. Read `props.children.get()` in a reactive binding or computation to
+follow changes when `source` is a signal. To place the caller's JSX nodes in the component's view, use a
+`Prop<Children>` slot.
 
 ### Render functions and the app's classes
 

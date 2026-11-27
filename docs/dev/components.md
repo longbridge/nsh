@@ -897,7 +897,11 @@ what changed.
 
 ## Children, slots and rows
 
-- JS inserts a component's children into the host; the core places them where the view's `Children` is, before the
+- A value prop named `children`, such as `children: Prop<SharedString>`, receives the JSX child as a typed value.
+  The compiler supplies it as `props.children`, and the JS face reads it in the ordinary prop effect, including
+  when a signal read by its getter changes. The generated TypeScript declaration for `Prop<SharedString>` is
+  `children: string`. Read `props.children.get()` in a Rust binding or computation to track the value.
+- For a `Children` slot, JS inserts a component's children into the host; the core places them where the view's `Children` is, before the
   node that follows it (or keeps them out of the tree while the view has none: a `Children` in a region that is not
   shown). The core sets the `Prop<Children>` when JS adds the first child or removes the last, so
   `props.children.get().is_empty()` in a binding follows it. With `children_each`, the children are an `Each` keyed by the child's node over a signal of the host's JS
