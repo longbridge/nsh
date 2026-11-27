@@ -450,11 +450,28 @@ mod macos {
             let field = native_field(&input).expect("the input's native text field");
             assert_eq!(field.accessibilityRole().unwrap().to_string(), role, "{id}");
             assert_eq!(field.stringValue().to_string(), "Sample value");
+            // The cell is the element AppKit lists in the field's place,
+            // the one VoiceOver reads: it answers as the field does.
+            let cell = field.cell().expect("the field's cell");
+            assert_eq!(
+                cell.class().name().to_string_lossy(),
+                if id == "secure-field" {
+                    "NshSecureFieldCell"
+                } else {
+                    "NshFieldCell"
+                }
+            );
+            assert_eq!(
+                cell.accessibilityRole().unwrap().to_string(),
+                role,
+                "{id} cell"
+            );
             if id.ends_with("combo") {
                 let open = id == "open-combo";
                 assert_eq!(field.isAccessibilityExpanded(), open);
+                assert_eq!(cell.isAccessibilityExpanded(), open, "{id} cell");
                 assert_eq!(
-                    field.accessibilityLabel().unwrap().to_string(),
+                    cell.accessibilityLabel().unwrap().to_string(),
                     if open {
                         "Open choices"
                     } else {
@@ -464,6 +481,8 @@ mod macos {
                 for (children, target) in [
                     (field.accessibilitySelectedChildren(), "choice"),
                     (field.accessibilityLinkedUIElements(), "choices"),
+                    (cell.accessibilitySelectedChildren(), "choice"),
+                    (cell.accessibilityLinkedUIElements(), "choices"),
                 ] {
                     if open {
                         let children = children.unwrap();

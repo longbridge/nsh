@@ -1137,7 +1137,8 @@ macro_rules! define_field {
                 // element VoiceOver is on while the list is open, named and
                 // expanded as the input, its selected child the input's
                 // active descendant, its linked element the list
-                // ([`crate::access::combobox_field`]).
+                // ([`crate::access::combobox_field`]). Its cell, the
+                // element clients read, answers the same.
                 #[unsafe(method_id(accessibilityRole))]
                 fn accessibility_role(&self) -> Option<Retained<NSString>> {
                     match self.combobox() {
@@ -2096,6 +2097,12 @@ fn cell_editor_field(cell: &NSCell) -> Option<crate::access::EditorField> {
     crate::access::editor_field(&view)
 }
 
+/// The input view's combo box, for its field's `cell`.
+fn cell_combobox(cell: &NSCell) -> Option<crate::access::ComboboxField> {
+    let (_, view, _) = cell_ctx(cell)?.get()?;
+    crate::access::combobox_field(&view)
+}
+
 /// Whether `action` is AppKit's semantic `AXConfirm` action.
 fn is_confirm_action(action: &NSString) -> bool {
     // SAFETY: immutable AppKit accessibility action constant.
@@ -2175,6 +2182,44 @@ macro_rules! define_field_cell {
                         Some(field) => field.label.map(|l| NSString::from_str(&l)),
                         // SAFETY: NSTextFieldCell's own label.
                         None => unsafe { msg_send![super(self), accessibilityLabel] },
+                    }
+                }
+
+                // A combo box's cell is the combo box clients read, as the
+                // field says ([`crate::access::combobox_field`]).
+                #[unsafe(method_id(accessibilityRole))]
+                fn accessibility_role(&self) -> Option<Retained<NSString>> {
+                    match cell_combobox(self) {
+                        Some(_) => Some(NSString::from_str("AXComboBox")),
+                        // SAFETY: NSTextFieldCell's own role.
+                        None => unsafe { msg_send![super(self), accessibilityRole] },
+                    }
+                }
+
+                #[unsafe(method(isAccessibilityExpanded))]
+                fn is_accessibility_expanded(&self) -> bool {
+                    match cell_combobox(self) {
+                        Some(field) => field.expanded,
+                        // SAFETY: NSTextFieldCell's own state.
+                        None => unsafe { msg_send![super(self), isAccessibilityExpanded] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilitySelectedChildren))]
+                fn accessibility_selected_children(&self) -> Option<Retained<NSArray>> {
+                    match cell_combobox(self).and_then(|f| f.active) {
+                        Some(active) => Some(NSArray::from_retained_slice(&[active])),
+                        // SAFETY: NSTextFieldCell's own answer.
+                        None => unsafe { msg_send![super(self), accessibilitySelectedChildren] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityLinkedUIElements))]
+                fn accessibility_linked_ui_elements(&self) -> Option<Retained<NSArray>> {
+                    match cell_combobox(self).and_then(|f| f.controls) {
+                        Some(list) => Some(NSArray::from_retained_slice(&[list])),
+                        // SAFETY: NSTextFieldCell's own answer.
+                        None => unsafe { msg_send![super(self), accessibilityLinkedUIElements] },
                     }
                 }
 
