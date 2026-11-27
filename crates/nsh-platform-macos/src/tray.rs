@@ -153,11 +153,7 @@ pub(crate) fn set(surface: &Surface, tray: Option<&Tray>) {
         button.sendActionOn(NSEventMask::LeftMouseUp | NSEventMask::RightMouseUp);
         set_title(&button, &tray.title, tray.title_placement);
     }
-    item.status.setMenu(if tray.click == 0 {
-        item.menu.as_deref()
-    } else {
-        None
-    });
+    attach_menu(&item, mtm);
     if item.icon.as_ref() != Some(&tray.icon) {
         item.icon = Some(tray.icon.clone());
         item.icon_load = set_icon(surface, &item.status, tray.icon.as_ref());
@@ -174,13 +170,25 @@ pub(crate) fn relabel(surface: &Surface) {
         item.menu = (!item.menu_items.is_empty())
             .then(|| chrome::menu(surface, "", &item.menu_items, &mut loads));
         item.menu_icons = loads;
-        item.status.setMenu(if item.click == 0 {
-            item.menu.as_deref()
-        } else {
-            None
-        });
+        attach_menu(&item, surface.mtm);
     }
     ITEM.set(Some(item));
+}
+
+/// Gives the item its menu. Without an `onClick` the item opens it on any
+/// click. With one, a click reports to the app, and the menu is the
+/// button's context menu instead: AppKit then offers `AXShowMenu`
+/// (VoiceOver's VO-Shift-M) on the button and opens the menu on a
+/// Control-click, while a secondary click still opens it below the item
+/// ([`open_menu`]).
+fn attach_menu(item: &Item, mtm: MainThreadMarker) {
+    let clicks = item.click != 0;
+    item.status
+        .setMenu(item.menu.as_deref().filter(|_| !clicks));
+    if let Some(button) = item.status.button(mtm) {
+        // SAFETY: the menu lives in the item, as long as the button.
+        unsafe { button.setMenu(item.menu.as_deref().filter(|_| clicks)) };
+    }
 }
 
 /// Shows `title` on the `position` side of the icon, in the menu bar's font, each run in its
