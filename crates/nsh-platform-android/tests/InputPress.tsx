@@ -26,6 +26,13 @@ function App() {
           onFocus={() => note("focus area")}
           onPress={() => note("press area")}
         />
+        <Input
+          testID="padded"
+          defaultValue="Padded"
+          style={{ ...input, height: 64, paddingTop: 44, paddingBottom: 4 }}
+          onFocus={() => note("focus padded")}
+          onPress={() => note("press padded")}
+        />
         <Input testID="quiet" defaultValue="Quiet" style={input} onFocus={() => note("focus quiet")} />
       </View>
     </View>

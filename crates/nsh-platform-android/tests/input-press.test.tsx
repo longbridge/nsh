@@ -19,6 +19,17 @@ test("a tap on an input presses it after its focus, and not the row around it", 
   expect(app.shows("text:log:focus field,press field,press field,focus area,press area")).toBe(true);
 });
 
+test("a tap on the padding that moves a little still focuses the field and presses it", async () => {
+  const app = await open("./InputPress.tsx");
+  // Its middle is on its padding (44 points above the field): a finger
+  // lands there and moves 3 points, under the touch slop, as a real tap
+  // does; every event of the touch must reach the field where it went down.
+  await app.drag("id:padded", { x: 3, y: 0 });
+  await app.waitFor("text:log:focus padded,press padded");
+  await app.wait(300);
+  expect(app.shows("text:log:focus padded,press padded")).toBe(true);
+});
+
 test("an input that does not listen leaves the tap to no one", async () => {
   const app = await open("./InputPress.tsx");
   // A real touch on its padding (`press` needs a pressable view), which

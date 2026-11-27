@@ -99,6 +99,13 @@ final class InputBox extends FrameLayout implements Node {
     /** Press handling, once the input listens to presses. */
     Pressable press;
 
+    /**
+     * A touch that went down on the padding: how far its events move to land in the field, the same for each of
+     * them until it lifts, so the field sees the whole touch where it went down (a finger's small moves stay in it).
+     */
+    private boolean padTouch;
+    private float padDx, padDy;
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
         // No target (an editor's hidden input at its caret, over the
@@ -107,20 +114,25 @@ final class InputBox extends FrameLayout implements Node {
         if (pointerEvents == 1 || pointerEvents == 2) return false;
         // Where its clip path cuts it away, the touch goes to the views below.
         if (e.getActionMasked() == MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) return false;
-        boolean handled;
-        if (e.getActionMasked() == MotionEvent.ACTION_DOWN && !onField(e.getX(), e.getY())) {
+        int action = e.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
             // A touch on the padding is the field's, at the nearest point
             // in it, as on the other platforms: the field takes the focus
             // and the caret, and no view around hears a press.
+            padTouch = !onField(e.getX(), e.getY());
+            padDx = clamp(e.getX(), edit.getLeft(), edit.getRight() - 1) - e.getX();
+            padDy = clamp(e.getY(), edit.getTop(), edit.getBottom() - 1) - e.getY();
+        }
+        boolean handled;
+        if (padTouch) {
             MotionEvent inside = MotionEvent.obtain(e);
-            inside.offsetLocation(
-                    clamp(e.getX(), edit.getLeft(), edit.getRight() - 1) - e.getX(),
-                    clamp(e.getY(), edit.getTop(), edit.getBottom() - 1) - e.getY());
+            inside.offsetLocation(padDx, padDy);
             handled = super.dispatchTouchEvent(inside);
             inside.recycle();
         } else {
             handled = super.dispatchTouchEvent(e);
         }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) padTouch = false;
         // After the field: its press comes after the focus a tap gives it.
         if (press != null) press.onTouchEvent(e);
         return handled;
