@@ -86,6 +86,10 @@ JRSoftware.InnoSetup`）会把它编译成 `.nsh\out\<Name>-setup.exe`。安装�
 中的图标会直接嵌入可执行文件（资源管理器和任务栏都会显示它），不需要额外的工具；在其他系统上打包则保留默认图标。应用 id
 用于在任务栏中归组应用的窗口。`--run` 会在打包后启动应用。可执行文件没有签名：要分发，请用你自己的证书签名（`signtool`）。
 
+TSX 应用的可执行文件只包含应用导入的 `nsh/base` 部件。在 x86_64 上，`nsh package` 用 nsh 发布版运行器预先编好的目标文件
+（`runtime\windows\nsh-windows-app.link\`）重新链接，去掉其余部件。这一步不需要 Rust，也不需要 Visual Studio：链接器是
+`windows-linker` [组件](./installation.md#组件)，第一次打包时下载。链接失败时，应用使用预编译的运行器，包含所有部件。
+
 ## 嵌入 Win32 应用
 
 `nsh-platform-windows` crate（位于 NSH 仓库中）为 Rust 编写的 Win32 应用提供 `AppView`：一个在你的窗口的子窗口中运行的 NSH
