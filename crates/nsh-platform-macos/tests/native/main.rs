@@ -113,6 +113,8 @@ mod title_bar;
 #[cfg(target_os = "macos")]
 mod tray_owner;
 #[cfg(target_os = "macos")]
+mod unbound_animation;
+#[cfg(target_os = "macos")]
 mod web_file_input;
 #[cfg(target_os = "macos")]
 mod web_load_wait;
@@ -276,6 +278,8 @@ fn main() {
                 window_mode_layout::run();
             } else if std::env::var_os("NSH_PRESENTING_CHECK_ONLY").is_some() {
                 presenting::run();
+            } else if std::env::var_os("NSH_UNBOUND_ANIMATION_CHECK_ONLY").is_some() {
+                unbound_animation::run();
             } else {
                 quit_requests::run();
                 #[cfg(feature = "js")]
@@ -340,6 +344,7 @@ fn main() {
                 press_momentum::run();
                 momentum_bounce::run();
                 tap_feedback::run();
+                unbound_animation::run();
             }
         }
     }
