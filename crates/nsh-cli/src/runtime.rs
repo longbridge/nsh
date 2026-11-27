@@ -767,14 +767,45 @@ fn cli_build() -> Option<&'static CheckoutBuild> {
                     env::var_os("PATH").as_deref(),
                 )
             });
-            let paths = exe_paths(&exe, invoked.as_deref());
-            let build = paths.iter().find_map(|path| checkout_build(path));
-            if build.is_none() {
-                note_build_outside_checkout(&paths);
+            match find_build(&exe, invoked.as_deref()) {
+                FoundBuild::Checkout(build) => Some(build),
+                FoundBuild::Outside(bin) => {
+                    note_build_outside_checkout(&bin);
+                    None
+                }
+                FoundBuild::Other => None,
             }
-            build
         })
         .as_ref()
+}
+
+/// What this CLI is, as [`find_build`] tells.
+#[derive(Debug, PartialEq, Eq)]
+enum FoundBuild {
+    /// A build in a checkout of nsh.
+    Checkout(CheckoutBuild),
+    /// A cargo build outside any checkout, in this profile directory of its
+    /// resolved path (`CARGO_TARGET_DIR`, `build.target-dir`).
+    Outside(PathBuf),
+    /// Anything else, such as an installed distribution.
+    Other,
+}
+
+/// What the executable `exe` (as the OS reports it), run as `invoked`, is:
+/// a checkout build through any of its paths ([`exe_paths`]), else a cargo
+/// build where its resolved path is.
+fn find_build(exe: &Path, invoked: Option<&Path>) -> FoundBuild {
+    if let Some(build) = exe_paths(exe, invoked)
+        .iter()
+        .find_map(|path| checkout_build(path))
+    {
+        return FoundBuild::Checkout(build);
+    }
+    dunce::canonicalize(exe)
+        .ok()
+        .and_then(|real| real.parent().map(Path::to_owned))
+        .filter(|bin| cargo_profile_dir(bin))
+        .map_or(FoundBuild::Other, FoundBuild::Outside)
 }
 
 /// The links a path to an executable can pass through before its file.
@@ -783,8 +814,9 @@ const MAX_LINKS: usize = 40;
 /// The paths that reach the executable `exe` (as the OS reports it): that
 /// one and `invoked`, the path it was run as when it is the same file, each
 /// followed by every symlink it passes through in turn, and the resolved
-/// path last. macOS and Windows report the path as it was run, Linux the
-/// resolved one.
+/// path, added at the end unless one of them already is. macOS and Windows
+/// report the path as it was run, Linux the resolved one, which then comes
+/// first.
 fn exe_paths(exe: &Path, invoked: Option<&Path>) -> Vec<PathBuf> {
     let real = dunce::canonicalize(exe).ok();
     let mut paths: Vec<PathBuf> = Vec::new();
@@ -868,24 +900,22 @@ fn cargo_profile_dir(dir: &Path) -> bool {
     dir.join(".cargo-lock").is_file()
 }
 
-/// Says why a cargo build of this CLI from a checkout on this machine, run
-/// from a target directory outside it (`CARGO_TARGET_DIR`, `build.target-dir`),
-/// takes nsh's released crates and runtimes rather than the checkout's.
-fn note_build_outside_checkout(paths: &[PathBuf]) {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    if !source.join("crates/nsh-ios-host/Cargo.toml").exists() {
-        return;
-    }
-    let Some(bin) = paths
-        .last()
-        .and_then(|exe| exe.parent())
-        .filter(|bin| cargo_profile_dir(bin))
+/// Says why a cargo build of this CLI from a checkout on this machine, in
+/// the profile directory `bin` outside it (`CARGO_TARGET_DIR`,
+/// `build.target-dir`), takes nsh's released crates and runtimes rather than
+/// the checkout's.
+fn note_build_outside_checkout(bin: &Path) {
+    let Ok(source) = dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
     else {
         return;
     };
+    if !source.join("crates/nsh-ios-host/Cargo.toml").exists() {
+        return;
+    }
     crate::ui::note(format!(
         "this nsh was built from {} into {}, outside it, so apps use nsh's released crates and \
-         runtimes, not the checkout's; build it in the checkout's own target directory to use them",
+         runtimes, not the checkout's; run it from the checkout's target directory, or build it \
+         there, to use them",
         crate::ui::path(&source),
         crate::ui::path(bin),
     ));
@@ -1162,19 +1192,17 @@ mod tests {
             }
         }
 
-        /// The checkout build `exe` run as `invoked` is.
+        /// What `exe` run as `invoked` is.
         fn build(
             &self,
             exe: &std::path::Path,
             invoked: Option<&std::path::Path>,
-        ) -> Option<super::CheckoutBuild> {
-            super::exe_paths(exe, invoked)
-                .iter()
-                .find_map(|path| super::checkout_build(path))
+        ) -> super::FoundBuild {
+            super::find_build(exe, invoked)
         }
 
-        fn expected(&self, profile: &str) -> Option<super::CheckoutBuild> {
-            Some(super::CheckoutBuild {
+        fn expected(&self, profile: &str) -> super::FoundBuild {
+            super::FoundBuild::Checkout(super::CheckoutBuild {
                 root: self.checkout.clone(),
                 bin: self.checkout.join("target").join(profile),
             })
@@ -1204,7 +1232,10 @@ mod tests {
             layout.expected("debug")
         );
         // The resolved path alone is the cache's.
-        assert_eq!(layout.build(&resolved, None), None);
+        assert_eq!(
+            layout.build(&resolved, None),
+            super::FoundBuild::Outside(layout.cache.join("debug"))
+        );
     }
 
     /// `install.sh --source` links `~/.local/bin/nsh` to `~/.nsh/bin/nsh`
@@ -1249,10 +1280,40 @@ mod tests {
         fs::create_dir_all(layout.checkout.join("tools/bin")).unwrap();
         symlink(dist.join("bin/nsh"), layout.checkout.join("tools/bin/nsh")).unwrap();
         let linked = layout.checkout.join("tools/bin/nsh");
-        assert_eq!(layout.build(&linked, None), None);
-        assert_eq!(layout.build(&dist.join("bin/nsh"), Some(&linked)), None);
+        assert_eq!(layout.build(&linked, None), super::FoundBuild::Other);
+        assert_eq!(
+            layout.build(&dist.join("bin/nsh"), Some(&linked)),
+            super::FoundBuild::Other
+        );
         let other = layout.checkout.join("target/debug/nsh");
-        assert_eq!(layout.build(&dist.join("bin/nsh"), Some(&other)), None);
+        assert_eq!(
+            layout.build(&dist.join("bin/nsh"), Some(&other)),
+            super::FoundBuild::Other
+        );
+    }
+
+    /// A build into `CARGO_TARGET_DIR` outside the checkout, run through
+    /// `install.sh --source`'s links, is the cargo build where it resolves:
+    /// Linux reports that path first and the links follow, macOS the reverse.
+    #[cfg(unix)]
+    #[test]
+    fn a_build_outside_the_checkout_is_where_it_resolves() {
+        use std::{fs, os::unix::fs::symlink};
+        let layout = Layout::new("outside-checkout");
+        let elsewhere = layout.dir.join("elsewhere/release");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(elsewhere.join(".cargo-lock"), "").unwrap();
+        fs::write(elsewhere.join("nsh"), "").unwrap();
+        let home = layout.dir.join("home");
+        fs::create_dir_all(home.join(".local/bin")).unwrap();
+        fs::create_dir_all(home.join(".nsh/bin")).unwrap();
+        symlink(elsewhere.join("nsh"), home.join(".nsh/bin/nsh")).unwrap();
+        symlink("../../.nsh/bin/nsh", home.join(".local/bin/nsh")).unwrap();
+        let run_as = home.join(".local/bin/nsh");
+        let outside = super::FoundBuild::Outside(elsewhere.clone());
+        assert_eq!(layout.build(&elsewhere.join("nsh"), Some(&run_as)), outside);
+        assert_eq!(layout.build(&run_as, Some(&run_as)), outside);
+        assert_eq!(layout.build(&run_as, None), outside);
     }
 
     /// The first argument is a path relative to the working directory when

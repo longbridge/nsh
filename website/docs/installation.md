@@ -200,6 +200,8 @@ git clone https://github.com/longbridge/nsh.git && cd nsh
 cargo build -p nsh-cli
 ```
 
+A CLI built into a target directory outside the checkout (`CARGO_TARGET_DIR`) uses NSH's released crates and runtimes, and says so.
+
 The commands for the iOS and Android runtimes and the release runners are in the repository's [AGENTS.md](https://github.com/longbridge/nsh/blob/main/AGENTS.md#commands).
 
 ## Platform tools

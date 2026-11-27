@@ -201,6 +201,8 @@ git clone https://github.com/longbridge/nsh.git && cd nsh
 cargo build -p nsh-cli
 ```
 
+构建到源码目录之外的 target 目录（`CARGO_TARGET_DIR`）的 CLI 会使用 NSH 已发布的 crate 和运行时，并会给出提示。
+
 iOS、Android 运行时和发布版运行器的构建命令见仓库的 [AGENTS.md](https://github.com/longbridge/nsh/blob/main/AGENTS.md#commands)。
 
 ## 平台工具
