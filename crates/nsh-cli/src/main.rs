@@ -46,7 +46,7 @@ mod windows;
 
 use std::{
     net::Ipv4Addr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::ExitCode,
     sync::{Arc, OnceLock, RwLock},
 };
@@ -839,6 +839,23 @@ fn parse_limits(spec: &str) -> Result<nsh_core::js::HostLimits, String> {
     nsh_core::js::HostLimits::parse(spec)
 }
 
+/// Owns the dev server's `port` for `entry`, or the first free one at
+/// `host` (the address the server will listen on) when none was given.
+fn acquire_port(
+    entry: &Path,
+    port: &mut Option<u16>,
+    host: Ipv4Addr,
+) -> anyhow::Result<Option<dev_port::Session>> {
+    match port {
+        Some(port) => dev_port::Session::acquire(*port, entry),
+        None => {
+            let (session, free) = dev_port::Session::acquire_free(entry, host)?;
+            *port = Some(free);
+            Ok(session)
+        }
+    }
+}
+
 /// Refuses `--limits` for an app of Rust only: they are its JS VM's, and it
 /// runs no JS.
 fn no_limits_for_rust(
@@ -948,14 +965,25 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             let port = port.get_or_insert(nsh_dev::protocol::DEFAULT_PORT);
             dev_port::Session::acquire(*port, entry)?
         }
-        Command::Run { entry, port, .. } | Command::Dev { entry, port, .. } => match port {
-            Some(port) => dev_port::Session::acquire(*port, entry)?,
-            None => {
-                let (session, free) = dev_port::Session::acquire_free(entry)?;
-                *port = Some(free);
-                session
-            }
-        },
+        Command::Run {
+            entry,
+            port,
+            target,
+            ..
+        } => {
+            let host = dev::Listen::new(0, target.uses_network()).host;
+            acquire_port(entry, port, host)?
+        }
+        Command::Dev {
+            entry,
+            port,
+            target,
+            host,
+            ..
+        } => {
+            let host = host.unwrap_or(dev::Listen::new(0, target.uses_network()).host);
+            acquire_port(entry, port, host)?
+        }
         _ => None,
     };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
