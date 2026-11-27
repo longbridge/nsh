@@ -2362,14 +2362,8 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
         }
         _ if is_command(m) => match vk {
             0x41 => moved(&|model| model.select_all()),
-            0x43 => {
-                copy(&input, secure);
-                true
-            }
-            _ if vk == VK_INSERT && !m.shift => {
-                copy(&input, secure);
-                true
-            }
+            0x43 => copy(&input, secure),
+            _ if vk == VK_INSERT && !m.shift => copy(&input, secure),
             0x58 => {
                 if editable {
                     cut(surface, &view, &input, secure);
@@ -2406,16 +2400,17 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     }
 }
 
-/// Copies the selection (never a password's).
-fn copy(input: &InputState, secure: bool) {
+/// True if there was a selection to copy. A password is never copied.
+fn copy(input: &InputState, secure: bool) -> bool {
     let text = {
         let model = input.model.borrow();
         if secure || !model.has_selection() {
-            return;
+            return false;
         }
         model.selected().to_owned()
     };
     crate::rt::on_app(move |cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)));
+    true
 }
 
 fn cut(surface: &Surface, view: &NshView, input: &InputState, secure: bool) -> bool {
@@ -2660,6 +2655,34 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_only_handles_a_selection_it_can_copy() {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let field = NshView::new(4, nsh_core::ViewKind::Input);
+        field.insert_before(&surface.root, None);
+        focus_for_test(&surface, &field);
+        let input = input_of(&field).unwrap();
+        input.model.borrow_mut().set_text("hello");
+        input.model.borrow_mut().select(5, 5);
+        let mac = cfg!(target_os = "macos");
+        let copy = KeyEvent {
+            vk: 0x43,
+            down: true,
+            repeat: false,
+            modifiers: Modifiers {
+                ctrl: !mac,
+                meta: mac,
+                ..Default::default()
+            },
+        };
+        assert!(!key(&surface, &copy));
+        input.model.borrow_mut().select(0, 5);
+        assert!(key(&surface, &copy));
+        input.config.borrow_mut().secure = true;
+        assert!(!key(&surface, &copy));
+        surface_stopped(surface.key());
+    }
 
     #[test]
     fn removing_a_composing_field_reports_the_end_without_committing() {

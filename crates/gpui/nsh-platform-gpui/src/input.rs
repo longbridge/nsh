@@ -3914,8 +3914,6 @@ mod tests {
         crate::text_input::focused(surface).as_ref() == Some(field)
     }
 
-    /// While the field is focused it swallows Cmd + C; once a selection
-    /// drag blurred it, the key is left to the selection.
     fn assert_copy_goes_to_selection(surface: &Rc<Surface>, field: &NshView) {
         assert!(!focused_is(surface, field));
         assert!(!crate::text_input::key(surface, &cmd_c(true)));
@@ -3924,7 +3922,8 @@ mod tests {
     #[test]
     fn dragging_selectable_text_blurs_the_field_and_copy_goes_to_the_selection() {
         let (surface, field, _) = field_and_text(false);
-        assert!(crate::text_input::key(&surface, &cmd_c(true)));
+        assert!(focused_is(&surface, &field));
+        assert!(!crate::text_input::key(&surface, &cmd_c(true)));
         press_and_drag(&surface, Key::Mouse, 110.0, 1, true);
         assert_copy_goes_to_selection(&surface, &field);
         crate::text_input::surface_stopped(surface.key());
@@ -3933,7 +3932,8 @@ mod tests {
     #[test]
     fn dragging_in_a_selectable_view_blurs_the_field() {
         let (surface, field, _) = field_and_text(true);
-        assert!(crate::text_input::key(&surface, &cmd_c(true)));
+        assert!(focused_is(&surface, &field));
+        assert!(!crate::text_input::key(&surface, &cmd_c(true)));
         press_and_drag(&surface, Key::Mouse, 110.0, 1, true);
         assert_copy_goes_to_selection(&surface, &field);
         crate::text_input::surface_stopped(surface.key());
