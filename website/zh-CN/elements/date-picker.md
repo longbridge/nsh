@@ -117,7 +117,7 @@ fn trip_dates() -> impl IntoElement {
 
 - 单个日期：按下某一天会设置值并关闭弹出层。
 - 在 `range` 时，第一次按压开始范围，第二次结束范围，与[日历的](./calendar.md#value)相同；完整的范围设置值并关闭弹出层。
-- 在 `timePrecision` 时（仅限单个日期），日历下方显示一个时间输入框，时间的每次编辑都会报告。在桌面上，选中某一天时弹出层保持打开以便设置时间，并报告带时间的日期；再次按下已选中的日期会关闭弹出层。在手机和平板上，点一下某天就以它的时间选中这一天并关闭底部面板，与单个日期相同；再次打开面板即可设置时间。`closeOnSelect={false}` 时点一下某天不会关闭面板，时间就在同一面板中设置。在设置任何时间之前选中的日期使用 `defaultTime`（默认 `00:00`）。`hourCycle` 是时间输入框的小时计法，与 [TimeField](./time-field.md) 的相同，包括用户的。
+- 在 `timePrecision` 时（仅限单个日期），日历下方显示一个时间输入框，时间的每次编辑都会报告。在桌面上，选中某一天时弹出层保持打开以便设置时间，并报告带时间的日期；再次按下已选中的日期会关闭弹出层。在手机和平板上，点一下某天就以它的时间选中这一天并关闭底部面板，与单个日期相同；再次打开面板即可设置时间。应用在选择后让面板保持打开时（见[应用与取消](#apply-and-cancel)），时间就在同一面板中设置。在设置任何时间之前选中的日期使用 `defaultTime`（默认 `00:00`）。`hourCycle` 是时间输入框的小时计法，与 [TimeField](./time-field.md) 的相同，包括用户的。
 
 `cleanable` 会在有值时加一个清除按钮：按下它会清除值（`onChange({ value: null })`）。这个按钮在触发元素之后，不在它里面，所以按它不会打开弹出层；由应用摆放并填充内容（`clearButton`），和[选择框的清除按钮](./select.md#value)一样。
 
@@ -144,9 +144,9 @@ fn trip_dates() -> impl IntoElement {
 
 ## 应用与取消
 
-很多选择器在按下"应用"时才提交：用户选好、调整，只有"应用"会设置值，"取消"则保持原值不变。`popupHeader` 和 `popupFooter` 是应用放在弹出层（触屏设备上是底部面板）里的内容，分别在预设和日历的上方、在它们和时间的下方：可输入的开始和结束日期、标题、"取消"和"应用"按钮。它们的键盘焦点停靠点分别在日历的之前和之后。
+很多选择器在按下"应用"时才提交：用户选好、调整，只有"应用"会设置值，"取消"则保持原值不变。`header` 和 `footer` 是应用放在弹出层（触屏设备上是底部面板）里的内容，分别在预设和日历的上方、在它们和时间的下方：可输入的开始和结束日期、标题、"取消"和"应用"按钮。它们的键盘焦点停靠点分别在日历的之前和之后。
 
-`closeOnSelect={false}` 让弹出层在一次完整的选择后保持打开：一天、范围的结束日、一个预设。每次选择仍由 `onChange` 报告，应用把它保存为待定值，并在自己的 `popupFooter` 中提交，同时通过 `open` 关闭弹出层。Escape、在外面按压和背景层仍会关闭它，并触发 `onCancel`。
+一次完整的选择（一天、范围的结束日、一个预设）先由 `onChange` 报告，再通过 `onOpenChange({ open: false, reason: "select" })` 请求关闭弹出层。`open` 受控时，应用不跟随 `"select"` 就能让弹出层保持打开：把选择保存为待定值，在自己的 `footer` 中提交，同时通过 `open` 关闭弹出层。Escape、在外面按压和背景层仍会请求关闭它，并触发 `onCancel`。
 
 这时 `value` 就是待定值：日历、清除按钮以及屏幕阅读器在触发元素上听到的值都跟随它，而触发元素的内容显示已应用的值。清除按钮和触发元素上的 Delete 在弹出层关闭时清除值，此时没有"应用"可按，所以弹出层关闭时发生的变化要在 `onChange` 中立即提交。
 
@@ -176,10 +176,13 @@ function Stay() {
         if (!open()) stay.set(value);
       }}
       open={open()}
-      onOpenChange={({ open: next }) => (next ? open.set(true) : discard())}
-      closeOnSelect={false}
-      popupHeader={<Text class="text-sm font-medium">Stay</Text>}
-      popupFooter={
+      onOpenChange={({ open: next, reason }) => {
+        // A pick stays pending until Apply.
+        if (reason === "select") return;
+        next ? open.set(true) : discard();
+      }}
+      header={<Text class="text-sm font-medium">Stay</Text>}
+      footer={
         <View class="flex-row justify-end gap-2 pt-2">
           <Button onPress={discard}>
             <Text>Cancel</Text>
@@ -234,11 +237,10 @@ function Stay() {
 | `defaultValue` | `.default_value(..)` | `DatePickerValue` | `null` | 没有 `value` 时的初始值。 |
 | `range` | `.range(..)` | `boolean` | `false` | 选择一段日期。 |
 | `open`、`defaultOpen` | `.open(..)`、`.default_open(..)` | `boolean` | `false` | 展开状态，由应用或选择器自己持有。 |
-| `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | 一次完整的选择或一个预设会关闭弹出层；`false` 时保持打开，由应用关闭（"应用"）。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 保持关闭，不接受按压和键盘焦点。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对它的称呼。 |
 | `dateFormat` | `.date_format(..)` | `string` | `"%Y/%m/%d"` 加时间 | 屏幕阅读器听到的值的格式，采用 `chrono` 的格式。 |
-| `timePrecision` | `.time_precision(..)` | `"minute" \| "second"` | 无 | 同时编辑一天中的时间，精确到此单位；在触屏设备上点一下某天会关闭底部面板，除非 `closeOnSelect` 为 `false`。 |
+| `timePrecision` | `.time_precision(..)` | `"minute" \| "second"` | 无 | 同时编辑一天中的时间，精确到此单位；在触屏设备上点一下某天会关闭底部面板。 |
 | `hourCycle` | `.hour_cycle(..)` | `"h23" \| "h12"` | `"h23"` | 时间输入框的小时计法。 |
 | `defaultTime` | `.default_time(..)` | `string` | `"00:00"` | 用户设置时间之前日期使用的时间。 |
 | `cleanable` | `.cleanable(..)` | `boolean` | `false` | 有值时显示清除按钮。 |
@@ -266,8 +268,8 @@ function Stay() {
 | `clearButton` | `.clear_button(..)` | `JSX.Element` | 无 | 清除按钮的内容。 |
 | `clearButtonAccessibilityLabel` | `.clear_button_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对清除按钮的称呼。 |
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 按下时打开弹出层的元素；弹出层相对它放置。 |
-| `popupHeader` | `.popup_header(..)` | `JSX.Element` | 无 | 弹出层在预设和日历上方显示的内容（`headerClass` 是日历头部的样式）。 |
-| `popupFooter` | `.popup_footer(..)` | `JSX.Element` | 无 | 弹出层在预设、日历和时间下方显示的内容："取消"、"应用"。 |
+| `header` | `.header(..)` | `JSX.Element` | 无 | 弹出层在预设和日历上方显示的内容（`headerClass` 是日历头部的样式，不作用于它）。 |
+| `footer` | `.footer(..)` | `JSX.Element` | 无 | 弹出层在预设、日历和时间下方显示的内容："取消"、"应用"。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 包住触发元素的视图。 |
 
 <a id="events"></a>
@@ -291,14 +293,14 @@ function Stay() {
 | 清除按钮 | 选择器的视图，触发元素之后（`cleanable`，有值时） | `clearButtonClass`、`clearButtonStyle`；内容 `clearButton` |
 | 弹出层或 sheet | 在一切之上，位于触发元素处（桌面平台）或底部（触屏设备） | `popupClass`、`popupStyle` |
 | 背景层 | sheet 后面（触屏设备） | `backdropClass`、`backdropStyle` |
-| 弹出层头部 | 弹出层中的第一个（`popupHeader`） | 应用自己的元素 |
+| 弹出层头部 | 弹出层中的第一个（`header`） | 应用自己的元素 |
 | 内容 | 弹出层中 | `contentClass`、`contentStyle` |
 | 预设 | 内容中的第一个（`presets`） | `presetsClass`、`presetsStyle`；每个 `presetClass`、`presetStyle` |
 | 预设的说明 | 预设按钮中，标签下方（`description`） | `presetDescriptionClass`、`presetDescriptionStyle` |
 | 日历 | 内容中 | `calendarClass`、`calendarStyle`，以及 [Calendar](./calendar.md#parts) 的部件 |
 | 时间行 | 日历下方（`timePrecision`） | `timeClass`、`timeStyle`；标签 `timeLabel` |
 | 时间输入框 | 时间行中 | `timeFieldClass`、`timeFieldStyle`，以及 [TimeField](./time-field.md#parts) 的部件 |
-| 弹出层底部 | 弹出层中的最后一个（`popupFooter`） | 应用自己的元素 |
+| 弹出层底部 | 弹出层中的最后一个（`footer`） | 应用自己的元素 |
 
 <a id="keyboard"></a>
 
@@ -310,7 +312,7 @@ function Stay() {
 | Delete、Backspace（在触发元素上） | 弹出层关闭时清除值。 |
 | Escape | 不做选择就关闭弹出层。 |
 
-在弹出层中，日历的按键在日期间移动并选中一天（见[键盘](./calendar.md#keyboard)），时间输入框的按键编辑时间（见[键盘](./time-field.md#keyboard)）。Tab 依次经过 `popupHeader` 的控件、日历、时间和 `popupFooter` 的控件。
+在弹出层中，日历的按键在日期间移动并选中一天（见[键盘](./calendar.md#keyboard)），时间输入框的按键编辑时间（见[键盘](./time-field.md#keyboard)）。Tab 依次经过 `header` 的控件、日历、时间和 `footer` 的控件。
 
 <a id="accessibility"></a>
 

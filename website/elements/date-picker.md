@@ -136,9 +136,9 @@ change with `onChange({ value })`; the app sets `value` to follow it. Left out, 
 - With `timePrecision` (a single date only), a time field shows under the calendar and every edit of the time is
   reported. On the desktops, picking a day keeps the popup open for the time and reports the date with its time; a
   press on the selected day again closes the popup. On phones and tablets, a tap on a day picks it at its time and
-  closes the sheet, as a single date does; the sheet opens again for the time. With `closeOnSelect={false}` a tap on a
-  day leaves the sheet open, and the time is set in it. A day picked before any time gets `defaultTime` (default
-  `00:00`). `hourCycle` is how the field counts the hours, as
+  closes the sheet, as a single date does; the sheet opens again for the time. An app that keeps the sheet open on a
+  pick (see [Apply and Cancel](#apply-and-cancel)) has the time set in the same sheet. A day picked before any time
+  gets `defaultTime` (default `00:00`). `hourCycle` is how the field counts the hours, as
   [TimeField](./time-field.md)'s, the user's included.
 
 `cleanable` adds a clear button while there is a value: a press clears it (`onChange({ value: null })`). It comes
@@ -172,13 +172,14 @@ button stacks the two lines in a column; a `presetClass` with `flex` makes it a 
 ## Apply and Cancel
 
 Many pickers commit on Apply: the user picks, adjusts, and only Apply sets the value, while Cancel leaves it as it
-was. `popupHeader` and `popupFooter` are the app's content in the popup (the sheet on touch screens), above the presets
+was. `header` and `footer` are the app's content in the popup (the sheet on touch screens), above the presets
 and the calendar and below them and the time: typed start and end fields, a title, Cancel and Apply. Their keyboard
 stops come before the calendar's and after it.
 
-`closeOnSelect={false}` keeps the popup open after a complete pick: a day, a range's end, a preset. Each pick is
-still reported with `onChange`, so the app holds it as a pending value and commits it from its `popupFooter`, closing
-the popup through `open`. Escape, a press outside and the backdrop still close it, with `onCancel`.
+A complete pick (a day, a range's end, a preset) is reported with `onChange`, then asks to close the popup with
+`onOpenChange({ open: false, reason: "select" })`. With `open` controlled, the app keeps the popup open by not
+following a `"select"`: it holds the pick as a pending value and commits it from its `footer`, closing the popup
+through `open`. Escape, a press outside and the backdrop still ask to close it, with `onCancel`.
 
 `value` is then the pending value: the calendar, the clear button and what screen readers hear on the trigger follow
 it, while the trigger's content shows the applied one. The clear button and Delete on the trigger clear the value while
@@ -212,10 +213,13 @@ function Stay() {
         if (!open()) stay.set(value);
       }}
       open={open()}
-      onOpenChange={({ open: next }) => (next ? open.set(true) : discard())}
-      closeOnSelect={false}
-      popupHeader={<Text class="text-sm font-medium">Stay</Text>}
-      popupFooter={
+      onOpenChange={({ open: next, reason }) => {
+        // A pick stays pending until Apply.
+        if (reason === "select") return;
+        next ? open.set(true) : discard();
+      }}
+      header={<Text class="text-sm font-medium">Stay</Text>}
+      footer={
         <View class="flex-row justify-end gap-2 pt-2">
           <Button onPress={discard}>
             <Text>Cancel</Text>
@@ -276,11 +280,10 @@ appears and goes at once; the sheet of touch screens slides in and out on its ow
 | `defaultValue` | `.default_value(..)` | `DatePickerValue` | `null` | The value at first, without `value`. |
 | `range` | `.range(..)` | `boolean` | `false` | Pick a range of dates. |
 | `open`, `defaultOpen` | `.open(..)`, `.default_open(..)` | `boolean` | `false` | The open state, the app's or the picker's own. |
-| `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | A complete pick or a preset closes the popup; `false` keeps it open for the app to close (Apply). |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It stays closed and takes no presses or keyboard focus. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call it. |
 | `dateFormat` | `.date_format(..)` | `string` | `"%Y/%m/%d"` and the time | How screen readers hear the value, in `chrono`'s format. |
-| `timePrecision` | `.time_precision(..)` | `"minute" \| "second"` | none | Edit the time of day too, down to this; on touch screens a tap on a day closes the sheet unless `closeOnSelect` is off. |
+| `timePrecision` | `.time_precision(..)` | `"minute" \| "second"` | none | Edit the time of day too, down to this; on touch screens a tap on a day closes the sheet. |
 | `hourCycle` | `.hour_cycle(..)` | `"h23" \| "h12"` | `"h23"` | How the time field counts the hours. |
 | `defaultTime` | `.default_time(..)` | `string` | `"00:00"` | The time a date gets before the user sets one. |
 | `cleanable` | `.cleanable(..)` | `boolean` | `false` | A clear button while there is a value. |
@@ -308,8 +311,8 @@ appears and goes at once; the sheet of touch screens slides in and out on its ow
 | `clearButton` | `.clear_button(..)` | `JSX.Element` | none | The content of the clear button. |
 | `clearButtonAccessibilityLabel` | `.clear_button_accessibility_label(..)` | `string` | none | What screen readers call the clear button. |
 | `trigger` | `.trigger(..)` | `JSX.Element` | none | What opens the popup when pressed; the popup is placed against it. |
-| `popupHeader` | `.popup_header(..)` | `JSX.Element` | none | What the popup shows above the presets and the calendar (`headerClass` styles the calendar's header). |
-| `popupFooter` | `.popup_footer(..)` | `JSX.Element` | none | What the popup shows below the presets, the calendar and the time: Cancel, Apply. |
+| `header` | `.header(..)` | `JSX.Element` | none | What the popup shows above the presets and the calendar (`headerClass` styles the calendar's header, not this). |
+| `footer` | `.footer(..)` | `JSX.Element` | none | What the popup shows below the presets, the calendar and the time: Cancel, Apply. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The view around the trigger. |
 
 ## Events
@@ -329,14 +332,14 @@ appears and goes at once; the sheet of touch screens slides in and out on its ow
 | The clear button | the picker's view, after the trigger (`cleanable`, while there is a value) | `clearButtonClass`, `clearButtonStyle`; its content `clearButton` |
 | The popup or sheet | over everything, at the trigger (desktops) or at the bottom (touch screens) | `popupClass`, `popupStyle` |
 | The backdrop | behind the sheet (touch screens) | `backdropClass`, `backdropStyle` |
-| The popup's header | the popup, first (`popupHeader`) | the app's own element |
+| The popup's header | the popup, first (`header`) | the app's own element |
 | The content | the popup | `contentClass`, `contentStyle` |
 | The presets | the content, first (`presets`) | `presetsClass`, `presetsStyle`; each `presetClass`, `presetStyle` |
 | A preset's description | its button, under the label (`description`) | `presetDescriptionClass`, `presetDescriptionStyle` |
 | The calendar | the content | `calendarClass`, `calendarStyle`, and [Calendar](./calendar.md#parts)'s parts |
 | The time's row | under the calendar (`timePrecision`) | `timeClass`, `timeStyle`; its label `timeLabel` |
 | The time field | the time's row | `timeFieldClass`, `timeFieldStyle`, and [TimeField](./time-field.md#parts)'s parts |
-| The popup's footer | the popup, last (`popupFooter`) | the app's own element |
+| The popup's footer | the popup, last (`footer`) | the app's own element |
 
 ## Keyboard
 
@@ -347,8 +350,8 @@ appears and goes at once; the sheet of touch screens slides in and out on its ow
 | Escape | Closes the popup without a choice. |
 
 In the popup, the calendar's keys move between days and pick one (see [Keyboard](./calendar.md#keyboard)) and the
-time field's edit the time (see [Keyboard](./time-field.md#keyboard)). Tab goes through `popupHeader`'s controls, the
-calendar, the time and `popupFooter`'s controls, in that order.
+time field's edit the time (see [Keyboard](./time-field.md#keyboard)). Tab goes through `header`'s controls, the
+calendar, the time and `footer`'s controls, in that order.
 
 ## Accessibility
 

@@ -12,9 +12,10 @@
 // a date and time whose sheet a tap on a day closes and which opens
 // again for the time (`timePrecision`, `hourCycle`, the time's label and
 // segments); and a range that commits on Apply: picks stay pending in a
-// sheet the app keeps open (`closeOnSelect={false}`, `open`), with the
-// app's `popupHeader` and a `popupFooter` whose Apply commits and closes it. The
-// dates are fixed, so nothing depends on today. Its script checks each.
+// sheet the app keeps open (`open`, a `select` in `onOpenChange` not
+// followed), with the app's `header` and a `footer` whose Apply commits
+// and closes it. The dates are fixed, so nothing depends on today. Its
+// script checks each.
 import { Text, View, signal } from "nsh";
 import { type CalendarEntry, DatePicker, type DatePickerValue } from "nsh/base";
 
@@ -101,12 +102,13 @@ function App() {
         value={stay()}
         onChange={({ value }) => stay.set(value)}
         open={stayOpen()}
-        onOpenChange={({ open }) => stayOpen.set(open)}
-        closeOnSelect={false}
+        onOpenChange={({ open, reason }) => {
+          if (reason !== "select") stayOpen.set(open);
+        }}
         accessibilityLabel="Stay"
         renderItem={(item) => <Item item={item} />}
-        popupHeader={<Text>StayHeader</Text>}
-        popupFooter={
+        header={<Text>StayHeader</Text>}
+        footer={
           <View
             testID="stayApply"
             style={{ height: 30 }}
