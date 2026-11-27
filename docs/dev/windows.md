@@ -240,7 +240,8 @@ when the pixel scale changes.
 - **Navigation** (`navigation::key_pressed`): Escape (which leaves a focused field instead), Alt+Left and the Browser
   Back key (also from a field) go back.
 - **Scrolling** (`scroll.rs`), then **Tab / Shift+Tab** (`input::tab`): the next focus stop in tree order — a text
-  field or a focusable custom view (`keyboard::is_stop`) — (a scroll view's content as it is on screen,
+  field or a focusable custom view (`keyboard::is_stop`), with an area: what a `display: none` view holds is laid out
+  at no size and passed by (`keyboard::has_area`) — (a scroll view's content as it is on screen,
   `nsh_core::scroll::reading_order`: a list's recycled cells are not in their rows' order) within
   `navigation::focus_scope` (the newest dialog of the window the input is in, else the surface); a field's text is
   selected as in Windows' dialogs, a custom view reports its focus and scrolls into view.
@@ -312,7 +313,8 @@ ancestors within the same window:
   when it closes if that view is still attached, enabled and shown in a window no modal covers.
 - The raw path is only for a focused custom view: a text field (`Input`, the system's RichEdit and IME) and a hosted
   web view or native component own their keys and text, and a capture on their ancestors does not intercept them. A
-  view that is removed, concealed or disabled loses the focus (a `Blur`) without a synthetic key release; a real
+  view that is removed, concealed or disabled loses the focus (a `Blur`) without a synthetic key release, and one laid
+  out at no size (`display: none`) gives it up quietly, as one that stops being focusable does (`focused_in`); a real
   release the window gets is reported on whichever view has the focus then. `ToUnicodeEx` supplies the logical key
   from the current layout (never a US guess), always with its keyboard-state-not-changed flag (0x4), so a
   dead key read for an event (also an AltGr-layer one) is never stored and the layout's pending composition is left

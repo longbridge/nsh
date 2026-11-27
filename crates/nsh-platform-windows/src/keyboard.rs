@@ -81,9 +81,9 @@ pub(crate) fn reset(surface: &Surface) {
     surface.keyboard.focus.borrow_mut().clear();
 }
 
-/// Whether Tab stops at `view`: it takes presses or is `focusable`, and
-/// the pointer could reach it. A text field is a stop of its own
-/// ([`crate::text_input`]) and not one of these.
+/// Whether Tab stops at `view`: it takes presses or is `focusable`, it has
+/// an area and the pointer could reach it. A text field is a stop of its
+/// own ([`crate::text_input`]) and not one of these.
 pub(crate) fn is_stop(view: &NshView) -> bool {
     {
         let state = view.state();
@@ -95,7 +95,16 @@ pub(crate) fn is_stop(view: &NshView) -> bool {
             return false;
         }
     }
-    targetable(view)
+    has_area(view) && targetable(view)
+}
+
+/// Whether `view` has an area. `display: none` lays out each view it holds
+/// at no size and hides none of them, so without this Tab would stop at
+/// them and a focused one that hides would keep taking keys (as on macOS,
+/// `seen_by_keys`).
+pub(crate) fn has_area(view: &NshView) -> bool {
+    let size = view.state().frame.size;
+    size.width.0 > 0.0 && size.height.0 > 0.0
 }
 
 /// Whether the pointer may reach `view` (it and its ancestors are shown,
@@ -1685,6 +1694,35 @@ mod tests {
             translated(&event, &state).is_none(),
             "{vk:#x} composed with itself: the dead key was stored"
         );
+    }
+
+    /// A stop `display: none` holds (laid out at no size) is passed by Tab,
+    /// and a focused stop that hides so gives up the focus.
+    #[test]
+    fn tab_passes_a_stop_at_no_size_and_a_hidden_focus_is_given_up() {
+        let surface = surface();
+        let gone = focusable(&surface, 2);
+        let shown = focusable(&surface, 4);
+        let empty = rect(0.0, 0.0, 0.0, 0.0);
+        apply(
+            &surface,
+            &[MountItem::Frame {
+                id: 2,
+                frame: empty,
+            }],
+        );
+        assert!(!is_stop(&gone));
+        assert!(crate::input::tab(&surface, &key(0x09)));
+        assert_eq!(focused_in(&surface, ROOT_ID).as_ref(), Some(&shown));
+        // The focused stop hides: no key goes to it any more.
+        apply(
+            &surface,
+            &[MountItem::Frame {
+                id: 4,
+                frame: empty,
+            }],
+        );
+        assert_eq!(focused_in(&surface, ROOT_ID), None);
     }
 
     #[test]

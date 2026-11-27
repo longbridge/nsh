@@ -1495,7 +1495,9 @@ fn collect_stops(view: &NshView, out: &mut Vec<NshView>) {
                 s.props.accessibility.state.disabled,
             )
         };
-        !disabled && (field || crate::keyboard::is_stop(view))
+        // A field in a `display: none` view has no area, as a custom stop
+        // there has none (`keyboard::has_area`).
+        !disabled && ((field && crate::keyboard::has_area(view)) || crate::keyboard::is_stop(view))
     }));
 }
 
