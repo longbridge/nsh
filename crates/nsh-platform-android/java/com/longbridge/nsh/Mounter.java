@@ -313,8 +313,8 @@ final class Mounter {
         tapEndsSelection = false;
     }
 
-    /** The outermost selectable view {@code text} is in (an area inside another is part of it), or null. */
-    SelectableView selectableViewOf(TextBox text) {
+    /** The outermost selectable view {@code text} is or is in (an area inside another is part of it), or null. */
+    SelectableView selectableViewOf(View text) {
         if (selectableViews.size() == 0) return null;
         SelectableView outer = null;
         for (Object v = text; v instanceof View; v = ((View) v).getParent()) {
@@ -2932,6 +2932,12 @@ final class Mounter {
                 if (area != null && v != null && (within(area.view, v) || within(v, area.view))) {
                     area.clear();
                 }
+                break;
+            }
+            case 69: {
+                // ref.selectAll(): every text of the selectable view v is or is in.
+                SelectableView area = v != null ? selectableViewOf(v) : null;
+                if (area != null) area.selectAll();
                 break;
             }
             case 21: {

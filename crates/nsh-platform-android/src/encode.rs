@@ -571,6 +571,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     Command::Focus => e.int(0),
                     Command::Blur => e.int(1),
                     Command::ClearSelection => e.int(62),
+                    Command::SelectAll => e.int(69),
                     Command::ScrollTo { x, y, animated } => {
                         e.int(2);
                         e.float(x.0);

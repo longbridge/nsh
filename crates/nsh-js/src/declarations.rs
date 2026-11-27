@@ -284,6 +284,7 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
             "focus",
             "blur",
             "clearSelection",
+            "selectAll",
             "measure",
             "reveal",
             "animateLayout",
