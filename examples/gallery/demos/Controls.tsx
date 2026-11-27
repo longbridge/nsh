@@ -3452,6 +3452,42 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     );
   }
 
+  function EmailCode() {
+    const CODE = "AB12CD34";
+    const code = signal("");
+    const verdict = signal("");
+    const tone = (): Tone | undefined => (verdict() === "Verified" ? "up" : verdict() ? "danger" : undefined);
+    // Eight cells fit a phone's width a size down from the six-digit ones.
+    const eightCells = pointer ? "w-8 h-10 text-base" : "w-9 h-11 text-lg";
+    return (
+      <Card title="Email code" subtitle="Eight letters and digits, typed in any case and shown in capitals">
+        <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
+          <OtpInput
+            length={8}
+            groups={2}
+            validationType="alphanumeric"
+            value={code()}
+            onChange={({ value: next }) => {
+              code.set(next);
+              verdict.set("");
+              last.set(`Email code: ${next || "empty"}`);
+            }}
+            onComplete={({ value }) => {
+              verdict.set(value === CODE ? "Verified" : "That code is not right");
+              last.set(`Email code complete: ${value}`);
+            }}
+            accessibilityLabel="Email code, 8 letters and digits"
+            class={codeClass}
+            groupClass={groupClass}
+            {...otpCellLook({ cells: eightCells, tone: () => tone() })}
+          />
+          <CodeSpace />
+          <Message label={verdict() || `The code is ${CODE}`} tone={tone()} />
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -3472,7 +3508,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     Progress: [Transfers, Uploads, Steps, Meters],
     Slider: [Levels, Equalizer],
     NumberInput: [Quantities, Cart, Units],
-    OtpInput: [Verify, SignIn, Pin],
+    OtpInput: [Verify, SignIn, Pin, EmailCode],
   };
   // `firsts`: the first card of each named control on one page, above one last event (the TUI host's acceptance tests).
   const shown = props.firsts ? props.firsts.map((control) => cards[control][0]) : cards[props.show];
