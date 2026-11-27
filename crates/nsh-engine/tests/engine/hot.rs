@@ -191,6 +191,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -356,6 +357,7 @@ fn entry_edits_keep_navigation_and_state() {
             picker: None,
             audio: None,
             windows: None,
+            error_reporting: None,
             login_item: None,
             data_dir: None,
         };
@@ -504,6 +506,7 @@ fn nested_hot_components_render_the_stacks_screen() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

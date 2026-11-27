@@ -58,6 +58,7 @@ fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     }
@@ -148,6 +149,7 @@ fn first_error(bundle: Bundle) -> String {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

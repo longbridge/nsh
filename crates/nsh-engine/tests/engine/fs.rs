@@ -108,6 +108,7 @@ const report = (text) => shown.set(`done ${{text}}`);
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -687,6 +688,7 @@ mount(() => <Text>{shown()}</Text>);
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

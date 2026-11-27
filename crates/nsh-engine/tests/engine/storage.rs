@@ -84,6 +84,7 @@ fn launch(
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -199,6 +200,7 @@ fn rust_shares_the_entries_of_js() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -305,6 +307,7 @@ fn rust_edits_the_storage() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -395,6 +398,7 @@ fn a_rust_root_keeps_its_data_under_its_id() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -449,6 +453,7 @@ fn start_rust(root: Root, data: &PathBuf) -> (Engine, Receiver<MountBatch>) {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

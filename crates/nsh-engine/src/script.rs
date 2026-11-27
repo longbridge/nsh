@@ -24,6 +24,9 @@ pub(crate) struct SystemConfig {
     /// come near (`EngineConfig::content_culling`).
     #[cfg_attr(not(feature = "js-core"), allow(dead_code))]
     pub(crate) lazy_rows: bool,
+    /// Sends the app's errors (`EngineConfig::error_reporting`).
+    #[cfg_attr(not(feature = "js-core"), allow(dead_code))]
+    pub(crate) reporter: Option<std::sync::Arc<crate::reporting::Reporter>>,
 }
 
 #[cfg(not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))))]
@@ -56,7 +59,7 @@ mod imp {
 
     use crate::{
         AppError, AppErrorKind, Bundle, BundleCode, Chunk, Environment, FetchEvent, HotUpdate,
-        Limits, MountSink, PackageInfo, symbolicate::Symbolicator,
+        Limits, MountSink, PackageInfo, reporting::Reporter, symbolicate::Symbolicator,
     };
 
     /// A JS app's VM.
@@ -72,6 +75,8 @@ mod imp {
         package: Option<Arc<PackageInfo>>,
         /// Told of fatal errors ([`Bundle::trial`]).
         trial: Option<Arc<dyn crate::Trial>>,
+        /// Sends errors to the tracker (`EngineConfig::error_reporting`).
+        reporter: Option<Arc<Reporter>>,
     }
 
     impl Script {
@@ -112,6 +117,9 @@ mod imp {
                     if let Some(trial) = &bundle.trial {
                         trial.failed(&error);
                     }
+                    if let Some(reporter) = &system.reporter {
+                        reporter.report(&error);
+                    }
                     sink.report(&error);
                     return None;
                 }
@@ -133,25 +141,37 @@ mod imp {
             let symbolicator = Rc::new(RefCell::new(Symbolicator::new(bundle.source_map.clone())));
             let (map, errors, stopping) = (symbolicator.clone(), sink.clone(), stop.clone());
             let package = bundle.package.clone();
+            let reporter = system.reporter.clone();
             host.set_error_handler(Box::new(move |err| {
                 if stopping.load(Ordering::Relaxed) {
                     return;
                 }
                 let message = map.borrow_mut().rewrite(&err.message);
                 log::error!(target: "js", "uncaught exception: {message}");
-                errors.report(
-                    &AppError::new(AppErrorKind::Uncaught, &message).with_package(package.clone()),
-                );
+                let error =
+                    AppError::new(AppErrorKind::Uncaught, &message).with_package(package.clone());
+                if let Some(reporter) = &reporter {
+                    reporter.report(&error);
+                }
+                errors.report(&error);
             }));
             // Unhandled rejections are logged only, as browsers do: the
-            // app's error handler and the overlay get exceptions.
+            // app's error handler and the overlay get exceptions. The
+            // error tracker gets them too, as browser SDKs send them.
             let (map, stopping) = (symbolicator.clone(), stop.clone());
+            let (package, reporter) = (bundle.package.clone(), system.reporter.clone());
             host.set_rejection_handler(Box::new(move |err| {
                 if stopping.load(Ordering::Relaxed) {
                     return;
                 }
                 let message = map.borrow_mut().rewrite(&err.message);
                 log::error!(target: "js", "unhandled rejection: {message}");
+                if let Some(reporter) = &reporter {
+                    reporter.report_rejection(
+                        &AppError::new(AppErrorKind::Uncaught, &message)
+                            .with_package(package.clone()),
+                    );
+                }
             }));
             // Canvas `measureText` measures on this thread.
             let line_engine = text_engine.clone();
@@ -172,6 +192,7 @@ mod imp {
                 stop,
                 package: bundle.package.clone(),
                 trial: bundle.trial.clone(),
+                reporter: system.reporter.clone(),
             };
             // The chunks that come with the bundle: the entry may import
             // them statically, `import()` without waiting.
@@ -208,6 +229,9 @@ mod imp {
                 && error.is_fatal()
             {
                 trial.failed(&error);
+            }
+            if let Some(reporter) = &self.reporter {
+                reporter.report(&error);
             }
             sink.report(&error);
         }

@@ -1207,6 +1207,7 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         picker: None,
         audio: None,
         windows: options.windows.clone(),
+        error_reporting: None,
         login_item: None,
     }
 }

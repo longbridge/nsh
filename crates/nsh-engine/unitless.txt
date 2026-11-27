@@ -11,6 +11,8 @@ perf::PerfSnapshot.max_fps                                       # a rate (frame
 perf::PerfSnapshot.refresh_rate                                  # a rate (Hz)
 perf::ProcessSample.cpu                                          # a percent of one core's time
 perf::ProcessSample.gpu                                          # a percent of time
+reporting::ErrorReporting.sample_rate                            # a share of errors sent, 0..1
+reporting::ErrorReporting::sample_rate(rate)                     # a share of errors sent, 0..1
 shader::ShaderView::set_size(scale)                              # pixels per point (a display scale factor)
 shader_off::ShaderView::set_size(_scale)                              # pixels per point (a display scale factor)
 gpu::GpuViews::set_size(scale)                                   # pixels per point (a display scale factor)

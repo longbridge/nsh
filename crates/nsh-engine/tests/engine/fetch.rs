@@ -148,6 +148,7 @@ fn fetch_round_trips_through_the_platform_network() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -276,6 +277,7 @@ fn fetch_stays_within_the_capabilities() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -385,6 +387,7 @@ fn path_rules_hold_for_every_request() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -460,6 +463,7 @@ fn rust_components_fetch_through_the_platform_network() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

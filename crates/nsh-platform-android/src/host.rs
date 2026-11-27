@@ -267,6 +267,7 @@ impl Host {
             picker: None,
             audio: None,
             windows: None,
+            error_reporting: None,
             login_item: None,
         };
         let density = self.density.clone();

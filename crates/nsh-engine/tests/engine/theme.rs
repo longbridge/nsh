@@ -62,6 +62,7 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -169,6 +170,7 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -259,6 +261,7 @@ fn a_hosts_theme_overrides_win_over_the_apps_tokens_they_set_and_keep_the_rest()
         audio: None,
         cache: Default::default(),
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
@@ -380,6 +383,7 @@ fn start_branded(
         audio: None,
         cache: Default::default(),
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

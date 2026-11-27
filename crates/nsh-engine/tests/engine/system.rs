@@ -94,6 +94,7 @@ mount(() => <Text>{status()}</Text>);
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: override_directory.then_some(data_dir),
     };
@@ -190,6 +191,7 @@ mount(() => <Text>{status()}</Text>);"#,
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
