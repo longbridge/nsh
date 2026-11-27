@@ -252,6 +252,11 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         if (shader) setShader(false, FILL, 0, 0);
     }
 
+    /** Whether a shader draws it, or a transition's picture stands in for its children. */
+    boolean hasShader() {
+        return shader || fromBitmap != null;
+    }
+
     /** Whether it draws over the whole surface. */
     boolean screen() {
         return shaderRole == SCREEN || shaderRole == SCREEN_TRANSITION;
