@@ -2291,8 +2291,12 @@ UrlScheme.on("open", ({ url }) => {
 `open` reports every link the system hands the app, at launch and while it runs. A link that comes while nothing
 listens, the one that launched the app included, waits for the next listener (up to 16, the oldest dropped), so listen
 when the app starts or once the screen that handles links is ready. Rust code awaits `next_url_scheme_open()` of
-`nsh_core::prelude`; every call waiting when a link comes gets it. A Rust app's generated code passes its schemes to
-its root (`Root::url_schemes`).
+`nsh_core::prelude`; every call waiting when a link comes gets it. A task that called it listens for as long as it
+lives: its next call first gets the links that came since its last one (the last 16 at most), so a loop hears every
+link, even those that came while it handled the one before. Await it in a loop, or in a task that ends once it stops
+listening; a task that calls it again much later gets every link that came meanwhile. A listener that starts later does
+not get the links that came before it, except those that came while nothing listened. A Rust app's generated code
+passes its schemes to its root (`Root::url_schemes`).
 
 A native module that waits for one link, such as a sign-in session waiting for the provider to redirect back to
 `myapp://signed-in`, awaits `next_url_scheme_open_for("myapp")` instead. While it waits, the next link of that scheme

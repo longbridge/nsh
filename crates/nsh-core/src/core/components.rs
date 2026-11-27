@@ -691,8 +691,8 @@ struct UrlScheme {
     recent: std::collections::VecDeque<(u64, String)>,
     /// The number of the next link.
     next_number: u64,
-    /// The first link no listener took yet, which the next new listener
-    /// gets.
+    /// The first link that came while nothing listened and no listener
+    /// took yet, which the next new listener gets.
     unheard: u64,
     /// The tasks that listen, each with the number of the next link it is
     /// to hear: a task awaiting links in a loop is not waiting between two
@@ -743,8 +743,13 @@ impl UrlScheme {
         // `select!`) leaves the link to the others.
         self.next
             .retain(|(_, answer)| crate::element::task::awaited(answer));
-        if !self.next.is_empty() {
+        // Came while something listened: the listeners between two calls
+        // hear it at their next, and a listener that starts later does not
+        // (only links that came while nothing listened wait for one).
+        if !self.next.is_empty() || !self.listeners.is_empty() {
             self.unheard = number + 1;
+        }
+        if !self.next.is_empty() {
             for (task, answer) in std::mem::take(&mut self.next) {
                 if let Some(task) = task {
                     self.heard(task, number);

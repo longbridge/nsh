@@ -1159,17 +1159,23 @@ pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> 
 }
 
 /// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
-/// URL of a scheme the app claims (`nsh.json` `schemes`), those
-/// that came before anything listened first, the one that launched the app
-/// included ([`crate::url_scheme`]). Every call waiting when a link comes
-/// gets it, as TS's `open` listeners all do. A task that awaits it in a
-/// loop hears every link: those that came while it handled the one before
-/// come at its next call. Links that came while nothing listened, the one
-/// that launched the app included, go to the first call that asks, not to
-/// later listeners (at most [`crate::url_scheme::MAX_PENDING`] are kept).
-/// A link a call of
-/// [`next_url_scheme_open_for`] waits for goes to that call alone. To await
-/// in a task.
+/// URL of a scheme the app claims (`nsh.json` `schemes`,
+/// [`crate::url_scheme`]). Every call waiting when a link comes gets it, as
+/// TS's `open` listeners all do.
+///
+/// A task that called it is a listener for as long as it lives: its next
+/// call first gets the links that came since its last one, at most the
+/// last [`crate::url_scheme::MAX_PENDING`] (16). So a loop hears every
+/// link, those that came while it handled the one before included. Await
+/// it in a loop, or in a task that ends once it stops listening: a task
+/// that calls it again much later gets every link that came meanwhile,
+/// though others may have handled them long ago.
+///
+/// Links that came while nothing listened, the one that launched the app
+/// included, go to the first call that asks (at most 16 are kept); a
+/// listener that starts later does not get the links that came before it.
+/// A link a call of [`next_url_scheme_open_for`] waits for goes to that
+/// call alone. To await in a task.
 pub fn next_url_scheme_open() -> Answer<String> {
     let (answer, slot) = Answer::new();
     let executor = executor();
@@ -1193,9 +1199,9 @@ pub fn next_url_scheme_open() -> Answer<String> {
 /// every `https` link of the app meanwhile (its Universal Links and App
 /// Links), so a callback should use a scheme of the app's own; matching by
 /// host or path would be another function. The wait starts at the call,
-/// not at the first poll, so a module calls it before it opens what will send the link. Dropping the
-/// answer (a task cancelled, the losing branch of a `select!`) ends the
-/// wait. To await in a task.
+/// not at the first poll, so a module calls it before it opens what will
+/// send the link. Dropping the answer (a task cancelled, the losing branch
+/// of a `select!`) ends the wait. To await in a task.
 pub fn next_url_scheme_open_for(scheme: impl Into<String>) -> Answer<String> {
     let (answer, slot) = Answer::new();
     act(Action::NextUrlSchemeOpenFor(

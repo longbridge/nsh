@@ -21101,22 +21101,70 @@ mod components {
         );
     }
 
+    /// Runs the tasks and commits for 100 ms, past the listeners' timers,
+    /// adding the texts shown.
+    fn settle(c: &mut Core<FakeEngine>, shown: &mut Vec<String>) {
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(100);
+        while std::time::Instant::now() < end {
+            run_briefly(c, shown);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Runs the tasks and commits a few times, adding the texts shown: not
+    /// long enough for the listeners' timers.
+    fn run_briefly(c: &mut Core<FakeEngine>, shown: &mut Vec<String>) {
+        for _ in 0..5 {
+            c.run_component_tasks();
+            if let Some(batch) = c.commit() {
+                shown.extend(texts(&batch));
+            }
+        }
+    }
+
+    /// The last text shown that starts with `prefix`.
+    fn last_shown(shown: &[String], prefix: &str) -> String {
+        shown
+            .iter()
+            .rfind(|t| t.starts_with(prefix))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The node that takes presses.
+    fn pressable(items: &[MountItem]) -> NodeId {
+        items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .unwrap()
+    }
+
     /// Two listeners hearing the app's links as long as it runs, as the TS
-    /// runtime's and a Rust module's.
+    /// runtime's and a Rust module's, each taking a while over a link; a
+    /// press starts a third.
     #[component]
-    fn TwoLinkLoops() -> impl IntoElement {
+    fn LinkLoops() -> impl IntoElement {
         let a = signal(String::new());
         let b = signal(String::new());
-        for heard in [a, b] {
+        let c = signal(String::new());
+        let listen = move |heard: Signal<String>| {
             spawn(async move {
                 loop {
                     say(heard, next_url_scheme_open().await);
+                    timer(std::time::Duration::from_millis(20)).await;
                 }
             });
-        }
+        };
+        listen(a);
+        listen(b);
         view()
             .child(text(move || format!("a:{}", a.get())))
             .child(text(move || format!("b:{}", b.get())))
+            .child(text(move || format!("c:{}", c.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| listen(c)))
     }
 
     #[test]
@@ -21125,32 +21173,107 @@ mod components {
         c.set_url_schemes(["myapp"]);
         // The link that launched the app, before anything listened.
         open_link(&mut c, "myapp://launch");
-        c.mount_root(&crate::element::Root::new::<TwoLinkLoops>(|| ()));
+        c.mount_root(&crate::element::Root::new::<LinkLoops>(|| ()));
         let mut shown: Vec<String> = c.commit().map(|b| texts(&b)).unwrap_or_default();
-        let settle = |c: &mut Core<FakeEngine>, shown: &mut Vec<String>| {
-            for _ in 0..50 {
-                c.run_component_tasks();
-                if let Some(batch) = c.commit() {
-                    shown.extend(texts(&batch));
-                }
-            }
-        };
         settle(&mut c, &mut shown);
         // Links in a burst, before the listeners run again.
         open_link(&mut c, "myapp://1");
         open_link(&mut c, "myapp://2");
         open_link(&mut c, "myapp://3");
         settle(&mut c, &mut shown);
-        let last = |prefix: &str| shown.iter().rfind(|t| t.starts_with(prefix)).cloned();
-        let shown = [last("a:").unwrap(), last("b:").unwrap()];
         // Each loop hears the links that came while it handled the one
         // before; the one that came while nothing listened goes to the
         // first listener only.
         assert_eq!(
-            shown,
+            [last_shown(&shown, "a:"), last_shown(&shown, "b:")],
             [
                 "a: myapp://launch myapp://1 myapp://2 myapp://3",
                 "b: myapp://1 myapp://2 myapp://3"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_listener_does_not_hear_links_that_came_while_others_listened() {
+        let mut c = core();
+        c.set_url_schemes(["myapp"]);
+        c.mount_root(&crate::element::Root::new::<LinkLoops>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = pressable(&batch.items);
+        let mut shown = texts(&batch);
+        settle(&mut c, &mut shown);
+        // The second comes while both loops handle the first: theirs, not
+        // the third listener's, which starts after it and asks before they
+        // ask again.
+        open_link(&mut c, "myapp://1");
+        run_briefly(&mut c, &mut shown);
+        open_link(&mut c, "myapp://2");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        run_briefly(&mut c, &mut shown);
+        settle(&mut c, &mut shown);
+        open_link(&mut c, "myapp://3");
+        settle(&mut c, &mut shown);
+        assert_eq!(
+            [
+                last_shown(&shown, "a:"),
+                last_shown(&shown, "b:"),
+                last_shown(&shown, "c:")
+            ],
+            [
+                "a: myapp://1 myapp://2 myapp://3",
+                "b: myapp://1 myapp://2 myapp://3",
+                "c: myapp://3"
+            ]
+        );
+    }
+
+    /// Hears the app's links in a loop; a second task listens once, then
+    /// again only after a later launch of the app.
+    #[component]
+    fn OccasionalLinkListener() -> impl IntoElement {
+        let a = signal(String::new());
+        let once = signal(String::new());
+        spawn(async move {
+            loop {
+                say(a, next_url_scheme_open().await);
+            }
+        });
+        spawn(async move {
+            say(once, next_url_scheme_open().await);
+            next_second_instance().await;
+            say(once, next_url_scheme_open().await);
+            say(once, next_url_scheme_open().await);
+        });
+        view()
+            .child(text(move || format!("a:{}", a.get())))
+            .child(text(move || format!("once:{}", once.get())))
+    }
+
+    #[test]
+    fn a_task_that_listened_hears_what_came_since_at_its_next_call() {
+        use crate::single_instance::SecondInstance;
+        let mut c = core();
+        c.set_url_schemes(["myapp"]);
+        c.mount_root(&crate::element::Root::new::<OccasionalLinkListener>(|| ()));
+        let mut shown: Vec<String> = c.commit().map(|b| texts(&b)).unwrap_or_default();
+        settle(&mut c, &mut shown);
+        for url in ["myapp://1", "myapp://2", "myapp://3"] {
+            open_link(&mut c, url);
+            settle(&mut c, &mut shown);
+        }
+        c.component_event(
+            crate::ROOT_ID,
+            EventKind::SecondInstance,
+            &SecondInstance::new(Vec::new(), "/").to_payload(),
+        );
+        settle(&mut c, &mut shown);
+        // The task listens as long as it lives: its next calls get the
+        // links that came since its last, which the loop handled long ago.
+        assert_eq!(
+            [last_shown(&shown, "a:"), last_shown(&shown, "once:")],
+            [
+                "a: myapp://1 myapp://2 myapp://3",
+                "once: myapp://1 myapp://2 myapp://3"
             ]
         );
     }
