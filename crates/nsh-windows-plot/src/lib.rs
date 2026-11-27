@@ -2,7 +2,7 @@
 //! for everything it shares with the core, and builds `nsh/base`'s plot
 //! sources into itself. The runner loads it when the app imports
 //! `nsh/base/plot` and calls [`nsh_part_plot`].
-#![cfg(windows)]
+#![cfg(any(windows, target_os = "linux"))]
 #![allow(dead_code, unreachable_pub)]
 
 // Links what the module shares with the core from `nsh-core.dll`: without

@@ -17,3 +17,9 @@ nsh-windows-core = { path = "../nsh-windows-core" }
 nsh-core.workspace = true
 nsh-base = { workspace = true, default-features = false }
 log.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-windows-core = { path = "../nsh-windows-core" }
+nsh-core.workspace = true
+nsh-base = { workspace = true, default-features = false }
+log.workspace = true

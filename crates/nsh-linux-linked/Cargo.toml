@@ -1,0 +1,16 @@
+[package]
+name = "nsh-linux-linked"
+description = "Prototype (#1644): the Linux release runner linked by `nsh package` from prebuilt static parts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-windows-core = { path = "../nsh-windows-core" }
+nsh-windows-editor = { path = "../nsh-windows-editor" }
+nsh-windows-plot = { path = "../nsh-windows-plot" }
+nsh-core.workspace = true

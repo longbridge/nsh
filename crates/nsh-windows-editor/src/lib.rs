@@ -3,7 +3,7 @@
 //! `nsh/base`'s editor sources (and the small helpers they use) into
 //! itself. The runner loads it when the app makes an `Editor` and calls
 //! [`nsh_part_editor`].
-#![cfg(windows)]
+#![cfg(any(windows, target_os = "linux"))]
 #![allow(dead_code, unreachable_pub, unused_imports, missing_docs)]
 
 // Links what the module shares with the core from `nsh-core.dll`: without

@@ -3,3 +3,5 @@
 //! runner and every feature module link.
 #[cfg(windows)]
 pub use {nsh_base, nsh_platform_windows, nsh_windows_app};
+#[cfg(target_os = "linux")]
+pub use {nsh_base, nsh_linux_app, nsh_platform_linux};

@@ -3948,6 +3948,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-linux-linked"
+version = "0.7.1"
+dependencies = [
+ "nsh-core",
+ "nsh-windows-core",
+ "nsh-windows-editor",
+ "nsh-windows-plot",
+]
+
+[[package]]
 name = "nsh-macos-app"
 version = "0.7.1"
 dependencies = [
@@ -4273,6 +4283,8 @@ name = "nsh-windows-core"
 version = "0.7.1"
 dependencies = [
  "nsh-base",
+ "nsh-linux-app",
+ "nsh-platform-linux",
  "nsh-platform-windows",
  "nsh-windows-app",
 ]

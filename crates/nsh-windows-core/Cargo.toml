@@ -16,3 +16,8 @@ crate-type = ["dylib", "rlib"]
 nsh-base = { workspace = true, default-features = false }
 nsh-platform-windows.workspace = true
 nsh-windows-app = { path = "../nsh-windows-app", default-features = false, features = ["js", "net", "svg"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-base = { workspace = true, default-features = false }
+nsh-platform-linux.workspace = true
+nsh-linux-app = { path = "../nsh-linux-app", default-features = false, features = ["js", "net", "svg"] }

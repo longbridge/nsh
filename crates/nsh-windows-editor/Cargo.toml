@@ -31,3 +31,16 @@ imara-diff.workspace = true
 unicode-linebreak.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-windows-core = { path = "../nsh-windows-core" }
+nsh-core.workspace = true
+nsh-base = { workspace = true, default-features = false }
+log.workspace = true
+regex.workspace = true
+rustc-hash.workspace = true
+ropey.workspace = true
+imara-diff.workspace = true
+unicode-linebreak.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
