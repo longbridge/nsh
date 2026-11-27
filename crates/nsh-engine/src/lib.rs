@@ -28,6 +28,7 @@ pub mod logging;
 #[cfg(feature = "net")]
 pub mod net;
 pub mod perf;
+mod reporting;
 mod script;
 #[cfg_attr(not(feature = "shader"), path = "shader_off.rs")]
 pub mod shader;
@@ -93,6 +94,7 @@ pub use storage::{FileStorage, resolve_data_dir, support_dir};
 pub use crate::{
     cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
+    reporting::ErrorReporting,
     host_channel::{
         HostCall, HostChannel, HostReply, HostSender, HostSenderClosed, OpenUrlRequest,
     },
@@ -1251,6 +1253,12 @@ pub struct EngineConfig {
     pub content_culling: bool,
     /// The HTTP stack behind `fetch`; without one, requests fail.
     pub network: Option<Arc<dyn Network>>,
+    /// Sends the JS app's errors (uncaught exceptions, load failures, a
+    /// stopped VM, unhandled rejections) to a Sentry-protocol tracker
+    /// (Sentry, Beacon) over [`EngineConfig::network`]. `None` (the
+    /// default), or without a network: they are only logged and given to
+    /// [`MountSink::report`].
+    pub error_reporting: Option<ErrorReporting>,
     /// The host transport for WebSockets, including the browser WebSocket API.
     pub websocket: Option<Arc<dyn nsh_core::websocket::WebSocketTransport>>,
     /// Refuses the app's connections (`net` sockets and both WebSocket
@@ -1458,6 +1466,7 @@ impl EngineConfig {
             trace: false,
             content_culling: false,
             network: None,
+            error_reporting: None,
             websocket: None,
             refuse_connections: None,
             filesystem: None,
@@ -2784,6 +2793,9 @@ impl<M: TextEngine + 'static> Driver<M> {
                         }),
                         host: Rc::new(host_bridge),
                         lazy_rows: config.content_culling,
+                        reporter: config.error_reporting.as_ref().and_then(|reporting| {
+                            reporting::Reporter::new(reporting, config.network.clone()?)
+                        }),
                     }
                 };
                 #[cfg(not(any(

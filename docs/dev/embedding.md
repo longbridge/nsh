@@ -458,6 +458,14 @@ NSH draws (`src/layers.rs`).
   handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
   `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
   `NshView.ErrorListener`) are unchanged.
+- **Error reporting.** `EngineConfig::error_reporting` (`ErrorReporting::new(dsn)`, with `environment`,
+  `sample_rate`, `tag`, `rejections`, `max_events`) sends the JS app's errors to a tracker that speaks the Sentry
+  envelope protocol (Sentry, Beacon): `Load`, `Uncaught` and `Stopped` errors and unhandled promise rejections, which
+  are otherwise only logged. Each event carries the mapped stack as frames, the release `id@version+build` of the
+  signed package, and tags `nsh.kind`, `nsh.package`, `nsh.sha256`. Envelopes go through `EngineConfig::network` (the
+  platform's stack, as `fetch`) from a thread of their own, at most `max_events` (100) per engine, dropped when 32 wait;
+  without a network or on the web nothing is sent (`crates/nsh-engine/src/reporting.rs`). Native crashes stay with the
+  embedding app's crash reporter.
 
 ## TestFlight uploads
 

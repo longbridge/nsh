@@ -1034,6 +1034,7 @@ impl RootView {
             picker: None,
             audio: None,
             windows: None,
+            error_reporting: None,
             login_item: None,
         };
         // A test session's app: the test's storage, network and trace.

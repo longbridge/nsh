@@ -93,6 +93,7 @@ pub(crate) fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatc
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

@@ -50,6 +50,7 @@ mod package;
 mod parity;
 mod platform;
 mod process;
+mod reporting;
 mod runtime;
 mod rust_animation;
 mod rust_app;

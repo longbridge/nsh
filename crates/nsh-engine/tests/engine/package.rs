@@ -66,6 +66,7 @@ fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

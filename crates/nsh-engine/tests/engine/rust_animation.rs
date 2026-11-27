@@ -119,6 +119,7 @@ impl Platform {
             picker: None,
             audio: None,
             windows: None,
+            error_reporting: None,
             login_item: None,
             data_dir: None,
         };

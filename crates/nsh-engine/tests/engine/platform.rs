@@ -87,6 +87,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };

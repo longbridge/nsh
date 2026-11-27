@@ -154,6 +154,7 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
         picker: None,
         audio: None,
         windows: None,
+        error_reporting: None,
         login_item: None,
         data_dir: None,
     };
