@@ -202,7 +202,7 @@ pub use crate::{
     },
     otp_input::{
         OtpInput, OtpInputApi, OtpInputCompleteEvent, OtpInputElement, OtpInputEvent,
-        OtpInputProps, otp_input,
+        OtpInputProps, OtpInputValidationType, otp_input,
     },
     pagination::{
         Pagination, PaginationElement, PaginationEvent, PaginationItem, PaginationItemKind,
