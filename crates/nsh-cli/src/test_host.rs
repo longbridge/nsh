@@ -386,6 +386,8 @@ pub(crate) fn serve(
             id: crate::package::app_id(entry).ok(),
             window: crate::package::window_json(entry),
             application: crate::package::application_json(entry),
+            // A test reports nothing to the app's tracker.
+            error_reporting: None,
         },
         None,
         built.ui_sets,

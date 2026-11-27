@@ -172,6 +172,7 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
             app_id,
             window,
             application,
+            error_reporting,
             limits,
         } => {
             let mut bundle = match format {
@@ -196,7 +197,8 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
             bundle = bundle
                 .with_app_id(app_id.as_deref())
                 .with_main_window(window.as_deref())
-                .with_application(application.as_deref());
+                .with_application(application.as_deref())
+                .with_error_reporting(error_reporting.as_deref());
             bundle = match bundle.with_capabilities_json(capabilities.as_deref()) {
                 Ok(bundle) => bundle,
                 Err(err) => return host.dev_error(Some(("Invalid capabilities", &err)), true),

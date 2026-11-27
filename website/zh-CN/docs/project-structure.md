@@ -166,6 +166,7 @@ pub fn App() -> impl IntoElement {
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏、应用自己的窗口（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
 | `window` | object | 每次构建、`package` | 桌面平台上应用声明的第一个窗口的启动设置，从第一帧起生效：`title`、`defaultSize`、`minSize`、`titleBar`、`backdrop` 以及窗口的其他选项和属性，写法与 `nsh/desktop` 的 `WindowOptions` 相同（`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`）（[应用宿主与第一个窗口](../modules/nsh-desktop.md#应用宿主与第一个窗口)）。`defaultVisible` 不再适用：应用宿主永远不会显示；以无窗口状态启动的应用不打开窗口即可。 |
 | `application` | object | 每次构建、`package` | 应用的生命周期：`"quitMode": "platform" \| "lastWindowClosed" \| "explicit"`。`"platform"`（`<Window>` 应用的默认）让 macOS 应用在没有窗口时继续运行，并在 Windows 和 Linux 上于最后一个窗口关闭时退出；`"lastWindowClosed"` 在所有平台上最后一个窗口关闭时退出；`"explicit"` 在没有窗口时继续运行。未声明 `<Window>` 的裸 `mount(App)` 隐式主窗口在关闭时默认在所有平台退出，除非在此或通过 `Application.setQuitMode` 显式配置（[退出](../modules/nsh-desktop.md#退出)）。 |
+| `errorReporting` | object | `run`、`build`、`package` | 把应用的错误（未捕获的异常、加载失败的 bundle、被停止的 VM、未处理的 Promise rejection）发给支持 Sentry 协议的错误追踪服务，例如 Sentry 或 Beacon（[errorReporting](#errorreporting)）。 |
 | `resolve` | object | 每次构建 | 裸导入如何解析：npm 包的导出条件和别名（[npm 包](#npm-包)）。 |
 | `rust` | string 或 string[] | 每个命令 | 应用的 Rust crate 或 crate 列表，路径相对于 `nsh.json`：其中的组件和模块，TSX 按每个 crate 的 `#[native_module]` 名称导入（[用 Rust 开发](./rust.md#多个-crate)）。 |
 | `dependencies` | object | 每个命令 | 应用使用的 [nshm](./nshm.md)，以包名为键，由 `nsh add` 记录在这里并由 NSH 锁定在 `nsh.lock`：来自 crates.io 时写版本要求（`"acme-gauge": "^1.0"`），否则写带 `"github"`、`"git"` 或 `"path"` 的对象，可加 `"version"`、`"tag"` 或 `"rev"`，`"features"`，即要开启的 Rust nshm 的 Cargo feature（`"nsh-extra": { "version": "^0.6", "features": ["camera"] }`），以及 `"targets"`，即按 `platform.os` 名字列出的、要链接 Rust nshm 的 target（默认所有 target；[nshm](./nshm.md#使用-nshm)）（[CLI：nsh add](./cli.md#nsh-add)）。 |
@@ -204,6 +205,32 @@ NSH 读不懂的能力不会被授予，因此略过的内容永远不会扩大�
 ```
 
 `network` 涵盖 `fetch`、远程图片和视频源；本地资源始终允许访问。嵌入 NSH 的应用可以授予比应用声明更少的权限。详情见 [沙箱与权限](./sandbox-and-capabilities.md)。
+
+### errorReporting
+
+独立运行的应用（`nsh run`，以及 `nsh package` 打出的桌面端、iOS 和 Android 包）只要在 `nsh.json` 写上错误追踪服务的
+DSN 就会上报错误，不用改代码：
+
+```json
+"errorReporting": {
+  "dsn": "https://<public key>@beacon.example.com/2",
+  "environment": "sit",
+  "sampleRate": 1
+}
+```
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `dsn` | string | 项目的 DSN，按追踪服务给出的原样填写：`http(s)://<public key>@<host>[/<path>]/<project id>`。必填。 |
+| `environment` | string | 事件归入的环境（`production`、`sit`）。默认：追踪服务的默认值。 |
+| `sampleRate` | number | 发送错误的比例，0 到 1。默认：1。 |
+| `tags` | object | 附加到每个事件的标签，值为字符串（`{ "channel": "beta" }`）。 |
+| `rejections` | boolean | 是否也发送未处理的 Promise rejection。默认：`true`。 |
+| `maxEvents` | number | 一次运行最多发送的事件数，超出的丢弃。默认：100。 |
+
+每个事件都带着已经映射回应用源码的调用栈，追踪服务不需要 source map。事件通过平台的网络栈在单独的线程里发送，不会拖慢应用。
+网页由页面自己上报错误，`nsh test` 不发送。嵌入在其他 App 里的应用按宿主 `EngineConfig::error_reporting` 的设置上报，它优先于
+`nsh.json`（[嵌入](./embedding.md)）。值写错时构建会给出警告，上报保持关闭。
 
 ## tsconfig.json 与 .nsh/types
 

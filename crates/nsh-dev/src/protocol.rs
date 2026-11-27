@@ -356,6 +356,11 @@ pub enum ServerMessage {
         /// `nsh_engine::Bundle::with_application` reads it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         application: Option<String>,
+        /// Where the app's errors are reported (`nsh.json`
+        /// `"errorReporting"`, JSON):
+        /// `nsh_engine::Bundle::with_error_reporting` reads it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_reporting: Option<String>,
         /// The VM limits to run the app with, as an embedding app would
         /// set them (`nsh run --limits`, in `nsh_core::js::HostLimits`'
         /// syntax: `memory=128MB,call=500ms`; empty: the embedding
@@ -1260,6 +1265,7 @@ mod tests {
             app_id: None,
             window: None,
             application: None,
+            error_reporting: None,
             limits: None,
         };
         // No declaration: the field is left out (older hosts read the same).

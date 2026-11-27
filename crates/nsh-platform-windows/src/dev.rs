@@ -388,6 +388,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             limits,
             window,
             application,
+            error_reporting,
         } => {
             hide_status(ui);
             let mut bundle = match format {
@@ -417,7 +418,8 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             // taken the first time a session loads.
             bundle = bundle
                 .with_main_window(window.as_deref())
-                .with_application(application.as_deref());
+                .with_application(application.as_deref())
+                .with_error_reporting(error_reporting.as_deref());
             bundle = match bundle
                 .with_app_id(app_id.as_deref())
                 .with_capabilities_json(capabilities.as_deref())

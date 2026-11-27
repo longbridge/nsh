@@ -465,7 +465,10 @@ NSH draws (`src/layers.rs`).
   signed package, and tags `nsh.kind`, `nsh.package`, `nsh.sha256`. Envelopes go through `EngineConfig::network` (the
   platform's stack, as `fetch`) from a thread of their own, at most `max_events` (100) per engine, dropped when 32 wait;
   without a network or on the web nothing is sent (`crates/nsh-engine/src/reporting.rs`). Native crashes stay with the
-  embedding app's crash reporter.
+  embedding app's crash reporter. An app of its own sets it in `nsh.json` `"errorReporting"`
+  (`ErrorReporting::from_json`): `nsh build` and `nsh package` write it into `app.json`, the dev server's app info
+  carries it to `nsh run`'s hosts, and the engine uses `Bundle::error_reporting` when the host's config sets none (an
+  update keeps the installed app's). `nsh test` reports nothing.
 
 ## TestFlight uploads
 

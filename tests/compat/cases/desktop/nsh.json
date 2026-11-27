@@ -1,6 +1,11 @@
 {
   "name": "API Desktop",
   "id": "com.example.api-desktop",
+  "errorReporting": {
+    "dsn": "http://compat@127.0.0.1:9/1",
+    "environment": "compat",
+    "sampleRate": 0
+  },
   "capabilities": {
     "windows": {
       "kinds": [

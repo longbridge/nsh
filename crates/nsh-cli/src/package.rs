@@ -69,9 +69,7 @@ impl PackageTarget {
         use crate::module_meta::Platform;
         match self {
             PackageTarget::Ios => Some((&["aarch64-apple-ios"], Platform::Ios)),
-            PackageTarget::IosSimulator => {
-                Some((&[runtime::IOS_SIMULATOR_TRIPLE], Platform::Ios))
-            }
+            PackageTarget::IosSimulator => Some((&[runtime::IOS_SIMULATOR_TRIPLE], Platform::Ios)),
             PackageTarget::Macos => Some((
                 arch.unwrap_or_else(Arch::native).macos_triples(),
                 Platform::Macos,
@@ -338,6 +336,12 @@ pub(crate) struct AppConfig {
     /// Written into `app.json` and the dev server's app info, where the
     /// engine sets the quit mode before the app's code runs.
     pub(crate) application: Option<serde_json::Value>,
+    /// Where the app's errors are reported (`"errorReporting"`, checked by
+    /// [`read_config`]): `{ "dsn": "...", "environment": "sit",
+    /// "sampleRate": 1 }` (`nsh_engine::ErrorReporting::from_json`).
+    /// Written into `app.json` and the dev server's app info, where the
+    /// engine reads it when the host sets none.
+    pub(crate) error_reporting: Option<serde_json::Value>,
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
@@ -719,6 +723,9 @@ pub(crate) fn desktop_app_json(
     if let Some(application) = &config.application {
         info["application"] = application.clone();
     }
+    if let Some(reporting) = &config.error_reporting {
+        info["errorReporting"] = reporting.clone();
+    }
     if config.single_instance {
         info["singleInstance"] = true.into();
     }
@@ -739,6 +746,16 @@ pub(crate) fn window_json(entry: &Path) -> Option<String> {
 pub(crate) fn application_json(entry: &Path) -> Option<String> {
     let entry = dunce::canonicalize(entry).ok()?;
     read_config(&entry).ok()?.application.map(|a| a.to_string())
+}
+
+/// `nsh.json` `"errorReporting"` of the app at `entry` (checked), as JSON:
+/// the dev server's app info carries it.
+pub(crate) fn error_reporting_json(entry: &Path) -> Option<String> {
+    let entry = dunce::canonicalize(entry).ok()?;
+    read_config(&entry)
+        .ok()?
+        .error_reporting
+        .map(|r| r.to_string())
 }
 
 /// Says, once per app, that `nsh.json` `window.defaultVisible: false` has no
@@ -1104,6 +1121,12 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     {
         ignored.push(format!("application: {e}"));
         config.application = None;
+    }
+    if let Some(reporting) = &config.error_reporting
+        && let Err(e) = nsh_engine::ErrorReporting::from_json(reporting)
+    {
+        ignored.push(format!("errorReporting: {e}"));
+        config.error_reporting = None;
     }
     // The runner resolves it again on the user's machine, with their home.
     if let Some(dir) = &config.data_dir
@@ -1712,6 +1735,9 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
                 if let Some(application) = &config.application {
                     info["application"] = application.clone();
                 }
+                if let Some(reporting) = &config.error_reporting {
+                    info["errorReporting"] = reporting.clone();
+                }
                 info
             },
             &links,
@@ -1934,6 +1960,9 @@ fn package_android(
                 let mut info = serde_json::json!({ "id": id });
                 if let Some(application) = &config.application {
                     info["application"] = application.clone();
+                }
+                if let Some(reporting) = &config.error_reporting {
+                    info["errorReporting"] = reporting.clone();
                 }
                 config.add_file_types_to_app_json(&mut info);
                 info
@@ -2288,6 +2317,9 @@ fn package_macos(
     config.add_data_dir_to_app_json(&mut info);
     if let Some(application) = &config.application {
         info["application"] = application.clone();
+    }
+    if let Some(reporting) = &config.error_reporting {
+        info["errorReporting"] = reporting.clone();
     }
     // macOS opens web links in the app only under a profile that grants
     // Associated Domains, which an ad hoc package has not: the links are
@@ -4272,6 +4304,44 @@ mod tests {
         // An app without them has none.
         let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
         assert!(info.get("window").is_none());
+    }
+
+    #[test]
+    fn error_reporting_goes_into_app_json() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-cli-error-reporting-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.tsx");
+        std::fs::write(&entry, "").unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "errorReporting": { "dsn": "http://k@127.0.0.1:8787/2", "environment": "sit", "sampleRate": 0.5 } }"#,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        let info = desktop_app_json(&config, "A", "com.a", "1.0.0");
+        assert_eq!(
+            info["errorReporting"],
+            serde_json::json!({ "dsn": "http://k@127.0.0.1:8787/2", "environment": "sit", "sampleRate": 0.5 })
+        );
+        // The runner's engine reads it from there (`Bundle::read_trusted`).
+        let reporting = nsh_engine::ErrorReporting::from_json(&info["errorReporting"]).unwrap();
+        assert_eq!(reporting.environment.as_deref(), Some("sit"));
+        // A wrong one is left out, with a warning.
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "errorReporting": { "dsn": "not a dsn" } }"#,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        assert!(config.error_reporting.is_none());
+        assert!(
+            desktop_app_json(&config, "A", "com.a", "1.0.0")
+                .get("errorReporting")
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

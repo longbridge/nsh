@@ -103,6 +103,10 @@ pub enum DevEvent {
         /// The app's lifecycle (`nsh.json` `"application"`, JSON): give it
         /// to the bundle (`Bundle::with_application`).
         application: Option<String>,
+        /// Where the app's errors are reported (`nsh.json`
+        /// `"errorReporting"`, JSON): give it to the bundle
+        /// (`Bundle::with_error_reporting`).
+        error_reporting: Option<String>,
         /// The VM limits to run it with (`nsh run --limits`, see
         /// [`ServerMessage::Bundle`]): `nsh_core::js::Limits::development`
         /// reads them; `None` is none.
@@ -302,6 +306,7 @@ fn session(
         app_id: Option<String>,
         window: Option<String>,
         application: Option<String>,
+        error_reporting: Option<String>,
         limits: Option<String>,
         bytes: Option<Vec<u8>>,
     }
@@ -365,6 +370,7 @@ fn session(
                     app_id,
                     window,
                     application,
+                    error_reporting,
                     limits,
                 }) => {
                     pending = Some(Pending {
@@ -376,6 +382,7 @@ fn session(
                         app_id,
                         window,
                         application,
+                        error_reporting,
                         limits,
                         bytes: None,
                     })
@@ -394,6 +401,7 @@ fn session(
                         app_id: None,
                         window: None,
                         application: None,
+                        error_reporting: None,
                         limits: None,
                         bytes: None,
                     })
@@ -452,6 +460,7 @@ fn session(
                             app_id: p.app_id,
                             window: p.window,
                             application: p.application,
+                            error_reporting: p.error_reporting,
                             limits: p.limits,
                         })
                     }

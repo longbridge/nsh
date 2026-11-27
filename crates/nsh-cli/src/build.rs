@@ -402,6 +402,9 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
                 if let Some(application) = &config.application {
                     info["application"] = application.clone();
                 }
+                if let Some(reporting) = &config.error_reporting {
+                    info["errorReporting"] = reporting.clone();
+                }
                 info
             },
             &links,
