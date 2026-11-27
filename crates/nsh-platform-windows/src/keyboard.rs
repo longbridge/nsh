@@ -966,7 +966,11 @@ pub(crate) fn activate(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool
     let Some(view) = focused_control(surface) else {
         return false;
     };
-    surface.event(view.id(), EventKind::Press, EventPayload::None);
+    // A held key presses once: its auto-repeats stay the control's without
+    // pressing it again, as on macOS and Linux.
+    if !event.repeat {
+        surface.event(view.id(), EventKind::Press, EventPayload::None);
+    }
     true
 }
 
@@ -1455,8 +1459,23 @@ mod tests {
             }],
         );
         assert!(focused_control(&surface).is_some());
+        surface.record_events();
         assert!(activate(&surface, &key(0x0D)), "Return");
         assert!(activate(&surface, &key(0x20)), "Space");
+        assert_eq!(
+            surface.take_events(),
+            vec![
+                (view.id(), EventKind::Press, EventPayload::None),
+                (view.id(), EventKind::Press, EventPayload::None),
+            ]
+        );
+        // Auto-repeats stay consumed by the control without pressing it again.
+        for vk in [0x0D, 0x20] {
+            let mut held = key(vk);
+            held.repeat = true;
+            assert!(activate(&surface, &held), "a repeat stays the control's");
+        }
+        assert!(surface.take_events().is_empty(), "repeats press nothing");
         assert!(!activate(&surface, &key(0x41)), "another key");
         let mut ctrl = key(0x0D);
         ctrl.modifiers.ctrl = true;
