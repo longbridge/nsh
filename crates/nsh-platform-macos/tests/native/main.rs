@@ -77,6 +77,8 @@ mod momentum_bounce;
 #[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
+mod multi_view;
+#[cfg(target_os = "macos")]
 mod navigation_unmount;
 #[cfg(target_os = "macos")]
 mod nested_bounce;
@@ -185,6 +187,8 @@ fn main() {
             } else if std::env::var_os("NSH_TRAY_OWNER_CHECK_ONLY").is_some() {
                 window_press::run();
                 tray_owner::run();
+            } else if std::env::var_os("NSH_MULTI_VIEW_CHECK_ONLY").is_some() {
+                multi_view::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
@@ -324,6 +328,7 @@ fn main() {
                 download_redirect::run();
                 web_load_wait::run();
                 mount::run();
+                multi_view::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();
                 input_wheel_chain::run();
