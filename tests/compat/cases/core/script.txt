@@ -188,11 +188,12 @@ frame id:inner2 8 8 374 20
 expect Plum
 absent No plums
 expect Nothing here
-# A viewport of overscan below the visible rows (100 pt): bound after the
-# first frame, never further.
+# A viewport of overscan below the visible rows (100 pt), and the one the
+# list's start leaves empty above them: bound after the first frame, never
+# further.
 expect Long 0
-expect Long 4
-absent Long 6
+expect Long 7
+absent Long 8
 drawing id:sep-0 fillStyle #ff0000ff
 drawing id:sep-1 fillStyle #ff0000ff
 tap id:reload

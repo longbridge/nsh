@@ -6,6 +6,8 @@
   },
   "capabilities": {
     "speech": true,
+    "windows": true,
+    "application": true,
     "share": true,
     "fs": {
       "read": ["${dataDir}"],

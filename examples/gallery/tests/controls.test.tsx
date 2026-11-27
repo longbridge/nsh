@@ -393,6 +393,18 @@ test("a sign-in code is sent, counts down to a resend, shakes off a wrong code a
   expect(app.enabled(code)).toBe(false);
 });
 
+test("an email code takes letters and digits, shown in capitals", async () => {
+  await show("OtpInput", "The code is AB12CD34");
+  const code = "label:Email code, 8 letters and digits";
+  await app.type(code, "ab1-2");
+  await app.waitFor("Email code: AB12");
+  expect(app.texts()).toContain("A");
+  expect(app.texts()).not.toContain("a");
+  await app.paste(code, { text: "ab12 cd34" });
+  await app.waitFor("Email code complete: AB12CD34");
+  expect(app.texts()).toContain("Verified");
+});
+
 test("a PIN is entered twice, masked: a mismatch starts over, a match sets it", async () => {
   await show("OtpInput", "Choose a 4-digit PIN");
   const pin = "label:PIN, 4 digits";

@@ -773,8 +773,30 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
 
     // --- Touch routing: pointerEvents and hitSlop -----------------------------
 
+    // The down time of the touch whose DOWN this view, or a view inside it, took; -1 for none.
+    private long tookDown = -1;
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
+        boolean handled = dispatchTouch(e);
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            tookDown = handled ? e.getDownTime() : -1;
+        }
+        return handled;
+    }
+
+    /**
+     * Whether this view, or a view inside it, took the DOWN of a touch: the views on the touch's path, which a
+     * scroll view around asks about to find the pan the touch went to.
+     *
+     * @param downTime the down time of the touch
+     * @return whether the touch's DOWN went to this view or into it
+     */
+    boolean took(long downTime) {
+        return tookDown == downTime;
+    }
+
+    private boolean dispatchTouch(MotionEvent e) {
         if (pointerEvents == 1) return false;
         int action = e.getActionMasked();
         // Outside its clip path, neither the box nor its children: the touch
@@ -1028,6 +1050,28 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         screen.setLocation(e.getRawX(), e.getRawY());
         velocity.addMovement(screen);
         screen.recycle();
+    }
+
+    /**
+     * Whether this view, on the path of a touch in a scroll view around it, pans for a drag by ({@code dx},
+     * {@code dy}) px: {@link #takesPan}, except for a content wrapper, which shares its box's id but never handles
+     * touches itself.
+     *
+     * @param dx the drag along x, px
+     * @param dy the drag along y, px
+     * @return whether this view's pan would take the drag
+     */
+    boolean takesPanInside(float dx, float dy) {
+        return !contentWrapper && takesPan(dx, dy);
+    }
+
+    /**
+     * Whether this view's pan waits for its `panActivation` to decide, which may still fail for the touch.
+     *
+     * @return whether the pan has a `panActivation`
+     */
+    boolean panGated() {
+        return mounter.panActivation(id) != null;
     }
 
     /** Whether this view's pan would start for a drag by ({@code dx}, {@code dy}) px (a scroll view inside asks). */
