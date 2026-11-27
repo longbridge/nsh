@@ -409,10 +409,11 @@ impl AppView {
                         }
                     }
                     (None, None) => {
-                        if let Some(content) = content
-                            && content_size(hwnd) != Some(content)
-                        {
-                            crate::window_state::size_content(hwnd, content);
+                        if let Some(content) = content {
+                            if content_size(hwnd) != Some(content) {
+                                crate::window_state::size_content(hwnd, content);
+                            }
+                            crate::window_state::open_in_work_area(hwnd, content);
                         }
                     }
                 }

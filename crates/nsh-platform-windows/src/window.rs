@@ -31,7 +31,10 @@ use windows::{
     Win32::{
         Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::{
-            Dwm::{DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmSetWindowAttribute},
+            Dwm::{
+                DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmGetWindowAttribute,
+                DwmSetWindowAttribute,
+            },
             Gdi::{
                 BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetDC,
                 GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
@@ -988,18 +991,40 @@ pub(crate) fn set_cloaked(hwnd: HWND, cloaked: bool) {
     };
 }
 
-/// Darkens (or not) a top-level window's title bar.
+/// Darkens (or not) a top-level window's title bar. A shown window's
+/// frame is redrawn when it changes: DWM keeps the caption it painted
+/// until the frame changes, while its text and buttons already follow.
 pub(crate) fn set_dark_title_bar(hwnd: HWND, dark: bool) {
     let value: i32 = dark.into();
-    // SAFETY: a BOOL-sized attribute value.
-    let _ = unsafe {
-        DwmSetWindowAttribute(
+    let mut current: i32 = 0;
+    // SAFETY: BOOL-sized attribute values; plain calls on a live window.
+    unsafe {
+        let known = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &mut current as *mut i32 as *mut _,
+            std::mem::size_of::<i32>() as u32,
+        )
+        .is_ok();
+        let set = DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE,
             &value as *const i32 as *const _,
             std::mem::size_of::<i32>() as u32,
         )
-    };
+        .is_ok();
+        if set && known && (current != 0) != dark && IsWindowVisible(hwnd).as_bool() {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
 }
 
 /// Runs the message loop until the last top-level window closes.

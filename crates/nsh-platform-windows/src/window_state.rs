@@ -640,6 +640,12 @@ pub(crate) fn opening_rect(
         let shown = |a: i32, b: i32| Points((a - b).max(0) as f32 / screen.scale);
         let (l, t) = (shown(extents.0, hidden.0), shown(extents.1, hidden.1));
         let (r, b) = (shown(extents.2, hidden.2), shown(extents.3, hidden.3));
+        // A window placed by NSH (not at an origin the app gave) fits the
+        // work area: one larger than it is shrunk ([`fit_size`]).
+        let content = match origin {
+            Some(_) => content,
+            None => fit_size(content, screen.display.visible_bounds.size, (l, t, r, b)),
+        };
         let area = center_on.unwrap_or(screen.display.visible_bounds);
         let at = origin.unwrap_or(point(
             area.origin.x + (area.size.width - (l + content.width + r)) / 2.0,
@@ -648,6 +654,43 @@ pub(crate) fn opening_rect(
         let inner = screen.native_bounds(Bounds::new(point(at.x + l, at.y + t), content));
         Some(outset(inner, extents))
     })
+}
+
+/// `content` (points) shrunk where it and its shown frame `frame` (left,
+/// top, right, bottom points) are larger than a work area of `area`.
+fn fit_size(
+    content: nsh_core::geometry::Size<Points>,
+    area: nsh_core::geometry::Size<Points>,
+    (l, t, r, b): (Points, Points, Points, Points),
+) -> nsh_core::geometry::Size<Points> {
+    let fit = |v: Points, room: Points| Points(v.0.min((room.0).max(1.0)));
+    nsh_core::geometry::size(
+        fit(content.width, area.width - l - r),
+        fit(content.height, area.height - t - b),
+    )
+}
+
+/// Opens `hwnd`, sized to `content` points where the system placed it,
+/// centered on its display's work area (and fitted to it) instead when it
+/// does not fit there: the first window takes the size of the host it is
+/// made from, which a small or scaled display does not have room for.
+pub(crate) fn open_in_work_area(hwnd: HWND, content: nsh_core::geometry::Size<Points>) {
+    let Some(rect) = visible_rect(hwnd) else {
+        return;
+    };
+    let fits = with_screens(|screens| {
+        let screen = screen_of(screens, hwnd, rect)?;
+        let shown = screen.bounds(rect);
+        let area = screen.display.visible_bounds;
+        let inside = shown.origin.x >= area.origin.x
+            && shown.origin.y >= area.origin.y
+            && shown.origin.x + shown.size.width <= area.origin.x + area.size.width
+            && shown.origin.y + shown.size.height <= area.origin.y + area.size.height;
+        Some((inside, screen.display.id))
+    });
+    if let Some((false, display)) = fits {
+        open_at(hwnd, content, None, None, Some(display));
+    }
 }
 
 /// Sizes `hwnd` to a content of `content` points and places it at `origin`
@@ -724,6 +767,21 @@ mod tests {
     use nsh_core::geometry::{point, px, size};
 
     use super::*;
+
+    #[test]
+    fn a_window_larger_than_the_work_area_is_fitted_to_it() {
+        let frame = (px(8.0), px(31.0), px(8.0), px(8.0));
+        // 1920x1080 at 150%: a 1280x688 point work area.
+        let area = size(px(1280.0), px(688.0));
+        let fitted = fit_size(size(px(1200.0), px(800.0)), area, frame);
+        assert_eq!(fitted, size(px(1200.0), px(649.0)));
+        let small = size(px(480.0), px(360.0));
+        assert_eq!(
+            fit_size(small, area, frame),
+            small,
+            "one that fits keeps its size"
+        );
+    }
 
     #[test]
     fn bounds_change_by_the_fields_given() {
