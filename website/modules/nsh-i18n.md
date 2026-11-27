@@ -23,8 +23,10 @@ It works on every platform, the web included.
 ```ts
 function t<K extends TranslationKey>(
   key: K,
-  ...args: ...
+  options?: Translations[K] & { locale?: LocaleTag },
 ): string;
+// Without `locales/`:
+// function t(key: string, options?: { locale?: string; [name: string]: unknown }): string;
 ```
 
 The text of `key` in the language the app shows: the first of the user's preferred languages
@@ -32,8 +34,9 @@ The text of `key` in the language the app shows: the first of the user's preferr
 
 - **Type checking**: when the app has a `locales/` directory, `nsh` generates `.nsh/types/nsh/translations.d.ts`
   (mirroring `.nsh/types/nsh/tokens.d.ts`), augmenting `Translations` and `TranslationLocales`. `nsh check` and editors
-  check `key` (`TranslationKey`), required `%{name}` properties, and offer `LocaleTag` autocomplete. Without `locales/`,
-  `TranslationKey` and `LocaleTag` fall back to `string`.
+  check `key` (`TranslationKey`), require `options` whenever the key's message has `%{name}` placeholders (optional
+  otherwise), and offer `LocaleTag` autocomplete. Without `locales/`, `TranslationKey` and `LocaleTag` fall back to
+  `string`.
 - When `locales/` is present, passing a plain `string` variable as `key` requires typing the variable (for example
   `TranslationKey` or a template-literal union like `` `status.${kind}` ``) or asserting it (`key as TranslationKey`),
   and calling keys loaded only at run time with `addTranslations` and arbitrary parameters can cast `t` (for example
@@ -46,7 +49,11 @@ The text of `key` in the language the app shows: the first of the user's preferr
   user's settings and, in development, the files.
 
 ```tsx
-<Text>{t("cart.items", { count: items().length })}</Text>
+t("hello");
+t("messages.hello", { name: "Jason" });
+t("hello", { locale: "zh-CN" });
+
+<Text>{t("cart.items", { count: items().length })}</Text>;
 ```
 
 ## setLocale
