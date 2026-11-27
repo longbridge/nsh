@@ -2200,12 +2200,15 @@ impl<M: TextEngine> Core<M> {
         if options.attributes.is_empty() {
             return;
         }
-        let _ = self.apply_op(Op::Command {
-            id: crate::ROOT_ID,
-            command: Command::Desktop(Box::new(crate::desktop::DesktopCommand::SetAttributes(
-                Box::new(options.attributes.clone()),
-            ))),
-        });
+        // The launch defaults are the host's, read before the app runs:
+        // they are not the sandboxed app acting on the main window.
+        if self.key(crate::ROOT_ID).is_ok() {
+            self.window_command(
+                crate::ROOT_ID,
+                crate::desktop::DesktopCommand::SetAttributes(Box::new(options.attributes.clone())),
+                true,
+            );
+        }
     }
 
     /// Opens and applies the app's windows of its own with `backend`, an
@@ -3167,7 +3170,7 @@ impl<M: TextEngine> Core<M> {
                 command: Command::Desktop(desktop),
             } if desktop.is_core_handled() => {
                 self.key(id)?;
-                self.window_command(id, *desktop);
+                self.window_command(id, *desktop, false);
                 Ok(())
             }
             Op::Command { id, command } => {
@@ -3182,7 +3185,12 @@ impl<M: TextEngine> Core<M> {
     /// record ([`Core::flush_windows`] sends what changed), opening one is
     /// checked against the capabilities and resolved, a placement is fitted
     /// on the displays there are.
-    fn window_command(&mut self, id: NodeId, command: crate::desktop::DesktopCommand) {
+    fn window_command(
+        &mut self,
+        id: NodeId,
+        command: crate::desktop::DesktopCommand,
+        launch: bool,
+    ) {
         use crate::desktop::{
             DesktopCommand, WindowPlacement, WindowRequest,
             window::{WindowRecord, placement_key},
@@ -3191,6 +3199,22 @@ impl<M: TextEngine> Core<M> {
             // The quit mode reaches past the app's view, as quitting does:
             // a sandboxed app without `application` keeps the platform's.
             DesktopCommand::SetQuitMode(_) if !self.access.allows_application() => {
+                self.deny(
+                    "the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into(),
+                );
+            }
+            // nsh.json's launch attributes are the host's, applied before
+            // the app runs; the app's own sets still need `application`.
+            DesktopCommand::SetAttributes(_)
+                if id == crate::ROOT_ID && !launch && !self.access.allows_application() =>
+            {
+                self.deny(
+                    "the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into(),
+                );
+            }
+            DesktopCommand::Request(WindowRequest::SetPlacement(_))
+                if id == crate::ROOT_ID && !self.access.allows_application() =>
+            {
                 self.deny(
                     "the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into(),
                 );
@@ -4104,15 +4128,23 @@ impl<M: TextEngine> Core<M> {
                 }
                 // A context menu shows in the app's own view, and the
                 // windows the app opens are `capabilities.windows`'
-                // (`Access::check_window`): neither needs `application`. The main
-                // window, the application menu, the tray, global shortcuts
-                // and quitting reach past the app's view and do.
+                // (`Access::check_window`): neither needs `application`. The
+                // main window, the application menu, the tray, global
+                // shortcuts and quitting reach past the app's view and do.
+                // The core-handled window commands (a window's attributes, a
+                // placement, opening one) are checked where they are applied,
+                // so that nsh.json's launch attributes reach the main window
+                // while the app's own sets need `application`. Fitting a
+                // window's content is the core's own follow-up.
                 Command::Desktop(desktop)
                     if !self.access.allows_application()
+                        && !desktop.is_core_handled()
                         && !matches!(
                             **desktop,
                             crate::desktop::DesktopCommand::PopupMenu { .. }
-                                | crate::desktop::DesktopCommand::OpenWindow(_)
+                                | crate::desktop::DesktopCommand::Request(
+                                    crate::desktop::WindowRequest::SetContentSize { .. }
+                                )
                         )
                         && (id == crate::ROOT_ID || !desktop.is_window_command()) =>
                 {

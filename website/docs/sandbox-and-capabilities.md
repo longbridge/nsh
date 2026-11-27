@@ -309,7 +309,8 @@ shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.resta
 ([`AppSettings.open()`](../modules/nsh-mobile.md#appsettings) of `nsh/mobile`; for an embedded view, the embedding
 app's page). Without it they do nothing, `Application.launchAtLogin()` and `AppSettings.available()` resolve `false`,
 and `setLaunchAtLogin` and `AppSettings.open()` reject with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
-granted by [`windows`](#windows), so neither needs it.
+granted by [`windows`](#windows), so neither needs it. nsh.json's [`window`](./project-structure.md) launch settings are
+the host's, applied before the app runs, so they need neither.
 
 ### `homeDir`
 
