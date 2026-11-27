@@ -977,6 +977,13 @@ pub fn share(
 /// with no code for a request
 /// [`AuthSessionRequest::check`](crate::auth_session::AuthSessionRequest::check)
 /// refuses or a page the platform could not show.
+///
+/// Deprecated: sign-in sessions moved to the
+/// [`nsh-oauth2`](https://github.com/longbridge/nsh-oauth2) nshm, which
+/// works from Rust and TSX. This function will be removed.
+#[deprecated(
+    note = "moved to the `nsh-oauth2` nshm (https://github.com/longbridge/nsh-oauth2): `nsh_oauth2::open_auth_session`; this one will be removed"
+)]
 pub fn open_auth_session(
     request: crate::auth_session::AuthSessionRequest,
 ) -> Answer<Result<crate::auth_session::AuthSessionOutcome, crate::auth_session::AuthSessionError>>
@@ -994,6 +1001,12 @@ pub fn open_auth_session(
 /// iOS and Android take the page off the screen, bringing the app back.
 /// A page in the system browser elsewhere stays open. Only the app's own
 /// session closes; with none waiting, nothing happens.
+///
+/// Deprecated: use `nsh_oauth2::close_auth_session` from the
+/// [`nsh-oauth2`](https://github.com/longbridge/nsh-oauth2) nshm.
+#[deprecated(
+    note = "moved to the `nsh-oauth2` nshm (https://github.com/longbridge/nsh-oauth2): `nsh_oauth2::close_auth_session`; this one will be removed"
+)]
 pub fn close_auth_session() {
     act(Action::CloseAuthSession);
 }

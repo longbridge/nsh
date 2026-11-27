@@ -1,3 +1,10 @@
+//! **Deprecated:** web sign-in sessions moved to the
+//! [`nsh-oauth2`](https://github.com/longbridge/nsh-oauth2) nshm
+//! (`nsh add github:longbridge/nsh-oauth2`), usable from Rust and TSX, with
+//! the same request, outcome and error types. NSH is a UI framework and
+//! does not keep business features such as OAuth in core; this module and
+//! [`crate::element::open_auth_session`] will be removed.
+//!
 //! Web sign-in sessions ([`crate::element::open_auth_session`]): the app
 //! opens a provider's sign-in page (an OAuth authorization URL), the user
 //! signs in, and the page redirects to a URL of the app's callback scheme,

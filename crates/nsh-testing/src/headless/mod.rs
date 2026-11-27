@@ -3729,6 +3729,12 @@ mod tests {
         assert_eq!(app.screen().shares().len(), 3);
     }
 
+    // The deprecated core sessions keep their tests until they are removed.
+    #[allow(deprecated)]
+    fn close_session() {
+        close_auth_session();
+    }
+
     /// Opens a sign-in session ending with a `demo:` callback (closes it)
     /// and shows how it ended; the links the app hears otherwise show
     /// after it.
@@ -3742,6 +3748,7 @@ mod tests {
             }
         });
         let sign_in = move |_: &()| {
+            #[allow(deprecated)]
             let session = open_auth_session(
                 nsh_core::auth_session::AuthSessionRequest::new(
                     "https://example.com/authorize",
@@ -3761,7 +3768,7 @@ mod tests {
         view()
             .child(text(move || result.get()))
             .child(text("Sign in").on_press(sign_in))
-            .child(text("Close").on_press(|_: &()| close_auth_session()))
+            .child(text("Close").on_press(|_: &()| close_session()))
     }
 
     #[test]
