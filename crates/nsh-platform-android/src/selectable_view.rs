@@ -381,6 +381,26 @@ extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeBounds(
     ints_array(&env, &ints)
 }
 
+/// The selection's anchor and focus as `SelectionModel::ends` gives them
+/// (anchor node, offset, focus node, offset), or an empty array without a
+/// selection: `onSelectionChange`'s `anchorNode` ... `focusNodeOffset`,
+/// which the core places in list items.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeEnds<'local>(
+    mut env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    this: JObject<'local>,
+) -> jintArray {
+    // SAFETY: Java passes its live handle, on the UI thread.
+    let area = unsafe { area(handle) };
+    let ends = with_texts(&mut env, &this, area, |model, texts| model.ends(texts));
+    let ints: Vec<jint> = ends.map_or_else(Vec::new, |[(a, a_at), (f, f_at)]| {
+        vec![a as jint, a_at as jint, f as jint, f_at as jint]
+    });
+    ints_array(&env, &ints)
+}
+
 /// The selected text, as a copy gives it.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeText<'local>(
