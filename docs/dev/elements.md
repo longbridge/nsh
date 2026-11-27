@@ -642,6 +642,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `KeyboardMotion::aligned`), and runs the scroll view's inset and scroll in one animation of that curve; Android takes
   the IME's `WindowInsetsAnimation` (interpolator, duration, start; API 30+) and fast-forwards its animators to it
   (`Mounter.keyboardAligned`), the scroll to the input included.
+- **Presses on inputs**: an input's field keeps its own clicks and taps (the caret, a selection, the focus, its edit
+  menu), on its text or on its padding; only an `Input` that listens to presses hears them, after the focus the press
+  gives the field, and no view around it does, on every platform. A drag or a touch held on the field is the field's,
+  not a press. An input that listens is still read as its text field, not as a button around it, and is no stop of
+  Tab of its own.
 - **Controlled inputs**: each native edit carries an edit count; a `value` from JS is applied only if it is based on the latest
   edit, so a slow JS round trip can never overwrite newer typing (React Native's eventCount).
   While an input method composes, a `value` is held natively and applied when the composition ends, if no edit came

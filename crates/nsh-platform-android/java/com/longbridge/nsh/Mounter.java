@@ -521,6 +521,9 @@ final class Mounter {
                     if (v instanceof ImageBox && presses && ((ImageBox) v).press == null) {
                         ((ImageBox) v).press = new Pressable(v, this, id);
                     }
+                    if (v instanceof InputBox && presses && ((InputBox) v).press == null) {
+                        ((InputBox) v).press = new Pressable(v, this, id, false, true);
+                    }
                     if (v instanceof TextBox || v instanceof ImageBox) {
                         v.setClickable(presses || (v instanceof TextBox && ((TextBox) v).hasLinks()));
                     }
