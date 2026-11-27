@@ -1295,7 +1295,28 @@ fn main_window_options(
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     let ok = Rc::new(std::cell::Cell::new(true));
     let result = ok.clone();
-    gpui_platform::application().run(move |cx| {
+    let application = gpui_platform::application();
+    #[cfg(target_os = "macos")]
+    let reopen = {
+        let target = Rc::new(std::cell::Cell::new(None::<gpui::WindowHandle<AppView>>));
+        let window = target.clone();
+        application.on_reopen(move |cx| {
+            if let Some(handle) = window.get() {
+                let _ = handle.update(cx, |view, _, _| {
+                    // The app decides which of its windows to open or focus.
+                    view.surface().event(
+                        nsh_core::ROOT_ID,
+                        nsh_core::EventKind::Window,
+                        nsh_core::EventPayload::Window(Box::new(
+                            nsh_core::desktop::WindowEvent::Reopen,
+                        )),
+                    );
+                });
+            }
+        });
+        target
+    };
+    application.run(move |cx| {
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -1308,16 +1329,18 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
         }
         crate::window::place_windows(options.display, options.keep_size, cx);
         match open(source, options, cx) {
-            // Shown without activating anything: the window that would have
-            // the keyboard.
-            Ok((handle, true)) if background => {
-                let _ = handle.update(cx, |_, window, cx| {
-                    crate::window::show_window(window, true, cx)
-                });
+            Ok((handle, shown)) => {
+                #[cfg(target_os = "macos")]
+                reopen.set(Some(handle));
+                if shown && background {
+                    // Give it the keyboard without activating the app.
+                    let _ = handle.update(cx, |_, window, cx| {
+                        crate::window::show_window(window, true, cx)
+                    });
+                } else if shown {
+                    cx.activate(true);
+                }
             }
-            Ok((_, true)) => cx.activate(true),
-            // Hidden: the app stays where the user is.
-            Ok((_, false)) => {}
             Err(err) => {
                 log::error!("cannot open a window: {err}");
                 ok.set(false);
