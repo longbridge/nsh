@@ -28,6 +28,7 @@ import BaseSplitView from "./base-split-view";
 import BaseEditor from "./base-editor";
 import BaseEditorFonts from "./base-editor-fonts";
 import BaseHoverCard from "./base-hover-card";
+import BaseHostAccessibility from "./base-host-accessibility";
 import BaseLink from "./base-link";
 import BaseNavPage from "./base-nav-page";
 import BaseNavHeaderItems from "./base-nav-header-items";
@@ -101,6 +102,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-editor": BaseEditor,
   "base-editor-fonts": BaseEditorFonts,
   "base-hover-card": BaseHoverCard,
+  "base-host-accessibility": BaseHostAccessibility,
   "base-link": BaseLink,
   "base-nav-page": BaseNavPage,
   "base-nav-header-items": BaseNavHeaderItems,

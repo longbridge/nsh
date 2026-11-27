@@ -5004,3 +5004,38 @@ absent No files
 expect Pinned files
 covers [props] Tree.header
 covers [props] Tree.empty
+
+# base-host-accessibility
+# A component's host takes a view's accessibility props, as a view does.
+tap id:case-base-host-accessibility
+prop id:button accessibilityDescription Deletes the draft
+prop id:details accessible true
+prop id:details role region
+prop id:details accessibilityLabel Details
+prop id:details accessibilityHint Shows the details
+prop id:details accessibilityState expanded=true
+prop id:details accessibilityValue text=three
+prop id:details accessibilityElementsHidden false
+prop id:details accessibilityLiveRegion polite
+prop id:details accessibilityActions activate
+# The error line's text describes the details while it is there.
+prop id:details accessibilityDescription Enter a name
+listens id:details onAccessibilityAction
+# "no-hide-descendants": not an element, and its subtree hidden.
+prop id:hidden accessible false
+prop id:hidden accessibilityElementsHidden true
+# `accessibilityElementsHidden`: the host's subtree hidden.
+prop id:hidden-elements accessibilityElementsHidden true
+covers [props] accessibilityDescription
+covers [props] accessible
+covers [props] role
+covers [props] accessibilityLabel
+covers [props] accessibilityHint
+covers [props] accessibilityState
+covers [props] accessibilityValue
+covers [props] accessibilityElementsHidden
+covers [props] accessibilityLiveRegion
+covers [props] accessibilityActions
+covers [props] accessibilityDescribedBy
+covers [props] importantForAccessibility
+covers [events] onAccessibilityAction

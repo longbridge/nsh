@@ -3459,6 +3459,128 @@ fn a_base_button_has_behavior_and_no_look() {
     );
 }
 
+const BASE_ACCESSIBILITY_HOST_PROPS: &str = r#"import { mount, signal, Text, View, type ViewRef } from "nsh";
+import { Button, Collapsible } from "nsh/base";
+
+function App() {
+  const error = signal<ViewRef>();
+  const list = signal<ViewRef>();
+  return (
+    <View>
+      <Button
+        testID="button"
+        accessibilityDescription="Deletes the draft"
+        accessibilityLevel={2}
+      >
+        <Text>Delete</Text>
+      </Button>
+      <Collapsible
+        testID="details"
+        accessible
+        role="region"
+        accessibilityLabel="Details"
+        accessibilityHint="Shows the details"
+        accessibilityState={{ expanded: true }}
+        accessibilityValue={{ text: "three" }}
+        accessibilityElementsHidden={false}
+        accessibilityLiveRegion="polite"
+        accessibilityActions={[{ name: "activate" }]}
+        accessibilityActiveDescendant={error() ?? null}
+        accessibilityControls={list() ?? null}
+        accessibilityDescribedBy={error() ?? null}
+        onAccessibilityAction={() => {}}
+      >
+        <Text>Details</Text>
+      </Collapsible>
+      <Collapsible
+        testID="hidden"
+        importantForAccessibility="no-hide-descendants"
+      >
+        <Text>Hidden details</Text>
+      </Collapsible>
+      <View testID="error" ref={error}><Text>Enter a name</Text></View>
+      <View testID="list" ref={list}><Text>List</Text></View>
+    </View>
+  );
+}
+
+mount(App);
+"#;
+
+/// A component's host takes a view's accessibility props, as its classes
+/// and mouse events: the app labels a control the component's own props
+/// leave out, and the host is the view screen readers reach.
+#[test]
+fn a_component_host_takes_the_accessibility_props_of_a_view() {
+    use nsh_core::{AccessibilityRole, LiveRegion};
+    let (_engine, rx) = start(BASE_ACCESSIBILITY_HOST_PROPS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let view = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .rev()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some((*id, props.clone()))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{test_id}"))
+    };
+    let (_, button) = view("button");
+    assert_eq!(
+        button.accessibility.description.as_deref(),
+        Some("Deletes the draft")
+    );
+    assert_eq!(button.accessibility.level, Some(2));
+    let (details, props) = view("details");
+    let accessibility = &props.accessibility;
+    assert_eq!(accessibility.role, AccessibilityRole::Region);
+    assert_eq!(accessibility.label.as_deref(), Some("Details"));
+    assert_eq!(accessibility.hint.as_deref(), Some("Shows the details"));
+    assert_eq!(
+        accessibility.state.expanded,
+        Some(true),
+        "the state the app set"
+    );
+    assert_eq!(
+        accessibility.value.as_ref().and_then(|v| v.text.as_deref()),
+        Some("three")
+    );
+    assert_eq!(accessibility.live_region, LiveRegion::Polite);
+    assert_eq!(accessibility.actions.len(), 1);
+    assert_eq!(accessibility.actions[0].name.as_ref(), "activate");
+    assert!(
+        accessibility.active_descendant.is_some(),
+        "the ref the app passed names the view"
+    );
+    assert!(accessibility.controls.is_some());
+    assert!(accessibility.described_by.is_some());
+    assert_eq!(
+        accessibility.accessible,
+        Some(true),
+        "the `accessible` host prop"
+    );
+    let (_, hidden) = view("hidden");
+    assert_eq!(
+        hidden.accessibility.accessible,
+        Some(false),
+        "importantForAccessibility=\"no-hide-descendants\""
+    );
+    assert!(hidden.accessibility.hidden);
+    assert!(
+        first.items.iter().any(|i| matches!(
+            i,
+            MountItem::Events { id, events }
+                if *id == details && events.contains(EventKind::AccessibilityAction)
+        )),
+        "the host hears the actions assistive technologies perform"
+    );
+}
+
 const BASE_SWITCH: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Switch } from "nsh/base";
 
