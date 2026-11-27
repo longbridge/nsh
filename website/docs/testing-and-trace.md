@@ -775,6 +775,10 @@ Only this machine can drive a session. The dev server takes attached steps on lo
 (even its own), and asks for a token that the session writes to a file only your user can read. Other machines on
 the network, other users of this machine and pages open in a browser cannot drive your app.
 
+Attaching is for development only. Only the hosts of `nsh run` and `nsh dev` connect to a dev server and keep the
+model the steps need; a packaged app (`nsh package`) and an app in its release build have neither, and nothing can
+attach to them.
+
 The examples have tests to start from: `examples/gallery-rs` for a Rust app (`cargo test`, one module per demo, and
 `App.test.tsx`), `examples/rust-exports` for an app with a Rust crate, `examples/counter` and `examples/gallery/tests`
 (storage, inputs, a long list, stubbed requests, dark mode, a manual clock) for TSX apps.

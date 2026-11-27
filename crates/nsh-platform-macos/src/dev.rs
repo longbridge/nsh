@@ -178,18 +178,16 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
         }
     });
 
-    let host = HostInfo {
-        device: device_name(),
-        platform: HostPlatform::MacOs,
-        bytecode_version: BYTECODE_VERSION.to_owned(),
-        ui_sets: crate::app::ui_sets()
-            .iter()
-            .flat_map(nsh_core::element::Registry::sets)
-            .filter_map(|set| set.specifier().map(str::to_owned))
-            .collect(),
-        tests: true,
-        attach: true,
-    };
+    let mut host = HostInfo::new(HostPlatform::MacOs);
+    host.device = device_name();
+    host.bytecode_version = BYTECODE_VERSION.to_owned();
+    host.ui_sets = crate::app::ui_sets()
+        .iter()
+        .flat_map(nsh_core::element::Registry::sets)
+        .filter_map(|set| set.specifier().map(str::to_owned))
+        .collect();
+    host.tests = true;
+    host.attach = true;
     // A test session (`nsh test --target macos`), or a development session
     // `nsh test --attach` may drive: the surface keeps the model the agent's
     // steps see, from the first bundle on. Only a test changes how the app
@@ -462,6 +460,8 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
                 hide_error(ui);
             }
         }
+        // Events added later for other hosts (`DevEvent` is non-exhaustive).
+        _ => {}
     }
 }
 

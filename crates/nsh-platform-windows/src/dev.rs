@@ -211,19 +211,17 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             }
         }));
 
-    let host = HostInfo {
-        device: device_name(std::env::var("COMPUTERNAME").ok().as_deref()),
-        platform: HostPlatform::Windows,
-        bytecode_version: BYTECODE_VERSION.to_owned(),
-        ui_sets: crate::app::ui_sets()
-            .iter()
-            .flat_map(nsh_core::element::Registry::sets)
-            .filter_map(|set| set.specifier().map(str::to_owned))
-            .collect(),
-        tests: true,
-        // It keeps no model in a development session (`nsh test --attach`).
-        attach: false,
-    };
+    let mut host = HostInfo::new(HostPlatform::Windows);
+    host.device = device_name(std::env::var("COMPUTERNAME").ok().as_deref());
+    host.bytecode_version = BYTECODE_VERSION.to_owned();
+    host.ui_sets = crate::app::ui_sets()
+        .iter()
+        .flat_map(nsh_core::element::Registry::sets)
+        .filter_map(|set| set.specifier().map(str::to_owned))
+        .collect();
+    host.tests = true;
+    // It keeps no model in a development session (`nsh test --attach`).
+    host.attach = false;
     // A test session (`nsh test --target windows`): the surface keeps the
     // model the agent's steps see, from the first bundle on (posted
     // messages keep their order, so it comes before the bundle).
@@ -487,6 +485,8 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
                 hide_error(ui);
             }
         }
+        // Events added later for other hosts (`DevEvent` is non-exhaustive).
+        _ => {}
     }
 }
 

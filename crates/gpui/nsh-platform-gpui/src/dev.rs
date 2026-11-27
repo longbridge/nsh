@@ -273,18 +273,16 @@ pub(crate) fn start(this: &AppView, url: String, held: bool, cx: &mut Context<Ap
         let _ = failed.unbounded_send(Msg::HotUpdateFailed);
     });
 
-    let host = HostInfo {
-        device: device_name(host_name().as_deref()),
-        platform: HostPlatform::Gpui,
-        bytecode_version: BYTECODE_VERSION.to_owned(),
-        ui_sets: crate::app::ui_sets()
-            .iter()
-            .flat_map(nsh_core::element::Registry::sets)
-            .filter_map(|set| set.specifier().map(str::to_owned))
-            .collect(),
-        tests: true,
-        attach: true,
-    };
+    let mut host = HostInfo::new(HostPlatform::Gpui);
+    host.device = device_name(host_name().as_deref());
+    host.bytecode_version = BYTECODE_VERSION.to_owned();
+    host.ui_sets = crate::app::ui_sets()
+        .iter()
+        .flat_map(nsh_core::element::Registry::sets)
+        .filter_map(|set| set.specifier().map(str::to_owned))
+        .collect();
+    host.tests = true;
+    host.attach = true;
     // A test session (`nsh test --target gpui`), or a development session
     // `nsh test --attach` may drive: the model goes to the surface through
     // the session's messages, ahead of the bundle. Keeping it changes
@@ -611,6 +609,8 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
                 dev.show_status(Status::Updated);
             }
         }
+        // Events added later for other hosts (`DevEvent` is non-exhaustive).
+        _ => {}
     }
     None
 }

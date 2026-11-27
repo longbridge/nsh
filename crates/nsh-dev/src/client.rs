@@ -13,8 +13,10 @@ use crate::protocol::{
     RunningBuild, ServerMessage, StepOutcome, TestStep,
 };
 
-/// Something the dev server told the host.
+/// Something the dev server told the host. Hosts ignore events they do not
+/// know (`_ => {}`), so the server can add events for some hosts only.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DevEvent {
     /// Connected (or reconnected) to the server.
     Connected,
@@ -115,8 +117,11 @@ pub enum DevEvent {
     },
 }
 
-/// What a host tells the dev server about itself.
+/// What a host tells the dev server about itself. Hosts in other crates
+/// start from [`HostInfo::new`] and assign the fields they know, so a field
+/// added later does not break them.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct HostInfo {
     /// Human-readable device name, shown in the developer's terminal.
     pub device: String,
@@ -132,6 +137,21 @@ pub struct HostInfo {
     /// It takes steps in a development session too, from `nsh test
     /// --attach` ([`DevEvent::Attachable`]).
     pub attach: bool,
+}
+
+impl HostInfo {
+    /// A host of `platform` with nothing else said: no device name, no
+    /// bytecode version, no UI sets, and it takes no steps.
+    pub fn new(platform: HostPlatform) -> Self {
+        HostInfo {
+            device: String::new(),
+            platform,
+            bytecode_version: String::new(),
+            ui_sets: Vec::new(),
+            tests: false,
+            attach: false,
+        }
+    }
 }
 
 /// Connects a dev host to a dev server, reconnecting until dropped, and

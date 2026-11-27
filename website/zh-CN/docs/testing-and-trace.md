@@ -670,6 +670,9 @@ macOS 和 GPUI 的开发宿主接受附着的步骤。其他宿主（Windows、L
 只有本机能驱动会话。开发服务器只在回环地址上接受附着的步骤，拒绝任何网页（包括它自己的页面），还要求一个令牌。会话把令牌
 写在只有你的用户能读的文件里。网络上的其他机器、本机的其他用户和浏览器里打开的网页都无法驱动你的应用。
 
+附着只用于开发。只有 `nsh run` 和 `nsh dev` 的宿主会连开发服务器、保留步骤需要的模型；打包的应用（`nsh package`）和正式构建的应用
+两样都没有，也就无法附着。
+
 示例中有可以参考的测试：Rust 应用见 `examples/gallery-rs`（`cargo test`，每个演示一个模块，以及 `App.test.tsx`），带 Rust crate
 的应用见 `examples/rust-exports`，TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求、
 深色模式、手动时钟）。

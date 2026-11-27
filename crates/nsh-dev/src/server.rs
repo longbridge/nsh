@@ -1173,7 +1173,7 @@ async fn attach_upgrade(
     headers: HeaderMap,
     State(shared): State<Arc<Shared>>,
 ) -> Response {
-    if !peer.ip().is_loopback() || headers.contains_key(header::ORIGIN) {
+    if !attach_allowed(peer.ip(), headers.contains_key(header::ORIGIN)) {
         log::warn!("dev server: refused an attached session from {peer}");
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -1184,6 +1184,14 @@ async fn attach_upgrade(
                 log::debug!("attached session ended: {err}");
             }
         })
+}
+
+/// Whether an attached session may come from `peer`: a process of this
+/// machine (a loopback address, also when the server listens on every
+/// interface for `nsh dev --network`) that is no browser's page (which
+/// always sends an `Origin`).
+fn attach_allowed(peer: std::net::IpAddr, has_origin: bool) -> bool {
+    peer.is_loopback() && !has_origin
 }
 
 /// Serves an attached session ([`AttachRequest`]): its hello's token must
@@ -1601,6 +1609,24 @@ mod tests {
             "{two}"
         );
         assert!(!two.contains("run"), "{two}");
+    }
+
+    #[test]
+    fn attached_sessions_come_from_this_machine_and_no_web_page() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+        let allowed = super::attach_allowed;
+        assert!(allowed(IpAddr::V4(Ipv4Addr::LOCALHOST), false));
+        assert!(allowed(IpAddr::V6(Ipv6Addr::LOCALHOST), false));
+        // Another address of the loopback block.
+        assert!(allowed(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), false));
+        // A page on this machine still sends an `Origin`.
+        assert!(!allowed(IpAddr::V4(Ipv4Addr::LOCALHOST), true));
+        // Other machines: the local network, the internet, an IPv6 peer.
+        assert!(!allowed(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)), false));
+        assert!(!allowed(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)), false));
+        assert!(!allowed(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), false));
+        assert!(!allowed("fe80::1".parse().unwrap(), false));
+        assert!(!allowed(IpAddr::V4(Ipv4Addr::UNSPECIFIED), false));
     }
 
     #[test]

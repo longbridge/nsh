@@ -4575,13 +4575,12 @@ mod tests {
         let (tests, (set_up, is_set_up)) = (tester.clone(), std::sync::mpsc::channel());
         let client = DevClient::start(
             format!("ws://{}{WS_PATH}", server.local_addr()),
-            HostInfo {
-                device: "tester".into(),
-                platform: HostPlatform::MacOs,
-                bytecode_version: "bc".into(),
-                ui_sets: Vec::new(),
-                tests: true,
-                attach: false,
+            {
+                let mut host = HostInfo::new(HostPlatform::MacOs);
+                host.device = "tester".into();
+                host.bytecode_version = "bc".into();
+                host.tests = true;
+                host
             },
             move |event| {
                 let setup = matches!(event, DevEvent::TestSetup { .. });

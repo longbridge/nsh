@@ -11,14 +11,20 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A host named `device` with bytecode `bytecode` serving `nsh/base`.
 fn host(device: &str, bytecode: &str) -> HostInfo {
-    HostInfo {
-        device: device.into(),
-        platform: HostPlatform::Android,
-        bytecode_version: bytecode.into(),
-        ui_sets: vec!["app/native".into(), "app/charts".into()],
-        tests: false,
-        attach: false,
-    }
+    let mut host = HostInfo::new(HostPlatform::Android);
+    host.device = device.into();
+    host.bytecode_version = bytecode.into();
+    host.ui_sets = vec!["app/native".into(), "app/charts".into()];
+    host
+}
+
+/// A host that takes test steps, and steps from `nsh test --attach` when
+/// `attach`.
+fn stepping_host(device: &str, bytecode: &str, attach: bool) -> HostInfo {
+    let mut host = host(device, bytecode);
+    host.tests = true;
+    host.attach = attach;
+    host
 }
 
 fn next_non_status(rx: &mpsc::Receiver<DevEvent>) -> DevEvent {
@@ -341,30 +347,28 @@ fn a_test_session_asks_its_host_for_steps_and_hears_their_outcomes() {
     let (tx, rx) = mpsc::channel();
     let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
     let answering = client.clone();
-    let started = DevClient::start(
-        url,
-        HostInfo {
-            tests: true,
-            ..host("tester", "bc-1")
-        },
-        move |event| match event {
-            DevEvent::Step { id, step } => {
-                let outcome = match step {
-                    TestStep::Texts => StepOutcome::Done {
-                        value: serde_json::json!(["Hello"]),
-                    },
-                    other => StepOutcome::Failed {
-                        message: format!("cannot {other:?}"),
-                    },
-                };
-                answering.get().expect("client").step_done(id, outcome);
-            }
-            event => {
-                let _ = tx.send(event);
-            }
-        },
-    )
-    .unwrap();
+    let started =
+        DevClient::start(
+            url,
+            stepping_host("tester", "bc-1", false),
+            move |event| match event {
+                DevEvent::Step { id, step } => {
+                    let outcome = match step {
+                        TestStep::Texts => StepOutcome::Done {
+                            value: serde_json::json!(["Hello"]),
+                        },
+                        other => StepOutcome::Failed {
+                            message: format!("cannot {other:?}"),
+                        },
+                    };
+                    answering.get().expect("client").step_done(id, outcome);
+                }
+                event => {
+                    let _ = tx.send(event);
+                }
+            },
+        )
+        .unwrap();
     let _ = client.set(started);
     // Told of the test session before anything else of the server's.
     loop {
@@ -401,31 +405,28 @@ fn attached_host(
     let answering = client.clone();
     let (tx, rx) = mpsc::channel();
     let name = device.to_owned();
-    let started = DevClient::start(
-        url,
-        HostInfo {
-            tests: true,
-            attach: true,
-            ..host(device, "bc-1")
-        },
-        move |event| match event {
-            DevEvent::Step { id, step } => {
-                let outcome = match step {
-                    TestStep::Texts => StepOutcome::Done {
-                        value: serde_json::json!([name.clone()]),
-                    },
-                    other => StepOutcome::Failed {
-                        message: format!("cannot {other:?}"),
-                    },
-                };
-                answering.get().expect("client").step_done(id, outcome);
-            }
-            event => {
-                let _ = tx.send(event);
-            }
-        },
-    )
-    .unwrap();
+    let started =
+        DevClient::start(
+            url,
+            stepping_host(device, "bc-1", true),
+            move |event| match event {
+                DevEvent::Step { id, step } => {
+                    let outcome = match step {
+                        TestStep::Texts => StepOutcome::Done {
+                            value: serde_json::json!([name.clone()]),
+                        },
+                        other => StepOutcome::Failed {
+                            message: format!("cannot {other:?}"),
+                        },
+                    };
+                    answering.get().expect("client").step_done(id, outcome);
+                }
+                event => {
+                    let _ = tx.send(event);
+                }
+            },
+        )
+        .unwrap();
     loop {
         match rx.recv_timeout(TIMEOUT).expect("event") {
             DevEvent::Attachable => break,
@@ -443,25 +444,13 @@ fn an_attached_session_drives_the_hosts_that_take_its_steps() {
 
     let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
     let addr = server.local_addr();
-    // A session without a token takes no attached steps.
-    assert_eq!(
-        Attachment::connect(addr, "secret").err().as_deref(),
-        Some("this session takes no attached steps")
-    );
     server.set_attach_token(Some("secret".into()));
-    assert_eq!(
-        Attachment::connect(addr, "guess").err().as_deref(),
-        Some("the session's token differs: it was replaced or restarted")
-    );
     let _window = attached_host(&server, "window");
     // A host that takes test steps but not attached ones (an older one).
     let (tx, rx) = mpsc::channel();
     let _page = DevClient::start(
         format!("ws://{addr}{WS_PATH}"),
-        HostInfo {
-            tests: true,
-            ..host("page", "bc-1")
-        },
+        stepping_host("page", "bc-1", false),
         move |event| {
             let _ = tx.send(event);
         },
@@ -509,11 +498,7 @@ fn a_test_session_takes_no_attached_steps() {
     let (tx, rx) = mpsc::channel();
     let _client = DevClient::start(
         format!("ws://{}{WS_PATH}", server.local_addr()),
-        HostInfo {
-            tests: true,
-            attach: true,
-            ..host("tester", "bc-1")
-        },
+        stepping_host("tester", "bc-1", true),
         move |event| {
             let _ = tx.send(event);
         },
@@ -565,6 +550,30 @@ fn an_attached_session_comes_from_this_machine_and_no_web_page() {
 }
 
 #[test]
+fn an_attached_session_needs_the_sessions_token() {
+    use nsh_dev::Attachment;
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    let addr = server.local_addr();
+    // A development session that takes no attached steps.
+    assert_eq!(
+        Attachment::connect(addr, "secret").err().as_deref(),
+        Some("this session takes no attached steps")
+    );
+    server.set_attach_token(Some("secret".into()));
+    // A wrong token, one of the same length, and none.
+    for token in ["guess", "secreT", ""] {
+        assert_eq!(
+            Attachment::connect(addr, token).err().as_deref(),
+            Some("the session's token differs: it was replaced or restarted"),
+            "{token:?}"
+        );
+    }
+    // The session's own.
+    assert!(Attachment::connect(addr, "secret").is_ok());
+}
+
+#[test]
 fn an_app_of_rust_only_runs_as_its_hosts_root() {
     let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
     server.publish_root();
@@ -595,31 +604,29 @@ fn a_traced_test_session_hears_the_batches_before_the_step_ends() {
     let (setup_tx, setup) = mpsc::channel();
     let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
     let answering = client.clone();
-    let started = DevClient::start(
-        url,
-        HostInfo {
-            tests: true,
-            ..host("tester", "bc-1")
-        },
-        move |event| match event {
-            DevEvent::TestSetup { trace, .. } => {
-                let _ = setup_tx.send(trace);
-            }
-            // A step's batch goes before its outcome.
-            DevEvent::Step { id, .. } => {
-                let client = answering.get().expect("client");
-                client.trace(vec!["Create { id: 2, kind: View }".into()]);
-                client.step_done(
-                    id,
-                    StepOutcome::Done {
-                        value: serde_json::Value::Null,
-                    },
-                );
-            }
-            _ => {}
-        },
-    )
-    .unwrap();
+    let started =
+        DevClient::start(
+            url,
+            stepping_host("tester", "bc-1", false),
+            move |event| match event {
+                DevEvent::TestSetup { trace, .. } => {
+                    let _ = setup_tx.send(trace);
+                }
+                // A step's batch goes before its outcome.
+                DevEvent::Step { id, .. } => {
+                    let client = answering.get().expect("client");
+                    client.trace(vec!["Create { id: 2, kind: View }".into()]);
+                    client.step_done(
+                        id,
+                        StepOutcome::Done {
+                            value: serde_json::Value::Null,
+                        },
+                    );
+                }
+                _ => {}
+            },
+        )
+        .unwrap();
     let _ = client.set(started);
     assert!(
         setup.recv_timeout(TIMEOUT).expect("the setup"),
@@ -1090,18 +1097,11 @@ fn tester(
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
     let answering = client.clone();
-    let started = DevClient::start(
-        url,
-        HostInfo {
-            tests: true,
-            ..host("tester", "bc-1")
-        },
-        move |event| {
-            if let DevEvent::Step { id, step } = event {
-                answering.get().expect("client").step_done(id, answer(step));
-            }
-        },
-    )
+    let started = DevClient::start(url, stepping_host("tester", "bc-1", false), move |event| {
+        if let DevEvent::Step { id, step } = event {
+            answering.get().expect("client").step_done(id, answer(step));
+        }
+    })
     .unwrap();
     let _ = client.set(started);
     let deadline = std::time::Instant::now() + TIMEOUT;
