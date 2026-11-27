@@ -51,6 +51,7 @@ impl Session {
     /// the address the dev server will listen on, returning it. With every
     /// port in the range taken, the OS allocates one.
     pub(crate) fn acquire_free(app: &Path, host: Ipv4Addr) -> anyhow::Result<(Option<Self>, u16)> {
+        listenable(host)?;
         let dir = crate::check::cache()?.join("dev-sessions");
         let app = &identity(app);
         let is_free = |port| port_is_free(host, port);
@@ -167,6 +168,15 @@ fn app_file(dir: &Path, port: u16) -> PathBuf {
     dir.join(format!("{port}.app"))
 }
 
+/// Fails for an address this machine cannot listen at (a mistyped `--host`),
+/// which fails at every port alike: the probe of each would say it is taken,
+/// and the server would fall back to the OS's port and fail there.
+fn listenable(host: Ipv4Addr) -> anyhow::Result<()> {
+    std::net::TcpListener::bind((host, 0))
+        .map(drop)
+        .with_context(|| format!("the dev server cannot listen at {host}"))
+}
+
 /// Whether a dev server could listen on `port` at `host`, the address it
 /// will listen on. Listening on every interface for a server that will
 /// listen on loopback only, even briefly, makes Windows Defender Firewall
@@ -227,6 +237,18 @@ mod tests {
         assert!(!port_is_free(Ipv4Addr::LOCALHOST, port));
         drop(held);
         assert!(port_is_free(Ipv4Addr::LOCALHOST, port));
+    }
+
+    /// An address no machine has (TEST-NET-1) is refused before any port is
+    /// probed; loopback is not.
+    #[test]
+    fn an_address_this_machine_lacks_is_refused_at_once() {
+        let err = listenable(Ipv4Addr::new(192, 0, 2, 1)).unwrap_err();
+        assert!(
+            err.to_string().contains("cannot listen at 192.0.2.1"),
+            "{err}"
+        );
+        listenable(Ipv4Addr::LOCALHOST).unwrap();
     }
 
     #[test]
