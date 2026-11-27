@@ -57008,3 +57008,96 @@ fn allow_navigation_reaches_the_web_view() {
         "{denied:?}"
     );
 }
+
+/// A tab bar (a horizontal scroll view) that gets 60 tabs in one turn,
+/// past the 45 it has: every tab's views are made within a few display
+/// frames, the turns between them making none (NsVim's `nsvim *.rs`).
+#[test]
+fn a_tab_bar_makes_every_tab_added_in_one_turn_over_frames() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        Op::SetProp {
+            id: 2,
+            prop: Prop::Horizontal(true),
+        },
+        style_op(2, &[("height", StyleValue::Number(30.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // A tab: a row of an icon, a label and a close button, narrow enough
+    // for all 105 to be in content culling's window (a viewport past the
+    // bar's), so pacing alone holds them back.
+    let tab = |ops: &mut Vec<Op>, i: u32| {
+        let id = 1000 + i * 10;
+        ops.extend(child_view(
+            id,
+            2,
+            30.0,
+            &[
+                ("width", StyleValue::Number(6.0)),
+                ("flexDirection", StyleValue::Str("row")),
+            ],
+        ));
+        for (n, w) in [1.0, 4.0, 1.0].into_iter().enumerate() {
+            ops.extend(child_view(
+                id + 1 + n as u32,
+                id,
+                30.0,
+                &[("width", StyleValue::Number(w))],
+            ));
+        }
+    };
+    for i in 0..45 {
+        tab(&mut ops, i);
+    }
+    apply(&mut c, ops);
+    let mut made = Vec::new();
+    let frame = |c: &mut Core<FakeEngine>, made: &mut Vec<NodeId>| {
+        // A turn between two frames (a timer), then the frame's.
+        c.begin_mount_turn();
+        c.hold_paced_mounts();
+        if let Some(batch) = c.commit() {
+            made.extend(created_in(&batch));
+        }
+        c.begin_mount_turn();
+        if let Some(batch) = c.commit() {
+            made.extend(created_in(&batch));
+        }
+    };
+    for _ in 0..20 {
+        frame(&mut c, &mut made);
+        if !c.has_paced_mounts() {
+            break;
+        }
+    }
+    assert!(!c.has_paced_mounts());
+    assert_eq!(made.iter().filter(|&&id| id >= 1000).count(), 45 * 4);
+    let mut ops = Vec::new();
+    for i in 45..105 {
+        tab(&mut ops, i);
+    }
+    apply(&mut c, ops);
+    let mut frames = 0;
+    loop {
+        frame(&mut c, &mut made);
+        frames += 1;
+        if !c.has_paced_mounts() {
+            break;
+        }
+        assert!(frames < 40, "still waiting after {frames} frames");
+    }
+    assert!(frames > 1, "the tabs were paced over frames ({frames})");
+    for i in 0..105u32 {
+        for n in 0..4 {
+            let id = 1000 + i * 10 + n;
+            assert!(made.contains(&id), "tab {i} view {n} was never made");
+        }
+    }
+}

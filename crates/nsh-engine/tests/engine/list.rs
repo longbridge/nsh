@@ -409,6 +409,18 @@ struct Paced {
 impl Paced {
     fn start(app: &str) -> Self {
         let (config, dir) = config(app);
+        Self::start_with(config, dir)
+    }
+
+    /// As the platforms run it: scroll views make their content as it
+    /// comes near, and what a turn makes past its budget waits.
+    fn start_culling(app: &str) -> Self {
+        let (mut config, dir) = config(app);
+        config.content_culling = true;
+        Self::start_with(config, dir)
+    }
+
+    fn start_with(config: EngineConfig, dir: std::path::PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         let seen = std::sync::Arc::new(Seen::default());
         let engine =
@@ -1302,4 +1314,63 @@ mount(App);
         paced.texts
     );
     assert_eq!(paced.errors(), Vec::<String>::new());
+}
+
+/// A tab bar (a horizontal `Scroll`) with 45 tabs gets 60 more in one
+/// turn: the views out of sight wait, and come over the display frames
+/// that follow, each frame asking for the next, until every tab shows its
+/// label (NsVim's `nsvim *.rs`, #3505). The tabs are narrow enough for all
+/// of them to be in content culling's window, so pacing alone holds them.
+#[test]
+fn tabs_added_in_one_turn_are_all_made_over_frames() {
+    let app = r#"
+import { mount, Scroll, signal, Text, View } from "nsh";
+const tabs = signal(Array.from({ length: 45 }, (_, i) => i));
+// On the first display frame, once the platform sends them.
+requestAnimationFrame(() => tabs.set(Array.from({ length: 105 }, (_, i) => i)));
+function App() {
+  return (
+    <Scroll horizontal style={{ height: 30 }}>
+      <View style={{ flexDirection: "row" }}>
+        <Each of={tabs()}>
+          {(tab) => (
+            <View style={{ width: 5, height: 30, flexDirection: "row" }}>
+              <View style={{ width: 1 }} />
+              <Text style={{ width: 3 }}>{`tab ${tab()}`}</Text>
+              <View style={{ width: 1 }}><Text>x</Text></View>
+            </View>
+          )}
+        </Each>
+      </View>
+    </Scroll>
+  );
+}
+mount(App);
+"#;
+    let mut paced = Paced::start_culling(app);
+    paced.frame().expect("the app asks for a frame");
+    let mut frames = 1;
+    loop {
+        // A turn between two frames (the timer's, the main thread's), then
+        // the frame the engine asked for.
+        let between = paced.turn();
+        assert!(
+            between.iter().all(Vec::is_empty),
+            "a turn between frames made waiting views: {between:?}"
+        );
+        if paced.frame().is_none() {
+            break;
+        }
+        frames += 1;
+        assert!(frames < 100, "views still wait after {frames} frames");
+    }
+    assert_eq!(paced.errors(), Vec::<String>::new());
+    let missing: Vec<u32> = (0..105)
+        .filter(|i| !paced.texts.values().any(|t| *t == format!("tab {i}")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "tabs never made: {missing:?} ({frames} frames)"
+    );
+    assert!(frames > 2, "the tabs were paced over frames ({frames})");
 }
