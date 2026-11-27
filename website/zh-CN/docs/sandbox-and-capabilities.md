@@ -246,7 +246,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 ### `share`
 
-`"share": true` 允许应用显示系统的分享面板（[`Share`](../modules/nsh.md#share)）：由用户决定内容发往哪里。分享的文件还需要能在 `fs.read` 下读取。
+`"share": true` 允许应用显示系统的分享面板（`nsh-extra` 的 [`Share`](./nshm.md#share)）：由用户决定内容发往哪里。分享的文件还需要能在 `fs.read` 下读取。
 
 ### `speech`
 

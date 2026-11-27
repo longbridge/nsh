@@ -1712,18 +1712,6 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             .str("pickScreenColor")
             .num(*request)
             .end(),
-        // `navigator.share`; a page shares no local files, so a share with
-        // files says only that it has some (`nsh.js` refuses it).
-        Command::Share { id: request, sheet } => out
-            .item("cmd")
-            .num(id)
-            .str("share")
-            .num(*request)
-            .opt_str(sheet.title.as_deref())
-            .opt_str(sheet.text.as_deref())
-            .opt_str(sheet.url.as_deref())
-            .bool(!sheet.files.is_empty())
-            .end(),
         Command::ReadClipboard {
             id: request,
             has_only,

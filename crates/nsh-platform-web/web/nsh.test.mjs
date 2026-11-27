@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, webNetwork, webShareAllowed } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, webNetwork, webShareAllowed };`)}`
+const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, webNetwork } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, webNetwork };`)}`
 );
 
 test("the network is the browser's link, none while it is offline", () => {
@@ -5151,52 +5151,6 @@ test("a web view's relative URL is the site's where the page names its base", ()
   }
 });
 
-test("share reports shared, dismissed and unavailable, never shared when it could not", async () => {
-  const { player } = fakePlayer();
-  const got = [];
-  player.event = (_, name, value) => got.push([name, value]);
-  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  const browser = (share, canShare) =>
-    Object.defineProperty(globalThis, "navigator", { value: { share, canShare }, configurable: true });
-  try {
-    const shared = [];
-    browser(async (data) => { shared.push(data); });
-    await player.share(1, "Docs", null, "https://example.com/docs", false);
-    assert.deepEqual(shared, [{ title: "Docs", url: "https://example.com/docs" }]);
-    browser(async () => { throw Object.assign(new Error("closed"), { name: "AbortError" }); });
-    await player.share(2, null, "Hello", null, false);
-    // Files never reach the browser.
-    browser(async () => assert.fail("shared files"));
-    await player.share(3, null, "Hello", null, true);
-    browser(async () => assert.fail("shared what it cannot"), () => false);
-    await player.share(4, null, "Hello", null, false);
-    browser(undefined);
-    await player.share(5, null, "Hello", null, false);
-    browser(async () => { throw Object.assign(new Error("no activation"), { name: "NotAllowedError" }); });
-    await player.share(6, null, "Hello", null, false);
-    // An earlier share's sheet still open.
-    browser(async () => { throw Object.assign(new Error("in progress"), { name: "InvalidStateError" }); });
-    await player.share(7, null, "Hello", null, false);
-    // Anything else is a failure without a code.
-    browser(async () => { throw new TypeError("bad data"); });
-    await player.share(8, null, "Hello", null, false);
-    const unavailable = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
-    assert.deepEqual(got.map(([name, v]) => [name, v.id, v.action ?? v.code ?? "error"]), [
-      ["onShare", 1, "shared"],
-      ["onShare", 2, "dismissed"],
-      ["onShare", 3, unavailable],
-      ["onShare", 4, unavailable],
-      ["onShare", 5, unavailable],
-      ["onShare", 6, unavailable],
-      ["onShare", 7, unavailable],
-      ["onShare", 8, "error"],
-    ]);
-  } finally {
-    if (saved) Object.defineProperty(globalThis, "navigator", saved);
-    else delete globalThis.navigator;
-  }
-});
-
 test("window blur resets hoverButtons and cancels all active pointers", () => {
   const windowListeners = new Map();
   const savedWindow = globalThis.window;
@@ -5366,47 +5320,3 @@ test("point, corner, wheel, context menu, pinch, and scrollbar drag undo ancesto
   }
 });
 
-test("sharing is available when the browser says the document may share", () => {
-  const share = () => {};
-  const canShare = (answer) => (data) => {
-    assert.equal(typeof data.text, "string", "canShare gets valid share data");
-    return answer;
-  };
-  // No share sheet at all.
-  assert.equal(webShareAllowed({}, {}), false);
-  assert.equal(webShareAllowed(undefined, {}), false);
-  // `canShare` is the answer, and a throw is "no".
-  assert.equal(webShareAllowed({ share, canShare: canShare(true) }, {}), true);
-  assert.equal(webShareAllowed({ share, canShare: canShare(false) }, {}), false);
-  assert.equal(
-    webShareAllowed({ share, canShare: () => { throw new TypeError("no"); } }, {}),
-    false,
-  );
-  // With `canShare` the policy is never asked by name (that is what logs
-  // "Unrecognized feature").
-  const asked = [];
-  const policy = { features: () => [], allowsFeature: (name) => (asked.push(name), false) };
-  assert.equal(webShareAllowed({ share, canShare: canShare(true) }, { permissionsPolicy: policy }), true);
-  assert.deepEqual(asked, []);
-});
-
-test("without canShare the permissions policy decides, and an unlisted name is not asked", () => {
-  const nav = { share() {} };
-  const asked = [];
-  const policy = (features, allowed) => ({
-    features: () => features,
-    allowsFeature: (name) => (asked.push(name), allowed),
-  });
-  // Listed: the policy's answer, for `permissionsPolicy` and the older `featurePolicy`.
-  assert.equal(webShareAllowed(nav, { permissionsPolicy: policy(["web-share"], true) }), true);
-  assert.equal(webShareAllowed(nav, { permissionsPolicy: policy(["web-share"], false) }), false);
-  assert.equal(webShareAllowed(nav, { featurePolicy: policy(["web-share"], false) }), false);
-  assert.deepEqual(asked, ["web-share", "web-share", "web-share"]);
-  // Not listed: the browser does not gate sharing on it; no lookup, no console warning.
-  asked.length = 0;
-  assert.equal(webShareAllowed(nav, { permissionsPolicy: policy(["camera"], false) }), true);
-  assert.deepEqual(asked, []);
-  // No policy API at all.
-  assert.equal(webShareAllowed(nav, {}), true);
-  assert.equal(webShareAllowed(nav, undefined), true);
-});

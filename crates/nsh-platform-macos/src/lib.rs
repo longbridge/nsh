@@ -56,7 +56,6 @@ mod screen_color;
 mod scroll;
 mod selectable_view;
 mod shader;
-mod share;
 mod sight;
 // Shared with iOS.
 use nsh_platform_apple::{audio, notifications};

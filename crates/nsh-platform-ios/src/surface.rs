@@ -609,8 +609,6 @@ impl RootView {
             // Drawings replayed into Core Graphics bitmaps
             // ([`crate::canvas::Offscreen`]).
             canvas_render: true,
-            // `UIActivityViewController` (`crate::share`).
-            share: true,
             // `UIApplication.openSettingsURLString`. A Mac has no settings
             // page of an iPhone or iPad app's own: Mac Catalyst and an iOS
             // app running on a Mac ("Designed for iPad") report none.

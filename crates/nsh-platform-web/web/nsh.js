@@ -575,41 +575,6 @@ function localOffset(ms) {
   return 0 - new Date(ms).getTimezoneOffset() * 60;
 }
 
-/**
- * Whether the page can show the browser's share sheet: it has
- * `navigator.share` and the document is allowed to use `web-share` (a frame
- * of another origin needs `allow="web-share"`, and `Permissions-Policy:
- * web-share=()` turns it off).
- *
- * Web Share (W3C REC) makes `navigator.canShare(data)` return `false` when the
- * document is not allowed to use "web-share", so that is the probe. It never
- * touches the policy by name, so it does not log "Unrecognized feature" in
- * browsers whose Permissions Policy has no `web-share` entry. The data only
- * has to be valid share data; nothing is shared.
- *
- * `canShare` is newer than `share` (some browsers ship only `share`). Those
- * fall back to the Permissions Policy API, asking `features()` before
- * `allowsFeature()`: `allowsFeature` logs for a name the browser does not
- * list, and such a browser does not gate sharing on that policy.
- */
-function webShareAllowed(
-  nav = typeof navigator === "undefined" ? undefined : navigator,
-  doc = typeof document === "undefined" ? undefined : document,
-) {
-  if (typeof nav?.share !== "function") return false;
-  if (typeof nav.canShare === "function") {
-    try {
-      return nav.canShare({ text: "share" });
-    } catch {
-      return false;
-    }
-  }
-  const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
-  if (typeof policy?.allowsFeature !== "function") return true;
-  if (typeof policy.features === "function" && !policy.features().includes("web-share")) return true;
-  return policy.allowsFeature("web-share");
-}
-
 /** The kinds `network()` names for `navigator.connection.type`'s. */
 const CONNECTION_KINDS = {
   wifi: "wifi", cellular: "cellular", ethernet: "wired", none: "none",
@@ -2493,7 +2458,6 @@ class Player {
       screenColor: typeof window.EyeDropper === "function",
       // `writeClipboard` reports each write's result.
       clipboardWriteResult: true,
-      share: webShareAllowed(),
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
       // Shader views draw until the first one finds no WebGL 2 (`shaderGl`).
@@ -7827,7 +7791,6 @@ class Player {
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
-      case "share": this.share(args[0], args[1], args[2], args[3], args[4]); break;
       case "renderCanvas": this.renderCanvas(...args); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
@@ -8054,43 +8017,6 @@ class Player {
       color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
     } catch {}
     this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
-  }
-
-  // `share`: the browser's share sheet (`navigator.share`, which the
-  // environment's `share` reports). A page has no local files to share, and
-  // a browser that cannot share this content says so: both are reported as
-  // unavailable, never as shared. The user closing the sheet rejects with
-  // an `AbortError`: dismissed.
-  async share(request, title, text, url, files) {
-    const unavailable = (error) => this.event(ROOT_ID, "onShare",
-      { id: request, error, code: "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM" });
-    const data = {};
-    if (title != null) data.title = title;
-    if (text != null) data.text = text;
-    if (url != null) data.url = url;
-    if (files) return unavailable("share: a page shares no local files");
-    if (!webShareAllowed()) return unavailable("share: this browser has no share sheet for this page");
-    if (typeof navigator.canShare === "function" && !navigator.canShare(data)) {
-      return unavailable("share: this browser cannot share this content");
-    }
-    try {
-      await navigator.share(data);
-      this.event(ROOT_ID, "onShare", { id: request, action: "shared" });
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        this.event(ROOT_ID, "onShare", { id: request, action: "dismissed" });
-      } else if (err?.name === "NotAllowedError") {
-        // The browser refuses the sheet here: the page's permissions policy
-        // (a frame without `web-share`) or a share without a user gesture.
-        unavailable(`share: the browser does not allow sharing here (${err?.message ?? err})`);
-      } else if (err?.name === "InvalidStateError") {
-        // An earlier share's sheet is still open: a browser shows one at a
-        // time and keeps it until the user closes it.
-        unavailable(`share: the browser still shows an earlier share (${err?.message ?? err})`);
-      } else {
-        this.event(ROOT_ID, "onShare", { id: request, error: `share: ${err?.message ?? err}` });
-      }
-    }
   }
 
   // Audio (`Sound`, `AudioPlayer`) -----------------------------------------

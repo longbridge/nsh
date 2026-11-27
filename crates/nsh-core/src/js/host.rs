@@ -1158,7 +1158,6 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::OpenAppSettings,
     EventKind::ClipboardWrite,
     EventKind::ScreenColor,
-    EventKind::Share,
     EventKind::CanvasImage,
     EventKind::FileRequest,
     EventKind::Notification,

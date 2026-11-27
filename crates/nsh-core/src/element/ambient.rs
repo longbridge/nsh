@@ -940,34 +940,6 @@ pub fn pick_screen_color() -> Answer<Option<crate::Hsla>> {
     answer
 }
 
-/// Shows the system's share sheet for `request` (TS: `Share.show`;
-/// [`crate::share`]): text, a link or local files the user sends to
-/// another app, a message or mail. To await in a task: the
-/// [`ShareOutcome`](crate::share::ShareOutcome) says whether the user
-/// shared or dismissed it; it fails with the
-/// [`ShareError`](crate::share::ShareError) `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`
-/// where the platform shows no share sheet ([`share_available`]),
-/// `ERR_ACCESS_DENIED` where the app's capabilities do not grant `share`,
-/// and with no code for a request [`ShareRequest::check`](crate::share::ShareRequest::check)
-/// refuses or the platform could not share.
-pub fn share(
-    request: crate::share::ShareRequest,
-) -> Answer<Result<crate::share::ShareOutcome, crate::share::ShareError>> {
-    let (answer, action) = super::services::share(request);
-    act(action);
-    answer
-}
-
-/// Whether the system's share sheet shows here (TS: `Share.available()`):
-/// the platform has one (iOS, Android, macOS, browsers with
-/// `navigator.share`) and the app's capabilities grant `share`. To await
-/// in a task.
-pub fn share_available() -> Answer<bool> {
-    let (answer, slot) = Answer::new();
-    act(Action::ShareAvailable(slot));
-    answer
-}
-
 /// The `file:` URLs of the local files on the system clipboard (files
 /// copied in a file manager; TS: `Clipboard.readFiles`), to await in a task.
 pub fn clipboard_files() -> Answer<Vec<String>> {
