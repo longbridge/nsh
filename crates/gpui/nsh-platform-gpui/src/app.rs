@@ -1069,13 +1069,14 @@ pub fn open_app_window(
     options: AppOptions,
     cx: &mut GpuiApp,
 ) -> anyhow::Result<gpui::WindowHandle<AppView>> {
-    open(source, options, cx).map(|(handle, _)| handle)
+    open(source, options, false, cx).map(|(handle, _)| handle)
 }
 
 /// [`open_app_window`], and whether the window shows as it opens.
 fn open(
     source: AppSource,
     mut options: AppOptions,
+    runner: bool,
     cx: &mut GpuiApp,
 ) -> anyhow::Result<(gpui::WindowHandle<AppView>, bool)> {
     // A standalone launch keeps the implicit desktop window.
@@ -1142,6 +1143,7 @@ fn open(
     let handle = cx.open_window(window_options, move |window, cx| {
         let view: Entity<AppView> = cx.new(|cx| AppView::new(options, window, cx));
         view.read(cx).own_window(window, cx);
+        view.read(cx).surface().chrome.runner.set(runner);
         view.read(cx)
             .surface()
             .chrome
@@ -1296,18 +1298,15 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
     let ok = Rc::new(std::cell::Cell::new(true));
     let result = ok.clone();
     gpui_platform::application().run(move |cx| {
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
+        // The engine applies the app's quit policy to its own windows. The
+        // GPUI host is not one of them.
+        cx.set_quit_mode(gpui::QuitMode::Explicit);
         let background = options.background;
         if background {
             crate::window::run_in_background(cx);
         }
         crate::window::place_windows(options.display, options.keep_size, cx);
-        match open(source, options, cx) {
+        match open(source, options, true, cx) {
             // Shown without activating anything: the window that would have
             // the keyboard.
             Ok((handle, true)) if background => {

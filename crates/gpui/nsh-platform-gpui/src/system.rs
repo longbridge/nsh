@@ -1510,6 +1510,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             *scale,
             *format,
         ),
+        Command::ExitApp if surface.chrome.runner.get() => crate::rt::on_app(|cx| cx.quit()),
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
             // the surface). An embedded surface closes the window it is in,

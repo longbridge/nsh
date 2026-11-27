@@ -857,6 +857,14 @@ fn close_main(surface: &Surface, window: &mut Window, cx: &mut App) {
 /// The main window's close button (or the system) asked to close it: what
 /// GPUI's should-close callback answers.
 pub(crate) fn main_should_close(surface: &Surface, window: &mut Window, cx: &mut App) -> bool {
+    if surface.chrome.runner.get() {
+        // Only a visible launcher shell can be dismissed by its native
+        // close button. Exit rather than removing the engine host.
+        if native::visible(window) {
+            crate::rt::on_app(|cx| cx.quit());
+        }
+        return false;
+    }
     if !crate::chrome::close_press(surface, CloseReason::CloseButton) {
         return false;
     }
@@ -948,6 +956,9 @@ pub(crate) fn main_attributes(surface: &Rc<Surface>, attributes: &WindowAttribut
 
 /// A request for the main window.
 pub(crate) fn main_request(surface: &Rc<Surface>, r: &WindowRequest) {
+    if surface.chrome.runner.get() && matches!(r, WindowRequest::Close) {
+        return;
+    }
     let r = r.clone();
     let s = Rc::downgrade(surface);
     with_main(surface, move |window, cx| {
