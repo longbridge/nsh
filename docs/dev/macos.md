@@ -673,7 +673,9 @@ password required right after sleep) to run tests that way.
   never shown (there is no software keyboard); `keyboardShouldPersistTaps` is ignored.
 - **Accessibility**: `accessibilityActions`.
 - **No desktop equivalent**: the status bar, haptics; the safe area and keyboard height are 0.
-- **Packaged apps** are signed ad hoc; to distribute one, sign it with a Developer ID and notarize it.
+- **Signing**: the development host and packaged apps are signed ad hoc unless given a signing identity: both
+  take the same `--sign`, which keeps the app's signature, and so its keychain access, the same across rebuilds.
+  To distribute an app, sign it with a Developer ID and notarize it.
 
 ## Standalone shutdown
 

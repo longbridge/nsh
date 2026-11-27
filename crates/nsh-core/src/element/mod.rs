@@ -164,7 +164,7 @@ pub use self::{
     events::{
         CaretEvent, Composition, FileDragEvent, FileDropEvent, GestureEvent, HintReason,
         ImageProgress, NativeEvent, OverlayPosition, PanEvent, ScrollEvent, Selection,
-        TextSelectionEvent, VideoInfo, VideoProgress, WebNavigation,
+        TextSelectionEndpoint, TextSelectionEvent, VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
