@@ -96,6 +96,9 @@ final class InputBox extends FrameLayout implements Node {
     /** `pointerEvents` (`Box`'s codes): `none` and `box-none` let touches through to the views below. */
     int pointerEvents;
 
+    /** Press handling, once the input listens to presses. */
+    Pressable press;
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
         // No target (an editor's hidden input at its caret, over the
@@ -104,7 +107,32 @@ final class InputBox extends FrameLayout implements Node {
         if (pointerEvents == 1 || pointerEvents == 2) return false;
         // Where its clip path cuts it away, the touch goes to the views below.
         if (e.getActionMasked() == MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) return false;
-        return super.dispatchTouchEvent(e);
+        boolean handled;
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN && !onField(e.getX(), e.getY())) {
+            // A touch on the padding is the field's, at the nearest point
+            // in it, as on the other platforms: the field takes the focus
+            // and the caret, and no view around hears a press.
+            MotionEvent inside = MotionEvent.obtain(e);
+            inside.offsetLocation(
+                    clamp(e.getX(), edit.getLeft(), edit.getRight() - 1) - e.getX(),
+                    clamp(e.getY(), edit.getTop(), edit.getBottom() - 1) - e.getY());
+            handled = super.dispatchTouchEvent(inside);
+            inside.recycle();
+        } else {
+            handled = super.dispatchTouchEvent(e);
+        }
+        // After the field: its press comes after the focus a tap gives it.
+        if (press != null) press.onTouchEvent(e);
+        return handled;
+    }
+
+    /** Whether ({@code x}, {@code y}) is on the field, not on the padding around it. */
+    private boolean onField(float x, float y) {
+        return x >= edit.getLeft() && x < edit.getRight() && y >= edit.getTop() && y < edit.getBottom();
+    }
+
+    private static float clamp(float v, float min, float max) {
+        return Math.max(min, Math.min(max, v));
     }
 
     InputBox(Context context, Mounter mounter, int id) {

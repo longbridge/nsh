@@ -629,7 +629,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
         })
         // A press on the input opens and closes the list in every idiom,
         // as `gpui-component`'s trigger does (after the focus it gave,
-        // which the platforms report first).
+        // which every platform reports first).
         .on_press(move || {
             if focus_opened.replace(false) || props.disabled.get_untracked() {
                 return;
