@@ -521,7 +521,20 @@ fn update(view: &NshView) -> bool {
     if spec.role != view.accessible_role() {
         set_role(view, spec.role);
     }
-    apply(view, old, &spec);
+    if view.kind() == ViewKind::Input {
+        // The editor is the text box assistive technologies read and
+        // focus; the view around it only hides it.
+        apply(
+            view.upcast_ref(),
+            old.map(host_spec).as_ref(),
+            &host_spec(&spec),
+        );
+        if let Some(editor) = crate::text_input::editor(view) {
+            apply(editor.upcast_ref(), old, &spec);
+        }
+    } else {
+        apply(view.upcast_ref(), old, &spec);
+    }
     let label_changed = old.is_some_and(|o| o.label != spec.label);
     let is_text = view.state().text.is_some();
     if label_changed
@@ -533,6 +546,34 @@ fn update(view: &NshView) -> bool {
     }
     view.state_mut().access.spec = Some(Box::new(spec));
     label_changed
+}
+
+/// What an input's view keeps of `spec`: its role and whether it is
+/// hidden; the rest is on its editor.
+fn host_spec(spec: &Spec) -> Spec {
+    Spec {
+        role: spec.role,
+        label: None,
+        description: None,
+        range: None,
+        disabled: false,
+        selected: false,
+        checked: None,
+        level: None,
+        expanded: None,
+        busy: false,
+        invalid: false,
+        hidden: spec.hidden,
+    }
+}
+
+/// An input's editor was replaced (single line to several, or back):
+/// gives the new one everything the old one had.
+pub(crate) fn editor_replaced(view: &NshView, editor: &gtk::Widget) {
+    let spec = view.state().access.spec.clone();
+    if let Some(spec) = spec {
+        apply(editor.upcast_ref(), None, &spec);
+    }
 }
 
 /// Changes the role of a view that has one already.
@@ -560,7 +601,7 @@ fn has_press_role(events: EventMask) -> bool {
 }
 
 /// Sets on GTK what differs between `old` and `new`.
-fn apply(view: &NshView, old: Option<&Spec>, new: &Spec) {
+fn apply(view: &gtk::Accessible, old: Option<&Spec>, new: &Spec) {
     let mut props: Vec<accessible::Property<'_>> = Vec::new();
     let mut reset: Vec<gtk::AccessibleProperty> = Vec::new();
     push_text(
@@ -783,6 +824,8 @@ fn spec_for(
 /// The GTK role of a view of `kind`, with press handlers or not.
 fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Gtk {
     match a.role {
+        // The editor inside is the text box (`text_input::new_editor`).
+        Role::None | Role::Textbox if kind == ViewKind::Input => Gtk::Generic,
         Role::None => match kind {
             ViewKind::Text => Gtk::Label,
             ViewKind::Image if a.label.is_some() => Gtk::Img,
@@ -1044,6 +1087,65 @@ mod tests {
         use nsh_core::prelude::*;
 
         recording_target(nsh_core::element::input().p(px(12.0)))
+    }
+
+    #[cfg(feature = "dev")]
+    #[nsh_core::element::component]
+    fn LabelledInput() -> impl nsh_core::element::IntoElement {
+        use nsh_core::prelude::*;
+
+        nsh_core::element::input()
+            .test_id("activation")
+            .label("Email")
+            .hint("Work address")
+            .accessibility_state(AccessibilityState {
+                invalid: true,
+                ..Default::default()
+            })
+            .w(px(200.0))
+            .h(px(40.0))
+    }
+
+    /// An input is read as its editor: a text box with the input's name
+    /// and states, and no labelled group around it.
+    #[test]
+    #[cfg(feature = "dev")]
+    fn input_reads_as_its_editor() {
+        let ran = with_root(nsh_engine::Root::of::<LabelledInput>(), |_, input, _| {
+            assert_eq!(input.accessible_role(), Gtk::Generic);
+            let editor = crate::text_input::editor(input).unwrap();
+            assert!(editor.is::<gtk::Text>());
+            assert_eq!(editor.accessible_role(), Gtk::TextBox);
+            let spec = input.state().access.spec.clone().unwrap();
+            assert_eq!(spec.label.as_deref(), Some("Email"));
+            assert!(spec.invalid);
+        });
+        assert!(ran.is_some(), "the test requires a GTK display");
+    }
+
+    #[test]
+    #[cfg(feature = "dev")]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_input_reads_as_a_text_box() {
+        let ran = with_root(nsh_engine::Root::of::<LabelledInput>(), |_, input, _| {
+            crate::text_input::focus(input);
+            let editor = crate::text_input::editor(input).unwrap();
+            assert!(crate::gtk_test::wait_until(|| editor.has_focus()));
+            let mut client = std::process::Command::new("python3")
+                .args(["-I", "-c", include_str!("atspi_input_test.py")])
+                .spawn()
+                .expect("the AT-SPI client starts");
+            let mut status = None;
+            assert!(
+                crate::gtk_test::wait_until(|| {
+                    status = client.try_wait().unwrap();
+                    status.is_some()
+                }),
+                "the AT-SPI client timed out"
+            );
+            assert!(status.unwrap().success(), "AT-SPI input check failed");
+        });
+        assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
     }
 
     fn recording_target(
