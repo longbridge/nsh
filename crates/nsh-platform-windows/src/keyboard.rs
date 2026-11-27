@@ -109,7 +109,7 @@ pub(crate) fn has_area(view: &NshView) -> bool {
 
 /// Whether the keyboard may act on `view`: it has an area and neither it
 /// nor a view around it is `visibility: hidden` (macOS's `seen_by_keys`).
-fn seen(view: &NshView) -> bool {
+pub(crate) fn seen(view: &NshView) -> bool {
     if !has_area(view) {
         return false;
     }
@@ -130,7 +130,6 @@ fn seen(view: &NshView) -> bool {
 /// still act on what the user cannot see.
 pub(crate) fn release_hidden_focus(surface: &Surface) {
     if let Some(field) = crate::text_input::focused(surface)
-        && field.attached()
         && !seen(&field)
     {
         crate::text_input::blur(&field);

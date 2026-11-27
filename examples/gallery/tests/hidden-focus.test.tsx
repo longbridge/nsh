@@ -33,3 +33,19 @@ test("a focused control that hides gives up the focus", async () => {
   await app.wait(300);
   expect(app.texts()).toContain("Log: Shown focused");
 });
+
+test("a focused field that hides gives up the focus", async () => {
+  const app = await open("./fixtures/hidden-focus.tsx", { platform: "macos", width: 400, height: 300 });
+  await app.waitFor("Panel hidden");
+  // As above: headless, a hidden field keeps the focus.
+  if (!app.shows("Platform: web") && !app.shows("Platform: windows")) return;
+  await app.type("text:Away field", "ab");
+  await app.keyboard.press("ctrl+h");
+  await app.waitFor("Field hidden");
+  // A key now reaches no field: "c" is typed nowhere.
+  await app.keyboard.press("c");
+  await app.wait(300);
+  expect(app.texts()).toContain(
+    "Log: Away field focused, Away field = a, Away field = ab, Away field blurred",
+  );
+});
