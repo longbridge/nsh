@@ -2517,6 +2517,24 @@ define_class!(
             Bool::YES
         }
 
+        // No notification says so: only the delegate hears that a full
+        // screen transition failed (`crate::window_state`).
+        #[unsafe(method(windowDidFailToEnterFullScreen:))]
+        fn window_did_fail_to_enter_full_screen(&self, _window: &NSWindow) {
+            let (key, id) = *self.ivars();
+            if let Some(surface) = Surface::with_key(key) {
+                crate::window_state::failed_to_enter_full_screen(&surface, Target::Own(id));
+            }
+        }
+
+        #[unsafe(method(windowDidFailToExitFullScreen:))]
+        fn window_did_fail_to_exit_full_screen(&self, _window: &NSWindow) {
+            let (key, id) = *self.ivars();
+            if let Some(surface) = Surface::with_key(key) {
+                crate::window_state::failed_to_leave_full_screen(&surface, Target::Own(id));
+            }
+        }
+
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &objc2_foundation::NSNotification) {
             let (key, id) = *self.ivars();
