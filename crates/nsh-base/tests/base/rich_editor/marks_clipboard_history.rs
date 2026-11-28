@@ -67,6 +67,68 @@ fn paste(app: &mut Headless, text: &str) {
     app.paste("id:editor", &paste).unwrap();
 }
 
+#[component]
+fn LimitedFilePaste() -> impl IntoElement {
+    use nsh_base::rich_editor::view::RichEditorPastedFiles;
+    let session = session(paragraphs(&["original"]));
+    let document = session.clone();
+    let result = signal(String::new());
+    view()
+        .child(
+            rich_editor()
+                .test_id("editor")
+                .h(px(100.0))
+                .editor(session)
+                .paste_max_size(2)
+                .on_paste_files(move |files: &RichEditorPastedFiles| {
+                    let read: Vec<_> = files.files.iter().map(|f| (&f.name, &f.data)).collect();
+                    let over: Vec<_> = files
+                        .too_large
+                        .iter()
+                        .map(|f| (&f.name, &f.mime, f.size))
+                        .collect();
+                    let state = document.state();
+                    result.set(format!(
+                        "doc={:?} caret={} read={read:?} over={over:?} uris={:?}",
+                        doc_text(state.doc()),
+                        state.selection().from(),
+                        files.uris
+                    ));
+                }),
+        )
+        .child(text(move || result.get()))
+}
+
+#[test]
+fn files_over_the_paste_limit_are_reported_without_inserting_their_text() {
+    use nsh_core::PastedFile;
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        LimitedFilePaste,
+    >()))
+    .unwrap();
+    let mut paste = PasteEvent::new("large.pdf");
+    paste.files.push(PastedFile::new(
+        "large.pdf",
+        "application/pdf",
+        vec![1, 2, 3],
+    ));
+    app.wait_for("original").unwrap();
+    app.paste("id:editor", &paste).unwrap();
+    app.wait_for(
+        r#"doc="original" caret=1 read=[] over=[("large.pdf", "application/pdf", 3)] uris=[]"#,
+    )
+    .unwrap();
+    paste
+        .files
+        .push(PastedFile::new("ok", "text/plain", vec![4, 5]));
+    paste.uris.push("file:///note".into());
+    app.paste("id:editor", &paste).unwrap();
+    app.wait_for(
+        r#"doc="original" caret=1 read=[("ok", [4, 5])] over=[("large.pdf", "application/pdf", 3)] uris=["file:///note"]"#,
+    )
+    .unwrap();
+}
+
 // Marks.
 
 #[test]

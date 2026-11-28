@@ -145,7 +145,7 @@ Markdown），以及按 schema 的 `renderHTML` 写出的 HTML，邮件、文档
 
 ### 粘贴和拖入的文件
 
-文件交给应用，由应用决定它们变成什么（图片节点、附件、指向上传副本的链接）；编辑器不为它们插入任何内容，选区保持不变，应用在选区处插入自己生成的内容。粘贴图片或在文件管理器中复制的文件时调用 `onPasteFiles`，参数为 `{ paste: { files, uris } }`：`files` 是带字节的图片（`{ name, mime, data }`），`uris` 是被复制文件的 `file:` URL。在桌面平台上，从其他应用拖到编辑器上的文件调用它的 `onFileDrop`，参数为 `{ uris, mimeTypes }`，与[视图的文件拖放](./view.md#桌面文件拖放)相同；`onFileDragEnter` / `onFileDragLeave` 跟随拖动，可用于显示「松开以添加附件」之类的提示。没有 `onFileDrop` 时，拖入的文件交给外层监听的视图。
+文件交给应用，由应用决定它们变成什么（图片节点、附件、指向上传副本的链接）；编辑器不为它们插入任何内容，选区保持不变，应用在选区处插入自己生成的内容。粘贴图片或在文件管理器中复制的文件时调用 `onPasteFiles`，参数为 `{ paste: { files, tooLarge, uris } }`：`files` 是带字节的图片（`{ name, mime, data }`），`uris` 是被复制文件的 `file:` URL。`pasteMaxSize` 指定读取每个文件的字节上限。超过上限的文件以 `{ name, mime, size }` 列在 `tooLarge` 中，即使所有文件都超过了上限。在桌面平台上，从其他应用拖到编辑器上的文件调用它的 `onFileDrop`，参数为 `{ uris, mimeTypes }`，与[视图的文件拖放](./view.md#桌面文件拖放)相同；`onFileDragEnter` / `onFileDragLeave` 跟随拖动，可用于显示「松开以添加附件」之类的提示。没有 `onFileDrop` 时，拖入的文件交给外层监听的视图。
 
 从其他应用或其他视图拖到编辑器上的文字插在松手的位置：光标移到那里，文字像粘贴一样插入（拖动带 HTML 时一并使用，经过 `transformPasted` 和 `handlePaste`），算一步撤销。目前 iOS 会派发文字拖放；桌面平台和 Android 上文字拖动仍由平台处理。
 
