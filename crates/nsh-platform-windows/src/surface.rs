@@ -71,7 +71,7 @@ thread_local! {
 static NEXT_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Forwards batches from the engine thread to the main thread.
-struct Sink {
+pub(crate) struct Sink {
     /// The window to wake (an `HWND` as an integer: window handles may be
     /// used from any thread, `PostMessage` is thread-safe).
     hwnd: Arc<std::sync::atomic::AtomicIsize>,
@@ -611,7 +611,7 @@ impl Surface {
     /// A queue as an engine's ([`Surface::start`]'s sink) for a test
     /// without one: what it is sent wakes the window and is drained there.
     #[cfg(test)]
-    fn queue_for_test(&self) -> Sink {
+    pub(crate) fn queue_for_test(&self) -> Sink {
         let (tx, rx) = crossbeam_channel::unbounded();
         let pending = Arc::new(AtomicBool::new(false));
         *self.rx.borrow_mut() = Some(rx);
