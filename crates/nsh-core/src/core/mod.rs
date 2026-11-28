@@ -4738,6 +4738,7 @@ impl<M: TextEngine> Core<M> {
             self.inherited_text_style(key).inherit(&node.text_style),
             node.paragraph.font_multiplier(self.font_scale),
         );
+        text.paragraph_strut = Some(style);
         if multiline {
             text.push(&broken_runs(content), style);
         } else {
@@ -9222,7 +9223,9 @@ impl<M: TextEngine> Core<M> {
             .map(|align| (align, node.text_style.text_align_physical))
             .or_else(|| self.inherited_text_align(key))
             .unwrap_or_default();
+        let base = inherited.inherit(&node.text_style);
         let mut text = AttributedText {
+            paragraph_strut: Some(base),
             align: directed_align(align, node.rtl && !physical),
             writing_direction: node.text_style.writing_direction,
             rtl: node.rtl,
@@ -9240,7 +9243,6 @@ impl<M: TextEngine> Core<M> {
                 .or(highlight),
             ..AttributedText::default()
         };
-        let base = inherited.inherit(&node.text_style);
         let multiplier = node.paragraph.font_multiplier(self.font_scale);
         let inserted = self.update_attachments(key);
         let baselines = self.attachment_baselines(key);
@@ -9258,6 +9260,9 @@ impl<M: TextEngine> Core<M> {
         } = parts;
         self.hide_attachments(key, false);
         if multiplier != 1.0 {
+            if let Some(strut) = &mut text.paragraph_strut {
+                *strut = scaled(*strut, multiplier);
+            }
             for span in &mut text.spans {
                 span.style = scaled(span.style, multiplier);
             }
@@ -12206,6 +12211,10 @@ fn fitted<M: TextEngine>(
 ) -> AttributedText {
     let scaled = |scale: f32| {
         let mut t = text.clone();
+        if let Some(strut) = &mut t.paragraph_strut {
+            strut.font_size *= scale;
+            strut.line_height *= scale;
+        }
         for span in &mut t.spans {
             span.style.font_size *= scale;
             span.style.line_height *= scale;
