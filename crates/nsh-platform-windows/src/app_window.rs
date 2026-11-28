@@ -541,7 +541,7 @@ fn release_owner(surface: &Surface, window: &AppWindow) {
 
 /// The first frame was drawn (or did not come in time): the window shows,
 /// in the mode it opens in.
-fn first_show(surface: &Rc<Surface>, window: &AppWindow) {
+fn first_show(surface: &Rc<Surface>, window: &Rc<AppWindow>) {
     // SAFETY: the timer of this window, if it runs.
     let _ = unsafe { KillTimer(Some(window.hwnd), SHOW_TIMER) };
     if window.opened.replace(true) || window.closed.get() {
@@ -552,8 +552,20 @@ fn first_show(surface: &Rc<Surface>, window: &AppWindow) {
         report_now(surface, window);
         return;
     }
-    // What the engine sent so far, then a frame of it.
+    // What the engine sent so far, then recheck whether draining hid, closed,
+    // or destroyed this window before painting or showing it.
     surface.drain();
+    if window.closed.get()
+        || !get(surface, window.id).is_some_and(|current| Rc::ptr_eq(&current, window))
+        // SAFETY: plain validity query.
+        || !unsafe { IsWindow(Some(window.hwnd)).as_bool() }
+    {
+        return;
+    }
+    if window.hidden.get() {
+        report_now(surface, window);
+        return;
+    }
     paint(surface, window);
     crate::window::show(window.hwnd);
     report_now(surface, window);
@@ -1770,5 +1782,32 @@ mod tests {
             !enabled,
             "removing NSH modal re-enabled its already-disabled owner"
         );
+    }
+
+    #[test]
+    fn first_show_respects_hide_queued_during_drain() {
+        use nsh_engine::MountSink as _;
+
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let a = open_test_window(surface, 7, None);
+        let window = get(surface, 7).unwrap();
+        assert!(!window.opened.get());
+        surface.queue_for_test().submit(nsh_core::MountBatch {
+            items: vec![nsh_core::MountItem::Command {
+                id: 7,
+                command: nsh_core::Command::Desktop(Box::new(DesktopCommand::Request(
+                    WindowRequest::Hide,
+                ))),
+            }],
+        });
+        first_show(surface, &window);
+        assert!(window.hidden.get(), "queued Hide must be processed");
+        // SAFETY: plain style query on the test window before destruction.
+        let visible = unsafe { GetWindowLongPtrW(a, GWL_STYLE) as u32 & WS_VISIBLE.0 != 0 };
+        close_all(surface);
+        // SAFETY: test app host window.
+        let _ = unsafe { DestroyWindow(app.hwnd()) };
+        assert!(!visible, "Hide processed during drain must not show window");
     }
 }
