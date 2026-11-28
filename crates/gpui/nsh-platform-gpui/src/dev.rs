@@ -953,12 +953,23 @@ mod tests {
             }
         });
         let host = HostInfo::new(HostPlatform::Gpui);
-        let client = Arc::new(DevClient::start(url, host, |_| {}).unwrap());
+        let (connected, on_connect) = mpsc::channel();
+        let client = Arc::new(
+            DevClient::start(url, host, move |event| {
+                if matches!(event, DevEvent::Connected) {
+                    let _ = connected.send(());
+                }
+            })
+            .unwrap(),
+        );
         *CLIENT.lock().unwrap() = Arc::downgrade(&client);
 
         // A client, not connected.
         assert!(!send(log::Level::Error, "embed", "offline"));
 
+        // As `start` does: lines are only queued once the client connected,
+        // so its reconnect loop cannot take one of them.
+        on_connect.recv_timeout(Duration::from_secs(10)).unwrap();
         CONNECTED.store(true, Ordering::Relaxed);
         assert!(send(log::Level::Info, "js", "console"));
         assert!(send(log::Level::Warn, "embed", "host warning"));
