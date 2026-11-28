@@ -494,7 +494,7 @@ mod tests {
         let mounter = Mounter::new(
             mtm,
             surface,
-            engine.control(),
+            &engine,
             shared.clone(),
             None,
             Arc::new(Policy::default().access()),

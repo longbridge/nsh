@@ -201,6 +201,7 @@ pub(crate) struct ImageLoader {
     notify: Notify,
     /// What the app may load, checked at every redirect.
     access: std::sync::Arc<nsh_engine::Access>,
+    files: std::sync::Arc<nsh_core::access::MediaFiles>,
     /// The disk cache remote images go through.
     disk: Option<DiskCache>,
 }
@@ -215,6 +216,8 @@ impl ImageLoader {
         asset_base: Option<AssetBase>,
         notify: Notify,
         access: std::sync::Arc<nsh_engine::Access>,
+        files: std::sync::Arc<nsh_core::access::MediaFiles>,
+        disk: Option<DiskCache>,
     ) -> Self {
         // SAFETY: fresh caches with NSString keys and the declared values;
         // plain setters.
@@ -233,13 +236,9 @@ impl ImageLoader {
             asset_base,
             notify,
             access,
-            disk: None,
+            files,
+            disk,
         }
-    }
-
-    /// The disk cache remote images go through.
-    pub(crate) fn set_disk_cache(&mut self, disk: Option<DiskCache>) {
-        self.disk = disk;
     }
 
     /// Cache key: the same URI decoded at different sizes (or blurred or
@@ -370,13 +369,20 @@ impl ImageLoader {
                 self.access.clone(),
             )),
             Some(Source::File(path)) => {
+                // Bundled assets are the app's own. Other local media reads use
+                // the same roots as the engine that admitted this source.
+                let files = if uri.starts_with("asset:/") {
+                    Default::default()
+                } else {
+                    self.files.clone()
+                };
                 let uri = uri.to_owned();
                 DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
                     DispatchQueueGlobalPriority::Default,
                 ))
                 .exec_async(move || {
-                    let result = std::fs::read(&path)
-                        .map(|bytes| NSData::with_bytes(&bytes))
+                    let result = nsh_core::image::loader::read_file(&path, &files)
+                        .map(|bytes| ns_data(&bytes))
                         .map_err(|e| format!("{}: {e}", path.display()));
                     on_main(&notify, LoadEvent::Bytes { uri, result });
                 });

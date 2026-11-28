@@ -590,6 +590,18 @@ fn bundled_files_load_whatever_fs_read_roots_are_declared() {
     };
     let read = |uri: &str| read_now(&context.resolve(uri).unwrap(), &context);
     assert_eq!(&*read("asset:/logo.png").unwrap(), b"logo");
+    let photo = data.join("photo.png");
+    std::fs::write(&photo, b"photo").unwrap();
+    assert_eq!(&*read(photo.to_str().unwrap()).unwrap(), b"photo");
+    std::fs::File::create(&photo)
+        .unwrap()
+        .set_len(MAX_BYTES + 1)
+        .unwrap();
+    assert!(
+        read(photo.to_str().unwrap())
+            .unwrap_err()
+            .contains(&format!("larger than {MAX_BYTES} bytes"))
+    );
     // Out of the bundle by `..`: an `fs.read` read, outside the roots.
     assert!(read("asset:/../outside.png").is_err());
     let outside = root.join("outside.png");

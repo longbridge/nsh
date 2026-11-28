@@ -1083,7 +1083,7 @@ impl RootView {
         let mut installed = Mounter::new(
             mtm,
             root,
-            engine.control(),
+            &engine,
             mounter.clone(),
             asset_base,
             access,
@@ -1093,8 +1093,6 @@ impl RootView {
         if self.ivars().options.handoff {
             installed.hand_off();
         }
-        // The app's downloaded images go through its disk cache.
-        installed.set_image_cache(engine.image_cache());
         if self.ivars().options.fps || nsh_engine::perf::enabled_by_env() {
             installed.measure();
         }
