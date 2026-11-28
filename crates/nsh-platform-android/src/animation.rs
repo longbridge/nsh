@@ -84,6 +84,9 @@ pub(crate) struct UiAnimation {
     sticky: FxHashMap<u32, Vec<(u32, NodeId)>>,
     /// The shader views, whose animated slots are written here.
     pub(crate) shaders: crate::shader::Shaders,
+    /// Timestamp of the last `Graph::tick_frame` call, cleared when animations or
+    /// gestures mutate so high-rate or newly started work ticks on the next frame.
+    last_tick: Option<f64>,
 }
 
 impl UiAnimation {
@@ -100,7 +103,10 @@ impl UiAnimation {
 
     pub(crate) fn apply(&mut self, item: MountItem) {
         match item {
-            MountItem::Animation(op) => self.graph.apply(op, &mut self.finished),
+            MountItem::Animation(op) => {
+                self.last_tick = None;
+                self.graph.apply(op, &mut self.finished);
+            }
             MountItem::AnimationBindings { id, bindings } => {
                 if bindings.is_empty() {
                     self.bindings.remove(&id);
@@ -168,9 +174,28 @@ impl UiAnimation {
         }
     }
 
+    /// Whether `Choreographer` frame `now` should advance the animation graph.
+    /// When every running animation asks for a capped `frameRate` (and no shader
+    /// view wants a frame), intermediate vsyncs are skipped so Java does not
+    /// touch view properties or trigger a Skia frame.
+    pub(crate) fn should_tick(&self, now: f64) -> bool {
+        if self.shaders.wants_frame() {
+            return true;
+        }
+        let Some(hz) = self.graph.frame_rate() else {
+            return true;
+        };
+        match self.last_tick {
+            None => true,
+            // 2 ms vsync slack so 30 Hz locks cleanly to every 4th 120 Hz, 3rd 90 Hz, or 2nd 60 Hz frame.
+            Some(prev) => now - prev >= (1.0 / f64::from(hz)) - 0.002,
+        }
+    }
+
     /// A `Choreographer` frame, the only thing that ticks it
     /// ([`Graph::tick_frame`]).
     pub(crate) fn tick(&mut self, now: f64) -> bool {
+        self.last_tick = Some(now);
         self.graph.tick_frame(now, &mut self.finished)
     }
 
@@ -191,6 +216,7 @@ impl UiAnimation {
         let Some(&(node, _)) = self.scrolls.get(&id) else {
             return false;
         };
+        self.last_tick = None;
         self.graph.settle(node)
     }
 
@@ -199,6 +225,7 @@ impl UiAnimation {
         let Some(&(node, horizontal)) = self.scrolls.get(&id) else {
             return false;
         };
+        self.last_tick = None;
         self.graph
             .set(node, if horizontal { x } else { y }, &mut self.finished);
         true
@@ -210,6 +237,7 @@ impl UiAnimation {
         let Some(&node) = self.pulls.get(&id) else {
             return false;
         };
+        self.last_tick = None;
         self.graph.set(node, distance.max(0.0), &mut self.finished);
         true
     }
@@ -236,6 +264,7 @@ impl UiAnimation {
             return;
         };
         let (x, y, start) = (g.values.pan_x, g.values.pan_y, g.start);
+        self.last_tick = None;
         if let Some(n) = x {
             self.graph.set(n, start[0] + tx, &mut self.finished);
         }
@@ -273,6 +302,7 @@ impl UiAnimation {
         let Some(g) = self.gestures.get(&id) else {
             return;
         };
+        self.last_tick = None;
         if rotation {
             if let Some(n) = g.values.rotation {
                 let v = g.start[3] + amount;
@@ -394,5 +424,60 @@ impl UiAnimation {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{
+        MountItem,
+        animation::{AnimationOp, Driver, Easing},
+    };
+
+    use super::UiAnimation;
+
+    fn timing(node: u32, frame_rate: Option<f32>) -> MountItem {
+        MountItem::Animation(AnimationOp::Start {
+            node,
+            driver: Driver::Timing {
+                to: 1.0,
+                duration_ms: 1000.0,
+                easing: Easing::Linear,
+                delay_ms: 0.0,
+                frame_rate,
+            },
+            animation: node,
+        })
+    }
+
+    #[test]
+    fn throttles_capped_animations_and_preempts_for_full_rate() {
+        let mut anim = UiAnimation::default();
+        anim.apply(MountItem::Animation(AnimationOp::CreateValue {
+            node: 1,
+            value: 0.0,
+        }));
+        anim.apply(MountItem::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value: 0.0,
+        }));
+        anim.apply(timing(1, Some(30.0)));
+
+        // First frame always ticks immediately.
+        assert!(anim.should_tick(1.000));
+        anim.tick(1.000);
+
+        // Intermediate 120 Hz vsyncs (8.33 ms apart) are skipped until ~33.3 ms.
+        assert!(!anim.should_tick(1.0083));
+        assert!(!anim.should_tick(1.0167));
+        assert!(!anim.should_tick(1.0250));
+        assert!(anim.should_tick(1.0333));
+        anim.tick(1.0333);
+
+        // Starting an uncapped animation immediately restores full-rate ticking.
+        anim.apply(timing(2, None));
+        assert!(anim.should_tick(1.0340));
+        anim.tick(1.0340);
+        assert!(anim.should_tick(1.0423));
     }
 }

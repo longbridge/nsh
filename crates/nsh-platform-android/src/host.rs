@@ -2273,25 +2273,30 @@ extern "system" fn Java_com_longbridge_nsh_Native_tick(
     let mut anim_updates = Vec::new();
     let out = {
         let mut ui = host.ui.lock().expect("ui");
-        let changed = ui.tick(host.epoch.elapsed().as_secs_f64());
-        finish(host, &mut ui);
-        // A frame only shader views asked for: no bound value moved.
-        let mut out = if changed || ui.animating() {
-            let comps = host.components.lock().unwrap_or_else(|e| e.into_inner());
-            ui.outputs(|id, slot, value| {
-                if comps.has_instance(id) {
-                    anim_updates.push((id, slot, value));
-                    true
-                } else {
-                    false
-                }
-            })
+        let now = host.epoch.elapsed().as_secs_f64();
+        if !ui.should_tick(now) {
+            vec![if ui.animating() { 1.0 } else { 0.0 }]
         } else {
-            vec![0.0]
-        };
-        let shading = ui.shaders.render(host.view.as_obj());
-        out[0] = if ui.animating() || shading { 1.0 } else { 0.0 };
-        out
+            let changed = ui.tick(now);
+            finish(host, &mut ui);
+            // A frame only shader views asked for: no bound value moved.
+            let mut out = if changed || ui.animating() {
+                let comps = host.components.lock().unwrap_or_else(|e| e.into_inner());
+                ui.outputs(|id, slot, value| {
+                    if comps.has_instance(id) {
+                        anim_updates.push((id, slot, value));
+                        true
+                    } else {
+                        false
+                    }
+                })
+            } else {
+                vec![0.0]
+            };
+            let shading = ui.shaders.render(host.view.as_obj());
+            out[0] = if ui.animating() || shading { 1.0 } else { 0.0 };
+            out
+        }
     };
     crate::component::apply_animated_slots(&mut env, host, &anim_updates);
     floats(&env, &out)
