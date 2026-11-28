@@ -157,6 +157,9 @@ A floor, not a substitute for the guides.
   take `variant`, `size`, states and slots, never colors or radii; features import
   them, never controls from `nsh/base`, and never style controls themselves. A look
   `ui` lacks becomes a new variant there first.
+  In TSX, start `src/ui/` by copying [references/ui-kit/](references/ui-kit/index.ts)
+  (Button, IconButton, Icon, Select, Tabs, Menu with Submenu, each wrapping its
+  `nsh/base` element; `examples/ui-kit` runs it), then restyle it to the app's design.
 - **Parts draw nothing until styled.** A switch with no track and thumb style shows no
   switch, and a test still passes. Style every part, and look at the result.
 - **Use the semantic component.** Button, Menu, Popover, Sheet, Dialog and Select bring
