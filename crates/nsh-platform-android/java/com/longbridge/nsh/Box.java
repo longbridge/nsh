@@ -330,6 +330,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     public void onDescendantInvalidated(View child, View target) {
         super.onDescendantInvalidated(child, target);
         stale = true;
+        if (culledCorners) invalidate();
     }
 
     /** Whether a transition started here still runs. */
@@ -598,7 +599,20 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             super.dispatchDraw(canvas);
             canvas.restore();
         } else {
+            culledCorners = false;
             super.dispatchDraw(canvas);
+        }
+    }
+
+    /** Whether the last {@link #drawInCorners} display list skipped any corner layer or dispatch. */
+    private boolean culledCorners;
+
+    /** Invalidates ancestor boxes whose recorded corner-culling display list may depend on {@code v}. */
+    static void invalidateCulledCorners(View v) {
+        for (ViewParent p = v.getParent(); p instanceof View; p = p.getParent()) {
+            if (p instanceof Box && ((Box) p).culledCorners) {
+                ((Box) p).invalidate();
+            }
         }
     }
 
@@ -622,7 +636,11 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         float left = edges[0], top = edges[1], right = edges[2], bottom = edges[3];
         float l = edges[4], t = edges[5], r = edges[6], b = edges[7];
         if (l >= r || t >= b) {
-            if (!hasDrawingInRect(this, left, top, right, bottom)) return;
+            if (!hasDrawingInRect(this, left, top, right, bottom)) {
+                culledCorners = true;
+                return;
+            }
+            culledCorners = false;
             drawFullCornerLayer(canvas, left, top, right, bottom);
             return;
         }
@@ -632,6 +650,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         if (right > r && bottom > b && hasDrawingInRect(this, r, b, right, bottom)) corners |= 4;
         if (l > left && bottom > b && hasDrawingInRect(this, left, b, l, bottom)) corners |= 8;
         if (corners == 0) {
+            culledCorners = true;
             canvas.save();
             canvas.clipRect(left, top, right, bottom);
             super.dispatchDraw(canvas);
@@ -639,9 +658,11 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             return;
         }
         if (layeredChild()) {
+            culledCorners = false;
             drawFullCornerLayer(canvas, left, top, right, bottom);
             return;
         }
+        culledCorners = corners != 0x0f;
         drawCornerBand(canvas, left, t, right, b);
         drawCornerBand(canvas, l, top, r, t);
         drawCornerBand(canvas, l, b, r, bottom);
@@ -686,7 +707,12 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
             if (child.getVisibility() != View.VISIBLE || child.getAlpha() <= 0f) continue;
-            if (!child.getMatrix().isIdentity() || Effects.layered(child)) return true;
+            if (!child.getMatrix().isIdentity()
+                    || Effects.layered(child)
+                    || child.getElevation() > 0f
+                    || child.getTranslationZ() > 0f) {
+                return true;
+            }
             Decor d = Decor.of(child);
             if (d != null && (d.hasOuterShadows() || d.outlineWidth > 0)) return true;
             float cl = child.getLeft() - sx, ct = child.getTop() - sy;
