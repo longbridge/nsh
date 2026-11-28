@@ -14,6 +14,49 @@ demo: el-select
 
 选择框负责行为：值（应用持有的，或它自己保存的）、打开状态、键盘、输入跳转、搜索、分组、高亮的行以及屏幕阅读器听到的内容。外观由应用决定：应用为触发元素、弹出层、列表、行、分组标题和搜索框设置样式，或者自己绘制行。
 
+```tsx tabs
+import { mount, signal, Text, View } from "nsh";
+import { Select } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+const FRUITS = [
+  { value: "apple", title: "苹果" },
+  { value: "banana", title: "香蕉" },
+  { value: "blueberry", title: "蓝莓" },
+  { value: "grapes", title: "葡萄", disabled: true },
+  { value: "pineapple", title: "菠萝" },
+];
+
+function App() {
+  const fruit = signal<string | null>(null);
+  const title = () => FRUITS.find((f) => f.value === fruit())?.title;
+  return (
+    <Select
+      items={FRUITS}
+      value={fruit()}
+      onChange={({ value }) => fruit.set(value)}
+      accessibilityLabel="水果"
+      offset={4}
+      popupClass="rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
+      backdropClass="bg-black/40"
+      itemClass="rounded-md px-2 py-1.5 text-sm focus:bg-accent focus:text-accent-foreground disabled:opacity-50"
+      trigger={
+        <View class="h-9 w-48 flex-row items-center justify-between rounded-md border border-input px-3 hover:bg-accent active:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
+          <Text class={fruit() ? "text-foreground" : "text-muted-foreground"}>{title() ?? "选择水果"}</Text>
+          <Text class="text-muted-foreground">▾</Text>
+        </View>
+      }
+    />
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_base::{SelectEntry, SelectItem, select, theme};
 use nsh_core::prelude::*;
@@ -81,49 +124,6 @@ fn fruit_select() -> impl IntoElement {
                 .child(text(item.title.clone()).text_sm())
         })
 }
-```
-
-```tsx tabs
-import { mount, signal, Text, View } from "nsh";
-import { Select } from "nsh/base";
-import { Window } from "nsh/desktop";
-
-const FRUITS = [
-  { value: "apple", title: "苹果" },
-  { value: "banana", title: "香蕉" },
-  { value: "blueberry", title: "蓝莓" },
-  { value: "grapes", title: "葡萄", disabled: true },
-  { value: "pineapple", title: "菠萝" },
-];
-
-function App() {
-  const fruit = signal<string | null>(null);
-  const title = () => FRUITS.find((f) => f.value === fruit())?.title;
-  return (
-    <Select
-      items={FRUITS}
-      value={fruit()}
-      onChange={({ value }) => fruit.set(value)}
-      accessibilityLabel="水果"
-      offset={4}
-      popupClass="rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
-      backdropClass="bg-black/40"
-      itemClass="rounded-md px-2 py-1.5 text-sm focus:bg-accent focus:text-accent-foreground disabled:opacity-50"
-      trigger={
-        <View class="h-9 w-48 flex-row items-center justify-between rounded-md border border-input px-3 hover:bg-accent active:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
-          <Text class={fruit() ? "text-foreground" : "text-muted-foreground"}>{title() ?? "选择水果"}</Text>
-          <Text class="text-muted-foreground">▾</Text>
-        </View>
-      }
-    />
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
 ```
 
 `Select` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`select()` 创建一个选择框，每个属性有一个设置方法（`.items(..)`、`.value(..)`、`.item_style(..)`），每个事件有一个监听方法（`.on_change(..)`）；`SelectItem::new(value, title)` 创建一个条目，可再用 `.disabled(..)` 和 `.group(..)`。
@@ -212,7 +212,40 @@ mount(() => (
 />
 ```
 
-在桌面平台上，列表打开时搜索框就获得键盘焦点；在触摸屏上，按下搜索框时键盘才弹出。每次打开时搜索都从空白开始。
+在桌面平台上，列表打开时搜索框就获得键盘焦点；在触摸屏上，按下搜索框时键盘才弹出。
+
+搜索词默认属于搜索框自己，每次打开从 `defaultQuery`（没有则为空）开始；有 `query` 时由应用持有：`onQueryChange({ query })` 报告在搜索框中输入的内容，应用把 `query` 设为它以跟随。应用持有的搜索词在多次打开之间保持不变，直到应用修改它；`renderItem` 绘制的行可以标出匹配的部分。下面的选择框在列表消失后（`onClose`）清空搜索词，这样列表离开时仍显示原来的行；应在这里清空，而不是在 `onOpen` 中：那时列表已经打开，搜索词的变化会像输入的一样，把高亮移到第一个匹配项：
+
+```tsx
+const query = signal("");
+// 标题按搜索词的第一个匹配分成三段：之前、匹配、之后。
+const split = (title: string, q: string) => {
+  const at = q ? title.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (at < 0) return [title, "", ""];
+  return [title.slice(0, at), title.slice(at, at + q.length), title.slice(at + q.length)];
+};
+
+<Select
+  items={zones}
+  searchable
+  query={query()}
+  onQueryChange={({ query: q }) => query.set(q)}
+  onClose={() => query.set("")}
+  renderItem={(item) => {
+    const parts = computed(() => split(item.title, query()));
+    return (
+      <Text class="px-2 py-1.5 text-sm">
+        {parts()[0]}
+        <Text class="font-semibold">{parts()[1]}</Text>
+        {parts()[2]}
+      </Text>
+    );
+  }}
+  trigger={trigger}
+/>
+```
+
+没有 `searchable` 时没有搜索框，也不会有搜索词筛选条目。
 
 <a id="rows-the-app-draws"></a>
 
@@ -251,6 +284,8 @@ mount(() => (
 | `searchPlaceholder` | `.search_placeholder(..)` | `string` | 无 | 搜索框的占位文字。 |
 | `searchAccessibilityLabel` | `.search_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对搜索框的称呼：它搜索的是什么。 |
 | `searchTestID` | `.search_test_id(..)` | `string` | 无 | UI 测试查找搜索框所用的 id（`nsh/test` 的 `id:`），与 `testID` 指向选择框自己的视图一样。 |
+| `query` | `.query(..)` | `string` | 无 | 搜索词，由应用持有（需要 `searchable`）。 |
+| `defaultQuery` | `.default_query(..)` | `string` | 无 | 没有 `query` 时每次打开的初始搜索词。 |
 | `cleanable` | `.cleanable(..)` | `boolean` | `false` | 有选中条目时显示清除按钮；按下会清空值（`onChange({ value: null })`）。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 保持关闭：触发元素不接受按压和键盘焦点，并应用 `disabled:` 样式。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对它的称呼：这次选择是关于什么的。 |
@@ -283,6 +318,7 @@ mount(() => (
 | 事件 | Rust | 说明 |
 |---|---|---|
 | `onChange` | `.on_change(\|value\| ..)` | 用户选中了另一个条目（按压、Return 或 Space、在触发元素上输入跳转）：它的 `value`；清除按钮清空时为 `null`。设置 `value` 以跟随它。 |
+| `onQueryChange` | `.on_query_change(\|query\| ..)` | 用户在搜索框中输入了内容：`{ query }`。设置 `query` 以跟随它。 |
 | `onOpenChange` | `.on_open_change(\|e\| ..)` | 列表打开或关闭了，附带原因。设置 `open` 以跟随它。 |
 | `onOpen` | `.on_open(\|\| ..)` | 列表已显示；作为 sheet 时，在它完全进入之后。 |
 | `onClose` | `.on_close(\|\| ..)` | 列表已消失；作为 sheet 时，在它完全离开之后。应用关闭它时也会触发。 |

@@ -1,15 +1,22 @@
 //! CoreText text engine: typesets on the engine thread, draws on the main
 //! thread from finished `CTLine`s, so every text is laid out once.
 
-use std::{cell::RefCell, ffi::c_void, ops::Range, ptr::NonNull};
+use std::{
+    cell::RefCell,
+    ffi::c_void,
+    ops::Range,
+    ptr::NonNull,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use nsh_core::{
     Affinity, AttributedText, Bounds, Color, EllipsizeMode, FamilyName, FontFamily, Point, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextPosition,
 };
 use nsh_platform_apple::core_text::{
-    background_key, decoration_key, ellipsis_key, flush_factor, run_visual_span, strikethrough_key,
-    stroke_decoration, underline_key,
+    background_key, decoration_key, ellipsis_key, flush_factor, italic, italic_face, reaches_past,
+    run_visual_span, slant_fallbacks, strikethrough_key, stroke_decoration, truncated_line_growth,
+    underline_key,
 };
 use objc2::rc::Retained;
 use objc2_app_kit::{
@@ -23,22 +30,21 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGColor, CGContext, CGPath};
 use objc2_core_text::{
-    CTFont, CTFontDescriptor, CTFontManagerRegisterFontsForURL, CTFontManagerScope,
-    CTFontSymbolicTraits, CTFrame, CTFramesetter, CTLine, CTLineBoundsOptions,
-    CTLineTruncationType, CTParagraphStyle, CTParagraphStyleSetting, CTParagraphStyleSpecifier,
-    CTRun, CTRunDelegate, CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter,
-    CTWritingDirection, kCTFontAttributeName, kCTFontCascadeListAttribute,
-    kCTFontFamilyNameAttribute, kCTFontFeatureSettingsAttribute, kCTFontOpenTypeFeatureTag,
-    kCTFontOpenTypeFeatureValue, kCTFontTraitsAttribute, kCTFontWeightTrait,
-    kCTForegroundColorFromContextAttributeName, kCTKernAttributeName,
-    kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName, kCTRunDelegateCurrentVersion,
-    kCTUnderlineStyleAttributeName,
+    CTFont, CTFontDescriptor, CTFontManagerRegisterFontsForURL, CTFontManagerScope, CTFrame,
+    CTFramesetter, CTLine, CTLineBoundsOptions, CTLineTruncationType, CTParagraphStyle,
+    CTParagraphStyleSetting, CTParagraphStyleSpecifier, CTRun, CTRunDelegate,
+    CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter, CTWritingDirection,
+    kCTFontAttributeName, kCTFontCascadeListAttribute, kCTFontFamilyNameAttribute,
+    kCTFontFeatureSettingsAttribute, kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue,
+    kCTFontTraitsAttribute, kCTFontWeightTrait, kCTForegroundColorFromContextAttributeName,
+    kCTKernAttributeName, kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName,
+    kCTRunDelegateCurrentVersion, kCTUnderlineStyleAttributeName,
 };
 use rustc_hash::FxHashMap;
 
 mod raster;
 
-pub(crate) use raster::{Rasters, prerender};
+pub(crate) use raster::{Rasters, State as RasterState, prerender};
 
 /// Identifies a font: size bits, weight, family, italic, OpenType features.
 type FontKey = (u32, u16, Option<FontFamily>, bool, u8);
@@ -78,21 +84,34 @@ impl FontCache {
     }
 }
 
+/// Fonts registered in the process so far ([`fonts_registered`]).
+static FONTS_REGISTERED: AtomicU32 = AtomicU32::new(0);
+
+/// Changes whenever the app registers a font: a family may resolve to
+/// another font from then on, so fonts and lines made from family names
+/// before (the canvas's, which draws on another thread than the engine
+/// that registers) are made again.
+pub(crate) fn fonts_registered() -> u32 {
+    FONTS_REGISTERED.load(Ordering::Relaxed)
+}
+
 pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
     let size = style.font_size.0 as CGFloat;
     let (font, fallbacks) = style
         .font_family
         .and_then(|family| listed_fonts(&family.name(), size, style.font_weight))
         .unwrap_or_else(|| (system_font(size, style.font_weight), Vec::new()));
-    let font = if style.italic {
-        let italic = CTFontSymbolicTraits::TraitItalic;
-        // SAFETY: a valid font; size 0 keeps the size, null matrix keeps it.
-        unsafe { font.copy_with_symbolic_traits(0.0, std::ptr::null(), italic, italic) }
-            // No italic face (CJK fonts): keep the upright one, CoreText
-            // synthesizes no oblique (browsers do).
-            .unwrap_or(font)
+    let (font, fallbacks) = if style.italic {
+        // The listed families' italic faces. A family without one leans
+        // ([`italic`]); as a fallback it stays upright here, where CoreText
+        // would ignore the lean, and `slant_fallbacks` leans its runs.
+        let fallbacks = fallbacks
+            .into_iter()
+            .map(|f| italic_face(&f).unwrap_or(f))
+            .collect();
+        (italic(&font), fallbacks)
     } else {
-        font
+        (font, fallbacks)
     };
     with_cascade(with_features(font, style.font_variant), &fallbacks)
 }
@@ -318,6 +337,11 @@ pub struct Prepared {
     /// `writingDirection` (`AttributedText::writing_direction`): right to
     /// left, left to right, or from the content (`None`).
     writing_direction: Option<bool>,
+    /// How far the root strut's baseline is below its line's top with a
+    /// fixed `lineHeight` (`None`: no fixed line height).
+    strut_up: Option<CGFloat>,
+    /// The root strut font's size.
+    strut_size: CGFloat,
     /// Attachments: placeholder offset (UTF-16) and how far its top is
     /// above the baseline (`TextAttachment::ascent`).
     attachments: Vec<(CFIndex, CGFloat)>,
@@ -328,6 +352,9 @@ pub struct Prepared {
 pub(crate) struct LaidLine {
     pub(crate) line: CFRetained<CTLine>,
     pub(crate) origin: CGPoint,
+    /// The ascent the root strut reserves when the line was moved down to
+    /// its baseline (`None`: CoreText's own metrics).
+    strut_ascent: Option<CGFloat>,
     /// Its characters in the text (before any ellipsis).
     pub(crate) range: CFRange,
     /// How many of its last characters (UTF-16 units) are a hard line break
@@ -353,6 +380,8 @@ pub(crate) struct CoreTextLayout {
     align: TextAlign,
     rtl: bool,
     writing_direction: Option<bool>,
+    strut_up: Option<CGFloat>,
+    strut_size: CGFloat,
     placeholders: Vec<(CFIndex, CGFloat)>,
     size: Size<Points>,
 }
@@ -372,6 +401,8 @@ impl std::ops::Deref for CoreTextLayout {
                 align: self.align,
                 rtl: self.rtl,
                 writing_direction: self.writing_direction,
+                strut_up: self.strut_up,
+                strut_size: self.strut_size,
                 attachments: self.placeholders.clone(),
             };
             lay_out(&prepared, self.size)
@@ -424,7 +455,7 @@ impl CoreTextEngine {
             .map_or_else(Default::default, |s| s.style);
         let f = self.fonts.get(&style);
         // SAFETY: a valid font.
-        let (ascent, descent, leading, x) =
+        let (ascent, descent, _leading, x) =
             unsafe { (f.ascent(), f.descent(), f.leading(), f.x_height()) };
         let align = alignments.get(a.index);
         let font = if align == nsh_core::VerticalAlign::Baseline {
@@ -450,8 +481,17 @@ impl CoreTextEngine {
         if line_height <= 0.0 {
             return (top, up, down);
         }
-        let half = (line_height - (ascent + descent + leading)) / 2.0;
-        let (strut_up, strut_down) = (ascent + half, descent + half);
+        let strut_font = self.fonts.get(&text.paragraph_strut_or_first());
+        // SAFETY: a valid font.
+        let (strut_ascent, strut_descent, strut_leading) = unsafe {
+            (
+                strut_font.ascent(),
+                strut_font.descent(),
+                strut_font.leading(),
+            )
+        };
+        let half = (line_height - (strut_ascent + strut_descent + strut_leading)) / 2.0;
+        let (strut_up, strut_down) = (strut_ascent + half, strut_descent + half);
         if align == nsh_core::VerticalAlign::Middle {
             let grow = (up - strut_up).max(down - strut_down).max(0.0);
             (top, strut_up + grow, strut_down + grow)
@@ -646,6 +686,15 @@ impl CoreTextEngine {
             }
         }
         CFMutableAttributedString::end_editing(s);
+        // Italic text CoreText takes from fallback fonts without an italic
+        // face (CJK in the system font) leans like the rest.
+        for span in text.spans.iter().filter(|span| span.style.italic) {
+            let range = CFRange {
+                location: span.start as CFIndex,
+                length: (span.end - span.start) as CFIndex,
+            };
+            slant_fallbacks(&string, range, &self.fonts.get(&span.style));
+        }
         string
     }
 }
@@ -743,9 +792,9 @@ fn attachment_points(
     points
 }
 
-/// The text's fixed `lineHeight` (its first span's; 0: none).
+/// The text's fixed `lineHeight`: its root paragraph strut's (0: none).
 fn line_height(text: &AttributedText) -> CGFloat {
-    text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat
+    text.paragraph_strut_or_first().line_height.0 as CGFloat
 }
 
 /// The paragraph settings of a text: its alignment, writing direction and
@@ -851,8 +900,13 @@ impl Prepared {
 
     /// Length (UTF-16 units) of the first `lines` lines at `width`.
     fn lines_length(&self, lines: u32, width: f64) -> CFIndex {
+        self.last_line(lines, width).end
+    }
+
+    /// The characters of the last of the first `lines` lines at `width`.
+    fn last_line(&self, lines: u32, width: f64) -> Range<CFIndex> {
         let typesetter = self.typesetter();
-        let mut end = 0;
+        let (mut start, mut end) = (0, 0);
         for _ in 0..lines {
             if end >= self.length {
                 break;
@@ -862,9 +916,43 @@ impl Prepared {
             if count <= 0 {
                 break;
             }
+            start = end;
             end += count;
         }
-        end
+        start..end
+    }
+
+    /// How much taller (above and below its baseline) the last line gets
+    /// when the text left over after `line` is truncated `width` wide
+    /// ([`truncated_line_growth`]). A clipped line holds the rest of the
+    /// text past the box's edge, not shown, and keeps its line's height.
+    fn truncation_growth(&self, line: Range<CFIndex>, width: f64) -> (CGFloat, CGFloat) {
+        if self.ellipsize == EllipsizeMode::Clip || line.end >= self.length || line.is_empty() {
+            return (0.0, 0.0);
+        }
+        // SAFETY: ranges within the string; the lines typeset from it.
+        unsafe {
+            let typesetter = self.typesetter();
+            let set = typesetter.line(CFRange {
+                location: line.start,
+                length: line.end - line.start,
+            });
+            // The truncated line keeps characters of the rest of the text
+            // and an ellipsis in the font of one of them: no taller than
+            // the rest set on one line. Most texts end in the fonts of
+            // their last line, and skip truncating.
+            let rest = typesetter.line(CFRange {
+                location: line.start,
+                length: self.length - line.start,
+            });
+            if !reaches_past(&rest, &set) {
+                return (0.0, 0.0);
+            }
+            let Some(shown) = self.truncate(line.start, width) else {
+                return (0.0, 0.0);
+            };
+            truncated_line_growth(&self.string, &set, &shown)
+        }
     }
 
     /// `line` (starting at `start`) cut to `width` with an ellipsis, as
@@ -1095,6 +1183,20 @@ impl TextEngine for CoreTextEngine {
             align: text.align,
             rtl: text.rtl,
             writing_direction: text.writing_direction,
+            strut_size: text.paragraph_strut_or_first().font_size.0 as CGFloat,
+            strut_up: if line_height(text) > 0.0 {
+                let style = text.paragraph_strut_or_first();
+                let font = self.fonts.get(&style);
+                // SAFETY: a valid font.
+                let (ascent, descent, leading) =
+                    unsafe { (font.ascent(), font.descent(), font.leading()) };
+                // CoreText reports fixed-height line ascents in whole
+                // points; quantize the strut the same way so a line of only
+                // smaller spans lands exactly on a root-font line's baseline.
+                Some((ascent + (line_height(text) - (ascent + descent + leading)) / 2.0).round())
+            } else {
+                None
+            },
             attachments: text
                 .attachments
                 .iter()
@@ -1114,14 +1216,11 @@ impl TextEngine for CoreTextEngine {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let width = max_width.map_or(CGFloat::MAX, |w| w.0 as CGFloat);
-        let range = if prepared.max_lines > 0 {
-            CFRange {
-                location: 0,
-                length: prepared.lines_length(prepared.max_lines, width),
-            }
-        } else {
-            WHOLE
-        };
+        let last = (prepared.max_lines > 0).then(|| prepared.last_line(prepared.max_lines, width));
+        let range = last.as_ref().map_or(WHOLE, |last| CFRange {
+            location: 0,
+            length: last.end,
+        });
         // SAFETY: a range within the string, no frame attributes, no fit
         // range out-param.
         let size = unsafe {
@@ -1132,7 +1231,13 @@ impl TextEngine for CoreTextEngine {
                 std::ptr::null_mut(),
             )
         };
-        Size::new(Points(size.width as f32), Points(size.height as f32))
+        let size = Size::new(Points(size.width as f32), Points(size.height as f32));
+        // The last line as the box this returns lays it out: truncated as
+        // wide as the box.
+        let (up, down) = last.map_or((0.0, 0.0), |last| {
+            prepared.truncation_growth(last, size.width.0 as CGFloat)
+        });
+        Size::new(size.width, Points(size.height.0 + (up + down) as f32))
     }
 
     fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
@@ -1166,6 +1271,8 @@ impl TextEngine for CoreTextEngine {
             align: prepared.align,
             rtl: prepared.rtl,
             writing_direction: prepared.writing_direction,
+            strut_up: prepared.strut_up,
+            strut_size: prepared.strut_size,
             placeholders: prepared.attachments.clone(),
             size,
         };
@@ -1200,6 +1307,11 @@ impl TextEngine for CoreTextEngine {
                     l.line
                         .typographic_bounds(&mut ascent, &mut descent, &mut leading)
                 };
+                if let Some(strut) = l.strut_ascent {
+                    let total = ascent + descent + leading;
+                    ascent = strut;
+                    descent = (total - leading - strut).max(0.0);
+                }
                 let (cap, x_height) =
                     line_font(&l.line).map_or((ascent * 0.7, ascent * 0.5), |f| {
                         // SAFETY: a valid font.
@@ -1252,6 +1364,7 @@ impl TextEngine for CoreTextEngine {
         };
         // Fonts resolve differently now (a family may have been missing).
         self.fonts.clear();
+        FONTS_REGISTERED.fetch_add(1, Ordering::Relaxed);
         if ok {
             return Ok(());
         }
@@ -1317,6 +1430,34 @@ fn has_strikethrough(prepared: &Prepared) -> bool {
     false
 }
 
+/// Whether `line` has a run whose own box already reaches past the root
+/// strut: an attachment delegate, or a larger font the fixed line height
+/// holds as it always has.
+fn reaches_past_strut(line: &CTLine, strut_size: CGFloat) -> bool {
+    // SAFETY: the line's own runs and their attribute dictionaries.
+    unsafe {
+        let runs = line.glyph_runs();
+        for i in 0..runs.count() {
+            let run = &*runs.value_at_index(i).cast::<objc2_core_text::CTRun>();
+            let key: *const CFString = kCTRunDelegateAttributeName;
+            if run.attributes().contains_ptr_key(key.cast()) {
+                return true;
+            }
+            let attributes = run.attributes();
+            let attributes: &objc2_core_foundation::CFDictionary<CFString, CFType> =
+                attributes.cast_unchecked();
+            if let Some(font) = attributes
+                .get(kCTFontAttributeName)
+                .and_then(|f| f.downcast::<CTFont>().ok())
+                && font.size() > strut_size + 0.01
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Typesets a text at its final size ([`CoreTextLayout`]).
 fn lay_out(prepared: &Prepared, size: Size<Points>) -> LaidLines {
     let _typesetting = prepared
@@ -1377,6 +1518,7 @@ fn lay_out(prepared: &Prepared, size: Size<Points>) -> LaidLines {
                 LaidLine {
                     line,
                     origin: origins[i as usize],
+                    strut_ascent: None,
                     range,
                     break_len: break_len(attributed, range),
                     hit_end: range.location + range.length,
@@ -1410,9 +1552,38 @@ fn lay_out(prepared: &Prepared, size: Size<Points>) -> LaidLines {
             };
             let start = paragraph_start_x(&truncated, paragraph, rtl);
             last.origin.x = cut_line_x(flushed, line_width, start, width, rtl);
+            // As `measure` grew the box for it: below the line above.
+            if prepared.ellipsize != EllipsizeMode::Clip {
+                // SAFETY: lines typeset from the prepared string.
+                let (up, _) =
+                    unsafe { truncated_line_growth(&prepared.string, &last.line, &truncated) };
+                last.origin.y -= up;
+            }
             last.line = truncated;
             last.hit_end = prepared.length;
             last.break_len = 0;
+        }
+    }
+    // A line made only of smaller inline spans still contains the root
+    // strut. CoreText centers the line's own extent in the fixed height, so
+    // move such a line down to the strut's baseline; a taller span or
+    // attachment already reaches at least that far and is left as laid out.
+    if let Some(strut_up) = prepared.strut_up {
+        for line in &mut lines {
+            let (mut ascent, mut descent, mut leading) = (0.0, 0.0, 0.0);
+            // SAFETY: a valid line and out pointers.
+            unsafe {
+                line.line
+                    .typographic_bounds(&mut ascent, &mut descent, &mut leading)
+            };
+            let truncated = line.hit_end > line.range.location + line.range.length;
+            if ascent < strut_up
+                && !truncated
+                && !reaches_past_strut(&line.line, prepared.strut_size)
+            {
+                line.origin.y -= strut_up - ascent;
+                line.strut_ascent = Some(strut_up);
+            }
         }
     }
     let attachments = if prepared.attachments.is_empty() {
@@ -1961,6 +2132,11 @@ impl<'a> LineBox<'a> {
             l.line
                 .typographic_bounds(&mut ascent, &mut descent, &mut leading)
         };
+        if let Some(strut) = l.strut_ascent {
+            let total = ascent + descent + leading;
+            ascent = strut;
+            descent = (total - leading - strut).max(0.0);
+        }
         let start = l.range.location.max(0);
         let end = l.hit_end.max(start);
         LineBox {
@@ -2576,16 +2752,22 @@ pub(crate) fn selection_up(view: &crate::view::NshView) -> bool {
 }
 
 /// A key went down: Cmd+C copies the selection, Escape clears it, Cmd+A
-/// selects all of the last pressed selectable text. True if it was
-/// handled.
+/// selects all of the last pressed selectable text, and Shift with an arrow
+/// key, Home or End extends the selection of the selectable view last
+/// pressed ([`extend_key`]). True if it was handled.
 pub(crate) fn selection_key(
-    surface: &crate::surface::Surface,
+    surface: &std::rc::Rc<crate::surface::Surface>,
     event: &objc2_app_kit::NSEvent,
 ) -> bool {
     use objc2_app_kit::NSEventModifierFlags;
     let command = event
         .modifierFlags()
         .contains(NSEventModifierFlags::Command);
+    if let Some((movement, direction)) = extend_key(event)
+        && crate::selectable_view::extend_by_key(surface, movement, direction)
+    {
+        return true;
+    }
     match crate::input::shortcut_key(event) {
         Some('c') if command => copy(surface),
         Some('a') if command => select_all(surface),
@@ -2601,6 +2783,51 @@ pub(crate) fn selection_key(
     }
 }
 
+/// How a key extends a selection, as `NSTextView`'s standard key bindings
+/// do (the `…AndModifySelection:` actions): Shift+Left / Right by a
+/// character, with Option by a word, with Command to the line's edge;
+/// Shift+Up / Down by a line, with Option to the paragraph's edge, with
+/// Command to the document's, as Shift+Home / End go. `None` for other
+/// keys, and with Control (Mission Control's spaces).
+fn extend_key(
+    event: &objc2_app_kit::NSEvent,
+) -> Option<(
+    nsh_core::selection::Movement,
+    nsh_core::selection::Direction,
+)> {
+    use nsh_core::selection::{Direction, Movement};
+    use objc2_app_kit::NSEventModifierFlags;
+    const HOME: u16 = 115;
+    const END: u16 = 119;
+    const LEFT: u16 = 123;
+    const RIGHT: u16 = 124;
+    const DOWN: u16 = 125;
+    const UP: u16 = 126;
+    let flags = event.modifierFlags();
+    if !flags.contains(NSEventModifierFlags::Shift) || flags.contains(NSEventModifierFlags::Control)
+    {
+        return None;
+    }
+    let command = flags.contains(NSEventModifierFlags::Command);
+    let option = flags.contains(NSEventModifierFlags::Option);
+    let (code, direction) = match event.keyCode() {
+        code @ (HOME | LEFT | UP) => (code, Direction::Backward),
+        code @ (END | RIGHT | DOWN) => (code, Direction::Forward),
+        _ => return None,
+    };
+    let movement = match (code, command, option) {
+        (HOME | END, false, false) => Movement::Document,
+        (LEFT | RIGHT, false, false) => Movement::Character,
+        (LEFT | RIGHT, false, true) => Movement::Word,
+        (LEFT | RIGHT, true, false) => Movement::LineEdge,
+        (UP | DOWN, false, false) => Movement::Line,
+        (UP | DOWN, false, true) => Movement::Paragraph,
+        (UP | DOWN, true, false) => Movement::Document,
+        _ => return None,
+    };
+    Some((movement, direction))
+}
+
 /// Copies the selection to the general pasteboard (the Edit menu's Copy).
 /// False if there is none.
 pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
@@ -2613,13 +2840,29 @@ pub(crate) fn write_selection(
     surface: &crate::surface::Surface,
     board: &objc2_app_kit::NSPasteboard,
 ) -> bool {
-    let Some(text) = selection_text(surface) else {
+    // A selectable view's selection also goes as HTML, keeping its bold,
+    // italic and links in a rich text editor.
+    let Some((text, html)) = surface.selection.area.copy().or_else(|| {
+        surface
+            .selection
+            .with_range()
+            .and_then(|v| selected_text(&v))
+            .map(|text| (text, None))
+    }) else {
         return false;
     };
     board.clearContents();
-    // SAFETY: an immutable AppKit constant.
-    let kind = unsafe { objc2_app_kit::NSPasteboardTypeString };
+    // SAFETY: immutable AppKit constants.
+    let (kind, kind_html) = unsafe {
+        (
+            objc2_app_kit::NSPasteboardTypeString,
+            objc2_app_kit::NSPasteboardTypeHTML,
+        )
+    };
     board.setString_forType(&objc2_foundation::NSString::from_str(&text), kind);
+    if let Some(html) = html {
+        board.setString_forType(&objc2_foundation::NSString::from_str(&html), kind_html);
+    }
     true
 }
 
@@ -2994,6 +3237,9 @@ fn draw_glyphs(cx: &CGContext, line: &LaidLine, stretches: &mut Stretches<'_>) {
     let mut advances = Vec::new();
     pieces.clear();
     let mut fill = None;
+    // The identity text matrix the text is drawn in, which each run's
+    // replaces while it draws.
+    let matrix = CGContext::text_matrix(c);
     // SAFETY: the line's own run array (of CTRuns), drawn by glyph ranges
     // within each run; buffers as long as those ranges.
     unsafe {
@@ -3039,12 +3285,17 @@ fn draw_glyphs(cx: &CGContext, line: &LaidLine, stretches: &mut Stretches<'_>) {
                     fill = Some(style.color);
                     CGContext::set_fill_color_with_color(c, Some(&cg_color(style.color)));
                 }
-                // Glyph positions are relative to the line's origin.
+                // `CTRunDraw` draws in the context's text matrix, not its
+                // font's: the run's own, which holds a leaning font's shear
+                // (`core_text::oblique`). Glyph positions are relative to
+                // the line's origin.
+                CGContext::set_text_matrix(c, run.text_matrix());
                 CGContext::set_text_position(c, line.origin.x, line.origin.y);
                 run.draw(cx, range);
             });
         }
     }
+    CGContext::set_text_matrix(c, matrix);
     if !pieces.is_empty() {
         draw_underlines(cx, line, &pieces);
     }
@@ -3285,6 +3536,139 @@ mod tests {
         );
     }
 
+    /// Italic text without an italic face leans by CSS's oblique angle, as
+    /// browsers and Android draw it: in a family that has none, and in the
+    /// fonts the system font's italic face falls back to (CJK). Upright
+    /// text and text in an italic face keep their fonts' own shapes.
+    #[test]
+    fn italic_text_without_an_italic_face_leans() {
+        use objc2_core_foundation::{CFDictionary, CFRetained, CFString, CFType};
+        use objc2_core_text::{CTFont, CTFontSymbolicTraits, CTRun};
+        let style = |italic: bool, family: Option<&str>| ResolvedTextStyle {
+            font_size: Points(16.0),
+            italic,
+            font_family: family.map(nsh_core::FontFamily::new),
+            ..ResolvedTextStyle::default()
+        };
+        let mut text = AttributedText::default();
+        text.push("正体 ", style(false, None));
+        text.push("Italic 斜体", style(true, None));
+        text.push(" 苹方", style(true, Some("PingFang SC")));
+        let engine = CoreTextEngine::default();
+        let prepared = engine.prepare(&text);
+        let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+        let layout = layout
+            .downcast::<super::CoreTextLayout>()
+            .expect("a CoreText layout");
+        // The font each character (UTF-16 unit) is typeset in.
+        let mut fonts: Vec<Option<CFRetained<CTFont>>> =
+            vec![None; text.text.encode_utf16().count()];
+        for line in &layout.lines {
+            // SAFETY: the line's own run array (of CTRuns) and attribute
+            // dictionaries, whose font values are CTFonts.
+            unsafe {
+                let runs = line.line.glyph_runs();
+                for i in 0..runs.count() {
+                    let run = &*runs.value_at_index(i).cast::<CTRun>();
+                    let attributes = run.attributes();
+                    let attributes: &CFDictionary<CFString, CFType> = attributes.cast_unchecked();
+                    let font = attributes
+                        .get(super::kCTFontAttributeName)
+                        .and_then(|f| f.downcast::<CTFont>().ok());
+                    let range = run.string_range();
+                    for at in range.location..range.location + range.length {
+                        fonts[at as usize] = font.clone();
+                    }
+                }
+            }
+        }
+        // The shear and the italic trait of the font of character `c`.
+        let shape = |c: char| {
+            let at: usize = text
+                .text
+                .chars()
+                .take_while(|&x| x != c)
+                .map(char::len_utf16)
+                .sum();
+            let font = fonts[at].as_ref().expect("typeset");
+            // SAFETY: a valid font.
+            unsafe {
+                (
+                    font.matrix().c,
+                    font.symbolic_traits()
+                        .contains(CTFontSymbolicTraits::TraitItalic),
+                )
+            }
+        };
+        let lean = 14_f64.to_radians().tan();
+        assert_eq!(shape('正'), (0.0, false), "upright CJK");
+        assert_eq!(shape('I'), (0.0, true), "the system font's italic face");
+        let (c, _) = shape('斜');
+        assert!(
+            (c - lean).abs() < 1e-9,
+            "CJK the italic face falls back to: {c}"
+        );
+        let (c, _) = shape('苹');
+        assert!(
+            (c - lean).abs() < 1e-9,
+            "a family without an italic face: {c}"
+        );
+    }
+
+    /// An italic family list takes each family's italic face. A fallback
+    /// family without one stays upright in the cascade list, where CoreText
+    /// would ignore a lean, and its runs lean when typeset.
+    #[test]
+    fn an_italic_family_list_takes_each_familys_italic_face() {
+        use objc2_core_foundation::{CFArray, CFIndex};
+        use objc2_core_text::{CTFont, CTFontDescriptor, CTFontSymbolicTraits};
+        let italic = |family: &str| ResolvedTextStyle {
+            font_size: Points(14.0),
+            italic: true,
+            font_family: Some(nsh_core::FontFamily::new(family)),
+            ..ResolvedTextStyle::default()
+        };
+        // The family and whether it is an italic face, of the first font
+        // and of each one in its cascade list.
+        let faces = |family: &str| {
+            let font = super::make_font(&italic(family));
+            let face = |font: &CTFont| {
+                // SAFETY: a valid font.
+                unsafe {
+                    (
+                        font.family_name().to_string(),
+                        font.symbolic_traits()
+                            .contains(CTFontSymbolicTraits::TraitItalic),
+                    )
+                }
+            };
+            // SAFETY: a valid font; its cascade list holds font descriptors.
+            unsafe {
+                let list = font
+                    .font_descriptor()
+                    .attribute(super::kCTFontCascadeListAttribute)
+                    .and_then(|list| list.downcast::<CFArray>().ok())
+                    .expect("a cascade list");
+                let cascade: Vec<_> = (0..list.len() as CFIndex)
+                    .map(|i| {
+                        let descriptor = &*list.value_at_index(i).cast::<CTFontDescriptor>();
+                        face(&CTFont::with_font_descriptor(
+                            descriptor,
+                            14.0,
+                            std::ptr::null(),
+                        ))
+                    })
+                    .collect();
+                (face(&font), cascade)
+            }
+        };
+        let (first, cascade) = faces("Menlo, Helvetica");
+        assert_eq!(first, ("Menlo".to_owned(), true));
+        assert_eq!(cascade, [("Helvetica".to_owned(), true)]);
+        let (_, cascade) = faces("Menlo, PingFang SC");
+        assert_eq!(cascade, [("PingFang SC".to_owned(), false)]);
+    }
+
     /// Showing words of a long paragraph or recoloring them draws again
     /// only their lines, across the box; anything else that changed draws
     /// all of it.
@@ -3500,6 +3884,101 @@ mod tests {
             blue.iter().min().copied().unwrap_or(0),
         );
         assert!(green_right < blue_left, "{green_right} {blue_left}");
+    }
+
+    /// Text in a leaning font draws leaning: each run draws in its own text
+    /// matrix, which holds the font's shear.
+    #[test]
+    fn leaning_text_draws_leaning() {
+        use objc2_core_foundation::{CGAffineTransform, CGFloat};
+        use objc2_core_graphics::{
+            CGBitmapContextCreate, CGBitmapContextGetBytesPerRow, CGBitmapContextGetData,
+            CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo, kCGColorSpaceSRGB,
+        };
+        // How far right of its bottom half the ink's top half lies, in
+        // pixels, for "斜体中文" drawn in `style`.
+        let lean = |style: ResolvedTextStyle| {
+            let mut text = AttributedText::default();
+            text.push("斜体中文", style);
+            let engine = CoreTextEngine::default();
+            let prepared = engine.prepare(&text);
+            let size = engine.measure(&prepared, None);
+            let layout = engine.layout(&prepared, size);
+            let layout = layout
+                .downcast::<super::CoreTextLayout>()
+                .expect("CoreText");
+            let (w, h) = (
+                size.width.0.ceil() as usize + 20,
+                size.height.0.ceil() as usize + 4,
+            );
+            // SAFETY: a constant of CoreGraphics; CoreGraphics allocates
+            // the pixels (null data) and frees them with the context.
+            let cx = unsafe {
+                let space = CGColorSpace::with_name(Some(kCGColorSpaceSRGB)).expect("sRGB");
+                CGBitmapContextCreate(
+                    std::ptr::null_mut(),
+                    w,
+                    h,
+                    8,
+                    w * 4,
+                    Some(&space),
+                    CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order32Big.0,
+                )
+            }
+            .expect("a bitmap context");
+            // The bitmap is y up, as CoreText draws.
+            CGContext::set_text_matrix(
+                Some(&cx),
+                CGAffineTransform {
+                    a: 1.0,
+                    b: 0.0,
+                    c: 0.0,
+                    d: 1.0,
+                    tx: 0.0,
+                    ty: 0.0,
+                },
+            );
+            CGContext::translate_ctm(Some(&cx), 10.0, 2.0 as CGFloat);
+            let mut stretches = super::Stretches::new(&text);
+            for line in &layout.lines {
+                super::draw_glyphs(&cx, line, &mut stretches);
+            }
+            let stride = CGBitmapContextGetBytesPerRow(Some(&cx));
+            // SAFETY: the context's `stride * h` bytes, which it keeps.
+            let pixels = unsafe {
+                std::slice::from_raw_parts(
+                    CGBitmapContextGetData(Some(&cx)).cast::<u8>(),
+                    stride * h,
+                )
+            };
+            let ink: Vec<(usize, usize)> = (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .filter(|&(x, y)| pixels[y * stride + x * 4 + 3] > 128)
+                .collect();
+            let top = ink.iter().map(|p| p.1).min().unwrap_or(0);
+            let bottom = ink.iter().map(|p| p.1).max().unwrap_or(0);
+            let middle = (top + bottom) / 2;
+            let mean = |half: &dyn Fn(usize) -> bool| {
+                let xs: Vec<f64> = ink
+                    .iter()
+                    .filter(|p| half(p.1))
+                    .map(|p| p.0 as f64)
+                    .collect();
+                xs.iter().sum::<f64>() / xs.len().max(1) as f64
+            };
+            // Row 0 is the bitmap's top.
+            mean(&|y| y < middle) - mean(&|y| y > middle)
+        };
+        let style = |italic: bool| ResolvedTextStyle {
+            font_size: Points(32.0),
+            italic,
+            ..ResolvedTextStyle::default()
+        };
+        let (upright, italic) = (lean(style(false)), lean(style(true)));
+        assert!(
+            italic - upright > 2.0,
+            "upright {upright:.2}, italic {italic:.2}"
+        );
     }
 
     /// The baseline of the first line, the attachment's top and the line's
@@ -4361,6 +4840,84 @@ mod first_baseline {
         let (large, _) = baseline(24.0);
         assert!(large > small * 1.5, "{small} {large}");
     }
+
+    /// The paragraph's fixed line height is the root strut's, not whatever
+    /// inline span happens to start the text (a small inline-code span).
+    #[test]
+    fn the_paragraph_line_height_is_the_root_struts() {
+        let root = ResolvedTextStyle {
+            font_size: Points(14.0),
+            line_height: Points(22.75),
+            ..Default::default()
+        };
+        let small = ResolvedTextStyle {
+            font_size: Points(12.6),
+            line_height: Points(20.475),
+            ..Default::default()
+        };
+        let text = |first_small| {
+            let mut text = AttributedText {
+                paragraph_strut: Some(root),
+                ..Default::default()
+            };
+            if first_small {
+                text.push("`code`", small);
+                text.push(" 中文正文", root);
+            } else {
+                text.push("中文正文 ", root);
+                text.push("`code`", small);
+            }
+            text
+        };
+        let engine = CoreTextEngine::default();
+        let measure = |first_small| {
+            let prepared = engine.prepare(&text(first_small));
+            let size = engine.measure(&prepared, Some(Points(300.0)));
+            let baseline = engine
+                .first_baseline(&prepared, Points(300.0))
+                .expect("a first line");
+            (size.height.0, baseline.0)
+        };
+        let small_first = measure(true);
+        let plain_first = measure(false);
+        assert!(
+            (small_first.0 - plain_first.0).abs() < 0.01,
+            "height: small first {small_first:?}, plain first {plain_first:?}"
+        );
+        assert!(
+            (small_first.1 - plain_first.1).abs() < 0.01,
+            "baseline: small first {small_first:?}, plain first {plain_first:?}"
+        );
+        assert!(
+            (plain_first.0 - 22.75f32.ceil()).abs() < 0.01,
+            "{plain_first:?}"
+        );
+
+        // Even when no root-sized glyph is present, the strut keeps the
+        // smaller inline box from lowering the paragraph or moving its baseline.
+        let only = |small_style| {
+            let mut text = AttributedText {
+                paragraph_strut: Some(root),
+                ..Default::default()
+            };
+            text.push("`code`", if small_style { small } else { root });
+            text
+        };
+        let measure_only = |small_style| {
+            let prepared = engine.prepare(&only(small_style));
+            let size = engine.measure(&prepared, Some(Points(300.0)));
+            let baseline = engine
+                .first_baseline(&prepared, Points(300.0))
+                .expect("a first line");
+            (size.height.0, baseline.0)
+        };
+        let small_only = measure_only(true);
+        let root_only = measure_only(false);
+        assert!(
+            (small_only.0 - root_only.0).abs() < 0.01 && (small_only.1 - root_only.1).abs() < 0.01,
+            "small only {small_only:?}, root only {root_only:?}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4697,6 +5254,199 @@ mod cut_lines {
                 assert!(
                     left >= -0.5 && right <= width + 0.5,
                     "{s}: its first word at {left}..{right}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod truncated_tail {
+    use nsh_core::{AttachmentAlignments, TextLine, VerticalAlign};
+
+    use super::*;
+
+    /// What ends the text after the long, small run of words.
+    #[derive(Clone, Copy, Debug)]
+    enum End {
+        /// A word in the same font: the control.
+        Same,
+        /// A word in a font three times the size.
+        Big,
+        /// An attachment twice as tall as the line.
+        Tall,
+    }
+
+    const WORDS: &str = "alpha beta gamma delta epsilon zeta eta theta iota kappa ";
+
+    fn text(
+        end: End,
+        mode: EllipsizeMode,
+        max_lines: u32,
+        line_height: f32,
+    ) -> (AttributedText, AttachmentAlignments) {
+        let style = ResolvedTextStyle {
+            font_size: Points(14.0),
+            line_height: Points(line_height),
+            ..Default::default()
+        };
+        let mut t = AttributedText {
+            max_lines,
+            ellipsize: mode,
+            ..Default::default()
+        };
+        let mut a = AttachmentAlignments::default();
+        t.push(WORDS, style);
+        t.push(WORDS, style);
+        match end {
+            End::Same => t.push("omega", style),
+            End::Big => t.push(
+                "OMEGA",
+                ResolvedTextStyle {
+                    font_size: Points(42.0),
+                    ..style
+                },
+            ),
+            End::Tall => {
+                t.push("omega ", style);
+                a.push(
+                    &mut t,
+                    Size::new(Points(20.0), Points(40.0)),
+                    VerticalAlign::Baseline,
+                    style,
+                );
+            }
+        }
+        (t, a)
+    }
+
+    struct Laid {
+        size: Size<Points>,
+        lines: Vec<TextLine>,
+        attachments: Vec<Option<Point<Points>>>,
+    }
+
+    impl Laid {
+        fn last(&self) -> &TextLine {
+            self.lines.last().expect("a line")
+        }
+
+        fn baseline(&self) -> f32 {
+            self.last().y.0 + self.last().ascender.0
+        }
+
+        /// The last line's glyph box sits below the line above it and
+        /// inside the box.
+        fn fits(&self) -> bool {
+            let last = self.last();
+            let (top, bottom) = (last.y.0, last.y.0 + last.ascender.0 + last.descender.0);
+            let above = self
+                .lines
+                .iter()
+                .rev()
+                .nth(1)
+                .map_or(0.0, |l| l.y.0 + l.ascender.0 + l.descender.0);
+            top >= above - 0.5 && bottom <= self.size.height.0 + 0.5
+        }
+    }
+
+    /// Lays the text out in `size`, or the box it measures 150 wide.
+    fn lay((t, a): (AttributedText, AttachmentAlignments), size: Option<Size<Points>>) -> Laid {
+        let engine = CoreTextEngine::default();
+        let prepared = engine.prepare_aligned(&t, &a);
+        let size = size.unwrap_or_else(|| {
+            let size = engine.measure(&prepared, Some(Points(150.0)));
+            // Measuring as wide as it measured keeps its truncation.
+            assert_eq!(engine.measure(&prepared, Some(size.width)), size);
+            size
+        });
+        let layout = engine.layout(&prepared, size);
+        Laid {
+            size,
+            lines: engine.lines(&layout),
+            attachments: engine.attachments(&layout),
+        }
+    }
+
+    /// `ellipsis-start` and `ellipsis-middle` keep the end of the text on
+    /// the last line: a larger font or a taller attachment there grows
+    /// the measured box, below the line above, as on a line not
+    /// truncated. A fixed `lineHeight` holds a larger font as on any line.
+    /// The ellipsis takes the font of the text's end, in every mode.
+    #[test]
+    fn a_kept_end_fits_in_the_measured_box() {
+        for line_height in [0.0, 20.0] {
+            for max_lines in [1, 2] {
+                let same = lay(
+                    text(End::Same, EllipsizeMode::Tail, max_lines, line_height),
+                    None,
+                );
+                if line_height > 0.0 {
+                    assert_eq!(same.size.height.0, line_height * max_lines as f32);
+                }
+                for mode in [
+                    EllipsizeMode::Head,
+                    EllipsizeMode::Middle,
+                    EllipsizeMode::Tail,
+                ] {
+                    for end in [End::Same, End::Big, End::Tall] {
+                        let what = format!(
+                            "{mode:?}, {max_lines} lines, {end:?}, lineHeight {line_height}"
+                        );
+                        let laid = lay(text(end, mode, max_lines, line_height), None);
+                        assert_eq!(laid.lines.len(), max_lines as usize, "{what}");
+                        let grows = match end {
+                            End::Same => false,
+                            End::Big => line_height == 0.0,
+                            End::Tall => mode != EllipsizeMode::Tail,
+                        };
+                        if !grows {
+                            assert_eq!(laid.size, same.size, "{what}");
+                            assert_eq!(laid.baseline(), same.baseline(), "{what}");
+                            continue;
+                        }
+                        assert!(
+                            laid.size.height.0 > same.size.height.0 + 20.0,
+                            "{what}: {:?}",
+                            laid.size
+                        );
+                        assert!(laid.fits(), "{what}: {:?} in {:?}", laid.lines, laid.size);
+                        if let End::Tall = end {
+                            let top = laid.attachments[0].expect("kept").y.0;
+                            let above = laid
+                                .lines
+                                .iter()
+                                .rev()
+                                .nth(1)
+                                .map_or(0.0, |l| l.y.0 + l.height.0);
+                            assert!(
+                                top >= above - 0.5 && top + 40.0 <= laid.size.height.0 + 0.5,
+                                "{what}: {top} in {:?}",
+                                laid.size
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A box too short for the text (`max_lines` 0) ellipsizes its last
+    /// fitting line; a taller end it keeps sits below the line above.
+    #[test]
+    fn a_kept_end_in_a_short_box_stays_below_the_line_above() {
+        for mode in [EllipsizeMode::Head, EllipsizeMode::Middle] {
+            for end in [End::Big, End::Tall] {
+                let laid = lay(
+                    text(end, mode, 0, 0.0),
+                    Some(Size::new(Points(150.0), Points(34.0))),
+                );
+                assert_eq!(laid.lines.len(), 2, "{mode:?} {end:?}");
+                let first = &laid.lines[0];
+                assert!(
+                    laid.last().y.0 >= first.y.0 + first.ascender.0 + first.descender.0 - 0.5,
+                    "{mode:?} {end:?}: {:?}",
+                    laid.lines
                 );
             }
         }

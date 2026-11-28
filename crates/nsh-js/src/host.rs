@@ -10,7 +10,7 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, NodeId, Op, PayloadValue, TouchPhase, js::Limits,
-    platform::Environment, time::Instant,
+    platform::Environment, selection::ListItemKey, time::Instant,
 };
 use rquickjs::{
     AsyncRuntime, CatchResultExt, Ctx, Function, Module, Persistent, Promise, Value, function::Opt,
@@ -67,7 +67,10 @@ pub(crate) struct Shared {
     /// sockets), handed to their calls' `System`.
     pub(crate) system_quotas: nsh_core::element::Quotas,
     /// The VM's scheduler, for native transports that start its I/O runtime.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg_attr(
+        not(all(not(target_arch = "wasm32"), feature = "websocket")),
+        allow(dead_code)
+    )]
     pub(crate) scheduler: std::rc::Weak<Scheduler>,
     /// The VM's state of the runtime's Rust modules (`process`'s
     /// children), closed when the VM goes.
@@ -569,6 +572,7 @@ impl Host {
 
     /// Delivers a native event (and its data) to the node's JS handler.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: &EventPayload) {
+        let payload_in = payload;
         self.guarded(Phase::Call, || {
             self.cx.with(|cx| {
                 // Touches: the responder system is native.
@@ -614,6 +618,13 @@ impl Host {
                         | EventKind::PressUp,
                         EventPayload::None,
                     ) => payload_object(&cx, &EventPayload::Press(nsh_core::PressEvent::default())),
+                    // A selectable view's `onSelectionChange`: the ends of
+                    // the selection in the list items, each `{ key, offset }`.
+                    (EventKind::SelectionChange, EventPayload::Map(fields))
+                        if fields.iter().any(|(k, _)| *k == "text") =>
+                    {
+                        text_selection(&cx, fields)
+                    }
                     // A video's `onLoad`: `{ duration, size }` of the
                     // platforms' `duration`, `width` and `height`.
                     (EventKind::Load, EventPayload::Map(fields))
@@ -629,6 +640,7 @@ impl Host {
                     let Some(handler) = crate::dom::handler(raw, id, event) else {
                         return Ok(());
                     };
+                    grant_user_files(raw, event, payload_in);
                     // SAFETY: an owned function value of this context.
                     let handler = unsafe { Value::from_raw(cx.clone(), handler) };
                     match handler.into_function() {
@@ -674,6 +686,27 @@ impl Host {
             });
             self.run_jobs();
         });
+    }
+
+    /// What row `index` of virtual list `list` is called: the key of a
+    /// `List`'s item (`keyExtractor`, else the item's `key` or `id`, else
+    /// its index), where a selection across the list starts and ends
+    /// (`onSelectionChange`'s `anchor` and `focus`).
+    /// [`ListItemKey::NotMine`] for a list that is not the runtime's;
+    /// [`ListItemKey::Failed`] when the list has no key for the row: a
+    /// `keyExtractor` that throws (reported as an uncaught exception) or
+    /// gives neither a string nor a number, a row past the items, or a VM
+    /// that stopped.
+    pub fn list_item_key(&self, list: NodeId, index: u32) -> ListItemKey {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::list::row_key(cx.as_raw().as_ptr(), list, index).unwrap_or_else(|()| {
+                    self.report::<()>(&cx, Err(rquickjs::Error::Exception));
+                    ListItemKey::Failed
+                })
+            })
+        })
+        .unwrap_or(ListItemKey::Failed)
     }
 
     /// Resolves the promises of finished (or interrupted) native animations.
@@ -1280,6 +1313,47 @@ fn video_load<'js>(
     Ok(obj.into_value())
 }
 
+/// Lets the app read the files the user pasted or dropped, as its handler
+/// gets them (`fs/promises` at their exact paths): not a drag that only
+/// entered.
+fn grant_user_files(raw: *mut qjs::JSContext, event: EventKind, payload: &EventPayload) {
+    let uris = match (event, payload) {
+        (EventKind::Paste, EventPayload::Paste(paste)) => &paste.uris,
+        (
+            EventKind::FileDrop,
+            EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. },
+        ) => uris,
+        _ => return,
+    };
+    nsh_core::runtime::grant_user_files(&crate::dom::shared(raw).system_locals, uris);
+}
+
+/// A selectable view's `onSelectionChange` event: the payload's fields,
+/// the ends' keys and offsets ([`nsh_core::selection::ITEM_FIELDS`]) as
+/// `anchor` and `focus` objects (`{ key, offset }`).
+fn text_selection<'js>(
+    cx: &Ctx<'js>,
+    fields: &[(&'static str, nsh_core::PayloadValue)],
+) -> rquickjs::Result<Value<'js>> {
+    let ends = nsh_core::selection::ITEM_FIELDS;
+    let obj = rquickjs::Object::new(cx.clone())?;
+    for (key, value) in fields {
+        if !ends.iter().any(|(k, o)| key == k || key == o) {
+            obj.set(*key, payload_value(cx, value)?)?;
+        }
+    }
+    let field = |name: &str| fields.iter().find(|(k, _)| *k == name).map(|(_, v)| v);
+    for ((key, offset), name) in ends.into_iter().zip(["anchor", "focus"]) {
+        if let (Some(key), Some(offset)) = (field(key), field(offset)) {
+            let end = rquickjs::Object::new(cx.clone())?;
+            end.set("key", payload_value(cx, key)?)?;
+            end.set("offset", payload_value(cx, offset)?)?;
+            obj.set(name, end)?;
+        }
+    }
+    Ok(obj.into_value())
+}
+
 /// The JS object handed to event handlers.
 fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Result<Value<'js>> {
     let obj = rquickjs::Object::new(cx.clone())?;
@@ -1566,6 +1640,22 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 o.set("pressure", p.pressure)?;
                 o.set("tiltX", p.tilt_x)?;
                 o.set("tiltY", p.tilt_y)?;
+                o.set("eraser", p.eraser)?;
+                o.set("barrel", p.barrel)?;
+                let coalesced = rquickjs::Array::new(cx.clone())?;
+                for (j, c) in p.coalesced.iter().enumerate() {
+                    let s = rquickjs::Object::new(cx.clone())?;
+                    s.set("pageX", c.page.x.0)?;
+                    s.set("pageY", c.page.y.0)?;
+                    s.set("locationX", c.location.x.0)?;
+                    s.set("locationY", c.location.y.0)?;
+                    s.set("pressure", c.pressure)?;
+                    s.set("tiltX", c.tilt_x)?;
+                    s.set("tiltY", c.tilt_y)?;
+                    s.set("timestamp", c.timestamp)?;
+                    coalesced.set(j, s)?;
+                }
+                o.set("coalesced", coalesced)?;
                 o.set("timestamp", touch.timestamp)?;
                 points.set(i, o)?;
             }
@@ -2716,6 +2806,77 @@ const report = (v) => text(String(v));
         );
     }
 
+    /// A named zone the app ships (nsh.json `timeZones`, packed into the
+    /// bundle's `i18n` by `nsh-i18n`) formats at its offset at each
+    /// instant: across daylight saving time in New York, at half an hour
+    /// in Kolkata, with Lord Howe's half-hour daylight saving time, and
+    /// by its rule after its last transition. A zone the app does not
+    /// ship still throws.
+    #[test]
+    fn formats_in_the_named_zones_the_app_ships() {
+        let host = Host::new().unwrap();
+        let zones = ["America/New_York", "Asia/Kolkata", "Australia/Lord_Howe"].map(String::from);
+        let bundle =
+            nsh_i18n::bundle_json(&Default::default(), Some(&["de".to_owned()]), &zones, |w| {
+                panic!("{w}")
+            })
+            .unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+            import {{ i18n }} from "nsh:rt";
+            i18n({bundle:?});
+            const time = (timeZone) => new Intl.DateTimeFormat("en-US", {{
+              timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+              hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short",
+            }});
+            const ny = time("america/new_york");
+            report(ny.resolvedOptions().timeZone);
+            // Daylight saving time starts at 2:00 EST on March 8, 2026 and
+            // ends at 2:00 EDT on November 1.
+            for (const at of [Date.UTC(2026, 2, 8, 6, 59), Date.UTC(2026, 2, 8, 7, 0),
+                              Date.UTC(2026, 10, 1, 5, 59), Date.UTC(2026, 10, 1, 6, 0)]) {{
+              report(ny.format(at));
+            }}
+            report(time("Asia/Kolkata").format(Date.UTC(2026, 0, 1, 0, 0)));
+            // Lord Howe: +10:30, and +11 from 2:00 on October 4, 2026.
+            const howe = time("Australia/Lord_Howe");
+            report(howe.format(Date.UTC(2026, 9, 3, 15, 29)));
+            report(howe.format(Date.UTC(2026, 9, 3, 15, 30)));
+            // Past the last transition: the zone's rule.
+            report(ny.format(Date.UTC(2200, 6, 1, 12, 0)));
+            report(ny.format(Date.UTC(2200, 11, 1, 12, 0)));
+            report(new Date(Date.UTC(2026, 6, 4, 16, 0)).toLocaleTimeString("en-US", {{ timeZone: "America/New_York" }}));
+            report(new Intl.DateTimeFormat("en-US", {{ timeZone: "America/New_York", timeStyle: "long" }}).format(Date.UTC(2026, 6, 4, 16, 0)));
+            report(new Intl.DateTimeFormat("de", {{ timeZone: "America/New_York", timeStyle: "long" }}).format(Date.UTC(2026, 0, 1)));
+            // A zone the app doesn't ship is a RangeError, unless it is the
+            // machine's own: local time is always there to name.
+            const local = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const unshipped = ["Pacific/Chatham", "America/Sao_Paulo"].find((zone) => zone !== local);
+            try {{ new Intl.DateTimeFormat("en", {{ timeZone: unshipped }}); }} catch (e) {{ report(e.name); }}
+            "#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [
+                "America/New_York",
+                "03/08/2026, 01:59 EST",
+                "03/08/2026, 03:00 EDT",
+                "11/01/2026, 01:59 EDT",
+                "11/01/2026, 01:00 EST",
+                "01/01/2026, 05:30 GMT+5:30",
+                "10/04/2026, 01:59 GMT+10:30",
+                "10/04/2026, 02:30 GMT+11",
+                "07/01/2200, 08:00 EDT",
+                "12/01/2200, 07:00 EST",
+                "12:00:00 PM",
+                "12:00:00 PM EDT",
+                "19:00:00 GMT-5",
+                "RangeError",
+            ]
+        );
+    }
+
     #[test]
     fn timers_fire_in_order_and_cancel() {
         let host = Host::new().unwrap();
@@ -2822,6 +2983,32 @@ const report = (v) => text(String(v));
             .count();
         assert_eq!(created, 1);
         assert!(host.fatal().is_none());
+    }
+
+    #[test]
+    fn an_event_for_a_components_node_never_reaches_the_js_node_below_its_id() {
+        // A Rust component's nodes have odd ids; once the component let go
+        // of one (a sheet closed), its late `Dismiss` comes to JS. Node 3 is
+        // not JS's node 2: a closed sheet's dismissal ran the handler of the
+        // page under it and popped that page.
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"import { element, prop } from "nsh:rt";
+            globalThis.view = element("view");
+            prop(globalThis.view, "onPress", () => element("view"));"#,
+        )
+        .unwrap();
+        ops(&host);
+        host.dispatch_event(3, EventKind::Press, &EventPayload::None);
+        host.dispatch_event(3, EventKind::Dismiss, &EventPayload::None);
+        assert!(ops(&host).is_empty());
+        // Its own id still reaches it.
+        host.dispatch_event(2, EventKind::Press, &EventPayload::None);
+        let created = ops(&host)
+            .into_iter()
+            .filter(|op| matches!(op, Op::Create { .. }))
+            .count();
+        assert_eq!(created, 1);
     }
 
     #[test]
@@ -3007,13 +3194,24 @@ const report = (v) => text(String(v));
                 if (({}).constructor !== Object || [].toString() !== "") throw new Error();
             });
             attempt(() => { "use strict"; Object.prototype.toString = null; });
+            // Functions take an own `constructor` (libraries such as axios copy
+            // a prototype's members onto a function), while the shared one
+            // stays blocked.
+            attempt(() => {
+                "use strict";
+                const f = function () {};
+                f.constructor = Object;
+                if (f.constructor !== Object || (function () {}).constructor === Object) throw new Error();
+            });
+            attempt(() => { "use strict"; Function.prototype.constructor = Object; });
+            attempt(() => Object.getPrototypeOf(function () {}).constructor("return 1")());
             report(results.join(","));
             "#))
         .unwrap();
         assert_eq!(
             reported(host),
             [
-                "ReferenceError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,ran,ran,ran,TypeError"
+                "ReferenceError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,ran,ran,ran,TypeError,ran,TypeError,TypeError"
             ]
         );
     }

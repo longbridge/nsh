@@ -34,7 +34,6 @@ pub(crate) struct DevSession {
     release: bool,
     server: DevServer,
     /// Whether other machines may connect.
-    network: bool,
     devices: Arc<Devices>,
     /// The modules of the last good development build: updates are
     /// computed against it.
@@ -46,6 +45,9 @@ pub(crate) struct DevSession {
     /// A Rust app (`nsh.json` `"root"`): nothing to bundle, the hosts run
     /// its root; the session serves its assets, its web page and its logs.
     rust_root: bool,
+    /// The token `nsh test --attach` drives the session's hosts with, kept
+    /// where that command finds it while the session runs.
+    _attach: Option<crate::dev_port::AttachFile>,
 }
 
 /// Where a dev server listens.
@@ -53,8 +55,18 @@ pub(crate) struct DevSession {
 pub(crate) struct Listen {
     /// Its port, zero for one the OS allocates.
     pub(crate) port: u16,
-    /// Whether other machines may connect, or only this one.
-    pub(crate) network: bool,
+    pub(crate) host: Ipv4Addr,
+}
+
+impl Listen {
+    pub(crate) fn new(port: u16, network: bool) -> Self {
+        let host = if network {
+            Ipv4Addr::UNSPECIFIED
+        } else {
+            Ipv4Addr::LOCALHOST
+        };
+        Self { port, host }
+    }
 }
 
 impl DevSession {
@@ -86,6 +98,20 @@ impl DevSession {
         server.serve_files(crate::build::crate_assets().map(|a| (a.path, a.source)));
         server.install_commands(install_commands(&app_dir));
         server.set_limits(limits.map(|l| l.to_string()));
+        // `nsh test --attach` drives the hosts that take its steps, from this
+        // machine, with the token only this user reads.
+        let attach = match crate::dev_port::AttachFile::new(server.local_addr().port()) {
+            Ok(attach) => {
+                server.set_attach_token(Some(attach.token().to_owned()));
+                Some(attach)
+            }
+            Err(err) => {
+                ui::warn(format!(
+                    "nsh test --attach cannot drive this session: {err:#}"
+                ));
+                None
+            }
+        };
         // Browsers too, when there is a web runtime to serve (`nsh run
         // --target web` builds it in a checkout).
         let rust_root = crate::rust_app::is_root(&entry);
@@ -100,12 +126,12 @@ impl DevSession {
             watch_ignored,
             release,
             server,
-            network: listen.network,
             devices,
             hot: Default::default(),
             watch_files: Default::default(),
             builds: Cell::new(0),
             rust_root,
+            _attach: attach,
         };
         session.rebuild();
         // A Rust app's hosts that connect (the terminal's) run the root
@@ -123,20 +149,36 @@ impl DevSession {
 
     /// WebSocket URL for hosts on this machine.
     pub(crate) fn local_url(&self) -> String {
-        format!(
-            "ws://127.0.0.1:{}{WS_PATH}",
-            self.server.local_addr().port()
-        )
+        format!("ws://{}{WS_PATH}", self.local_endpoint())
+    }
+
+    /// WebSocket URL for a host reaching the server through `127.0.0.1`
+    /// (such as an Android device over `adb reverse`).
+    pub(crate) fn loopback_url(&self) -> String {
+        format!("ws://{}:{}{WS_PATH}", Ipv4Addr::LOCALHOST, self.port())
     }
 
     /// The web host's page for browsers on this machine.
     pub(crate) fn web_url(&self) -> String {
-        format!("http://127.0.0.1:{}/", self.server.local_addr().port())
+        format!("http://{}/", self.local_endpoint())
+    }
+
+    fn local_endpoint(&self) -> SocketAddr {
+        let addr = self.server.local_addr();
+        if addr.ip().is_unspecified() {
+            SocketAddr::from((Ipv4Addr::LOCALHOST, addr.port()))
+        } else {
+            addr
+        }
     }
 
     /// This machine's addresses other machines reach the server on.
     fn network_ips(&self) -> Vec<Ipv4Addr> {
-        if self.network { lan_ips() } else { Vec::new() }
+        match self.server.local_addr().ip() {
+            std::net::IpAddr::V4(ip) if ip.is_unspecified() => lan_ips(),
+            std::net::IpAddr::V4(ip) if !ip.is_loopback() => vec![ip],
+            _ => Vec::new(),
+        }
     }
 
     /// Prints where hosts can connect.
@@ -281,6 +323,7 @@ impl DevSession {
         if self.release {
             match build::compile(&self.entry, true) {
                 Ok(built) => {
+                    self.note_web_view(built.native_use.as_ref().is_none_or(|u| u.web_view));
                     self.watch_files.replace(built.watch_files.clone());
                     self.serve_assets(&built);
                     let capabilities = built.capabilities_json();
@@ -291,6 +334,7 @@ impl DevSession {
                         built.source_map,
                         nsh_dev::AppInfo {
                             capabilities,
+                            url_schemes: built.url_schemes,
                             id: crate::package::app_id(&self.entry).ok(),
                             window: crate::package::window_json(&self.entry),
                             application: crate::package::application_json(&self.entry),
@@ -306,6 +350,9 @@ impl DevSession {
         }
         match build::compile_hot(&self.entry) {
             Ok((built, hot)) => {
+                // The compiled `<WebView>` passes the tag `webview` to
+                // `element` (`nsh_bundler::NativeUse::web_view`).
+                self.note_web_view(built.code.contains("webview"));
                 self.watch_files.replace(built.watch_files.clone());
                 self.serve_assets(&built);
                 let summary = self.summary(&built);
@@ -331,6 +378,7 @@ impl DevSession {
                     built.source_map,
                     nsh_dev::AppInfo {
                         capabilities,
+                        url_schemes: built.url_schemes,
                         id: crate::package::app_id(&self.entry).ok(),
                         window: crate::package::window_json(&self.entry),
                         application: crate::package::application_json(&self.entry),
@@ -343,6 +391,17 @@ impl DevSession {
             }
             Err(err) => self.failed(err),
         }
+    }
+
+    /// Tells a Rust app's Linux development host whether the app may make
+    /// a web view: by its bundle (`bundle`), or as `nsh.json` keeps
+    /// `webview` ([`crate::rust_app::set_dev_bundle_web_view`]).
+    fn note_web_view(&self, bundle: bool) {
+        let kept = || {
+            crate::package::read_config(&self.entry)
+                .is_ok_and(|c| c.features.iter().any(|f| f == "webview"))
+        };
+        crate::rust_app::set_dev_bundle_web_view(bundle || kept());
     }
 
     /// What the line of a good build says after its path.
@@ -493,18 +552,11 @@ fn start_server(
     assets_root: &Path,
     devices: Arc<Devices>,
 ) -> anyhow::Result<DevServer> {
-    let Listen { port, network } = listen;
+    let Listen { port, host } = listen;
     if ui::stop_requested() {
         anyhow::bail!("development session is stopping");
     }
-    let addr = SocketAddr::from((
-        if network {
-            [0, 0, 0, 0]
-        } else {
-            [127, 0, 0, 1]
-        },
-        port,
-    ));
+    let addr = SocketAddr::from((host, port));
     DevServer::start(
         addr,
         nsh_js::BYTECODE_VERSION,
@@ -700,26 +752,46 @@ fn lan_ips() -> Vec<Ipv4Addr> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use super::Listen;
 
     fn on_network(port: u16) -> Listen {
-        Listen {
-            port,
-            network: true,
-        }
+        Listen::new(port, true)
     }
 
     #[test]
     fn only_a_network_listen_is_open_to_other_machines() {
         let dir = std::env::temp_dir();
-        let local = Listen {
-            port: 0,
-            network: false,
-        };
+        let local = Listen::new(0, false);
         let server = super::start_server(local, &dir, Default::default()).unwrap();
         assert!(server.local_addr().ip().is_loopback());
         let server = super::start_server(on_network(0), &dir, Default::default()).unwrap();
         assert!(server.local_addr().ip().is_unspecified());
+    }
+
+    #[test]
+    fn explicit_host_is_the_bound_address() {
+        let listen = Listen {
+            port: 0,
+            host: Ipv4Addr::LOCALHOST,
+        };
+        let server =
+            super::start_server(listen, &std::env::temp_dir(), Default::default()).unwrap();
+        assert_eq!(server.local_addr().ip(), listen.host);
+    }
+
+    #[test]
+    fn loopback_url_targets_127_0_0_1_even_when_bound_to_all_interfaces() {
+        let dir = std::env::temp_dir().join(format!("nsh-loopback-url-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.tsx");
+        std::fs::write(&entry, "export default function App() { return null; }\n").unwrap();
+        let session = super::DevSession::start(&entry, on_network(0), false, None).unwrap();
+        let expected = format!("ws://127.0.0.1:{}{}", session.port(), super::WS_PATH);
+        assert_eq!(session.loopback_url(), expected);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

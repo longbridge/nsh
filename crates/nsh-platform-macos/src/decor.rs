@@ -12,7 +12,7 @@
 //! stays in the view's own layer, where it does not scroll.
 //!
 //! A shader view's frames are the contents of a sublayer
-//! ([`crate::shader`]) shaped here as an image view's image layer is. An
+//! ([`crate::shader`]; a GPU view's, [`crate::gpu_view`]) shaped here as an image view's image layer is. An
 //! effect's or a running transition's frames show instead of the children:
 //! their container's mask hides them ([`hide_children`]), and clipping
 //! leaves it in place until they show again.
@@ -109,6 +109,8 @@ struct Shape {
     backdrop: Option<nsh_core::MacOsBackdrop>,
     /// It shows a shader's frames ([`crate::shader`]).
     shader: bool,
+    /// It shows a GPU view's frames ([`crate::gpu_view`]).
+    gpu: bool,
 }
 
 /// The colors [`apply`] set last.
@@ -557,10 +559,13 @@ impl Decor {
             self.fit_contents();
         }
 
-        // A shader's frames fill the view's shape, as a background does
-        // (clipped even when the children are not).
-        if let Some(shader) = s.shader.as_ref().filter(|s| s.fills()) {
-            let l = shader.layer();
+        // A shader's or a GPU view's frames fill the view's shape, as a
+        // background does (clipped even when the children are not).
+        let fills = [
+            s.shader.as_ref().filter(|s| s.fills()).map(|s| s.layer()),
+            s.gpu.as_ref().map(|g| g.layer()),
+        ];
+        for l in fills.into_iter().flatten() {
             l.setFrame(local);
             set_corners(l, r, continuous);
             if shared.is_some() {
@@ -569,7 +574,7 @@ impl Decor {
             } else {
                 let m = CAShapeLayer::new();
                 m.setPath(Some(&rounded(local, radii)));
-                // SAFETY: a fresh mask layer, owned by the shader layer.
+                // SAFETY: a fresh mask layer, owned by the frames' layer.
                 unsafe { l.setMask(Some(&m)) };
             }
             if l.superlayer().is_none() {
@@ -590,11 +595,40 @@ impl Decor {
         }
         let covered = covers_shadows && kind != Kind::Text;
         let text = kind == Kind::Text;
+        // The corner mask sits on the view's own layer when there is no
+        // container: the visual masks that layer too, and chains its masks
+        // under this one.
+        let corner: Option<&CALayer> = self
+            .mask
+            .as_deref()
+            .filter(|_| clip_layer.is_some() && container.is_none())
+            .map(|m| &**m);
+        if corner.is_none()
+            && let Some(m) = &self.mask
+            && m.mask().is_some()
+        {
+            // The shape masked the layer with the visual's mask (a gradient
+            // or clip shape) until a container took it over: the visual
+            // would make it the layer's mask too, and a layer is the mask of
+            // one layer only.
+            // SAFETY: clearing the mask of the decoration's own shape.
+            unsafe { m.setMask(None) };
+        }
+        // The size a running layout animation takes the box to.
+        let heading = s
+            .live
+            .as_ref()
+            .and_then(|l| l.frame_target())
+            .map(|to| CGSize::new(to.size.width.0 as CGFloat, to.size.height.0 as CGFloat));
         match &mut self.visual {
-            Some(visual) => visual.apply(view, layer, style, local, radii, text, covered),
+            Some(visual) => visual.apply(
+                view, layer, style, local, radii, text, covered, corner, heading,
+            ),
             None => {
                 let mut visual = crate::visual::Visual::default();
-                visual.apply(view, layer, style, local, radii, text, covered);
+                visual.apply(
+                    view, layer, style, local, radii, text, covered, corner, heading,
+                );
                 if !visual.is_empty() {
                     self.visual = Some(Box::new(visual));
                 }
@@ -841,6 +875,7 @@ fn shape_of(s: &ViewState, kind: Kind) -> Shape {
         glass_tint: style.glass_tint_color,
         backdrop: style.macos_backdrop,
         shader: s.shader.as_ref().is_some_and(|s| s.fills()),
+        gpu: s.gpu.is_some(),
     }
 }
 

@@ -64,12 +64,6 @@ struct Claim {
     trigger: gtk::ShortcutTrigger,
     /// The binding: a raw view's dispatch reports it ([`raw`]).
     binding: KeyBinding,
-    /// It fires in a text field (`KeyBinding::in_text`).
-    in_text: bool,
-    /// Its window (`KeyBinding::window`).
-    window: Option<NodeId>,
-    /// It gives way to a focused control ([`gives_way`]).
-    yields: bool,
 }
 
 /// `MountItem::Keymap`: replaces the surface's shortcuts.
@@ -92,9 +86,6 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
             triggers.push(Claim {
                 trigger,
                 binding: *binding,
-                in_text: binding.in_text,
-                window: binding.window,
-                yields: gives_way(binding),
             });
         }
     }
@@ -143,20 +134,20 @@ pub(crate) fn attach(surface: &Rc<Surface>, root: &NshView) {
             continue;
         };
         let weak = Rc::downgrade(surface);
-        let (id, in_text, repeat) = (binding.id, binding.in_text, binding.repeat);
-        let yields = gives_way(binding);
-        let pass_through = binding.pass_through;
+        let binding = *binding;
+        let (id, repeat, pass_through) = (binding.id, binding.repeat, binding.pass_through);
         // The widget is the root view of the window the key is in.
         let action = gtk::CallbackAction::new(move |widget, _| match weak.upgrade() {
-            Some(surface) if fires(&surface, widget, in_text, yields) => {
+            Some(surface) if controller_acts(&surface.keymap) => {
+                let root = widget
+                    .downcast_ref::<NshView>()
+                    .expect("shortcut's window root");
+                let fires = fires(&surface, root);
+                if !fires(&binding) {
+                    return glib::Propagation::Proceed;
+                }
                 if let Some(window) = widget.root().and_downcast::<gtk::Window>() {
                     watch_releases(&surface, &window);
-                }
-                if !controller_acts(&surface.keymap) {
-                    // The raw view's own lookup ran the newest eligible
-                    // binding already: no shortcut reports (or consumes)
-                    // this press again.
-                    return glib::Propagation::Proceed;
                 }
                 let held = &surface.keymap.held;
                 if repeat || held.get() != Some(id) {
@@ -213,11 +204,12 @@ pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
         return false;
     };
     let root = crate::window::key_root(surface);
-    let fired = keymap.bindings().iter().rev().find(|b| {
-        b.keystroke == stroke
-            && b.window.is_none_or(|w| w == root.id())
-            && fires(surface, root.upcast_ref(), b.in_text, gives_way(b))
-    });
+    let fires = fires(surface, &root);
+    let fired = keymap
+        .bindings()
+        .iter()
+        .rev()
+        .find(|b| b.keystroke == stroke && fires(b));
     if let Some(binding) = fired {
         surface.event(
             ROOT_ID,
@@ -240,11 +232,11 @@ pub(crate) fn claims(surface: &Surface, event: &gtk::gdk::Event) -> bool {
         .surface()
         .and_then(|s| crate::window::root_at(surface, &s))
         .unwrap_or_else(|| surface.root.clone());
+    let fires = fires(surface, &root);
     surface.keymap.triggers.borrow().iter().any(|claim| {
         !claim.binding.pass_through
             && claim.trigger.trigger(event, false) != gtk::gdk::KeyMatch::None
-            && claim.window.is_none_or(|w| w == root.id())
-            && fires(surface, root.upcast_ref(), claim.in_text, claim.yields)
+            && fires(&claim.binding)
     })
 }
 
@@ -305,12 +297,13 @@ pub(crate) fn raw(surface: &Surface, event: &gtk::gdk::Event, repeat: bool) -> R
         .and_then(|s| crate::window::root_at(surface, &s))
         .unwrap_or_else(|| surface.root.clone());
     let (fired, binding) = {
+        let fires = fires(surface, &root);
         let triggers = surface.keymap.triggers.borrow();
         pick(
             &triggers[..],
             root.id(),
             repeat,
-            |claim| fires(surface, root.upcast_ref(), claim.in_text, claim.yields),
+            |claim| fires(&claim.binding),
             |trigger| trigger.trigger(event, false),
         )
     };
@@ -352,16 +345,16 @@ fn pick(
     let mut exact = None;
     for claim in claims {
         let binding = &claim.binding;
-        if !claim.window.is_none_or(|w| w == window) || !eligible(claim) {
+        if binding.window.is_some_and(|w| w != window) {
             continue;
         }
         match matches(&claim.trigger) {
-            gtk::gdk::KeyMatch::Exact => {
+            gtk::gdk::KeyMatch::Exact if eligible(claim) => {
                 exact = Some(*binding);
                 break;
             }
-            gtk::gdk::KeyMatch::Partial => {
-                partial.get_or_insert(*binding);
+            gtk::gdk::KeyMatch::Partial if partial.is_none() && eligible(claim) => {
+                partial = Some(*binding);
             }
             _ => {}
         };
@@ -394,35 +387,33 @@ fn controller_acts(state: &KeymapState) -> bool {
     !state.raw_fired.get()
 }
 
-/// Whether a binding fires where the focus of the window of root view
-/// `root` is: never while it is in another surface, in a text field or
-/// hosted widget only when the binding may (`in_text`), on a control
-/// Return and Space press not when the binding `gives_way` to it
-/// ([`gives_way`]).
-fn fires(surface: &Surface, root: &gtk::Widget, in_text: bool, gives_way: bool) -> bool {
-    let Some(focus) = root.root().and_then(|r| r.focus()) else {
-        return true;
-    };
-    if !(focus.is_ancestor(root) || &focus == root) {
-        return false;
+/// Whether a binding fires in this window and focus. Pointer overrides
+/// must meet the same eligibility rules as the binding they supersede.
+fn fires<'a>(surface: &'a Surface, root: &NshView) -> impl Fn(&KeyBinding) -> bool + use<'a> {
+    let focus = root.root().and_then(|r| r.focus());
+    let in_window = focus
+        .as_ref()
+        .is_none_or(|focus| focus.is_ancestor(root) || focus == root.upcast_ref::<gtk::Widget>());
+    let editing = focus.as_ref().is_some_and(|focus| !focus.is::<NshView>());
+    let control = in_window
+        && !editing
+        && focus
+            .as_ref()
+            .is_some_and(|focus| crate::key_focus::is_control(surface, focus));
+    let window = root.id();
+    move |binding| {
+        let eligible =
+            |b: &KeyBinding| b.window.is_none_or(|w| w == window) && (b.in_text || !editing);
+        in_window
+            && eligible(binding)
+            && (!control
+                || surface
+                    .keymap
+                    .keymap
+                    .borrow()
+                    .as_ref()
+                    .is_none_or(|table| !table.gives_way(binding, eligible)))
     }
-    // A field's text widget, or a hosted widget (a web view).
-    let editing = !focus.is::<crate::view::NshView>();
-    if gives_way && crate::key_focus::is_control(surface, &focus) {
-        return false;
-    }
-    in_text || !editing
-}
-
-/// Whether `binding` gives way to a focused control that its key presses:
-/// Return and Space, unless it is the focus' own
-/// ([`nsh_core::keymap::Keymap::find_at`]).
-fn gives_way(binding: &nsh_core::keymap::KeyBinding) -> bool {
-    !binding.for_focus
-        && nsh_core::input::presses_focused_control(
-            binding.keystroke.key,
-            binding.keystroke.modifiers,
-        )
 }
 
 /// The keyval that `key` types with Shift on the display's layout (`slash`
@@ -546,13 +537,7 @@ mod tests {
     fn claims(pairs: Vec<(gtk::ShortcutTrigger, KeyBinding)>) -> Vec<super::Claim> {
         pairs
             .into_iter()
-            .map(|(trigger, binding)| super::Claim {
-                trigger,
-                binding,
-                in_text: binding.in_text,
-                window: binding.window,
-                yields: super::gives_way(&binding),
-            })
+            .map(|(trigger, binding)| super::Claim { trigger, binding })
             .collect()
     }
 

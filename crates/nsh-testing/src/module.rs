@@ -276,6 +276,7 @@ impl Testing {
             width: options.width,
             height: options.height,
             safe_area: options.safe_area,
+            reserved_regions: options.reserved_regions,
             clipboard: options.clipboard,
             color_scheme: options.color_scheme,
             locale: options.locale,
@@ -404,6 +405,11 @@ pub struct OpenOptions {
     pub height: Option<Points>,
     /// The safe area insets in points (none).
     pub safe_area: Option<SafeArea>,
+    /// The regions the device reserves (`reservedRegions()`), each a
+    /// `kind` and its `bounds` in points: a fold to lay out around
+    /// (none). Headless only: on a device the system reports its own, so
+    /// with `--target` giving it rejects with `ERR_NSH_TEST_UNSUPPORTED`.
+    pub reserved_regions: Option<Vec<nsh_core::platform::ReservedRegion>>,
     /// The text on the clipboard at the start (none).
     pub clipboard: Option<String>,
     /// The system's appearance (`"light"`).
@@ -1046,51 +1052,6 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
     }
 }
 
-/// How the user answers the share sheet (`app.onShare`).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
-pub enum ShareAnswerAction {
-    /// The user shares.
-    Shared,
-    /// The user closes the sheet without sharing.
-    #[default]
-    Dismissed,
-}
-
-/// How the user answers every share sheet (`app.onShare`).
-#[derive(Debug, Clone, Default, PartialEq, JsObject)]
-#[prop(exact)]
-pub struct ShareAnswer {
-    /// `"shared"` or `"dismissed"`.
-    pub action: ShareAnswerAction,
-    /// The target chosen when shared (`"com.apple.UIKit.activity.Mail"`);
-    /// none: the platform names none.
-    pub target: Option<String>,
-}
-
-/// What the app shared (`Share.show`), as a test reads it.
-#[derive(Debug, Clone, PartialEq, JsObject)]
-pub struct SharedContent {
-    /// The title; `null` when none was given.
-    pub title: Option<String>,
-    /// The text; `null` when none was given.
-    pub text: Option<String>,
-    /// The link; `null` when none was given.
-    pub url: Option<String>,
-    /// The files' real paths.
-    pub files: Vec<String>,
-}
-
-impl From<&nsh_core::share::ShareSheet> for SharedContent {
-    fn from(sheet: &nsh_core::share::ShareSheet) -> Self {
-        SharedContent {
-            title: sheet.title.clone(),
-            text: sheet.text.clone(),
-            url: sheet.url.clone(),
-            files: sheet.files.clone(),
-        }
-    }
-}
-
 /// What the app asked of the speaker (`Sound`, `AudioPlayer`), as a test
 /// reads it.
 #[derive(Debug, Clone, PartialEq, JsObject)]
@@ -1212,6 +1173,15 @@ fn mime_of(name: &str) -> &'static str {
     }
 }
 
+/// Where a press lands ([`App::press`]), in points from the view's top left
+/// corner.
+#[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct PressOptions {
+    /// The point in the view the press lands on; its middle when omitted.
+    pub position: Option<Point<Points>>,
+}
+
 /// How far a drag moves the finger ([`App::drag`]), in points.
 #[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
 pub struct DragBy {
@@ -1269,6 +1239,17 @@ pub struct SpanStyle {
     pub font_size: f64,
     /// Its font weight (400 regular, 700 bold).
     pub font_weight: f64,
+    /// Its line height, in points (a multiple or ems of the font size
+    /// resolved against it); absent for the font's natural line height.
+    #[prop(skip_none)]
+    pub line_height: Option<f64>,
+    /// The extra space between its characters, in points (ems resolved).
+    pub letter_spacing: f64,
+    /// The `fontFamily` it has, as the app wrote it (a list stays a list);
+    /// absent for the system font. It is the family asked for, not the
+    /// face a platform falls back to for characters it lacks.
+    #[prop(skip_none)]
+    pub font_family: Option<String>,
     /// Whether it is italic.
     pub italic: bool,
     /// Whether it is underlined.
@@ -1291,6 +1272,10 @@ impl From<nsh_core::ResolvedTextStyle> for SpanStyle {
             background_color: style.background.map(|b| css(b.color)),
             font_size: f64::from(style.font_size.0),
             font_weight: f64::from(style.font_weight),
+            line_height: (style.line_height > nsh_core::Points::ZERO)
+                .then_some(f64::from(style.line_height.0)),
+            letter_spacing: f64::from(style.letter_spacing.0),
+            font_family: style.font_family.map(|f| f.name().to_string()),
             italic: style.italic,
             underline: style.decoration.underline,
             line_through: style.decoration.line_through,
@@ -1366,6 +1351,9 @@ pub struct AccessibilityNode {
     /// Its `accessibilityLabel`.
     #[prop(skip_none)]
     pub label: Option<String>,
+    /// Its accessible name, the one `role:<role>[<name>]` matches: its
+    /// `accessibilityLabel`, else the texts inside it.
+    pub name: String,
     /// It takes no presses.
     pub disabled: bool,
     /// It is selected.
@@ -1376,6 +1364,15 @@ pub struct AccessibilityNode {
     /// Whether it is expanded, for an expandable view.
     #[prop(skip_none)]
     pub expanded: Option<bool>,
+    /// A toggle button's toggle state (`accessibilityState.pressed`):
+    /// `"true"`, `"false"` or `"mixed"`; absent when it is unset.
+    #[prop(skip_none)]
+    pub pressed: Option<String>,
+    /// Its `accessibilityState.busy`: it is loading.
+    pub busy: bool,
+    /// Its `accessibilityValue.text`.
+    #[prop(skip_none)]
+    pub value: Option<String>,
     /// Its `accessibilityLevel`.
     #[prop(skip_none)]
     pub level: Option<u32>,
@@ -1391,10 +1388,14 @@ impl From<nsh_dev::protocol::AccessibilityNode> for AccessibilityNode {
         AccessibilityNode {
             role: n.role,
             label: n.label,
+            name: n.name,
             disabled: n.disabled,
             selected: n.selected,
             checked: n.checked,
             expanded: n.expanded,
+            pressed: n.pressed,
+            busy: n.busy,
+            value: n.value,
             level: n.level,
             description: n.description,
             children: n.children.into_iter().map(Self::from).collect(),
@@ -1620,6 +1621,8 @@ pub(crate) struct Launch {
     /// What the test gives of the environment: a real platform's host pins
     /// it, defaults included, and keeps its own for what it leaves out.
     pub(crate) safe_area: Option<SafeArea>,
+    /// The regions the device reserves (a headless run's only).
+    pub(crate) reserved_regions: Option<Vec<nsh_core::platform::ReservedRegion>>,
     pub(crate) clipboard: Option<String>,
     pub(crate) color_scheme: Option<ColorScheme>,
     pub(crate) locale: Option<String>,
@@ -2116,11 +2119,19 @@ const CLOSED: &str = "the app is closed: the test that opened it ended";
 #[class]
 impl App {
     /// Presses what `selector` names (or the nearest view around it that
-    /// hears presses, as a tap on a button's text does). On iOS, a header
-    /// button of `ios.headerRightItems` is pressed too, by `id:<key>` or
-    /// its label: it presses it, or opens its menu.
-    pub async fn press(this: Instance<Self>, selector: String) -> Result<(), JsError> {
-        step(&this, move |app| app.press(&selector)).await
+    /// hears presses, as a tap on a button's text does), at
+    /// `options.position` in it when given: points from its top left
+    /// corner, so a press can land on a part another view does not cover
+    /// (a sheet's backdrop around its panel). On iOS, a header button of
+    /// `ios.headerRightItems` is pressed too, by `id:<key>` or its label:
+    /// it presses it, or opens its menu.
+    pub async fn press(
+        this: Instance<Self>,
+        selector: String,
+        options: Option<PressOptions>,
+    ) -> Result<(), JsError> {
+        let at = options.and_then(|options| options.position);
+        step(&this, move |app| app.press(&selector, at)).await
     }
 
     /// Types `text` at the end of the input `selector` names (or the first
@@ -2426,7 +2437,7 @@ impl App {
 
     /// The accessibility tree as assistive technologies read it: the
     /// views on screen with a role or a label, each with `role`, `label`,
-    /// `disabled`, `selected`, `checked`, `expanded`, `level`,
+    /// `disabled`, `selected`, `checked`, `expanded`, `pressed`, `level`,
     /// `description` and the nodes inside it (`children`). With a
     /// selector, from the view it names (`null` when none is on screen);
     /// without, from a root that has no role.
@@ -2711,26 +2722,6 @@ impl App {
     /// quiet. Headless only.
     pub async fn fail_open_urls(this: Instance<Self>, url: String) -> Result<(), JsError> {
         step(&this, move |app| app.fail_open_urls(&url)).await
-    }
-
-    /// The platform shows a share sheet from now on (`Share.available()`
-    /// resolves `true`), and the user answers every one the app shows
-    /// (`Share.show`) as `answer` says: shared, to its `target` if it names
-    /// one, or dismissed. What the app shares is listed by `shares`. Then
-    /// waits until the app is quiet. Headless only: a real platform shows
-    /// its own sheet.
-    pub async fn on_share(this: Instance<Self>, answer: ShareAnswer) -> Result<(), JsError> {
-        let outcome = match answer.action {
-            ShareAnswerAction::Shared => nsh_core::share::ShareOutcome::shared(answer.target),
-            ShareAnswerAction::Dismissed => nsh_core::share::ShareOutcome::dismissed(),
-        };
-        step(&this, move |app| app.on_share(outcome)).await
-    }
-
-    /// What the app shared (`Share.show`), in order: recorded, never
-    /// shared, and answered as `onShare` says. Headless only.
-    pub fn shares(&self) -> Result<Vec<SharedContent>, JsError> {
-        self.with(|app| Ok(app.shares()?.iter().map(SharedContent::from).collect()))
     }
 
     /// Moves the app to `state`, as the system does when the user leaves it

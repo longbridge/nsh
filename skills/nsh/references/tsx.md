@@ -1,7 +1,8 @@
 # TSX
 
-TSX mode: UI and logic in TypeScript on QuickJS, with hot updates and no Rust toolchain. Pick it for UI delivered at
-run time. With Rust of your own, see [mixed.md](mixed.md); with no JS at all, [rust.md](rust.md). A complete app is in
+TSX mode: UI and logic in TypeScript on QuickJS, with hot updates and no Rust toolchain. Start an app here, including
+UI delivered at run time. To extend it with Rust (an nshm crate in `ext/` or a published one), see [mixed.md](mixed.md);
+for a whole app in Rust with no JS, [rust.md](rust.md). A complete app is in
 [tsx-recipe.md](tsx-recipe.md). `.nsh/types` is the authority on what exists.
 
 ## Components run once
@@ -73,7 +74,8 @@ Each read of `props.children` builds new views. Read it once, as `{props.childre
 Text shows only inside `<Text>`. Nested `<Text>` elements are spans.
 
 A literal string directly in `<View>` is a build error. A literal in any other component (`<Button>Save</Button>`) and a
-number or call in a `View` (`<View>{count()}</View>`) pass every tool and **show nothing**. Always wrap in `<Text>`.
+number or call in a `View` (`<View>{count()}</View>`) build and **show nothing**; the component case logs a warning when
+it runs. Always wrap in `<Text>`.
 
 ## If, Each, List
 
@@ -461,7 +463,11 @@ export function Confirm() {
 - `closeOnEscape`, `closeOnBackdropPress`, `closeOnSwipe`, `closeOnPressOutside` decide dismissal up front.
 - `Sheet` takes `open`, `onOpenChange`, `side` and `popupClass`. `Popover` and `Menu` take `trigger` and `popupClass`.
 - `const { action } = await AlertDialog.show({ title, actions: [{ id: "delete", label: "Delete", role: "destructive" }] })` resolves the chosen `id`, or `null` when closed without one. An alert with `input: { defaultValue, placeholder, selectTextOnFocus, required }` shows the system's text field (iOS, Android, macOS, web) and resolves its text as `value`.
-- `Menu` holds `MenuItem`s, each with `onSelect`.
+- `Menu` holds `MenuItem`s, each with `onSelect`, `MenuSeparator`s and `Submenu`s. A group under one row (Language,
+  Appearance) is a `<Submenu trigger={row with a trailing chevron} back={row leading back}>`: it cascades beside its
+  row on the desktops and takes the menu's place in a phone's sheet. Never expand nested items in place inside a menu
+  (a chevron turning down, indented rows); a few always-visible choices are a flat section of `checked` items under a
+  title instead. See `website/elements/menu.md`.
 - `ToastStack`, `Tooltip`, `HoverCard`, `ContextMenu` and `Command` are also in `nsh/base`.
 
 ## Runtime and sandbox limits
@@ -507,7 +513,8 @@ Every row was run through `nsh build` and `nsh check` at `nsh 0.4.0`, and the ru
 | Unknown class built at run time | The class does nothing | Run-time log, once |
 | Effect writing a signal it reads | App stops: `potential infinite loop` | `nsh test`, or at run time |
 | `eval`, `new Function`, writing to `Array.prototype` | Fine in `nsh run`; throws when hardened | `nsh test`, or in the package |
-| `<Button>Save</Button>`, `<View>{count()}</View>` | Not shown | Nothing |
+| `<Button>Save</Button>` | Not shown | Run-time warning |
+| `<View>{count()}</View>` | Not shown | Nothing |
 | `const { title } = props`, `const { a, ...rest } = props`, `const v = count()` or `props.title.toUpperCase()` in the body | Stale | Nothing |
 | `items().push(x); items.set(items())` | No update | Nothing |
 | `effect(() => b.set(a()))` | Works; an extra pass | Nothing |

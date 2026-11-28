@@ -477,7 +477,7 @@ impl AppView {
             cache: options.cache.clone(),
             storage: options.storage.clone(),
             clock: Default::default(),
-            context: Default::default(),
+            context: self.root_context(),
             pinned: Default::default(),
             clipboard: None,
             host: options.host.clone(),
@@ -499,6 +499,18 @@ impl AppView {
         self.surface.native.set_app(&config.app);
         crate::native::warm_web_later(&self.surface);
         self.surface.start(config);
+    }
+
+    /// An embedded view (not [`run_app`]'s) mounts a plain JS root in itself,
+    /// as it does a Rust app, rather than in an implicit `main` window of its
+    /// own (#3514). The app's `<Window>`s still open windows.
+    fn root_context(&self) -> nsh_core::element::EngineContext {
+        let context = nsh_core::element::EngineContext::default();
+        #[cfg(feature = "js")]
+        if !self.surface.standalone.get() {
+            return nsh_engine::with_inline_root(context);
+        }
+        context
     }
 
     /// Where `asset:/` URIs resolve from now on.
@@ -613,8 +625,6 @@ fn initial_environment() -> Environment {
         // `setString:forType:` says whether the pasteboard took the write.
         clipboard_write_result: true,
         canvas_render: true,
-        // `NSSharingServicePicker` (`crate::share`).
-        share: true,
         file_requests: true,
         notifications: true,
         audio: true,
@@ -688,6 +698,7 @@ fn show_launched(window: &NSWindow, surface: &Surface, background: bool) {
         window.makeFirstResponder(Some(surface.root.ns()));
         NSApplication::sharedApplication(surface.mtm).activate();
     }
+    crate::box_none::shown(window);
 }
 
 /// The window of the standalone app whose surface is `surface`, while a
@@ -962,6 +973,28 @@ define_class!(
             true
         }
 
+        // No notification says so: only the delegate hears that a full
+        // screen transition failed (`crate::window_state`).
+        #[unsafe(method(windowDidFailToEnterFullScreen:))]
+        fn did_fail_to_enter_full_screen(&self, window: &NSWindow) {
+            if let Some(surface) = running_surface(window) {
+                crate::window_state::failed_to_enter_full_screen(
+                    &surface,
+                    crate::window_state::Target::Main,
+                );
+            }
+        }
+
+        #[unsafe(method(windowDidFailToExitFullScreen:))]
+        fn did_fail_to_exit_full_screen(&self, window: &NSWindow) {
+            if let Some(surface) = running_surface(window) {
+                crate::window_state::failed_to_leave_full_screen(
+                    &surface,
+                    crate::window_state::Target::Main,
+                );
+            }
+        }
+
         #[unsafe(method(windowWillClose:))]
         fn window_will_close(&self, _notification: &NSNotification) {
             stop_running();
@@ -975,6 +1008,17 @@ define_class!(
         }
     }
 );
+
+/// The surface of the standalone app's main window, when it is `window`.
+fn running_surface(window: &NSWindow) -> Option<Rc<Surface>> {
+    RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .filter(|running| &*running.window == window)
+            .map(|running| running.view.surface().clone())
+    })
+}
 
 /// Closes the standalone app's main window (surface `key`'s) without
 /// asking the app again: hidden with [`AppOptions::keep_alive_on_close`],

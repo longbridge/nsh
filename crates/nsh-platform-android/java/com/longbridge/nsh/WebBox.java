@@ -48,9 +48,13 @@ final class WebBox extends WidgetBox {
     /** Source kind (0 none, 1 uri, 2 html) and fields; null before the first load. */
     private Object[] source;
     private String injected, injectedBefore, userAgent;
+    /** {@code allowOrigin}: the one origin besides the app's hosts (null: none). */
+    private String allowOrigin;
+    /** {@code allowNavigation}: the hosts this view may show, one per line (null: not narrowed). */
+    private String allowNavigation;
     private boolean scrollable = true;
     // The last props, to set up a WebView made after a renderer ended.
-    private boolean javaScriptEnabled, incognito;
+    private boolean javaScriptEnabled, incognito, zoomable;
     private boolean disposed, processGone;
     private final Handler evaluationHandler = new Handler(Looper.getMainLooper());
     private final HashMap<Integer, Evaluation> evaluations = new HashMap<>();
@@ -85,11 +89,37 @@ final class WebBox extends WidgetBox {
         web.setWebChromeClient(new Chrome());
         web.setOnTouchListener((v, e) -> {
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                // The page scrolls itself: keep enclosing scroll views out.
+                // The page handles its drags (scrolls, sliders, sortable lists): keep enclosing scroll views out.
                 v.getParent().requestDisallowInterceptTouchEvent(true);
             }
-            return !scrollable && e.getActionMasked() == MotionEvent.ACTION_MOVE;
+            // Every touch reaches the page, also with `scrollable={false}`, which only stops its viewport
+            // scrolling ({@link #NO_SCROLL}): its own drag handlers still hear the moves.
+            return false;
         });
+    }
+
+    /**
+     * {@code scrollable={false}}: a style keeps the page's viewport from scrolling ({@code overflow: hidden} on
+     * its root element) while its scripts still may and its inner scrollable elements still scroll, as on iOS
+     * (a {@code UIScrollView} with scrolling off), Windows and Linux. Applied as each document starts and when
+     * the prop changes; {@code scrollable} turned back on removes it.
+     */
+    private static String noScroll(boolean scrollable) {
+        return "(function () { var on = " + scrollable + "; var id = 'nsh-no-scroll';"
+                + " function apply() { var s = document.getElementById(id);"
+                + " if (on) { if (s) s.remove(); return; }"
+                + " if (!s && document.documentElement) { s = document.createElement('style'); s.id = id;"
+                + " s.textContent = 'html { overflow: hidden !important; }';"
+                + " document.documentElement.appendChild(s); } }"
+                + " if (document.documentElement) apply();"
+                + " else document.addEventListener('readystatechange', apply, { once: true }); })();";
+    }
+
+    private static final String NO_SCROLL = noScroll(false);
+
+    /** Puts the {@link #NO_SCROLL} style in the current document when the page does not scroll. */
+    private void applyNoScroll(WebView view) {
+        if (!scrollable) view.evaluateJavascript(NO_SCROLL, null);
     }
 
     /** Lets captures sample the page without replaying its functor at another viewport size. */
@@ -134,13 +164,16 @@ final class WebBox extends WidgetBox {
     }
 
     private final class Client extends WebViewClient {
-        /** Top-level navigations stay within the app's `webview` capability. */
+        /**
+         * Top-level navigations stay within the app's `webview` capability
+         * and the web view's {@code allowOrigin}.
+         */
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             if (disposed || processGone) return true;
             if (!request.isForMainFrame()) return false;
             String url = request.getUrl().toString();
-            if (mounter.allowsWebview(url)) return false;
+            if (mounter.allowsWebview(url, allowOrigin, allowNavigation)) return false;
             android.util.Log.w("nsh", "web view navigation to " + url + " is not granted");
             mounter.eventMap(id, Native.ERROR, new String[] {"message", "code", "url"},
                     new Object[] {"navigation to " + url + " is not granted", "ERR_ACCESS_DENIED", url});
@@ -151,8 +184,16 @@ final class WebBox extends WidgetBox {
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             if (disposed || processGone) return;
             cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
+            applyNoScroll(view);
             if (injectedBefore != null) view.evaluateJavascript(injectedBefore, null);
             state(Native.LOAD_START, url, true);
+        }
+
+        @Override
+        public void onPageCommitVisible(WebView view, String url) {
+            // onPageStarted can come before the new document replaces the old one: its first paint has the style.
+            if (disposed || processGone) return;
+            applyNoScroll(view);
         }
 
         @Override
@@ -254,7 +295,8 @@ final class WebBox extends WidgetBox {
 
     @SuppressWarnings("deprecation") // setSaveFormData: still honored before Android 8.
     void configure(Object[] source, String injected, String injectedBefore, String userAgent,
-            boolean scrollable, boolean javaScriptEnabled, boolean incognito) {
+            boolean scrollable, boolean javaScriptEnabled, boolean incognito, boolean zoomable,
+            String allowOrigin, String allowNavigation) {
         if (disposed) return;
         boolean revived = processGone;
         if (processGone && !revive()) return;
@@ -265,13 +307,22 @@ final class WebBox extends WidgetBox {
             settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
             settings.setSaveFormData(false);
         }
+        if (this.source == null && zoomable) zoom(web.getSettings());
+        // Before the source loads: a new origin applies to the next navigation.
+        this.allowOrigin = allowOrigin;
+        this.allowNavigation = allowNavigation;
         boolean scriptsChanged = !Objects.equals(injected, this.injected)
                 || !Objects.equals(injectedBefore, this.injectedBefore);
         this.injected = injected;
         this.injectedBefore = injectedBefore;
+        // The page shown takes the change now; pages loaded later as they start.
+        if (this.source != null && scrollable != this.scrollable) web.evaluateJavascript(noScroll(scrollable), null);
         this.scrollable = scrollable;
         this.javaScriptEnabled = javaScriptEnabled;
-        if (this.source == null) this.incognito = incognito;
+        if (this.source == null) {
+            this.incognito = incognito;
+            this.zoomable = zoomable;
+        }
         web.setVerticalScrollBarEnabled(scrollable);
         web.setHorizontalScrollBarEnabled(scrollable);
         web.getSettings().setJavaScriptEnabled(javaScriptEnabled);
@@ -286,6 +337,17 @@ final class WebBox extends WidgetBox {
             }
             loadSource();
         }
+    }
+
+    /**
+     * {@code zoomable}: pinch zoom with no on-screen buttons. The page's
+     * viewport keeps its say over the layout width (wide viewport and
+     * overview mode stay as they are).
+     */
+    static void zoom(WebSettings settings) {
+        settings.setSupportZoom(true);
+        settings.setBuiltInZoomControls(true);
+        settings.setDisplayZoomControls(false);
     }
 
     private void loadSource() {
@@ -321,6 +383,7 @@ final class WebBox extends WidgetBox {
             settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
             settings.setSaveFormData(false);
         }
+        if (zoomable) zoom(settings);
         settings.setJavaScriptEnabled(javaScriptEnabled);
         if (userAgent != null) settings.setUserAgentString(userAgent);
         fresh.setVerticalScrollBarEnabled(scrollable);

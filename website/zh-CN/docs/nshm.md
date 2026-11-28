@@ -9,7 +9,7 @@ group: start
 
 **nshm**（NSH 模块）为 Native Shell 应用提供组件、模块和类，就像 crate 为 Rust 程序提供代码。它有两种：
 
-- **Rust nshm** 是一个 Rust crate，发布在 crates.io 或 Git 上。应用可以在 Rust 和 TSX 中使用它：同一份实现，在每个平台上都是原生的。
+- **Rust nshm** 是一个 Rust crate，发布在 crates.io 或 Git 上。应用可以在 TSX 和 Rust 中使用它：同一份实现，在每个平台上都是原生的。
 - **TSX nshm** 是用版本标签发布的 Git 仓库里的 TSX。它被打进应用的 bundle，所以只用 TSX nshm 的应用不需要 Rust，nshm 也随应用的包和 OTA 更新一起发布。
 
 例如 [nsh-omarchy](https://github.com/huacnlee/nsh-omarchy) 为应用带来 [Omarchy](https://omarchy.org) 的风格：按钮、输入框、菜单、对话框、表格和图表，并随系统的 Omarchy 主题实时切换。
@@ -19,7 +19,38 @@ nsh add nsh-omarchy                  # 来自 crates.io
 nsh add github:huacnlee/nsh-omarchy  # 或来自 GitHub
 ```
 
-然后用应用所写的语言使用它，Rust 或 TSX 均可。**Rust 应用**中，它的组件就是 crate 里的函数：
+然后用应用所写的语言使用它。**TSX 应用**中，只要 nshm 向 TSX 导出了组件、模块或类，`nsh add` 安装后就能直接使用：按它的标识导入即可，这里是 `nsh-omarchy`。不需要升级 NSH，也不需要自己写 Rust 代码来扩展，`nsh` 会用这个 crate 构建应用的宿主。
+
+```tsx
+// App.tsx
+import { mount, signal, View } from "nsh";
+import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
+
+function App() {
+  // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
+  Omarchy.followSystem();
+  const notify = signal(true);
+  const saved = signal(0);
+  const save = () => {
+    saved.set(saved() + 1);
+    toast({ title: "Settings saved" });
+  };
+  return (
+    <View class="flex-1 gap-4 p-6 bg-background">
+      <Panel title="Settings">
+        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
+        <Button label="Save" variant="primary" onPress={save} />
+      </Panel>
+      <Body>{`Saved ${saved()} times`}</Body>
+      <Toaster />
+    </View>
+  );
+}
+
+mount(() => <App />);
+```
+
+**Rust 应用**中，它的组件就是 crate 里的函数：
 
 ```rust
 // src/lib.rs：应用的根组件
@@ -52,37 +83,6 @@ pub fn App() -> impl IntoElement {
         .child(nsh_omarchy::body(move || format!("Saved {} times", saved.get())))
         .child(nsh_omarchy::toaster())
 }
-```
-
-**TSX 应用**中，只要 nshm 向 TSX 导出了组件、模块或类，`nsh add` 安装后就能直接使用：按它的标识导入即可，这里是 `nsh-omarchy`。不需要升级 NSH，也不需要自己写 Rust 代码来扩展，`nsh` 会用这个 crate 构建应用的宿主。
-
-```tsx
-// App.tsx
-import { mount, signal, View } from "nsh";
-import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
-
-function App() {
-  // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
-  Omarchy.followSystem();
-  const notify = signal(true);
-  const saved = signal(0);
-  const save = () => {
-    saved.set(saved() + 1);
-    toast({ title: "Settings saved" });
-  };
-  return (
-    <View class="flex-1 gap-4 p-6 bg-background">
-      <Panel title="Settings">
-        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
-        <Button label="Save" variant="primary" onPress={save} />
-      </Panel>
-      <Body>{`Saved ${saved()} times`}</Body>
-      <Toaster />
-    </View>
-  );
-}
-
-mount(() => <App />);
 ```
 
 nshm 让功能不必成为 NSH 的一部分，也能交到需要它的应用手中：它按自己的节奏发布，只有安装它的应用才承担它的体积、构建时间和依赖。
@@ -122,6 +122,8 @@ nsh remove nsh-omarchy     # 从 nsh.json、nsh.lock 和应用的 crate 中移�
 
 应用有自己的 crate 时，Rust nshm 还会加入该 crate 的 `[dependencies]`，应用的 Rust 代码可以直接使用。只要应用的 nshm 里有 Rust nshm，nsh 就会像对带 crate 的应用一样用它构建宿主，因此开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。nshm 全是 TSX 的应用只需 `nsh` 即可构建。
 
+Rust 只来自 nshm 的应用，宿主用运行它的那个 nsh 构建：正式版用 crates.io 上它那个版本的 crate，nightly 用它自己那个提交的 crate，在源码目录里构建的 `nsh` 用该目录里的 crate。`nsh-extra` 与 nsh 一起发布，所以按版本要求依赖它的应用拿到的就是同一个 nsh 的 `nsh-extra`（有自己 crate 的应用，则是该 crate 所用 nsh 的那一份），并记录在 `nsh.lock` 中。nsh 的版本不满足版本要求时会报错，并同时指出两者。写了 `"path"`、`"github"` 或 `"git"` 的条目按原样使用。
+
 有自己 crate 的应用也可以只在 `Cargo.toml` 里依赖 Rust nshm，和依赖其他 crate 一样，来自 crates.io、Git（仓库子目录里的 crate 也可以）或本地路径。`nsh` 会在该 crate 的依赖（直接或间接）里找出 Rust nshm，像 `"dependencies"` 里的一样链接：它们的 `#[native_module]` 入口在应用启动时运行，启用该 crate 打开的 feature，`nsh run`、`nsh test` 和打包都一样，TSX 也按标识导入它们。同时列在 `"dependencies"` 里的只链接一次。
 
 包含多个模块的 crate 把每个模块放在一个 Cargo feature 后面，应用只开启自己用到的，也只承担这些模块的体积、权限和商店声明。`--features` 用来开启它们，条目随之写成对象形式：
@@ -136,6 +138,30 @@ nsh add nsh-extra --features camera
 }
 ```
 
+只有部分 target 需要其 Rust 的 nshm，可以用 `"targets"` 只为这些 target 链接，名字与 `platform.os` 相同：`macos`、
+`windows`、`linux`、`ios`、`android` 和 `web`（Mac Catalyst 算 `ios`；GPUI 和终端宿主算所在机器的系统）。例如在 Web 上
+用浏览器自己的识别器听写的应用：
+
+```json
+{
+  "dependencies": {
+    "nsh-extra": { "version": "^0.7", "features": ["speech"], "targets": ["macos", "windows", "ios", "android"] }
+  },
+  "resolve": { "alias": { "nsh-extra": "./src/speech-web.ts" } }
+}
+```
+
+其他 target 不构建它的任何 Rust：这里 `nsh run --target web` 和 `nsh package --target web` 用预构建的 Web 运行时。
+`nsh.lock` 在每个 target 上都一样。`nsh run`、`nsh dev` 和 `nsh package` 为它们构建的 target 链接 nshm，`nsh test`
+为它运行的 target 链接（无头运行时是本机的系统）。`nsh check`、`nsh build`、`nsh publish` 和 `nsh dev --server-only`
+面向所有 target，链接所有 nshm，因此应用的 TSX 会按 nshm 的声明检查，为其他 target 运行命令时 `.nsh/types` 也保留这些声明。
+
+在不带这个 nshm 的 target 上，它的模块不存在。静态 `import` 它会让构建失败，除非像上面那样用 `"resolve"` 的 `"alias"`
+给这个标识一个替身：只有不带这个 nshm 的 target 用替身，其他 target 导入模块本身。`import()` 它在每个 target 上都能构建，
+在没有链接它的 target 上会 reject，所以放在 `platform.os` 判断后面的代码可以加载它。`"targets"` 只用于带 Rust 的
+nshm（TSX nshm 在每个 target 上都是 bundle 的一部分），也只用于应用自己的条目：nshm 的依赖在它被链接的地方都会链接，
+被某个已链接的 nshm 依赖的 nshm 也会链接，不论应用自己的条目怎么写。
+
 [CLI：nsh add](./cli.md#nsh-add) 介绍了每种来源写法；[nsh upgrade](./cli.md#nsh-upgrade) 和 [nsh remove](./cli.md#nsh-remove) 介绍了其他命令。
 
 ## nsh-extra
@@ -145,8 +171,10 @@ nsh add nsh-extra --features camera
 | Feature | TSX | 作用 |
 |---|---|---|
 | `camera` | `Camera` | 在 iOS 和 Android 上用系统相机拍一张照片 |
+| `location` | `Location` | 在用户允许后读取设备位置，支持 macOS、iOS 和 Web |
 | `photos` | `Photos` | 在用户允许后读取 iOS 上用户最近的照片 |
 | `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知，在 Android 上通过该服务的绑定接收 |
+| `share` | `Share` | 在 iOS、Android、macOS 和 Web 上把文本、链接或本地文件交给系统的分享面板 |
 | `speech` | `Speech` | 在 macOS、iOS、Android、Windows 和 Web 上把用户说的话随说随转成文字 |
 
 ```tsx
@@ -160,6 +188,38 @@ if (await Camera.available()) {
 ```
 
 用户取消时 `takePhoto` 返回 `null`；用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。应用可以在同一次点按里关掉 sheet 并请求拍照：相机会在 sheet 关好之后出现。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
+
+### Location
+
+`Location` 在用户允许后读取设备的位置：用 `current` 读一次，或用 `watch` 在位置变化时持续收到，形式和浏览器的 `navigator.geolocation` 一致。macOS 和 iOS 用 CoreLocation 读取，Web 用浏览器的 `navigator.geolocation`；应用第一次读取时，系统或浏览器会询问用户。只在应用使用期间读取，不支持后台定位。
+
+```sh
+nsh add nsh-extra --features location
+```
+
+```tsx
+import { Location } from "nsh-extra";
+
+if (await Location.available()) {
+  const position = await Location.current({ accuracy: "high", timeout: 10_000 });
+  showOnMap(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+
+  const stop = Location.watch(
+    (position) => moveMarker(position.coords),
+    (error) => showError(error.code),
+    { distanceFilter: 10 },
+  );
+  // 之后调用 stop()；启动它的组件销毁时也会停止。
+}
+```
+
+- `available()` 在打包时开启了该 feature 的 macOS、iOS 应用，以及有 `navigator.geolocation` 的浏览器中为 `true`；在 Android、Windows、Linux、终端、headless 运行，以及以裸二进制运行的 Apple 应用（`nsh run --target macos`，没有 `Info.plist`，系统不会询问）中为 `false`。
+- `authorization()` 不询问用户，直接给出当前允许的范围：`"notDetermined"`、`"whenInUse"`、`"always"`、`"denied"` 或 `"restricted"`。Web 只有 `"whenInUse"`（已允许）、`"denied"` 和 `"notDetermined"`（会询问）。`requestAuthorization()` 询问用户并给出回答；读取时会自动询问，只在想自己决定询问时机时才需要先调用。
+- `current({ accuracy, timeout })` 给出一个 `Position`（`coords.latitude`、`longitude`、以米为单位的 `accuracy`、`altitude`、`altitudeAccuracy`、`heading`、`speed`，设备不知道的为 `null`；以及自 epoch 起的毫秒数 `timestamp`）。`accuracy` 可以是 `"best"`、`"high"`、`"balanced"`（默认）或 `"low"`。
+- `watch(listener, onError?, { accuracy, distanceFilter })` 每有新位置就调用 `listener`，返回一个停止它的函数。`onError` 收到使 watch 结束的错误。
+- 读取失败时得到一个 `Error`，其 `code` 为 `"EACCES"`（用户不允许）、`"ETIMEDOUT"`（`timeout` 内没有结果）、`"ERR_POSITION_UNAVAILABLE"`（设备找不到位置）或 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`（这里读不到位置）；选项超出范围时抛出 `RangeError`。
+
+该 feature 会在 iOS 和 macOS 应用的 `Info.plist` 中加入 `NSLocationWhenInUseUsageDescription`，并为沙盒化的 macOS 应用加入定位 entitlement。Rust 代码使用 `nsh_extra::location`：`available()`、`authorization().await`、`request_authorization().await`、`current(LocationRequest).await`，以及 `watch(LocationRequest)`，它的 `next().await` 给出每个位置（丢弃即停止）。
 
 ### Photos
 
@@ -278,6 +338,130 @@ function closeConversation(threadId: string) {
 - 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
 开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
+
+### Share
+
+`Share` 把文本、链接或本地文件交给系统的分享面板，由用户继续发送：发给另一个应用、消息、邮件、AirDrop 或存成文件。iOS 上是 `UIActivityViewController`，Android 上是 `Intent.ACTION_SEND` 的选择器，macOS 上是分享菜单（`NSSharingServicePicker`），浏览器里是 `navigator.share`。
+
+```sh
+nsh add nsh-extra --features share
+```
+
+```ts
+const Share: {
+  available(): Promise<boolean>;
+  show(content: ShareContent): Promise<ShareResult>;
+};
+
+interface ShareContent {
+  title?: string; // 主题（邮件的主题行），面板有标题时也是它的标题
+  text?: string;
+  url?: string; // 链接：http(s)、mailto、应用自己的 scheme
+  files?: string[]; // 本地文件的绝对路径，或 `${dataDir}/…`（最多 100 个）
+  anchor?: ViewRef; // 面板是 popover 时（iPad、macOS）指向的视图
+}
+
+interface ShareResult {
+  action: "shared" | "dismissed";
+  target: string | null; // 用户分享到了哪里，用平台给的名字
+}
+```
+
+一个旅行计划应用从分享按钮分享行程：
+
+```tsx
+import { Text, View, type ViewRef } from "nsh";
+import { Share } from "nsh-extra";
+
+function ShareButton(props: { trip: string }) {
+  let button: ViewRef | undefined;
+  const share = async () => {
+    try {
+      const { action } = await Share.show({
+        title: "Weekend in Kyoto",
+        url: `https://example.com/trips/${props.trip}`,
+        anchor: button,
+      });
+      if (action === "shared") console.log("shared");
+    } catch (e) {
+      console.warn("cannot share", e);
+    }
+  };
+  return (
+    <View ref={button} role="button" accessibilityLabel="Share" onPress={share}>
+      <Text>Share</Text>
+    </View>
+  );
+}
+```
+
+- `show` 以用户的操作 resolve：`"shared"`，带上用户分享到的 `target`（iOS 上是 activity type，Android 上是应用的包名，macOS 上是服务的标题，平台不告诉时为 `null`）；或 `"dismissed"`，表示用户关掉了面板。关掉面板是用户的回答，不是失败。`"shared"` 的含义以平台能知道的为准：iOS 上目标已完成分享（取消的邮件为 `"dismissed"`）；macOS 上服务报告已完成，或服务没有报告结果而用户回到了弹出菜单的窗口（拷贝、加入列表之后，邮件草稿仍开着时也算），服务报告取消、或没有报告且用户十分钟内没有回来时为 `"dismissed"`；Android 上用户选了一个应用，Android 不告诉该应用之后做了什么；Web 上 `navigator.share` 已 resolve。
+- `show` 在以下情况 reject：`text`、`url`、`files` 一个都没有（空文本视同没有），或 URL 解析不了、会运行代码（`javascript:`）、指向本地文件（`file:`；请用 `files` 分享）时为 `TypeError`；超过 100 个文件、文本或标题超过 1 MiB、URL 超过 16 KiB 时为 `RangeError`；`capabilities.fs.read` 没有授予的文件为 `ERR_ACCESS_DENIED`，不存在的文件为 `ENOENT`，文件夹为 `EISDIR`；没有分享面板的地方，或平台不分享的内容（Android 应用自有存储之外的文件、浏览器里的文件、浏览器在此不允许分享或仍在显示之前那次分享的面板）为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`。
+- 面板打开时再调用 `show`，之前的 promise 立即 resolve 为 `"dismissed"`。iOS 和 macOS 上新面板取代旧面板；Android 和 Web 上旧面板留到用户关掉为止，旧面板打开期间浏览器拒绝新的分享。
+- iPad 和 macOS 上面板是 popover：把打开它的视图（分享按钮，可以在页面、标题栏、对话框或另一个窗口里）交给 `anchor`，没有时显示在窗口中央。
+- 应用的能力授予了分享时，iOS、Android、macOS（AppKit 窗口）以及提供 `navigator.share` 且页面允许 `web-share` 的浏览器里 `available()` resolve 为 `true`；Windows、Linux、GPUI 窗口、终端应用，以及测试作答之前的无界面运行中为 `false`，此时 `show` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject，应用可以提供别的方式（比如复制链接）。
+- 声明了 `"capabilities"` 的应用用 [`"share": true`](./sandbox-and-capabilities.md#share) 授予 `Share`，分享的每个文件也要能被 `fs.read` 读取。没有授予时 `available()` resolve 为 `false`，`show` 以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"share"`。
+
+| 平台 | 分享面板 | 文件 |
+|---|---|---|
+| iOS | `UIActivityViewController`；iPad 上是 popover | 应用能读的任何文件 |
+| Android | `ACTION_SEND` 的选择器（多个文件时 `ACTION_SEND_MULTIPLE`） | 应用自己存储中的文件（`process.dataDir`、缓存），以 `content:` URI 分享 |
+| macOS | 分享菜单 `NSSharingServicePicker` | 应用能读的任何文件 |
+| Web | 浏览器提供的 `navigator.share`，且页面允许 `web-share` | 文本和链接 |
+
+这个 feature 不需要任何声明。iOS 上，应用说明了写入相册的理由时，面板才提供把图片存到“照片”：在 `ios.infoPlist` 中写 `NSPhotoLibraryAddUsageDescription`（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）。
+
+Rust 代码使用 `nsh_extra::share`：`show(ShareRequest).await` 以 `ShareOutcome`（`action` 是 `ShareAction`，以及 `target`）或 `ShareError`（`code`、`message`）结束，`available().await` 告诉这里能否显示面板。
+
+| TS | Rust |
+|---|---|
+| `await Share.available()` | `available().await -> bool` |
+| `await Share.show(content)` | `show(request).await -> Result<ShareOutcome, ShareError>` |
+| `title`、`text`、`url`、`files` | `ShareRequest::new().title(..).text(..).url(..).file(..)` |
+| `anchor` | `.anchor(&element_ref)` |
+| `result.action`、`.target` | `outcome.action`（`ShareAction`）、`outcome.target` |
+| `error.code` | `error.code` |
+
+```rust
+use nsh_core::prelude::*;
+use nsh_extra::share::{self, ShareAction, ShareRequest};
+
+fn share_button(trip: &'static str) -> impl IntoElement {
+    let button = element_ref();
+    view()
+        .element_ref(&button)
+        .role(AccessibilityRole::Button)
+        .accessibility_label("Share")
+        .on_press(move || {
+            let request = ShareRequest::new()
+                .title("Weekend in Kyoto")
+                .url(format!("https://example.com/trips/{trip}"))
+                .anchor(&button);
+            spawn(async move {
+                match share::show(request).await {
+                    Ok(outcome) if outcome.action == ShareAction::Shared => log::info!("shared"),
+                    Ok(_) => {}
+                    Err(error) => log::warn!("cannot share: {error}"),
+                }
+            });
+        })
+        .child(text("Share"))
+}
+```
+
+在 `nsh test`（以及 `nsh_testing::Headless`）中，分享交给模块的模拟分享面板，它的名称是 `"nsh-extra/share"`。测试作答之前没有面板：`available()` resolve 为 `false`，`show` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject。测试通过 [`app.fake`](./testing-and-trace.md)（Rust 中是 `Headless::call_fake`）代替用户作答：
+
+| 方法 | `args` | 作用和回答 |
+|---|---|---|
+| `answer` | `[{ action, target }]` | 这次运行从此有分享面板，用户按它回答每次分享：`"shared"`（有 `target` 时分享到它）或 `"dismissed"`。resolve 为 `null`。 |
+| `hold` | `[]` | 这次运行从此有分享面板，用户让每个面板都开着：下一次分享把它回答为 `"dismissed"`。resolve 为 `null`。 |
+| `shares` | `[]` | resolve 为应用分享过的内容，按顺序：`[{ title, text, url, files, anchored }]`（没给的为 `null`，`files` 是真实路径，`anchored` 表示面板是否指向这次分享的 `anchor`）。 |
+
+```tsx
+await app.fake("nsh-extra/share", "answer", [{ action: "shared", target: "com.apple.UIKit.activity.Mail" }]);
+await app.press("label:Share");
+expect(await app.fake("nsh-extra/share", "shares")).toHaveLength(1);
+```
 
 ### Speech
 
@@ -501,7 +685,7 @@ pub fn Gauge(props: GaugeProps) -> impl IntoElement {
 }
 ```
 
-nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-core = "0.6"`），`nsh add` 在编译前会与当前 `nsh` 比对。它的 TypeScript 声明由 Rust 类型生成，应用检查 TSX 时会像检查自己的 crate 一样检查对它的使用。
+nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-core = "0.6"`，或用 `nsh-core.workspace = true` 沿用工作区的要求），`nsh add` 在编译前会与当前 `nsh` 比对。在 Cargo 工作区里开发的 nshm 会像 Cargo 一样从工作区取得版本号和这项要求；它本身就是工作区的根 package 时，取自它自己的清单。它的 TypeScript 声明由 Rust 类型生成，应用检查 TSX 时会像检查自己的 crate 一样检查对它的使用。
 
 [nsh-omarchy 的 `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) 是一个完整的例子：它的组件由 `#[native_module("nsh-omarchy")]` 导出给 TSX，另有 `Omarchy` 主题模块。
 
@@ -543,6 +727,25 @@ crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStri
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 
+### 在 Rust 中显示系统界面和交出文件
+
+显示系统界面（选择器、分享面板、菜单）或把文件交给系统的模块，使用与 NSH 自己的模块相同的公开扩展点，因此行为也一致：
+
+| 需要 | 扩展点 |
+|---|---|
+| 检查应用传入的文件路径，规则与 `fs/promises` 读取相同 | `sys.readable_file(path)`（`sys: System` 参数）：在 `capabilities.fs.read` 内或用户粘贴、拖入的文件时返回真实路径，否则为 `ERR_ACCESS_DENIED`、`ENOENT`、文件夹为 `EISDIR`，Web 上为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
+| 在什么之上弹出（iOS） | `run_on_main_thread` 任务里的 `nsh_platform_ios::presenting_controller(mtm)`（[iOS](./ios.md#在-rust-中弹出视图)） |
+| 从哪里显示（macOS） | `run_on_main_thread` 任务里的 `nsh_platform_macos::presenting_view(mtm)`（[macOS](./macos.md#在-rust-中显示系统界面)） |
+| 在什么之上显示（Android） | `run_on_main_thread` 任务里的 `nsh::presenting_activity(env)`（[Android](./android.md#在-rust-中显示系统界面)） |
+| 拥有它的窗口（Windows、Linux） | `run_on_main_thread` 任务里 `nsh_platform_windows`（`HWND`）或 `nsh_platform_linux`（`gtk::Window`）的 `presenting_window()`（[Windows](./windows.md#在-rust-中显示系统界面)、[Linux](./linux.md#在-rust-中显示系统界面)） |
+| 某个元素的视图，供属于它的 popover 或菜单使用 | `native_view`，传入元素 `ref` 的节点（`NodeRef` 参数）：`nsh_platform_ios` 或 `nsh_platform_macos` 的 `native_view(mtm, node)`，Android 上的 `nsh::native_view(env, node)`，`nsh_platform_linux::native_view(node)`；Windows 上 NSH 自己绘制元素，用 `nsh_platform_windows::element_bounds(node)`：元素所在的窗口和它在其中的边界 |
+| 启动另一个应用并取回结果（Android） | `nsh::activity::start_for_result`（[Android](./android.md#在-rust-中启动-activity)） |
+| 让另一个应用读取应用存储中的文件（Android） | `nsh::activity::content_uri(env, path)` |
+| Java 监听器或回调（Android） | `nsh::proxy::implement`（[Android](./android.md#用-rust-实现-java-监听器)） |
+| API 以广播作答（Android） | `nsh::receiver::register(env, action, handler)`（[Android](./android.md#在-rust-中接收广播)） |
+
+先检查路径再交出：应用无权读取的文件不会到达另一个应用。原生视图和窗口只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的视图。在没有这些扩展点的嵌入后端（GPUI）下，视图和窗口为 `None`，模块应退回其他做法或报告该界面不可用。
+
 ### 封装原生 SDK
 
 封装 Apple SDK 的 nshm 在 `#[cfg(target_os = "ios")]` 或 `#[cfg(target_os = "macos")]` 下从 Rust 调用它。通过 `objc2` 系列 crate 使用的系统 framework 无需更多设置。厂商预编译的库（`.xcframework` 或 `.a`）由 nshm 自己的 `build.rs` 链接：Cargo 会把所有依赖的 `rustc-link-lib` 和 `rustc-link-search` 传给应用的可执行文件，应用本身不用写任何配置，NSH 也没有按平台的 SDK 设置。
@@ -570,6 +773,7 @@ fn main() {
 - 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
 - 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
 - NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。
+- 许可证要求用户能替换的库（LGPL，例如 libmpv）只能动态链接，由应用自己携带；NSH 的打包没有对应设置。像上面那样在 nshm 的 `build.rs` 里链接它（`rustc-link-lib=framework=…`、`rustc-link-search=framework=…`）。可执行文件的运行路径写在应用的 `.cargo/config.toml` 里（在 `[target.aarch64-apple-darwin]` 下写 `rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<framework 所在目录>"]`），因为 crate 的 `rustc-link-arg` 到不了 `nsh run`、`nsh check`、`nsh test`。`nsh package --target macos` 之后，把 framework 复制到应用的 `Contents/Frameworks/`，用 `install_name_tool -delete_rpath` 去掉开发时的运行路径，再按先 framework、后应用的顺序，用打包时的身份重新签名（`codesign --force --sign <身份> --options runtime --entitlements <应用的 entitlements>`，ad hoc 包用 `--sign -`），最后用 `codesign --verify --deep --strict` 检查。
 - 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。NSH 同样不会把共享库（`.so`、`.dll`）放进包里；请优先使用 SDK 的静态版本。
 
 ### TSX nshm
@@ -606,7 +810,7 @@ Rust nshm 也可以导出 TSX：在 `Cargo.toml` 旁放一个带同样 `"exports
 
 ### 依赖
 
-nshm 在自己的 `nsh.json` 的 `"dependencies"` 中列出需要的 nshm，写法与应用相同：来自 crates.io 或 Git，版本要求尽量宽到它能工作的范围，这样应用和它用到的其他 nshm 才能协调出同一个版本。已发布的 nshm 不能依赖本地目录。某个包从哪里来由应用自己的条目决定：应用可以从 fork 或本地目录取它的 nshm 所依赖的 nshm，而这些 nshm 的版本要求依然有效。
+nshm 在自己的 `nsh.json` 的 `"dependencies"` 中列出需要的 nshm，写法与应用相同：来自 crates.io 或 Git，版本要求尽量宽到它能工作的范围，这样应用和它用到的其他 nshm 才能协调出同一个版本。已发布的 nshm 不能依赖本地目录，也不能写 `"targets"`：链接到哪些 target 由应用决定（[使用 nshm](#使用-nshm)）。某个包从哪里来由应用自己的条目决定：应用可以从 fork 或本地目录取它的 nshm 所依赖的 nshm，而这些 nshm 的版本要求依然有效。
 
 ## 平台 nshm
 
@@ -620,4 +824,4 @@ nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.jso
 
 ## 安全
 
-nshm 的构建脚本和过程宏会在应用构建时执行，它的代码（无论 Rust 还是 TSX）以应用的权限运行。应用依赖图里的任何 crate 还能通过 `[package.metadata.nsh]` 给打包的应用加系统权限、清单组件、Java 库和 Android 库（连同其中的原生代码）以及 entitlements。请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。
+nshm 的构建脚本和过程宏会在应用构建时执行，它的代码（无论 TSX 还是 Rust）以应用的权限运行。应用依赖图里的任何 crate 还能通过 `[package.metadata.nsh]` 给打包的应用加系统权限、清单组件、Java 库和 Android 库（连同其中的原生代码）以及 entitlements。请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。

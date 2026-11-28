@@ -58,12 +58,14 @@
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
+    ptr::NonNull,
     rc::{Rc, Weak},
 };
 
+use block2::RcBlock;
 use nsh_core::{
     Bounds, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points, SubmitBehavior,
-    TextAlign,
+    TextAlign, ViewKind,
     geometry::{Point, Size, px},
     tailwind::state,
     text_edit::{char_len, clip_chars},
@@ -75,20 +77,24 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSDragOperation,
-    NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventPhase, NSEventType, NSFocusRingType,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSGestureRecognizer,
-    NSGestureRecognizerState, NSLineBreakMode, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollElasticity, NSScrollView,
-    NSSecureTextField, NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField,
-    NSTextFieldDelegate, NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate,
-    NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
+    NSAccessibilityConfirmAction, NSApplication, NSBorderType, NSCell, NSColor, NSControl,
+    NSControlTextEditingDelegate, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags,
+    NSEventPhase, NSEventType, NSFocusRingType, NSFontAttributeName,
+    NSForegroundColorAttributeName, NSGestureRecognizer, NSGestureRecognizerState, NSLineBreakMode,
+    NSMutableParagraphStyle, NSParagraphStyle, NSParagraphStyleAttributeName, NSPasteboard,
+    NSResponder, NSScrollElasticity, NSScrollView, NSSecureTextField, NSSecureTextFieldCell,
+    NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldCell,
+    NSTextFieldDelegate, NSTextInputClient, NSTextStorage, NSTextStorageDelegate,
+    NSTextStorageEditActions, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView,
+    NSWritingDirection,
 };
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGPath;
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint,
-    NSRange, NSRect, NSString, NSUndoManager,
+    NSAlignmentOptions, NSArray, NSAttributedString, NSDictionary, NSMutableDictionary,
+    NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect,
+    NSString, NSUndoManager, NSUndoManagerDidRedoChangeNotification,
+    NSUndoManagerDidUndoChangeNotification,
 };
 use objc2_quartz_core::{CALayer, CAShapeLayer};
 
@@ -120,13 +126,28 @@ impl Editor {
         &self,
         fallback: Option<&Retained<NSUndoManager>>,
     ) -> Option<Retained<NSUndoManager>> {
-        let Editor::Area { view, storage, .. } = self else {
-            return None;
-        };
-        let manager = view.undoManager().or_else(|| fallback.cloned())?;
-        // SAFETY: AppKit registers text undo operations with the text storage as target.
-        unsafe { manager.removeAllActionsWithTarget(storage) };
-        Some(manager)
+        match self {
+            Editor::Area { view, storage, .. } => {
+                let manager = view.undoManager().or_else(|| fallback.cloned())?;
+                // SAFETY: AppKit registers text undo operations with the text storage as target.
+                unsafe { manager.removeAllActionsWithTarget(storage) };
+                Some(manager)
+            }
+            // A field has undo records only while the window's field editor
+            // edits it; they target that editor's text storage.
+            Editor::Line { field, .. } => {
+                let view = field.currentEditor()?.downcast::<NSTextView>().ok()?;
+                let manager = view.undoManager()?;
+                // SAFETY: the field editor's own text storage (an assign
+                // property, retained here while used), which AppKit
+                // registers its text undo operations with as target.
+                unsafe {
+                    let storage = view.textStorage()?;
+                    manager.removeAllActionsWithTarget(&storage);
+                }
+                None
+            }
+        }
     }
 
     /// The view hosted in the input's view.
@@ -357,6 +378,10 @@ pub(crate) struct InputState {
     editing: Cell<bool>,
     /// A field is taking the focus.
     focusing: Cell<bool>,
+    /// `config` is restyling a field. A new placeholder makes AppKit end
+    /// editing and start it again in the same field (#3028): that end is
+    /// not a blur.
+    restyling: Cell<bool>,
     /// The modifiers of the key a text view is handling (its commands do
     /// not say which were held).
     key_mods: Cell<NSEventModifierFlags>,
@@ -631,12 +656,12 @@ impl Ctx {
         input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert
     }
 
-    /// Whether the editor offers Paste for what a text view's own paste
-    /// leaves out (images, files), while the app listens to pastes.
+    /// Whether the editor offers Paste while the app listens to pastes
+    /// (`onPaste`), whenever the pasteboard holds any type (including
+    /// images, files and app-custom types).
     fn pastes_more(&self) -> bool {
         self.get().is_some_and(|(_, view, _)| {
-            view.state().events.contains(EventKind::Paste)
-                && crate::system::has_pasted_files(&NSPasteboard::generalPasteboard())
+            pastes_for_events(view.state().events, &NSPasteboard::generalPasteboard())
         })
     }
 
@@ -702,12 +727,8 @@ impl Ctx {
         }
     }
 
-    /// Return submitted the input (`blur`: and unfocuses it).
-    fn submitted(&self, blur: bool) {
-        let Some(input) = self.input.upgrade() else {
-            return;
-        };
-        self.key_press("Enter");
+    /// Submits the input's live draft value (`blur`: and unfocuses it).
+    fn submit_editing(&self, input: &InputState, blur: bool) {
         let text = input.editor.borrow().text();
         let count = input.count.get();
         self.send(EventKind::SubmitEditing, || EventPayload::Text {
@@ -716,6 +737,100 @@ impl Ctx {
         });
         if blur {
             self.unfocus();
+        }
+    }
+
+    /// Return submitted the input (`blur`: and unfocuses it).
+    fn submitted(&self, blur: bool) {
+        let Some(input) = self.input.upgrade() else {
+            return;
+        };
+        self.key_press("Enter");
+        self.submit_editing(&input, blur);
+    }
+
+    /// Whether a semantic accessibility `AXConfirm` action can submit this
+    /// input right now: focused, enabled, editable, targetable inside the
+    /// active focus scope, and configured with a submit behavior.
+    fn can_confirm(&self) -> bool {
+        let Some((surface, view, input)) = self.get() else {
+            return false;
+        };
+        let listens_submit = {
+            let Some(state) = view.try_state() else {
+                return false;
+            };
+            if state.props.accessibility.state.disabled {
+                return false;
+            }
+            state.events.contains(EventKind::SubmitEditing)
+        };
+        if !view.can_target()
+            || input.pad.isHidden()
+            || !view
+                .ns()
+                .isDescendantOf(&crate::navigation::focus_scope(&surface))
+        {
+            return false;
+        }
+        let Ok(config) = input.config.try_borrow() else {
+            return false;
+        };
+        if !config.editable {
+            return false;
+        }
+        let accepts_submit = match config.submit() {
+            SubmitBehavior::Submit => listens_submit,
+            SubmitBehavior::BlurAndSubmit => true,
+            SubmitBehavior::Newline => false,
+        };
+        drop(config);
+        if !accepts_submit {
+            return false;
+        }
+        let Ok(editor) = input.editor.try_borrow() else {
+            return false;
+        };
+        if !editor.focused() {
+            return false;
+        }
+        match &*editor {
+            Editor::Line { field, .. } => field.isEnabled() && field.isEditable(),
+            Editor::Area { view, .. } => view.isEditable(),
+        }
+    }
+
+    /// Handles semantic accessibility `AXConfirm` on this input, routing to
+    /// the same submit path as physical Return while keeping IME composition,
+    /// non-submit behaviors, and disabled/unfocused guards intact.
+    fn confirm(&self) -> bool {
+        if !self.can_confirm() {
+            return false;
+        }
+        let Some(input) = self.input.upgrade() else {
+            return false;
+        };
+        let behavior = input.config.borrow().submit();
+        let editing = input.editor.borrow().editing();
+        if let Some(text_view) = editing
+            .as_deref()
+            .and_then(|editor| editor.downcast_ref::<NSTextView>())
+            && text_view.hasMarkedText()
+        {
+            text_view.unmarkText();
+            self.composition_changed();
+            return true;
+        }
+        match behavior {
+            SubmitBehavior::Newline => false,
+            SubmitBehavior::Submit => {
+                self.submit_editing(&input, false);
+                true
+            }
+            SubmitBehavior::BlurAndSubmit => {
+                self.submit_editing(&input, true);
+                true
+            }
         }
     }
 
@@ -944,7 +1059,7 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
             && (if crate::view::is_ours(&next) {
                 NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view))
             } else {
-                held_seen(&next)
+                held_seen(&next) && held_stop(&next)
             })
             && !from.isDescendantOf(&next)
         {
@@ -963,6 +1078,26 @@ fn held_seen(view: &NSView) -> bool {
     while let Some(ns) = at {
         if let Some(view) = NshView::from_ns(&ns) {
             return view.seen_by_keys();
+        }
+        at = crate::view::superview(&ns);
+    }
+    true
+}
+
+/// Whether a view of the key view loop that is not ours is a stop of Tab
+/// by the props of the input holding it: a disabled input, or one with
+/// `focusable: false`, is not (as [`nsh_core::ViewProps::focus_stop`]
+/// decides for views). A hosted view is a stop as AppKit says.
+fn held_stop(view: &NSView) -> bool {
+    let mut at = crate::view::superview(view);
+    while let Some(ns) = at {
+        // An input's pad, lifted to a host above transformed views
+        // (`place_pad`), is held by its input, not by that host.
+        if let Some(view) = pad_owner(&ns).or_else(|| NshView::from_ns(&ns)) {
+            let state = view.state();
+            return state.kind != ViewKind::Input
+                || (state.props.focusable != Some(false)
+                    && !state.props.accessibility.state.disabled);
         }
         at = crate::view::superview(&ns);
     }
@@ -1068,6 +1203,35 @@ macro_rules! define_field {
                     }
                 }
 
+                #[unsafe(method(isAccessibilitySelectorAllowed:))]
+                fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+                    if selector == sel!(accessibilityPerformConfirm) {
+                        self.ivars().get().is_some_and(Ctx::can_confirm)
+                    } else {
+                        // SAFETY: NSTextField's own answer.
+                        unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+                    }
+                }
+
+                #[unsafe(method(accessibilityPerformConfirm))]
+                fn accessibility_perform_confirm(&self) -> bool {
+                    self.ivars().get().is_some_and(Ctx::confirm)
+                }
+
+                #[unsafe(method(accessibilityPerformAction:))]
+                fn accessibility_perform_action(&self, action: &NSString) {
+                    if is_confirm_action(action) {
+                        if let Some(cx) = self.ivars().get() {
+                            let _ = cx.confirm();
+                        }
+                    } else {
+                        // SAFETY: NSTextField's own handling of other actions.
+                        let _: () = unsafe {
+                            msg_send![super(self), accessibilityPerformAction: action]
+                        };
+                    }
+                }
+
                 #[unsafe(method(becomeFirstResponder))]
                 fn become_first_responder(&self) -> bool {
                     // AppKit selects the whole text as the field takes the
@@ -1117,9 +1281,15 @@ macro_rules! define_field {
                     // SAFETY: NSTextField's own handling of its field
                     // editor's end (it implements NSTextDelegate).
                     let _: () = unsafe { msg_send![super(self), textDidEndEditing: notification] };
-                    if let Some(cx) = self.ivars().get() {
-                        cx.focus_changed(false);
+                    let Some(cx) = self.ivars().get() else {
+                        return;
+                    };
+                    // A restyle restarts editing without a new
+                    // `becomeFirstResponder`: the field keeps the focus.
+                    if cx.input.upgrade().is_some_and(|input| input.restyling.get()) {
+                        return;
                     }
+                    cx.focus_changed(false);
                 }
 
                 #[unsafe(method(textView:shouldChangeTextInRange:replacementString:))]
@@ -1206,6 +1376,7 @@ define_field!(
 define_field!(
     SecureField,
     "NshSecureTextField",
+    cell = SecureFieldCell,
     NSSecureTextField,
     NSTextField,
     NSControl,
@@ -1475,8 +1646,8 @@ define_text_view!(
             }
         }
 
-        /// Paste is offered for images and files too while the app
-        /// listens; Copy for text selected around the input.
+        /// Paste is offered for any pasteboard type while the app listens;
+        /// Copy for text selected around the input.
         #[unsafe(method(validateUserInterfaceItem:))]
         fn validate(&self, item: &ProtocolObject<dyn NSValidatedUserInterfaceItem>,
         ) -> objc2::runtime::Bool {
@@ -1491,8 +1662,43 @@ define_text_view!(
             // SAFETY: NSTextView's own method.
             unsafe { msg_send![super(self), validateUserInterfaceItem: item] }
         }
+
+        #[unsafe(method(isAccessibilitySelectorAllowed:))]
+        fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+            if selector == sel!(accessibilityPerformConfirm) {
+                self.ivars().get().is_some_and(Ctx::can_confirm)
+            } else {
+                // SAFETY: NSTextView's own answer.
+                unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+            }
+        }
+
+        #[unsafe(method(accessibilityPerformConfirm))]
+        fn accessibility_perform_confirm(&self) -> bool {
+            self.ivars().get().is_some_and(Ctx::confirm)
+        }
+
+        #[unsafe(method(accessibilityPerformAction:))]
+        fn accessibility_perform_action(&self, action: &NSString) {
+            if is_confirm_action(action) {
+                if let Some(cx) = self.ivars().get() {
+                    let _ = cx.confirm();
+                }
+            } else {
+                // SAFETY: NSTextView's own handling of other actions.
+                let _: () = unsafe { msg_send![super(self), accessibilityPerformAction: action] };
+            }
+        }
     }
 );
+
+/// Whether Paste is enabled on behalf of a view's event listeners: true
+/// when `events` includes `EventKind::Paste` and `pasteboard` holds at
+/// least one type (so custom types, images and files enable Paste even
+/// when `NSTextView` cannot read them itself).
+fn pastes_for_events(events: nsh_core::EventMask, pasteboard: &NSPasteboard) -> bool {
+    events.contains(EventKind::Paste) && crate::system::has_pasted_types(pasteboard)
+}
 
 /// The surface of text area `area`, for its drags.
 fn area_surface(area: &TextArea) -> Option<Rc<Surface>> {
@@ -1729,8 +1935,8 @@ define_text_view!(
             }
         }
 
-        /// Paste is offered for images and files too while the app
-        /// listens; Copy for text selected around the input.
+        /// Paste is offered for any pasteboard type while the app listens;
+        /// Copy for text selected around the input.
         #[unsafe(method(validateUserInterfaceItem:))]
         fn validate(&self, item: &ProtocolObject<dyn NSValidatedUserInterfaceItem>,
         ) -> objc2::runtime::Bool {
@@ -1745,6 +1951,33 @@ define_text_view!(
             // SAFETY: NSTextView's own method.
             unsafe { msg_send![super(self), validateUserInterfaceItem: item] }
         }
+
+        #[unsafe(method(isAccessibilitySelectorAllowed:))]
+        fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+            if selector == sel!(accessibilityPerformConfirm) {
+                field_ctx(self).is_some_and(|cx| cx.can_confirm())
+            } else {
+                // SAFETY: NSTextView's own answer.
+                unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+            }
+        }
+
+        #[unsafe(method(accessibilityPerformConfirm))]
+        fn accessibility_perform_confirm(&self) -> bool {
+            field_ctx(self).is_some_and(|cx| cx.confirm())
+        }
+
+        #[unsafe(method(accessibilityPerformAction:))]
+        fn accessibility_perform_action(&self, action: &NSString) {
+            if is_confirm_action(action) {
+                if let Some(cx) = field_ctx(self) {
+                    let _ = cx.confirm();
+                }
+            } else {
+                // SAFETY: NSTextView's own handling of other actions.
+                let _: () = unsafe { msg_send![super(self), accessibilityPerformAction: action] };
+            }
+        }
     }
 );
 
@@ -1753,13 +1986,56 @@ fn editor_surface(editor: &FieldEditor) -> Option<Rc<Surface>> {
     field_ctx(editor)?.surface.upgrade()
 }
 
+/// The input context of an `NshTextField` or `NshSecureTextField`.
+fn field_ctx_of(object: &AnyObject) -> Option<Ctx> {
+    if let Some(field) = object.downcast_ref::<TextField>() {
+        field.ivars().get().cloned()
+    } else if let Some(field) = object.downcast_ref::<SecureField>() {
+        field.ivars().get().cloned()
+    } else {
+        None
+    }
+}
+
 /// The input of the field `editor` edits (its delegate, while it edits).
 fn field_ctx(editor: &FieldEditor) -> Option<Ctx> {
     let delegate = editor.delegate()?;
     let object: &AnyObject = ProtocolObject::as_ref(&*delegate);
-    object
-        .downcast_ref::<TextField>()
-        .and_then(|field| field.ivars().get().cloned())
+    field_ctx_of(object)
+}
+
+/// The input of the field that owns `cell`.
+fn cell_ctx(cell: &NSCell) -> Option<Ctx> {
+    // SAFETY: `controlView` is an AppKit getter on the main thread.
+    let view = unsafe { cell.controlView() }?;
+    field_ctx_of(&view)
+}
+
+/// Whether `action` is AppKit's semantic `AXConfirm` action.
+fn is_confirm_action(action: &NSString) -> bool {
+    // SAFETY: immutable AppKit accessibility action constant.
+    action == unsafe { NSAccessibilityConfirmAction }
+}
+
+/// Filters `AXConfirm` from `actions` when `allowed` is false, or ensures it
+/// is advertised when `allowed` is true.
+fn confirm_actions(
+    actions: Option<Retained<NSArray<NSString>>>,
+    allowed: bool,
+) -> Retained<NSArray<NSString>> {
+    // SAFETY: immutable AppKit accessibility action constant.
+    let confirm = unsafe { NSAccessibilityConfirmAction };
+    let mut out: Vec<Retained<NSString>> = actions
+        .map(|list| {
+            list.iter()
+                .filter(|action| allowed || &**action != confirm)
+                .collect()
+        })
+        .unwrap_or_default();
+    if allowed && !out.iter().any(|action| &**action == confirm) {
+        out.push(Retained::from(confirm));
+    }
+    NSArray::from_retained_slice(&out)
 }
 
 /// A paste into the field `editor` edits: [`Ctx::pasting`].
@@ -1767,30 +2043,173 @@ fn field_editor_pasting(editor: &FieldEditor, pasteboard: &NSPasteboard) -> bool
     field_ctx(editor).is_none_or(|cx| cx.pasting(pasteboard))
 }
 
-define_class!(
-    /// The cell of a single-line input's field: its field editor is NSH's
-    /// ([`FieldEditor`]), one per window as AppKit's own, which reports
-    /// pastes. AppKit makes the cells (`cellClass`): no ivars.
-    #[unsafe(super(objc2_app_kit::NSTextFieldCell, objc2_app_kit::NSActionCell, objc2_app_kit::NSCell, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "NshFieldCell"]
-    struct FieldCell;
+/// Defines a single-line field cell (`NSTextFieldCell` or
+/// `NSSecureTextFieldCell`) that routes `AXConfirm` to [`Ctx::confirm`].
+macro_rules! define_field_cell {
+    ($name:ident, $objc:literal, { $($extra:tt)* }, $($super:path),+) => {
+        define_class!(
+            #[unsafe(super($($super),+))]
+            #[thread_kind = MainThreadOnly]
+            #[name = $objc]
+            struct $name;
 
-    unsafe impl NSObjectProtocol for FieldCell {}
+            unsafe impl NSObjectProtocol for $name {}
 
-    impl FieldCell {
+            impl $name {
+                $($extra)*
+
+                /// The idle cell's line is as tall as the font's ascent and
+                /// descent: the field is that tall. AppKit sets up the field
+                /// editor to add the font's leading to its line, so for a
+                /// font with leading (Arial) the editor is taller than the
+                /// field, and its clip view scrolls it up to the line's
+                /// bottom: the text would move up on focus. Laid out without
+                /// the leading, the editor's line is the cell's, its text at
+                /// the same baseline. Here, before AppKit sizes and places
+                /// the editor, which it sets up again for every edit.
+                #[unsafe(method_id(setUpFieldEditorAttributes:))]
+                fn set_up_field_editor_attributes(&self, text: &NSText) -> Retained<NSText> {
+                    // SAFETY: NSCell's own setup of the editor it returns.
+                    let text: Retained<NSText> =
+                        unsafe { msg_send![super(self), setUpFieldEditorAttributes: text] };
+                    if let Some(view) = text.downcast_ref::<NSTextView>()
+                        // SAFETY: AppKit's getter on the main thread.
+                        && let Some(layout) = unsafe { view.layoutManager() }
+                    {
+                        layout.setUsesFontLeading(false);
+                    }
+                    text
+                }
+
+                #[unsafe(method_id(accessibilityActionNames))]
+                fn accessibility_action_names(&self) -> Retained<NSArray<NSString>> {
+                    // SAFETY: NSTextFieldCell's own accessibility action names.
+                    let actions: Option<Retained<NSArray<NSString>>> =
+                        unsafe { msg_send![super(self), accessibilityActionNames] };
+                    let allowed = cell_ctx(self).is_some_and(|cx| cx.can_confirm());
+                    confirm_actions(actions, allowed)
+                }
+
+                #[unsafe(method(isAccessibilitySelectorAllowed:))]
+                fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+                    if selector == sel!(accessibilityPerformConfirm) {
+                        cell_ctx(self).is_some_and(|cx| cx.can_confirm())
+                    } else {
+                        // SAFETY: NSCell's own answer.
+                        unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
+                    }
+                }
+
+                #[unsafe(method(accessibilityPerformConfirm))]
+                fn accessibility_perform_confirm(&self) -> bool {
+                    cell_ctx(self).is_some_and(|cx| cx.confirm())
+                }
+
+                #[unsafe(method(accessibilityPerformAction:))]
+                fn accessibility_perform_action(&self, action: &NSString) {
+                    if is_confirm_action(action) {
+                        if let Some(cx) = cell_ctx(self) {
+                            let _ = cx.confirm();
+                        }
+                    } else {
+                        // SAFETY: NSTextFieldCell's own handling of other actions.
+                        let _: () = unsafe {
+                            msg_send![super(self), accessibilityPerformAction: action]
+                        };
+                    }
+                }
+            }
+        );
+    };
+}
+
+define_field_cell!(
+    FieldCell,
+    "NshFieldCell",
+    {
         #[unsafe(method_id(fieldEditorForView:))]
         fn field_editor_for_view(&self, view: &NSView) -> Option<Retained<NSTextView>> {
             let mtm = MainThreadMarker::from(self);
             view.window().map(|window| field_editor(mtm, &window))
         }
-    }
+    },
+    NSTextFieldCell,
+    objc2_app_kit::NSActionCell,
+    NSCell,
+    NSObject
+);
+
+define_field_cell!(
+    SecureFieldCell,
+    "NshSecureFieldCell",
+    {},
+    NSSecureTextFieldCell,
+    NSTextFieldCell,
+    objc2_app_kit::NSActionCell,
+    NSCell,
+    NSObject
 );
 
 thread_local! {
     /// The field editors of the windows, by window.
     static FIELD_EDITORS: RefCell<Vec<(objc2::rc::Weak<objc2_app_kit::NSWindow>, Retained<NSTextView>)>> =
         const { RefCell::new(Vec::new()) };
+}
+
+/// Reports the text an undo or redo changed in an input. AppKit's text
+/// views change their text without `textDidChange:` (nor a field's
+/// `controlTextDidChange:`) when the undo manager replays an edit, so JS
+/// would keep the text from before Command+Z. Observed once per process.
+fn observe_undo() {
+    thread_local! {
+        static OBSERVING: Cell<bool> = const { Cell::new(false) };
+    }
+    if OBSERVING.replace(true) {
+        return;
+    }
+    let block = RcBlock::new(|_: NonNull<NSNotification>| undo_replayed());
+    // SAFETY: immutable constants; undo managers post on the thread that
+    // undoes (here, the main one) and the observers are kept for the
+    // process (as the field editors and text views they report for).
+    unsafe {
+        let center = NSNotificationCenter::defaultCenter();
+        for name in [
+            NSUndoManagerDidUndoChangeNotification,
+            NSUndoManagerDidRedoChangeNotification,
+        ] {
+            let observer =
+                center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block);
+            std::mem::forget(observer);
+        }
+    }
+}
+
+/// After an undo or redo: the inputs being edited (the first responders of
+/// the windows) report their text if it is not what they reported last.
+fn undo_replayed() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    for window in NSApplication::sharedApplication(mtm).windows() {
+        let Some(responder) = window.firstResponder() else {
+            continue;
+        };
+        let cx = if let Some(editor) = responder.downcast_ref::<FieldEditor>() {
+            field_ctx(editor)
+        } else if let Some(area) = responder.downcast_ref::<TextArea>() {
+            area.ivars().get().cloned()
+        } else {
+            None
+        };
+        let Some(cx) = cx else { continue };
+        let Some(input) = cx.user_edit() else {
+            continue;
+        };
+        let text = input.editor.borrow().text();
+        if text != *input.known.borrow() {
+            cx.changed();
+        }
+    }
 }
 
 /// `window`'s field editor for inputs (made the first time).
@@ -1811,6 +2230,7 @@ fn field_editor(mtm: MainThreadMarker, window: &objc2_app_kit::NSWindow) -> Reta
         // SAFETY: the class is a subclass of NSTextView.
         let editor: Retained<NSTextView> = unsafe { Retained::cast_unchecked(editor) };
         editor.setFieldEditor(true);
+        observe_undo();
         editors.push((objc2::rc::Weak::from(window), editor.clone()));
         editor
     })
@@ -2092,6 +2512,30 @@ define_class!(
 
     unsafe impl NSTextFieldDelegate for InputDelegate {}
 
+    unsafe impl NSTextStorageDelegate for InputDelegate {
+        #[unsafe(method(textStorage:willProcessEditing:range:changeInLength:))]
+        fn storage_will_process_editing(
+            &self,
+            storage: &NSTextStorage,
+            actions: NSTextStorageEditActions,
+            range: NSRange,
+            _delta: isize,
+        ) {
+            if !actions.contains(NSTextStorageEditActions::EditedCharacters) || range.length == 0 {
+                return;
+            }
+            // AppKit replays attributed substrings. Fix only the restored text,
+            // before layout, even if another input now has the focus.
+            if let Some(input) = self.ivars().input.upgrade()
+                && input.undo_manager.borrow().as_ref().is_some_and(|m| m.isUndoing() || m.isRedoing())
+                && let Editor::Area { view, .. } = &*input.editor.borrow()
+                && let Some(style) = view.defaultParagraphStyle()
+            {
+                apply_storage_paragraph(storage, range, &style);
+            }
+        }
+    }
+
     unsafe impl NSTextDelegate for InputDelegate {
         #[unsafe(method(textDidChange:))]
         fn text_did_change(&self, _notification: &NSNotification) {
@@ -2358,6 +2802,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             pending_value: RefCell::new(None),
             editing: Cell::new(false),
             focusing: Cell::new(false),
+            restyling: Cell::new(false),
             key_mods: Cell::new(NSEventModifierFlags::empty()),
             anim_color: Cell::new(None),
             cx,
@@ -2367,9 +2812,11 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
 }
 
 thread_local! {
-    /// The text view the last wheel event reached, whether it passed the
-    /// event on, and the event's time (seconds).
-    static WHEEL_GESTURE: Cell<Option<(usize, bool, f64)>> = const { Cell::new(None) };
+    /// The text view the last wheel event reached, where its gesture goes
+    /// (`Some(true)`: around the input, `Some(false)`: the text, `None`:
+    /// not decided yet, the gesture has not moved), and the event's time
+    /// (seconds).
+    static WHEEL_GESTURE: Cell<Option<(usize, Option<bool>, f64)>> = const { Cell::new(None) };
 }
 
 /// Events of one wheel gesture come closer together than this (seconds).
@@ -2379,9 +2826,15 @@ const WHEEL_GAP: f64 = 0.15;
 /// text: while the surface scrolls (the pointer came over the input
 /// mid-scroll), for a gesture that began elsewhere, and for one beginning
 /// here that the text cannot take (`scrolls`).
+///
+/// A gesture is decided by its first move, as on the web: a trackpad's
+/// `MayBegin` / `Began` often carries no delta, and deciding there by
+/// overflow alone would keep every gesture on text already at its end.
+/// Until it moves, the gesture stays on the text; one the text cannot
+/// take then begins on the surface ([`crate::input::begin_gesture`]).
 fn wheel_to_host(
     text: &NSTextView,
-    surface: &Surface,
+    surface: &Rc<Surface>,
     event: &NSEvent,
     scrolls: impl Fn(CGFloat) -> bool,
 ) -> bool {
@@ -2394,28 +2847,39 @@ fn wheel_to_host(
         (owner == id && time - last < WHEEL_GAP).then_some(to_host)
     });
     let dy = event.scrollingDeltaY();
+    let moves = dy.abs() >= 0.01;
     let to_host = if crate::input::scrolling(surface, event) {
-        true
-    } else if starts {
-        // MayBegin / Began often carry a ~0 delta: only keep the gesture
-        // on the text when it actually overflows vertically.
-        if dy.abs() < 0.01 {
-            !text_overflows(text)
+        Some(true)
+    } else if starts || owned == Some(None) {
+        if !moves {
+            // Nothing to decide by yet: only text that overflows waits.
+            if text_overflows(text) {
+                None
+            } else {
+                Some(true)
+            }
+        } else if scrolls(dy) {
+            Some(false)
         } else {
-            !scrolls(dy)
+            // The surface gets this gesture from here: an undecided one
+            // began on the text, so the surface's begins now.
+            if owned == Some(None) && phase.contains(NSEventPhase::Changed) {
+                crate::input::begin_gesture(surface, event);
+            }
+            Some(true)
         }
     } else {
-        owned.unwrap_or(true)
+        owned.unwrap_or(Some(true))
     };
     WHEEL_GESTURE.set(Some((id, to_host, time)));
-    to_host
+    to_host.unwrap_or(false)
 }
 
 /// Whether a wheel `event` over the hosted view `native` scrolls the
 /// surface rather than an input's text: always over a single-line input,
 /// and over a multiline one unless its text takes the gesture
 /// ([`wheel_to_host`]). `false` for anything that is not an input.
-pub(crate) fn passes_wheel(surface: &Surface, native: &NSView, event: &NSEvent) -> bool {
+pub(crate) fn passes_wheel(surface: &Rc<Surface>, native: &NSView, event: &NSEvent) -> bool {
     if native.downcast_ref::<InputPad>().is_none() {
         return false;
     }
@@ -2524,6 +2988,7 @@ fn new_editor(
         view.setRichText(false);
         view.setImportsGraphics(false);
         view.setAllowsUndo(true);
+        observe_undo();
         view.setTextContainerInset(CGSize::new(0.0, 0.0));
         // SAFETY: the text view's own container.
         if let Some(container) = unsafe { view.textContainer() } {
@@ -2714,12 +3179,27 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     };
     match &editor {
         Editor::Line { field, .. } => {
+            let editing = field.currentEditor().is_some();
+            input.restyling.set(true);
             field.setFont(Some(&font));
             field.setTextColor(Some(&color));
             field.setAlignment(align);
             field.setBaseWritingDirection(direction);
             field.setEditable(config.editable);
-            field.setPlaceholderAttributedString(Some(&placeholder(config, &font, align)));
+            // Setting a placeholder on a field being edited ends editing
+            // and starts it again; only a changed one is set.
+            let hint = placeholder(config, &font, align);
+            if field
+                .placeholderAttributedString()
+                .is_none_or(|old| !old.isEqualToAttributedString(&hint))
+            {
+                field.setPlaceholderAttributedString(Some(&hint));
+            }
+            input.restyling.set(false);
+            if editing && field.currentEditor().is_none() {
+                // Editing did not start again: the focus left after all.
+                input.cx.focus_changed(false);
+            }
             if let Some(editor) = field.currentEditor() {
                 editor.setFont(Some(&font));
                 editor.setTextColor(Some(&color));
@@ -2729,8 +3209,17 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         Editor::Area {
             scroller,
             view: text,
-            ..
+            storage,
         } => {
+            let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
+            let style = paragraph(line, align, direction);
+            // Ordinary typing needs no storage delegate until an undo record
+            // can contain a paragraph style older than the current one.
+            if input.undo_manager.borrow().is_some()
+                && text.defaultParagraphStyle().as_deref() != Some(&*style)
+            {
+                storage.setDelegate(Some(ProtocolObject::from_ref(&*input.delegate)));
+            }
             // A built-in bar of the app's takes the indicator's place; the
             // text still scrolls with the wheel, the keys and the caret.
             scroller.setHasVerticalScroller(config.scrollbar_visible);
@@ -2756,8 +3245,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
             text.setAutomaticTextReplacementEnabled(
                 correct && NSSpellChecker::isAutomaticTextReplacementEnabled(),
             );
-            let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
-            text.setDefaultParagraphStyle(Some(&paragraph(line, align)));
+            apply_paragraph(text, storage, &style);
             // The space above the first line and below the last.
             text.setTextContainerInset(CGSize::new(0.0, line.inset));
             let label = &input.placeholder;
@@ -2942,16 +3430,61 @@ impl LineBox {
     }
 }
 
-/// A text view's paragraph style: alignment and lines.
-fn paragraph(line: LineBox, align: NSTextAlignment) -> Retained<NSMutableParagraphStyle> {
+/// A text view's paragraph style: alignment, writing direction and lines.
+fn paragraph(
+    line: LineBox,
+    align: NSTextAlignment,
+    direction: NSWritingDirection,
+) -> Retained<NSMutableParagraphStyle> {
     let style = NSMutableParagraphStyle::new();
     style.setAlignment(align);
+    style.setBaseWritingDirection(direction);
     if line.fragment > 0.0 {
         style.setMinimumLineHeight(line.fragment);
         style.setMaximumLineHeight(line.fragment);
         style.setLineSpacing(line.spacing);
     }
     style
+}
+
+/// Applies `style` to a multiline text view's defaults, typing attributes and
+/// existing storage. `setDefaultParagraphStyle:` updates neither
+/// `typingAttributes` nor characters already in the storage, so typing into an
+/// empty view or at index 0 (with no preceding character to inherit from)
+/// otherwise falls back to `typingAttributes` and resets the paragraph's line
+/// height to AppKit's default.
+fn apply_paragraph(text: &NSTextView, storage: &NSTextStorage, style: &NSParagraphStyle) {
+    text.setDefaultParagraphStyle(Some(style));
+    let typing = NSMutableDictionary::dictionaryWithDictionary(&text.typingAttributes());
+    // SAFETY: `NSParagraphStyleAttributeName` is an immutable AppKit attribute
+    // key taking an `NSParagraphStyle`, and the resulting dictionary stays
+    // valid typing attributes for the text view.
+    unsafe {
+        typing.insert(NSParagraphStyleAttributeName, style);
+        text.setTypingAttributes(&typing);
+    }
+    apply_storage_paragraph(storage, NSRange::new(0, storage.length()), style);
+}
+
+fn apply_storage_paragraph(storage: &NSTextStorage, range: NSRange, style: &NSParagraphStyle) {
+    if range.length == 0 {
+        return;
+    }
+    // Other attributes (e.g. a fallback font) may split a single paragraph
+    // style into several runs. Compare the range of this attribute alone.
+    let mut effective = NSRange::new(0, 0);
+    // SAFETY: `range` is the whole storage or the edited range supplied by AppKit.
+    unsafe {
+        let current = storage.attribute_atIndex_longestEffectiveRange_inRange(
+            NSParagraphStyleAttributeName,
+            range.location,
+            &mut effective,
+            range,
+        );
+        if effective != range || !style.isEqual(current.as_deref()) {
+            storage.addAttribute_value_range(NSParagraphStyleAttributeName, style, range);
+        }
+    }
 }
 
 /// The placeholder's color: the config's, else the text color at half its
@@ -3188,19 +3721,34 @@ fn place(view: &NshView, input: &InputState) {
             // insets its text by the field editor's line padding: the
             // field reaches past the box by as much, so the text starts at
             // the content box.
-            let pad = FIELD_PADDING;
+            let inset = FIELD_PADDING;
             let height = field.intrinsicContentSize().height as f32;
-            let rect = Bounds {
-                origin: Point {
-                    x: Points(content.origin.x.0 - pad),
-                    y: Points(content.origin.y.0 + (content.size.height.0 - height) / 2.0),
+            let rect = ns_rect(
+                content.origin.x.0 - inset,
+                content.origin.y.0 + (content.size.height.0 - height) / 2.0,
+                content.size.width.0 + 2.0 * inset,
+                height,
+            );
+            // On the backing store's pixels, as the core lays the box out:
+            // AppKit edits in a clip view it aligns to them, so for a field
+            // between pixels (centering leaves half a point) it sizes the
+            // field editor past the line and scrolls it up, and the text
+            // moved on focus.
+            let rect = pad.backingAlignedRect_options(
+                rect,
+                NSAlignmentOptions::AlignMinXNearest
+                    | NSAlignmentOptions::AlignWidthNearest
+                    | NSAlignmentOptions::AlignMinYNearest
+                    | NSAlignmentOptions::AlignHeightNearest
+                    | NSAlignmentOptions::AlignRectFlipped,
+            );
+            host(
+                field,
+                Bounds {
+                    origin: Point::new(px(rect.origin.x as f32), px(rect.origin.y as f32)),
+                    size: Size::new(px(rect.size.width as f32), px(rect.size.height as f32)),
                 },
-                size: Size {
-                    width: Points(content.size.width.0 + 2.0 * pad),
-                    height: Points(height),
-                },
-            };
-            host(field, rect);
+            );
         }
         Editor::Area { scroller, view, .. } => {
             // The placeholder goes first: hosted views stack in order. A
@@ -3930,7 +4478,9 @@ mod tests {
                 inset: 3.0,
             }
         );
-        let style = paragraph(line, NSTextAlignment::Left);
+        let style = paragraph(line, NSTextAlignment::Left, NSWritingDirection::Natural);
+        assert_eq!(style.alignment(), NSTextAlignment::Left);
+        assert_eq!(style.baseWritingDirection(), NSWritingDirection::Natural);
         assert_eq!(style.minimumLineHeight(), 18.0);
         assert_eq!(style.maximumLineHeight(), 18.0);
         assert_eq!(style.lineSpacing(), 6.0);
@@ -3945,8 +4495,45 @@ mod tests {
     }
 
     #[test]
+    fn matching_paragraph_style_across_other_attributes_does_not_edit_storage() {
+        let storage = NSTextStorage::new();
+        storage.replaceCharactersInRange_withString(NSRange::new(0, 0), &NSString::from_str("abc"));
+        let all = NSRange::new(0, storage.length());
+        let style = paragraph(
+            LineBox::new(22.0, 17.0),
+            NSTextAlignment::Left,
+            NSWritingDirection::Natural,
+        );
+        apply_storage_paragraph(&storage, all, &style);
+        // SAFETY: a foreground color on the middle character of "abc".
+        unsafe {
+            storage.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                &NSColor::redColor(),
+                NSRange::new(1, 1),
+            );
+        }
+        storage.beginEditing();
+        apply_storage_paragraph(&storage, all, &style);
+        let edits = storage.editedMask();
+        storage.endEditing();
+        assert!(
+            edits.is_empty(),
+            "unchanged paragraph was rewritten: {edits:?}"
+        );
+    }
+
+    #[test]
     fn no_line_height_leaves_the_fonts_lines() {
-        let style = paragraph(LineBox::new(0.0, 18.0), NSTextAlignment::Left);
+        let style = paragraph(
+            LineBox::new(0.0, 18.0),
+            NSTextAlignment::Left,
+            NSWritingDirection::RightToLeft,
+        );
+        assert_eq!(
+            style.baseWritingDirection(),
+            NSWritingDirection::RightToLeft
+        );
         assert_eq!(style.minimumLineHeight(), 0.0);
         assert_eq!(style.maximumLineHeight(), 0.0);
         assert_eq!(style.lineSpacing(), 0.0);
@@ -3961,5 +4548,34 @@ mod tests {
     fn keys() {
         assert_eq!(key_of("\n"), "Enter");
         assert_eq!(key_of("x"), "x");
+    }
+
+    #[test]
+    fn paste_validation_for_listener_accepts_any_type_only_when_listening() {
+        let mut paste_events = nsh_core::EventMask::default();
+        paste_events.set(EventKind::Paste, true);
+
+        let mut other_events = nsh_core::EventMask::default();
+        other_events.set(EventKind::ChangeText, true);
+
+        let custom = NSPasteboard::pasteboardWithUniqueName();
+        custom.clearContents();
+        custom.setData_forType(
+            Some(&objc2_foundation::NSData::with_bytes(br#"{"text":"hi"}"#)),
+            &NSString::from_str("com.example.custom-content"),
+        );
+
+        let empty = NSPasteboard::pasteboardWithUniqueName();
+        empty.clearContents();
+
+        assert!(pastes_for_events(paste_events, &custom));
+        assert!(!pastes_for_events(paste_events, &empty));
+        assert!(!pastes_for_events(other_events, &custom));
+        assert!(!pastes_for_events(nsh_core::EventMask::default(), &custom));
+
+        for pb in [&custom, &empty] {
+            // SAFETY: NSPasteboard's method; these private test pasteboards are not used again.
+            let _: () = unsafe { msg_send![pb, releaseGlobally] };
+        }
     }
 }

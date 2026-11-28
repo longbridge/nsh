@@ -1,6 +1,6 @@
 ---
 title: iOS
-description: Run Rust and TSX NSH apps on iOS with UIKit views, in the simulator or on devices, package them as .app and .ipa, and embed them in an existing iOS app with AppView or NativeShell.xcframework's NshAppView.
+description: Run TSX and Rust NSH apps on iOS with UIKit views, in the simulator or on devices, package them as .app and .ipa, and embed them in an existing iOS app with AppView or NativeShell.xcframework's NshAppView.
 order: 11
 group: platforms
 ---
@@ -464,9 +464,12 @@ app.onOpenURL = { url in
 
 Rust code that shows a system view controller (the camera, a share sheet) presents it over the surface whose code
 asked. In a main-thread task (`run_on_main_thread`), `nsh_platform_ios::presenting_controller(mtm)` is the top view
-controller of that surface's window, else of the app's key window. `prepare_image(bytes, name, &request)` prepares
-image bytes as `Picker.pickImages` does: upright, scaled and encoded as the request says. `nsh-extra`'s camera
-(`crates/nsh-extra/src/camera/ios.rs`) uses both.
+controller of that surface's window, else of the app's key window. `native_view(mtm, node)` is the `UIView` of an
+element of that surface (the node of its `ref`, a `NodeRef` argument of a module function; `ROOT_ID` for the
+surface's root view), in the surface or one of its modals: the source view of a popover that belongs to the element,
+as a share sheet points at its button on an iPad. Take both while the task runs. They are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a view NSH owns. `prepare_image(bytes, name, &request)`
+prepares image bytes as `Picker.pickImages` does: upright, scaled and encoded as the request says. `nsh-extra`'s
+camera (`crates/nsh-extra/src/camera/ios.rs`) uses `presenting_controller` and `prepare_image`.
 
 ## Limits
 
@@ -579,6 +582,7 @@ updates the app in place, logs appear in the `nsh dev` terminal, and errors show
 
 ## See also
 
+- [Publish to the App Store](./publish.md#publish-to-the-app-store)
 - [Building with Rust](./rust.md)
 - [Embedding in Android apps](./android.md)
 - [Native components](./native-components.md)

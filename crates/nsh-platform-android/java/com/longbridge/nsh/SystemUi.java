@@ -138,7 +138,10 @@ final class SystemUi {
         }
         b.setOnDismissListener(d -> {
             if (TestAgent.shownDialog == d) TestAgent.shownDialog = null;
-            if (mounter.dialogs.get(dialogId) == d) mounter.dialogs.remove(dialogId);
+            if (mounter.dialogs.get(dialogId) == d) {
+                mounter.dialogs.remove(dialogId);
+                mounter.dialogMoves.remove(dialogId);
+            }
             if (!answered[0]) {
                 answered[0] = true;
                 answer(mounter, dialogId, -1, field);
@@ -153,6 +156,18 @@ final class SystemUi {
         shown.show();
         TestAgent.shownDialog = shown;
         mounter.dialogs.put(dialogId, shown);
+        // Its window is the activity's: going for a configuration change, the activity takes it off, unanswered, and
+        // the one made again shows it again, with what was typed in it.
+        mounter.dialogMoves.put(dialogId, () -> {
+            String typed = field != null ? field.getText().toString() : input;
+            answered[0] = true;
+            mounter.dialogs.remove(dialogId);
+            mounter.dialogMoves.remove(dialogId);
+            shown.dismiss();
+            boolean reselect = selectAll && java.util.Objects.equals(typed, input);
+            return () -> dialog(mounter, dialogId, title, message, cancelable, sheet, texts, styles, typed, placeholder,
+                    reselect, required);
+        });
         if (surface != 0 && shown.getWindow() != null) {
             // The theme's shape (corners, insets), filled with the app's color.
             Drawable background = shown.getWindow().getDecorView().getBackground();
@@ -261,6 +276,7 @@ final class SystemUi {
         AlertDialog shown = mounter.dialogs.get(dialogId);
         if (shown == null) return;
         mounter.dialogs.remove(dialogId);
+        mounter.dialogMoves.remove(dialogId);
         shown.dismiss();
     }
 

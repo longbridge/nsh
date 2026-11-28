@@ -337,6 +337,9 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
+            // GPU views draw nothing on this backend yet
+            // (`docs/dev/gpu-views.md`).
+            MountItem::GpuView { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = &self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());
@@ -472,6 +475,11 @@ impl Mounter {
                     crate::selectable_view::clear_in(view);
                 }
             }
+            Command::SelectAll => {
+                if let Some(view) = view {
+                    crate::selectable_view::select_in(surface, view);
+                }
+            }
             Command::InsertText(text) => {
                 if let Some(view) = view {
                     crate::text_input::insert_text(view, text);
@@ -565,6 +573,7 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::TreeOrder(_)
         | MountItem::ProjectStates { .. }
         | MountItem::Shader { .. }
+        | MountItem::GpuView { .. }
         | MountItem::NavShader { .. } => Redraw::Nothing,
         MountItem::Frame { id, .. }
         | MountItem::ViewStyle { id, .. }

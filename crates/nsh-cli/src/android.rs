@@ -303,7 +303,7 @@ pub(crate) struct Apk<'a> {
     pub(crate) signing: Signing,
 }
 
-/// What `nsh package --target android` writes.
+/// What `nsh package` writes besides its default (`--format`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum Format {
     /// An APK: installed directly (`adb install`, sideloading).
@@ -312,6 +312,13 @@ pub(crate) enum Format {
     /// An Android App Bundle: uploaded to Google Play, which builds the
     /// APKs each device installs.
     Aab,
+    /// Linux: an AppImage, besides the directory and `.tar.gz`.
+    Appimage,
+    /// Linux: a Flatpak manifest (Flathub) and, with `flatpak-builder`, a
+    /// `.flatpak` bundle, besides the directory and `.tar.gz`.
+    Flatpak,
+    /// Windows: an MSIX package, for the Microsoft Store (`msix.rs`).
+    Msix,
 }
 
 impl Format {
@@ -319,7 +326,15 @@ impl Format {
         match self {
             Format::Apk => "apk",
             Format::Aab => "aab",
+            Format::Appimage => "AppImage",
+            Format::Flatpak => "flatpak",
+            Format::Msix => "msix",
         }
+    }
+
+    /// A Linux format (`--target linux`).
+    pub(crate) fn is_linux(self) -> bool {
+        matches!(self, Format::Appimage | Format::Flatpak)
     }
 }
 
@@ -874,6 +889,15 @@ fn xml_attribute(value: &str) -> String {
         .replace('\t', "&#9;")
 }
 
+/// The signature permission that keeps the receivers the runtime registers
+/// at run time to the app before Android 13 (from 13 they are registered
+/// not exported): `NativeReceiver.registerNotExported`'s, named as
+/// androidx's `ContextCompat` names it, so a library with androidx's
+/// declaration adds nothing.
+fn receiver_permission(package: &str) -> String {
+    format!("{package}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
+}
+
 /// The permissions NSH declares: its own, then the app's
 /// (`android.permissions`), each once.
 fn declared_permissions(apk: &Apk<'_>) -> Vec<String> {
@@ -930,7 +954,11 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
         .iter()
         .map(|name| format!("\n    <uses-permission android:name=\"{name}\" />"))
         .collect();
-    let permissions = format!("{permissions}{}", additions.top);
+    let receiver = receiver_permission(apk.package);
+    let permissions = format!(
+        "\n    <!-- Keeps the receivers registered at run time to the app before\n        Android 13, as `RECEIVER_NOT_EXPORTED` does from 13. -->\n    <permission android:name=\"{receiver}\" android:protectionLevel=\"signature\" />\n    <uses-permission android:name=\"{receiver}\" />{permissions}{}",
+        additions.top
+    );
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
     let launch_mode =
@@ -2699,6 +2727,10 @@ mod tests {
     /// libraries.
     const MANIFEST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
+    <!-- Keeps the receivers registered at run time to the app before
+        Android 13, as `RECEIVER_NOT_EXPORTED` does from 13. -->
+    <permission android:name="com.example.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" android:protectionLevel="signature" />
+    <uses-permission android:name="com.example.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Text actions (Translate and the like) the selection menu offers,

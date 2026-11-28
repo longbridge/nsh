@@ -1395,7 +1395,10 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     m.view = Some(view.clone());
     m.closed = false;
     m.reported = Reported::default();
-    view.insert_before(&surface.root, None);
+    // Into the window its options name: they come before its insertion
+    // (`ModalConfig` precedes `Insert` in a batch), and a dialog of a
+    // `<Window>` shows over that window's content, not in the main one.
+    view.insert_before(&host(surface, m.window()), None);
     nav.order.push(id);
     nav.size_modal(surface, id);
     // Shown at the end of the batch, as the options it brings say (its
@@ -1526,6 +1529,16 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
         nav.reconcile(surface, stack);
     }
     for id in std::mem::take(&mut nav.presenting) {
+        // A window opened later in the batch (an implicit `<Window>`'s
+        // `OpenWindow` comes after the dialogs inside it): its modals
+        // move into it now.
+        if let Some((view, host)) = nav.modals.get(&id).and_then(|m| {
+            let host = host(surface, m.window());
+            let view = m.view.as_ref()?;
+            (view.parent_view().as_ref() != Some(&host)).then(|| (view.clone(), host))
+        }) {
+            view.insert_before(&host, None);
+        }
         nav.size_modal(surface, id);
         nav.show_modal(surface, id);
     }

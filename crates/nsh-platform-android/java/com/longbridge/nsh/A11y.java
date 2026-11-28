@@ -31,7 +31,7 @@ final class A11y extends View.AccessibilityDelegate {
         "android.widget.GridView", "android.view.View", "android.view.View", "android.view.View", "android.view.View",
         "android.widget.ListView", "android.view.View", "android.view.View", "android.view.View",
         "android.view.View", "android.view.View", "android.view.View", "android.view.View", "android.view.View",
-        "android.view.View", "android.view.View", "android.widget.EditText",
+        "android.view.View", "android.view.View", "android.widget.EditText", "android.view.View",
     };
     /** Spoken role descriptions for roles without a widget class. */
     private static final String[] ROLE_DESCRIPTIONS = {
@@ -39,6 +39,7 @@ final class A11y extends View.AccessibilityDelegate {
         "menu bar", "menu item", null, null, null, "scroll bar", null, null, "tab", "tab list", "timer", null,
         null, null, null, "row", "cell", "column header", "row group", null, "option", null, "region",
         "navigation", "tree", "tree item", "menu item", "menu item", "dialog", "alert dialog", null,
+        "tab panel",
     };
     private static final int ROLE_ADJUSTABLE = 8;
     private static final int ROLE_HEADER = 9;
@@ -257,11 +258,11 @@ final class A11y extends View.AccessibilityDelegate {
         }
         if (role == ROLE_ADJUSTABLE || has("increment")) info.addAction(AccessibilityAction.ACTION_SCROLL_FORWARD);
         if (role == ROLE_ADJUSTABLE || has("decrement")) info.addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD);
-        if (has("activate") || mounter.wants(id, Native.PRESS)) {
+        if (has("activate") || pressListener(host, Native.PRESS)) {
             info.addAction(AccessibilityAction.ACTION_CLICK);
             info.setClickable(true);
         }
-        if (has("longpress") || mounter.wants(id, Native.LONG_PRESS)) {
+        if (has("longpress") || pressListener(host, Native.LONG_PRESS)) {
             info.addAction(AccessibilityAction.ACTION_LONG_CLICK);
             info.setLongClickable(true);
         }
@@ -283,7 +284,7 @@ final class A11y extends View.AccessibilityDelegate {
             report("activate");
             return true;
         }
-        if (action == AccessibilityNodeInfo.ACTION_CLICK && mounter.wants(id, Native.PRESS)) {
+        if (action == AccessibilityNodeInfo.ACTION_CLICK && pressListener(host, Native.PRESS)) {
             clickedBy(host);
             mounter.event(id, Native.PRESS);
             return true;
@@ -293,7 +294,7 @@ final class A11y extends View.AccessibilityDelegate {
                 report("longpress");
                 return true;
             }
-            if (mounter.wants(id, Native.LONG_PRESS)) {
+            if (pressListener(host, Native.LONG_PRESS)) {
                 mounter.event(id, Native.LONG_PRESS);
                 return true;
             }
@@ -312,6 +313,14 @@ final class A11y extends View.AccessibilityDelegate {
             return true;
         }
         return super.performAccessibilityAction(host, action, args);
+    }
+
+    /**
+     * Whether the view listens to press events of {@code kind}, which make it a button. An input that does
+     * (a combobox's) is still its field, the text field services read, not a button around it.
+     */
+    private boolean pressListener(View host, int kind) {
+        return !(host instanceof InputBox) && mounter.wants(id, kind);
     }
 
     /**

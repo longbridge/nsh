@@ -1,6 +1,6 @@
 ---
 title: macOS
-description: Run Rust and TSX NSH apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what differs on macOS.
+description: Run TSX and Rust NSH apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what differs on macOS.
 order: 13
 group: platforms
 ---
@@ -66,6 +66,25 @@ the steps click, type and scroll with the system's input at the views their sele
 keyboard stays with the app you type in (`--foreground` lets them become the active app), and clicks reach the app's
 views as they do in the active window, under a hidden title bar too.
 
+### Signing the development host
+
+`nsh run` signs the macOS host ad hoc, as the Rust toolchain leaves it. macOS ties an app's keychain items to its
+signature, and an ad hoc signature changes with every build: after the app's Rust code is rebuilt, macOS asks for the
+keychain password before the app can read an item it saved earlier. Pass your signing identity, the one
+[`nsh package --sign`](./packaging.md#macos) takes, to sign the host with it:
+
+```sh
+security find-identity -v -p codesigning           # the identities on this Mac
+nsh run --sign "Apple Development: Jane Doe (ABCDE12345)"
+```
+
+The host is then signed under the app's id with your certificate, a signature that stays the same from one build to the
+next, so the app keeps access to its keychain items across rebuilds. A package signed with the same identity carries the
+same signature requirement. `nsh run` signs a copy of the host in the app's `.nsh/` directory, again only when the host
+was rebuilt or the identity changed. The first time `codesign` uses the identity's private key, macOS may ask whether
+to allow it; choose **Always Allow** so later rebuilds sign without asking. The host is signed without Hardened Runtime,
+so debuggers can attach to it; `nsh package --sign` adds Hardened Runtime and a secure timestamp for distribution.
+
 ### Performance monitor
 
 `--fps` (`AppOptions { fps: true, .. }` in a Rust app's `run_app`, `AppView::set_fps_monitor(true)` when embedding,
@@ -81,7 +100,7 @@ the panel however the app is opened. Add this key through `nsh.json`'s `macos.in
 | `FPS` | Frames shown over the last second: display refreshes in which the app changed (an idle app reads low; that is not slowness). `max` is what the main thread could keep up with, then the display's rate (120 Hz on ProMotion screens). |
 | `TICK` | The gaps between display refreshes as they arrived (mean, p95) and `gap`, the p95 gap between shown frames: one refresh (8.3 ms at 120 Hz) when nothing is late. |
 | `MAIN` | Main-thread time per frame (applying the engine's changes, drawing text and canvases, animations, input), its 95th percentile, and `drop`: the share of frames that took longer than one refresh. |
-| `JS` / `CORE` | Per commit: your code (handlers, timers, list rows) and NSH's core (layout, text, diffing); commits per second, native view changes per commit. |
+| `JS` / `CORE` | Per commit, over the commits of the last 5 seconds: your code (handlers, timers, list rows) and NSH's core (layout, text, diffing); commits per second, native view changes per commit. |
 | `HOP` | How long changes wait between the engine thread and the main thread; how busy the engine thread is. |
 | `CPU` / `GPU` / `MEM` | The process: CPU (100% is one core), its GPU share, its memory footprint (Activity Monitor's figure). |
 
@@ -294,6 +313,16 @@ Native components are registered with `AppView::register_component`; see
 engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
 makes), so the TSX a view loads imports your Rust components and modules too.
 
+## Presenting from Rust
+
+Rust code that shows system UI (a share menu, a popover, a sheet) shows it from the surface whose code asked. In a
+main-thread task (`run_on_main_thread`), `nsh_platform_macos::presenting_view(mtm)` is the view to show it from when
+no element anchors it: the content of the surface's visible window the user is in, or the surface's own view when it
+is embedded; `None` when the surface shows in no visible window. `native_view(mtm, node)` is the `NSView` of an
+element of that surface (the node of its `ref`, a `NodeRef` argument of a module function; `ROOT_ID` for the
+surface's root view), in whatever window of the surface it is: the view a menu that belongs to the element opens
+from. NSH's views are flipped. Take both while the task runs. They are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a view NSH owns.
+
 ## Notifications from other code
 
 Remote notifications, and those other native code schedules, never reach `Notifications`' `press`: they go to the
@@ -308,7 +337,7 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 (`platform.idiom` is `"desktop"`), `os_version()` (`platform.version`) is the macOS version, and dark mode follows the system's appearance live. See
 [Device and environment](./device-and-environment.md).
 
-Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
+Input is a desktop's: the mouse, the trackpad (scrolling with momentum, stretching past the edges and springing back as in AppKit's scroll views, pinch and rotation) and the keyboard.
 Trackpad tap-to-click briefly shows the app’s `active:` feedback even when the press and release arrive together; press callbacks run at release. Reduced motion keeps immediate visual release.
 A zoomable scroll view zooms with a trackpad pinch or Control + wheel around the pointer, and scrolls both ways while
 zoomed.
@@ -343,6 +372,7 @@ press action and their row role, and labels and text children remain available t
 | Option+Left, Cmd+[, mouse back button | Go back (not while a field has the focus: there Option+Left moves the caret) |
 | Option / Cmd + arrows, with Shift; Option+Delete, Cmd+Delete; Ctrl+A / E / K | Move, select and delete by word and line in a field, as in every Mac app |
 | Cmd+Z, Shift+Cmd+Z, Cmd+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Cmd+A / Cmd+C select and copy selectable text |
+| Shift + arrows, with Option or Cmd; Shift+Home / End | Extend the selection of the selectable view last pressed: by a character or a line, by a word or a paragraph (Option), to the line's or the view's ends (Cmd, Home / End); the scroll views around it follow |
 | Arrows; Page Up / Down, Space, Shift+Space, Option+Up / Down; Home / End, Cmd+Up / Down | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | Cmd+W, Cmd+M, Ctrl+Cmd+F, Cmd+H, Option+Cmd+H, Cmd+Q | Close, minimize, full screen, hide, hide others, quit (`nsh package` and `nsh run` apps' menus) |
 | Cmd+R | Reloads the latest build (`nsh run`) |
@@ -377,6 +407,7 @@ Not supported, or different:
 
 ## See also
 
+- [Sign, notarize and distribute](./packaging.md#sign-notarize-and-distribute)
 - [CLI](./cli.md): `nsh run --target macos`, `nsh package --target macos`
 - [Packaging](./packaging.md)
 - [Platform-specific code](./platform-specific.md)

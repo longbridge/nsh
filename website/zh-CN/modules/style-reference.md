@@ -22,6 +22,24 @@ order: 16
 | `InputStyle` | `TextStyle` | `<Input>`：增加 `placeholderColor` 和 `caretColor` |
 | `ImageStyle` | `ViewStyle` | `<Image>` |
 
+```tsx tabs
+import type { ViewStyle, TextStyle } from "nsh";
+import { Text, View } from "nsh";
+
+const card: ViewStyle = {
+  padding: 16,
+  borderRadius: 12,
+  backgroundColor: "#fff",
+  boxShadow: "0 4px 12px rgb(0 0 0 / 0.08)",
+};
+
+const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
+
+<View style={card}>
+  <Text style={title}>Hello</Text>
+</View>;
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -41,32 +59,14 @@ fn title(label: &str) -> Text {
 card().child(title("Hello"))
 ```
 
-```tsx tabs
-import type { ViewStyle, TextStyle } from "nsh";
-import { Text, View } from "nsh";
-
-const card: ViewStyle = {
-  padding: 16,
-  borderRadius: 12,
-  backgroundColor: "#fff",
-  boxShadow: "0 4px 12px rgb(0 0 0 / 0.08)",
-};
-
-const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
-
-<View style={card}>
-  <Text style={title}>Hello</Text>
-</View>;
-```
-
 `style` 也接受数组：各项从左到右合并，假值会被跳过，因此条件样式无需展开运算。在 Rust 中，`.style_when(condition, …)` 在条件成立时加上样式：
-
-```rust tabs
-card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
-```
 
 ```tsx tabs
 <View style={[card, selected() && { borderColor: "#2563eb", borderWidth: 2 }]} />
+```
+
+```rust tabs
+card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 ```
 
 > [!NOTE]
@@ -152,6 +152,13 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 | `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | 网格项在其区域内沿行方向的位置。 |
 | `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | 为当前项覆盖 `justifyItems`。 |
 
+```tsx tabs
+<View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+  <View style={{ gridColumn: "span 2", height: 60, backgroundColor: "#c7d2fe" }} />
+  <View style={{ height: 60, backgroundColor: "#a5b4fc" }} />
+</View>
+```
+
 ```rust tabs
 view()
     .grid()
@@ -159,13 +166,6 @@ view()
     .gap_2()
     .child(view().col_span(2).h(px(60.0)).bg(rgb(0xc7d2fe)))
     .child(view().h(px(60.0)).bg(rgb(0xa5b4fc)))
-```
-
-```tsx tabs
-<View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-  <View style={{ gridColumn: "span 2", height: 60, backgroundColor: "#c7d2fe" }} />
-  <View style={{ height: 60, backgroundColor: "#a5b4fc" }} />
-</View>
 ```
 
 ### 尺寸
@@ -223,12 +223,12 @@ view()
 | `backgroundColor` | `ColorValue \| AnimatedNode` | `.bg(color)`、`.bind_background(&node)` | 填充色。接受原生动画颜色。 |
 | `backgroundImage` | `string` | `.bg_linear(angle)`、`.bg_radial()`、`.bg_conic()` 配合 `.gradient_from` / `_via` / `_to` | 画在背景色之上的 CSS 渐变：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`，多个用逗号分隔。 |
 
-```rust tabs
-view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))
-```
-
 ```tsx tabs
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #6366f1, #ec4899)" }} />
+```
+
+```rust tabs
+view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))
 ```
 
 ### 边框
@@ -287,16 +287,16 @@ view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x
 |---|---|---|---|
 | `boxShadow` | `string \| BoxShadowLayer[]` | `.shadow([BoxShadow { … }])`、`.shadow_md()`、`.shadow_color(c)` | CSS `box-shadow`：偏移、模糊、扩展和颜色，多层用逗号分隔，`inset` 表示内阴影；也可以用数字写出各层，`[{ x, y, blur, spread, color, inset }]`（只有 `x`、`y` 必填）；没写颜色的层使用文字颜色，即 CSS 的 `currentColor`。`.shadow_color(c)` 给预设或 `.shadow(…)` 的各层换色。 |
 
+```tsx tabs
+<View style={{ padding: 16, borderRadius: 12, backgroundColor: "#fff",
+  boxShadow: "0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -4px rgb(0 0 0 / 0.12)" }} />
+```
+
 ```rust tabs
 view().p_4().rounded(px(12.0)).bg(white()).shadow([
     BoxShadow { offset_y: px(1.0), blur: px(2.0), color: rgba(0x0000000f).into(), ..BoxShadow::default() },
     BoxShadow { offset_y: px(8.0), blur: px(24.0), spread: px(-4.0), color: rgba(0x0000001f).into(), ..BoxShadow::default() },
 ])
-```
-
-```tsx tabs
-<View style={{ padding: 16, borderRadius: 12, backgroundColor: "#fff",
-  boxShadow: "0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -4px rgb(0 0 0 / 0.12)" }} />
 ```
 
 > [!NOTE]
@@ -335,12 +335,12 @@ view().p_4().rounded(px(12.0)).bg(white()).shadow([
 | `skewX`、`skewY` | `number`（度）或 `string` | 不支持 |
 | `perspective` | `number`（点） | 不支持 |
 
-```rust tabs
-view().perspective(px(600.0)).child(view().rotate_y(deg(20.0)).scale(0.95))
-```
-
 ```tsx tabs
 <View style={{ transform: "perspective(600px) rotateY(20deg) scale(0.95)" }} />
+```
+
+```rust tabs
+view().perspective(px(600.0)).child(view().rotate_y(deg(20.0)).scale(0.95))
 ```
 
 动画值直接驱动 `translate`、`rotate` 和 `scale`，以及 `transform` 列表的各步骤：
@@ -362,7 +362,7 @@ const angle = createAnimatedValue(0);
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`、`.brightness(…)`、`.contrast(…)`、`.grayscale(…)`、`.hue_rotate(…)`、`.invert(…)`、`.saturate(…)`、`.sepia(…)` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`、`.backdrop_brightness(…)` 等 | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
-| `maskImage` | `string` | `.mask_linear(angle, stops)`、`.mask_radial(stops)`、`.mask_none()` | 一个 CSS 渐变，它的 alpha 决定视图绘制多少：不透明处完全绘制，透明处完全不绘制：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`。遮罩视图绘制的一切，包括它的背景滤镜。 此时模糊不带系统材质的色调。Windows 和 GPUI 上不绘制。 |
+| `maskImage` | `string` | `.mask_linear(angle, stops)`、`.mask_radial(stops)`、`.mask_none()` | 一个 CSS 渐变，它的 alpha 决定视图绘制多少：不透明处完全绘制，透明处完全不绘制：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`。遮罩视图绘制的一切，包括它的背景滤镜。 此时模糊不带系统材质的色调。过渡可以为它播放动画（`transitionProperty: "mask-image"`、`.transition_mask()`），在种类和色标数量都相同的渐变之间逐个色标变化；其他变化，以及变成 `"none"` 或从 `"none"` 变过来，都立即生效，与 CSS 一致。Windows 和 GPUI 上不绘制。 |
 | `glassEffect` | `"none" \| "regular" \| "clear"` | `.glass_effect(GlassEffect::Regular)` | 在 iOS 26、macOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，`"clear"` 从背景获取的颜色更少，默认值为 `"none"`。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。 |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | 视图与背后内容的混合方式。 |
 
@@ -378,10 +378,18 @@ const angle = createAnimatedValue(0);
 
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
-| `transitionProperty` | `string` | `.transition()`、`.transition_all()`、`.transition_colors()`、`.transition_opacity()`、`.transition_shadow()`、`.transition_transform()`、`.transition_clip_path()`、`.transition_none()` | 参与动画的属性，用逗号分隔：`"all"`、`"colors"`（`color`、`backgroundColor`、`borderColor` 等）、`"opacity"`、`"transform"`（所有变换属性）、`"boxShadow"`、`"borderRadius"`、`"borderWidth"`、`"clip-path"`，或 `"none"`。 |
+| `transitionProperty` | `string` | `.transition()`、`.transition_all()`、`.transition_colors()`、`.transition_opacity()`、`.transition_shadow()`、`.transition_transform()`、`.transition_clip_path()`、`.transition_mask()`、`.transition_none()` | 参与动画的属性，用逗号分隔：`"all"`、`"colors"`（`color`、`backgroundColor`、`borderColor` 等）、`"opacity"`、`"transform"`（所有变换属性）、`"boxShadow"`、`"borderRadius"`、`"borderWidth"`、`"clip-path"`、`"mask-image"`，或 `"none"`。 |
 | `transitionDuration` | `number \| "${number}ms" \| "${number}s"` | `.duration(ms)` | 数字表示毫秒，也可写 `"150ms"` / `"0.2s"`。 |
 | `transitionDelay` | `number \| "${number}ms" \| "${number}s"` | `.delay(ms)` | 过渡开始前的延迟。 |
 | `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)" \| "spring(...)"` | `.ease_linear()`、`.ease_in()`、`.ease_out()`、`.ease_in_out()`、`.ease_bezier(…)`、`.ease_spring(…)` | 缓动曲线（`cubic-bezier()` 的 `y` 超出 0..1 时会越过目标），或 NSH 的 `spring(stiffness, damping[, mass])`：弹簧自己决定时长，持续到稳定为止，不使用 `transitionDuration`。 |
+
+```tsx tabs
+<View
+  onPress={() => open.set(!open())}
+  style={{ height: open() ? 160 : 56, opacity: open() ? 1 : 0.8,
+    transitionProperty: "opacity, transform", transitionDuration: 200 }}
+/>
+```
 
 ```rust tabs
 view()
@@ -390,14 +398,6 @@ view()
     .opacity(move || if open.get() { 1.0 } else { 0.8 })
     .transition()
     .duration(200.0)
-```
-
-```tsx tabs
-<View
-  onPress={() => open.set(!open())}
-  style={{ height: open() ? 160 : 56, opacity: open() ? 1 : 0.8,
-    transitionProperty: "opacity, transform", transitionDuration: 200 }}
-/>
 ```
 
 ### 关键帧动画
@@ -496,6 +496,10 @@ CSS 中 SVG 图形的绘制属性：任何元素都可以设置，并像在浏�
 |---|---|---|---|
 | `textShadow` | `string \| TextShadowLayer[]` | `.text_shadow([TextShadow { … }])`、`.text_shadow_sm()`、`.text_shadow_color(c)` | CSS 的 `text-shadow`：偏移、模糊和颜色（`"0 1px 2px rgb(0 0 0 / 0.3)"`），也可以用数字写出各层，`[{ x, y, blur, color }]`；多层用逗号分隔，按最宽的一层绘制；没写颜色的层使用文字颜色；`"none"`。 |
 
+```tsx tabs
+<Text style={{ textShadow: "0 1px 2px rgb(0 0 0 / 0.3)" }}>Title</Text>
+```
+
 ```rust tabs
 text("Title").text_shadow([TextShadow {
     offset_y: px(1.0),
@@ -503,10 +507,6 @@ text("Title").text_shadow([TextShadow {
     color: rgba(0x0000004d).into(),
     ..TextShadow::default()
 }])
-```
-
-```tsx tabs
-<Text style={{ textShadow: "0 1px 2px rgb(0 0 0 / 0.3)" }}>Title</Text>
 ```
 
 > [!NOTE]

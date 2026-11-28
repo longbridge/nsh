@@ -17,6 +17,7 @@ use nsh_core::{
     Command, EventKind, NodeId, Op, Prop, Tag,
     geometry::{Percentage, Points},
     list_diff::ListDiff,
+    selection::ListItemKey,
 };
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
@@ -321,10 +322,13 @@ pub(crate) fn render(cx: *mut JsContext, props: JsValue) -> Result<JsValue, JsVa
             }
         }
     }
-    if has(cx, props, "empty") {
+    let items = lists(cx).map.borrow().get(&id).map(|d| d.items);
+    if has(cx, props, "empty")
+        && let Some(items) = items
+    {
         // SAFETY: a placeholder for the empty cell's state (owner, node).
         let state = unsafe { qjs::JS_NewArray(cx) };
-        let func = native(cx, empty_run, 0, &mut [node, props, state]);
+        let func = native(cx, empty_run, 0, &mut [node, props, state, items]);
         unsafe { qjs::JS_FreeValue(cx, state) };
         let r = reactive::render_effect(cx, func);
         unsafe { qjs::JS_FreeValue(cx, r) };
@@ -879,10 +883,13 @@ unsafe extern "C" fn empty_run(
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: three data values; values got are freed.
+    // SAFETY: four data values; values got are freed.
     unsafe {
-        let (list, props, state) = (*data, *data.add(1), *data.add(2));
-        let each = get(cx, props, "each");
+        let (list, props, state, items) = (*data, *data.add(1), *data.add(2), *data.add(3));
+        let each = qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut());
+        if qjs::JS_IsException(each) {
+            return each;
+        }
         let empty = length(cx, each) == 0;
         qjs::JS_FreeValue(cx, each);
         let shown = length(cx, state) > 0;
@@ -965,6 +972,10 @@ pub(crate) fn bind(
                         reactive::set_signal(cx, signal, qjs::JS_NewFloat64(index as f64));
                     }
                 }
+                // The data shrank after the core asked for this row: a new
+                // cell has no previous item to fall back on, so make none.
+                // The core unbinds the slot once it sees the new count.
+                None if !in_range(cx, list, index) => {}
                 None => {
                     if let Err(e) = make_cell(cx, list, slot, index) {
                         // SAFETY: the pending exception is reported below.
@@ -995,6 +1006,20 @@ pub(crate) fn bind(
         }
     }
     Some(if failed { Err(()) } else { Ok(()) })
+}
+
+/// Whether `index` is within the list's current data.
+fn in_range(cx: *mut JsContext, list: NodeId, index: u32) -> bool {
+    let Some(items) = lists(cx).map.borrow().get(&list).map(|d| d.items) else {
+        return false;
+    };
+    // SAFETY: the items getter, called untracked; the result is freed.
+    let each = reactive::untracked_with(cx, || unsafe {
+        qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut())
+    });
+    let len = length(cx, each);
+    unsafe { qjs::JS_FreeValue(cx, each) };
+    (index as i64) < len
 }
 
 /// A new cell for `slot`, showing item `first`.
@@ -1034,7 +1059,7 @@ fn make_cell(cx: *mut JsContext, list: NodeId, slot: u32, first: u32) -> Result<
                 cx,
                 separated_run,
                 0,
-                &mut [content, props, index, holder, owner],
+                &mut [content, props, index, holder, owner, items],
             );
             unsafe { qjs::JS_FreeValue(cx, holder) };
             let r = dom::insert_value_at(cx, cell, between, None);
@@ -1112,14 +1137,23 @@ unsafe extern "C" fn separated_run(
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: five data values; values got are freed or returned.
+    // SAFETY: six data values; values got are freed or returned.
     unsafe {
-        let (content, props, index, holder) = (*data, *data.add(1), *data.add(2), *data.add(3));
+        let (content, props, index, holder, items) = (
+            *data,
+            *data.add(1),
+            *data.add(2),
+            *data.add(3),
+            *data.add(5),
+        );
         let i = qjs::JS_Call(cx, index, UNDEFINED, 0, ptr::null_mut());
         let mut n = 0f64;
         qjs::JS_ToFloat64(cx, &mut n, i);
         qjs::JS_FreeValue(cx, i);
-        let each = get(cx, props, "each");
+        let each = qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut());
+        if qjs::JS_IsException(each) {
+            return each;
+        }
         let len = length(cx, each);
         qjs::JS_FreeValue(cx, each);
         let component = get(cx, props, "separator");
@@ -1262,7 +1296,7 @@ unsafe extern "C" fn report_later(
 /// Calls `onViewableItemsChange` with the items now viewable and those
 /// that changed, unless the range is the one reported last.
 fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
-    let (props, (first, last), (prev_first, prev_last)) = {
+    let (props, items, (first, last), (prev_first, prev_last)) = {
         let mut map = lists(cx).map.borrow_mut();
         let Some(d) = map.get_mut(&id) else {
             return UNDEFINED;
@@ -1273,36 +1307,29 @@ fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
         let r = (
             // SAFETY: a dup for the reads below.
             unsafe { qjs::JS_DupValue(cx, d.props) },
+            unsafe { qjs::JS_DupValue(cx, d.items) },
             d.latest,
             d.reported,
         );
         d.reported = d.latest;
         r
     };
-    let each = get(cx, props, "each");
+    let each = reactive::untracked_with(cx, || unsafe {
+        qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut())
+    });
+    // SAFETY: `items` was duped above; free it before returning early on error.
+    unsafe { qjs::JS_FreeValue(cx, items) };
+    if unsafe { qjs::JS_IsException(each) } {
+        unsafe { qjs::JS_FreeValue(cx, props) };
+        return each;
+    }
     let key_of = get(cx, props, "keyExtractor");
     let len = length(cx, each);
     // SAFETY: tokens are new objects; values got are freed or moved.
     let token = |index: i64, viewable: bool| -> JsValue {
         unsafe {
             let item = qjs::JS_GetPropertyInt64(cx, each, index);
-            let key = if qjs::JS_IsFunction(cx, key_of) {
-                let mut args = [item, qjs::JS_NewFloat64(index as f64)];
-                qjs::JS_Call(cx, key_of, UNDEFINED, 2, args.as_mut_ptr())
-            } else {
-                let mut k = get(cx, item, "key");
-                if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
-                    qjs::JS_FreeValue(cx, k);
-                    k = get(cx, item, "id");
-                }
-                if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
-                    qjs::JS_FreeValue(cx, k);
-                    k = qjs::JS_NewFloat64(index as f64);
-                }
-                let s = qjs::JS_ToString(cx, k);
-                qjs::JS_FreeValue(cx, k);
-                s
-            };
+            let key = named_key(cx, key_of, item, index);
             let o = qjs::JS_NewObject(cx);
             qjs::JS_SetPropertyStr(cx, o, c"item".as_ptr(), item);
             qjs::JS_SetPropertyStr(cx, o, c"key".as_ptr(), key);
@@ -1369,6 +1396,87 @@ fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
     }
 }
 
+/// The key item `item` at `index` goes by in the events that name items
+/// (`onViewableItemsChange`'s tokens, `onSelectionChange`'s ends): the
+/// list's `keyExtractor`'s (`key_of`), else the item's `key` or `id`, else
+/// its index, as a string. `item` is borrowed; the result is the caller's
+/// (an exception when `keyExtractor` throws).
+///
+/// # Safety
+///
+/// `key_of` and `item` are live values of `cx`.
+unsafe fn named_key(cx: *mut JsContext, key_of: JsValue, item: JsValue, index: i64) -> JsValue {
+    // SAFETY: the caller's live values; values got are freed or returned.
+    unsafe {
+        if qjs::JS_IsFunction(cx, key_of) {
+            let mut args = [item, qjs::JS_NewFloat64(index as f64)];
+            return qjs::JS_Call(cx, key_of, UNDEFINED, 2, args.as_mut_ptr());
+        }
+        let mut k = get(cx, item, "key");
+        if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
+            qjs::JS_FreeValue(cx, k);
+            k = get(cx, item, "id");
+        }
+        if qjs::JS_IsUndefined(k) || qjs::JS_IsNull(k) {
+            qjs::JS_FreeValue(cx, k);
+            k = qjs::JS_NewFloat64(index as f64);
+        }
+        let s = qjs::JS_ToString(cx, k);
+        qjs::JS_FreeValue(cx, k);
+        s
+    }
+}
+
+/// What row `index` of list `list` is called ([`named_key`]): where a
+/// selection across the list's items starts and ends
+/// (`onSelectionChange`'s `anchor` and `focus`).
+/// [`ListItemKey::NotMine`] for a list that is not the runtime's;
+/// [`ListItemKey::Failed`] for a row past the items or a key that is
+/// neither a string nor a number. `Err` when reading the items or
+/// `keyExtractor` threw: the exception is pending, for the caller to
+/// report.
+pub(crate) fn row_key(cx: *mut JsContext, list: NodeId, index: u32) -> Result<ListItemKey, ()> {
+    let Some((props, items)) = lists(cx)
+        .map
+        .borrow()
+        .get(&list)
+        .map(|d| (d.props, d.items))
+    else {
+        return Ok(ListItemKey::NotMine);
+    };
+    let index = i64::from(index);
+    // SAFETY: the list's values are duplicated before the calls, which may
+    // run JS that drops the list; values got are freed.
+    unsafe {
+        let props = qjs::JS_DupValue(cx, props);
+        let items = qjs::JS_DupValue(cx, items);
+        let each = reactive::untracked_with(cx, || {
+            qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut())
+        });
+        let key = if qjs::JS_IsException(each) || index >= length(cx, each) {
+            UNDEFINED
+        } else {
+            let key_of = get(cx, props, "keyExtractor");
+            let item = qjs::JS_GetPropertyInt64(cx, each, index);
+            let key = reactive::untracked_with(cx, || named_key(cx, key_of, item, index));
+            qjs::JS_FreeValue(cx, item);
+            qjs::JS_FreeValue(cx, key_of);
+            key
+        };
+        let named = if qjs::JS_IsException(each) || qjs::JS_IsException(key) {
+            Err(())
+        } else if qjs::JS_IsString(key) || qjs::JS_IsNumber(key) {
+            Ok(dom::string_arg(cx, key).map_or(ListItemKey::Failed, ListItemKey::Named))
+        } else {
+            Ok(ListItemKey::Failed)
+        };
+        for v in [key, each, items, props] {
+            qjs::JS_FreeValue(cx, v);
+        }
+        named
+    }
+}
+
 /// `nsh`'s `List` (its tags compile to `nsh:rt`'s `list`, the same
 /// function).
 pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
@@ -1425,7 +1533,8 @@ export interface ListProps<T> extends Omit<ViewProps, "children" | "ref">, Scrol
    * Short content stays at the top. Takes precedence over initialScrollIndex. */
   initialScrollAtEnd?: boolean;
   /** The item's key: changes are matched by it, so a row that moves keeps its cell (default: the item's
-   * identity), and `onViewableItemsChange` tokens name the item by it (default: `item.key`, `item.id`, or the index). */
+   * identity), and `onViewableItemsChange` tokens and the `anchor` and `focus` of a selectable view's
+   * `onSelectionChange` name the item by it (default: `item.key`, `item.id`, or the index). */
   keyExtractor?: (item: T, index: number) => string;
   onViewableItemsChange?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
   style?: StyleProp<ViewStyle>;
@@ -1568,6 +1677,66 @@ mod tests {
         check(
             "separators.color.set('black'); separators.colors.join() === 'green,green,green,green'",
         );
+    }
+
+    /// Binds the core asked for before the data shrank: a new cell past the
+    /// end is not made (its row would read `undefined`), a recycled one keeps
+    /// its last item, and the slot binds normally once the data grows again.
+    #[test]
+    fn binds_past_the_end_after_the_data_shrank_make_no_cell() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r#"
+            import { List, mount, signal } from "nsh";
+            import { text } from "nsh:rt";
+            const all = Array.from({ length: 6 }, (_, i) => ({ id: `r${i}` }));
+            const items = signal(all);
+            const state = globalThis.shrink = { all, items, made: 0, undef: 0 };
+            mount(() => List({
+                get each() { return items(); },
+                keyExtractor: item => item.id,
+                children: item => {
+                    state.made++;
+                    return text(() => {
+                        const it = item();
+                        if (it === undefined) { state.undef++; return ""; }
+                        return it.id;
+                    });
+                },
+            }));
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let list = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::Create {
+                    id,
+                    tag: nsh_core::Tag::List,
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let check = |source| assert!(host.eval_script("shrink", source).unwrap(), "{source}");
+        host.bind_list(list, &[(0, 0), (1, 1)]);
+        check("shrink.made === 2");
+        // Shrunk, then the core's pending binds arrive: slots 2..4 are new.
+        check("shrink.items.set(shrink.all.slice(0, 2)); true");
+        host.bind_list(list, &[(1, 1), (2, 2), (3, 3), (4, 4)]);
+        check("shrink.made === 2 && shrink.undef === 0");
+        // Cleared: a recycled cell past the end keeps its last item.
+        check("shrink.items.set([]); true");
+        host.bind_list(list, &[(0, 3), (1, 4)]);
+        check("shrink.made === 2 && shrink.undef === 0");
+        // Grown again: the skipped slots get cells and existing ones rebind.
+        check("shrink.items.set(shrink.all); true");
+        host.bind_list(list, &[(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]);
+        check("shrink.made === 6 && shrink.undef === 0");
+        // Scrolled: cells are reused for other rows, none made.
+        host.bind_list(list, &[(0, 5), (1, 4)]);
+        check("shrink.made === 6 && shrink.undef === 0");
     }
 
     /// A list's slots are its own: it makes each once and never passes
@@ -1763,6 +1932,72 @@ mod tests {
                 DiffRun::Kept { from: 11, len: 1 },
             ],
         );
+    }
+
+    #[test]
+    fn list_reads_each_once_through_its_items_memo() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r#"
+            import { List, mount, signal } from "nsh";
+            import { text } from "nsh:rt";
+            const data = signal([{ id: "a" }, { id: "b" }, { id: "c" }]);
+            const state = globalThis.memoCheck = { reads: 0, reports: [], data };
+            mount(() => List({
+                get each() { state.reads++; return data(); },
+                keyExtractor: item => item.id,
+                empty: () => text("empty"),
+                separator: () => text("-"),
+                onViewableItemsChange: info => state.reports.push(info),
+                children: item => text(item().id),
+            }));
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let list = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::Create {
+                    id,
+                    tag: nsh_core::Tag::List,
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let check = |source| assert!(host.eval_script("memo-each", source).unwrap(), "{source}");
+        check("memoCheck.reads === 1");
+        host.bind_list(list, &[(0, 0), (1, 1), (2, 2)]);
+        host.bind_list(list, &[(0, 2), (1, 1), (2, 0)]);
+        check("memoCheck.reads === 1");
+        for (first, last) in [(0, 1), (1, 2)] {
+            host.dispatch_event(
+                list,
+                nsh_core::EventKind::ViewableItemsChange,
+                &nsh_core::EventPayload::Map(vec![
+                    ("first", nsh_core::PayloadValue::Number(first as f64)),
+                    ("last", nsh_core::PayloadValue::Number(last as f64)),
+                ]),
+            );
+        }
+        check("memoCheck.reads === 1");
+        check(
+            "memoCheck.reports.length === 2 && memoCheck.reports[1].viewableItems.map(t => t.key).join(',') === 'b,c'",
+        );
+        check("memoCheck.data.set([{ id: 'x' }, { id: 'y' }]); memoCheck.reads === 2");
+        host.bind_list(list, &[(0, 0), (1, 1)]);
+        host.dispatch_event(
+            list,
+            nsh_core::EventKind::ViewableItemsChange,
+            &nsh_core::EventPayload::Map(vec![
+                ("first", nsh_core::PayloadValue::Number(0.0)),
+                ("last", nsh_core::PayloadValue::Number(1.0)),
+            ]),
+        );
+        check("memoCheck.reads === 2");
+        check("memoCheck.reports[2].viewableItems.map(t => t.key).join(',') === 'x,y'");
+        check("memoCheck.data.set([]); memoCheck.reads === 3");
     }
 
     fn diffs(ops: &[Op]) -> Vec<ListDiff> {

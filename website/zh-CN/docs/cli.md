@@ -77,7 +77,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--points-per-cell <WIDTHxHEIGHT>] [--window-size <WIDTHxHEIGHT>] [--display <N>] [--background]
+nsh run [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--points-per-cell <WIDTHxHEIGHT>] [--window-size <WIDTHxHEIGHT>] [--display <N>] [--background] [--sign <IDENTITY>]
 ```
 
 ```sh
@@ -104,6 +104,7 @@ nsh run my-app/App.tsx --target web
 | `--window-size <WIDTHxHEIGHT>` | 宿主默认值 | 初始窗口尺寸，单位为点，例如 `800x600`（`--target macos`、`linux`、`windows` 和 `gpui`，TSX 入口）。 |
 | `--display <N>` | 主显示器 | 窗口在哪个显示器上居中打开：`1` 是主显示器（带菜单栏的那个），`2` 是下一个，依此类推；没有这个编号的显示器时在主显示器上打开（`--target macos`，TSX 入口）。 |
 | `--background` | | 应用不会成为当前活跃的应用，和 `nsh test` 运行应用的方式一样：窗口照常显示，键盘留在你正在输入的应用里，发给它窗口的输入（驱动它的 agent、UI 测试）照样能到达。在 macOS 上它运行时没有 Dock 图标和菜单栏。用于不需要你盯着的运行，比如你工作时 agent 在检查一处改动（`--target macos`、`linux`、`windows` 和 `gpui`，TSX 入口）。 |
+| `--sign <IDENTITY>` | ad hoc 签名 | 给 macOS 宿主签名的代码签名身份，与 `nsh package --sign` 取值相同，比如 `"Apple Development: …"`。宿主的签名从此每次构建都保持不变，应用的 Rust 代码重新编译后仍能访问它的钥匙串项（[macOS](./macos.md#为开发宿主签名)）（`--target macos`）。 |
 
 使用 `--target android` 时，会选用 `--device` 或 `ANDROID_SERIAL` 指定的设备，否则选用 `adb devices` 列出的第一台（连着多台时 `nsh` 会提示用的是哪一台）；开发服务器的端口通过 `adb reverse` 转发到设备上。参见[快速开始](./getting-started.md)和[开发服务器与调试](./dev-server-and-debugging.md)。
 
@@ -115,10 +116,10 @@ nsh run my-app/App.tsx --target web
 ## nsh dev
 
 ```sh
-nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--server-only] [--port <PORT>] [--release] [--limits [<LIMITS>]]
+nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--server-only] [--port <PORT>] [--host <HOST>] [--release] [--limits [<LIMITS>]]
 ```
 
-启动开发服务器并打开当前系统的原生宿主：macOS 使用 AppKit，Linux 使用 GTK，Windows 使用 Win32。开发 iOS 或 Android 应用时显式指定 `--target ios` 或 `--target android`。用 `--server-only` 为自己启动的宿主提供服务。服务器构建应用、监视入口所在目录以及应用的 `nsh.json`、主题和翻译文件，并把每次重新构建推送给连接到它的宿主。使用 `--server-only` 时，它会打印本机宿主使用的 URL、每个局域网地址对应的设备 URL，以及在 Web 运行时存在时，浏览器运行应用要打开的页面（[Web](./web.md#在浏览器里开发)）：
+启动开发服务器并打开当前系统的原生宿主：macOS 使用 AppKit，Linux 使用 GTK，Windows 使用 Win32。开发 iOS 或 Android 应用时显式指定 `--target ios` 或 `--target android`。用 `--server-only` 为自己启动的宿主提供服务。服务器构建应用、监视入口所在目录以及应用的 `nsh.json`、主题和翻译文件，并把每次重新构建推送给连接到它的宿主。使用 `--server-only` 时，它会打印本机宿主使用的 URL，未绑定回环地址时还会打印每个局域网地址对应的设备 URL，以及在 Web 运行时存在时，浏览器运行应用要打开的页面（[Web](./web.md#在浏览器里开发)）：
 
 ```text
 ✓ built App.tsx (3.2 KB js, 9.8 KB bytecode, 21ms)
@@ -128,12 +129,12 @@ nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst]
   browsers on this network: http://192.168.1.20:8790/
 ```
 
-用 `nsh dev --server-only` 连接嵌入了开发版 SDK（`NativeShellDev.xcframework`、`nsh-dev.aar`）的应用。`--target`、`--device`、`--port`、`--release` 和 `--limits` 的含义与 `nsh run` 相同。
+用 `nsh dev --server-only` 连接嵌入了开发版 SDK（`NativeShellDev.xcframework`、`nsh-dev.aar`）的应用。`--target`、`--device`、`--port`、`--release` 和 `--limits` 的含义与 `nsh run` 相同。`--host <HOST>` 用于将开发服务器绑定到指定的 IPv4 地址，覆盖默认行为（`--server-only` 以及 `--target ios`、`android`、`web` 默认绑定 `0.0.0.0`；本机目标默认绑定 `127.0.0.1`），例如用 `nsh dev App.tsx --server-only --host 127.0.0.1` 仅监听本机回环地址。使用 `--target android` 时，由于 `adb reverse` 将设备的 `127.0.0.1` 转发到本机的 `127.0.0.1`，`--host` 只能指定为 `127.0.0.1` 或 `0.0.0.0`。
 
 ## nsh test
 
 ```sh
-nsh test [PATH] [--filter <NAME>] [--release] [--trace] [--fps] [--junit <FILE>] [--jobs <N>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground]
+nsh test [PATH] [--filter <NAME>] [--release] [--trace] [--fps] [--junit <FILE>] [--jobs <N>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground] [--attach[=<PORT>]]
 ```
 
 以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）：运行目录 `PATH`（默认为当前目录；跳过隐藏目录、`node_modules` 和 `target`）中的测试文件（`*.test.tsx`、`*.test.ts`，导入 `nsh/test`），或者测试文件 `PATH` 本身。如果传入的是带有自己 Rust crate 的应用（`nsh.json` `"rust"`：Rust 应用，或带 crate 的 TSX 应用）的目录，它会先在目录中每个 crate 自己的目录下运行 `cargo test`，并把每个 Rust 测试与 TypeScript 测试一起显示和计数，归在其测试目标的文件下（`src/lib.rs › tests::adds`）；只有 Rust 测试的 Rust 应用也这样测试。每个测试文件在各自的引擎上运行，测试打开的每个应用又在另一个全新的引擎上运行。它为每个测试打印一行；失败时还会打印抛出的内容、它在测试文件中的位置和屏幕上的文字。只要有失败，就以非零退出码结束。如果传入的是应用入口（`nsh test App.tsx`；Rust 应用为 `nsh test nsh.json`），它会在真实网络下打开应用，让它运行 1.2 s，然后执行标准输入给出的步骤（`await app.press("Add")`，其中 `app` 就是这个应用）。TSX 应用在 CLI 自己的进程里运行；带有自己 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，由 CLI 为它构建入口。除非测试以 Android 打开应用（`open` 的 `platform`），无界面运行按 iOS 处理：`platform.os` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
@@ -153,9 +154,10 @@ nsh test [PATH] [--filter <NAME>] [--release] [--trace] [--fps] [--junit <FILE>]
 | `-j, --jobs <N>` | 同时运行的测试文件数，每个文件用自己的引擎（默认等于 CPU 核数）。结果仍按文件顺序逐个显示。仅限无界面运行：带 `--target` 或 `--trace` 时逐个运行。 |
 | `--target <TARGET>` | 在该平台的开发 host 上运行测试打开的应用，而不是 headless（`macos`、`linux`、`windows`、`gpui`、`tui`、`web`、`ios` 和 `android`；`tui` 在内存终端里运行，`web` 在 headless 的 Chrome、Edge 或 Chromium 里运行）：步骤用平台自己的输入执行（[测试](./testing-and-trace.md#在真实平台上运行)），`open` 会按该平台检查它的选项，平台无法满足的选项会被拒绝（`ERR_NSH_TEST_UNSUPPORTED`：iOS 和 Android 上的 `width` 与 `height`、属于另一类设备的 `platform`）。crate 的 Rust 测试在本机运行，属于不带 `--target` 的运行。 |
 | `--browser <PATH>` | `--target web` 运行应用所用的 Chrome、Edge 或 Chromium 可执行文件（默认：本机安装的那个）。 |
-| `--device <DEVICE>` | 配合 `--target ios`：应用在哪个模拟器里运行，按名称（`"iPhone 16 Pro"`）或 UDID 指定。默认：已启动的模拟器，否则启动最新的 iPhone。配合 `--target android`：应用在哪台设备或模拟器上运行，按序列号（`adb devices` 列出的）指定。默认：`ANDROID_SERIAL` 指定的那台，否则第一台。 |
+| `--device <DEVICE>` | 配合 `--target ios`：应用在哪个模拟器里运行，按名称（`"iPhone 16 Pro"`）或 UDID 指定。默认：已启动的模拟器，否则启动最新的 iPhone。配合 `--target android`：应用在哪台设备或模拟器上运行，按序列号（`adb devices` 列出的）指定。默认：`ANDROID_SERIAL` 指定的那台，否则第一台。配合 `--attach`：会话里接收步骤的宿主，按会话终端里显示的名字或按 `--target` 的平台名（`gpui`）指定。默认：最后连上的那个。 |
 | `--display <N>` | 配合 `--target macos` 或 `gpui`：应用窗口在哪个显示器上居中打开：`1` 是主显示器（在 macOS 上是带菜单栏的那个），`2` 是下一个，依此类推；没有这个编号的显示器时在主显示器上打开。默认在副显示器（主显示器之外的第一个，且不是它的镜像）上打开，让测试运行占用一块单独的屏幕；只有一个显示器时在主显示器上打开。测试在每个显示器上的运行结果相同。 |
 | `--foreground` | 配合 `--target macos`、`windows`、`gpui` 或 `linux`：让应用成为当前活跃的应用，和用户使用时一样。默认应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，测试的点击、按键和快捷键直接发给这些窗口。在 Linux 桌面上，后台的按键直接输入到控件里，和 Wayland 上一样；测试 Tab、方向键或输入法时请带上 `--foreground`。在没有人输入的显示器上（Xvfb），Linux 应用无论是否带这个选项都按前台方式运行。依赖应用处于活跃状态的测试（`lifecycle()` 随应用是否活跃而变），或 `examples/gallery/tools/perf.py` 这类性能测量（它会传入该选项），应带上它运行。 |
+| `--attach[=<PORT>]` | 驱动正在运行的 `nsh run` 或 `nsh dev` 会话里的应用，就在它的窗口里，保持原样，而不是另开一个：`PORT` 上的会话，否则本机正在运行的那个（同时有几个时选当前应用的）。执行标准输入给出的步骤，或执行一个测试文件，文件里的 `open` 附着到这个应用；结束后应用照常运行。只接受本机（[驱动正在运行的会话](./testing-and-trace.md#驱动正在运行的会话)）。 |
 | `--web-host <JS>` | headless 运行时测试打开的应用所用的 Web 页面宿主模块（默认：`nsh.json` 的 `web.host`；它导出 `createHost(player)`）：它应答应用的 [`host`](../modules/nsh.md#host) 调用，它的 `player.hostEvent` 会送到 `host.on`（[测试](./testing-and-trace.md#页面的宿主)）。只用于 headless 运行；`--target web` 运行 `nsh.json` 的 `web.host`。 |
 
 NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及默认的构建和打包输出 `.nsh/out/`。Cargo 保留它通常的 `target/` 缓存和已有的 `CARGO_TARGET_DIR` 行为；NSH 不会添加 Cargo 配置来移动它。`--out` 仍可指定输出位置。使用我们推荐的 [huacnlee/cargo](https://github.com/huacnlee/cargo) 时，构建产物放在 `~/.cargo/targets/` 下，可执行文件仍在 `target/`。
@@ -220,7 +222,7 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [
 | `--keystore <FILE>` | Android：release keystore。默认使用 `~/.android/debug.keystore` 中的调试密钥（不存在时创建）。 |
 | `--key-alias <ALIAS>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <PASSWORD>` | Android：keystore 密码，也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
-| `--format <FORMAT>` | Android：`apk`（默认）或 `aab`，即用于 Google Play 的 Android App Bundle，使用 `jarsigner` 签名。不能与 `--run` 同时使用。 |
+| `--format <FORMAT>` | Android：`apk`（默认）或 `aab`，即用于 Google Play 的 Android App Bundle，使用 `jarsigner` 签名。Linux：`appimage` 或 `flatpak`，在目录和压缩包之外另行生成（见 [Linux](./linux.md)）。不能与 `--run` 同时使用。 |
 | `--abi <ABI>` | Android：APK 包含的 ABI（`arm64-v8a`、`armeabi-v7a`、`x86_64`），可重复或用逗号分隔。默认：`arm64-v8a` 和 `armeabi-v7a`，加上 `--run` 时还有设备的 ABI。 |
 | `--arch <ARCH>` | macOS：应用运行的处理器，`arm64`（Apple 芯片）、`x86_64`（Intel）或 `universal`（两者合在一个可执行文件里）。默认：本机的。为另一种处理器编 runner 需要它的 Rust target（`rustup target add x86_64-apple-darwin`）。 |
 | `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux` 和 `windows` 则直接启动它；`web` 在本机提供站点服务，并打印其地址。 |
@@ -272,7 +274,7 @@ nsh add --path ../gauge                              # 本地目录，按当前�
 nsh add nsh-extra --features camera                  # 开启 crate 的 Cargo feature（逗号分隔或重复传入）
 ```
 
-它像 `Cargo.toml` 一样按包名（crate 名，或 Git、本地 nshm 的 `nsh.json` 中的 `"name"`）把 nshm 记录到 `nsh.json` 的 `"dependencies"`：`"acme-gauge": "^1.2.0"`、`{ "github": "acme/ui", "version": "^1.4" }`、`{ "git": "…", "tag": "v1.4.0" }`、`{ "git": "…", "rev": "…" }` 或 `{ "path": "../gauge" }`，对象形式可加 `"version"` 和 `"features"`。没写版本时写入 `^` 加解析到的版本。随后它重新解析应用用到的所有 nshm，把缺少的安装到 `~/.nsh/nshms`，锁定在 `nsh.lock`（随应用提交），应用有自己的 crate（`"rust"`）时把 Rust nshm 加入该 crate 的 `[dependencies]`。它会打印要导入的标识；如果 nshm 给纯 TSX 应用带来了 Rust，也会说明，此后开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。若 nshm 无法解析、与应用的 crate 或其他 nshm 冲突（同一个包、标识或模块），或不兼容当前 NSH，应用的文件保持不变。
+它像 `Cargo.toml` 一样按包名（crate 名，或 Git、本地 nshm 的 `nsh.json` 中的 `"name"`）把 nshm 记录到 `nsh.json` 的 `"dependencies"`：`"acme-gauge": "^1.2.0"`、`{ "github": "acme/ui", "version": "^1.4" }`、`{ "git": "…", "tag": "v1.4.0" }`、`{ "git": "…", "rev": "…" }` 或 `{ "path": "../gauge" }`，对象形式可加 `"version"`、`"features"` 和 `"targets"`（要链接 Rust nshm 的 target，再次 `nsh add` 时保留：[nshm](./nshm.md#使用-nshm)）。没写版本时写入 `^` 加解析到的版本。随后它重新解析应用用到的所有 nshm，把缺少的安装到 `~/.nsh/nshms`，锁定在 `nsh.lock`（随应用提交），应用有自己的 crate（`"rust"`）时把 Rust nshm 加入该 crate 的 `[dependencies]`。它会打印要导入的标识；如果 nshm 给纯 TSX 应用带来了 Rust，也会说明，此后开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。若 nshm 无法解析、与应用的 crate 或其他 nshm 冲突（同一个包、标识或模块），或不兼容当前 NSH，应用的文件保持不变。
 
 `--features` 开启 Rust nshm 的 Cargo feature，即应用用到的模块，已列出的会保留（在 `camera` 之后 `nsh add nsh-extra --features push` 仍保留 `camera`）；crate 未定义的名字会让 `nsh add` 停止。要关闭某个 feature，从 `nsh.json` 和应用 crate 的 `Cargo.toml` 依赖中删掉它。crate 在 `[package.metadata.nsh]` 中为开启的 feature 声明的内容会进入打包结果，除 entitlements 外也进入开发宿主（[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。
 
@@ -298,7 +300,7 @@ nsh remove <NAME>...
 
 ## nsh component
 
-添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。
+添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`），以及 Windows 上 `nsh package` 用的链接器（`windows-linker`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。
 
 ```sh
 nsh component list
@@ -372,19 +374,68 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 ### nsh publish android
 
 ```sh
-nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+nsh publish android <BUNDLE.aab> [--track <TRACK>] [--rollout <FRACTION>] [--status <STATUS>] [--listing] [--draft]
+nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 ```
 
-把 Android App Bundle 上传到 Google Play，并发布到**内部测试**轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
-会被删除）。它不会走得更远：要发布到封闭测试、开放测试或正式版，请在 Play Console 中推进。登录身份是一个在 Play Console
-中有该应用发布权限的 Google Cloud 服务账号（[Android](./android.md#上传到-google-play)）。
+把 Android App Bundle 上传到 Google Play 并发布到某个轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
+会被删除）。不带 `--track` 时只发布到**内部测试**；发布给更多测试者或公众，必须显式给出 `--track`。用 `--from` 代替 bundle
+时，把一个轨道上最新的版本推进到另一个轨道。登录身份是一个在 Play Console 中有该应用发布权限的 Google Cloud
+服务账号（[发布到 Google Play](./publish.md#publish-to-google-play)）。
 
 | 参数 | 说明 |
 |---|---|
 | `--entry <DIR>` | 应用目录或入口，其 `nsh.json` 的 `id` 即包名。默认：`.`。 |
 | `--package <NAME>` | Google Play 上的包名。默认：`nsh.json` 的 `id`。 |
 | `--credentials <KEY.json>` | 服务账号的 JSON 密钥。默认读取 `NSH_PLAY_CREDENTIALS`。不要提交到仓库。 |
+| `--track <TRACK>` | `internal`（默认）、`alpha`、`beta`、`production` 或自定义轨道名。 |
+| `--from <TRACK>` | 推进：把该轨道最新版本的 version code 发布到 `--track`，不上传任何文件。 |
+| `--rollout <FRACTION>` | 分阶段发布给该轨道这一比例的用户，大于 0 小于 1，例如 `0.1`。 |
+| `--status <STATUS>` | `completed`（默认）、`in-progress`（带 `--rollout` 时的默认）、`halted`（暂停分阶段发布，需带 `--rollout`）或 `draft`。 |
 | `--draft` | 以草稿发布：应用在 Play Console 中完成首次发布之前，Play 只接受草稿。 |
+| `--store <DIR>` | [商店目录](./publish.md#store-listing)。默认：应用目录下的 `store`。 |
+| `--listing` | 同时按商店目录更新商店信息（名称、描述、图片），覆盖 Play 上这些语言已有的内容。 |
+
+要扩大分阶段发布，用更大的 `--rollout` 再发布同一版本；要全量发布，不带 `--rollout` 再发布一次。
+
+### nsh publish status android
+
+```sh
+nsh publish status android [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--json]
+```
+
+列出每个轨道的版本：状态、version code 和放量比例。它在一个随后删除的 edit 中读取，不做任何改动。`--json` 输出
+`{"package", "releases": [{"track", "name", "status", "version_codes", "user_fraction"}]}`，供脚本使用。
+
+### nsh publish doctor android
+
+```sh
+nsh publish doctor android [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--store <DIR>]
+```
+
+不改动 Play 上的任何内容，检查 `nsh publish android` 所需的一切：服务账号密钥、包名、商店目录、登录，以及对该应用的访问权限（打开一个
+edit 再删除）。有检查失败时以错误退出。
+
+
+### nsh publish linux
+
+```sh
+nsh publish linux <ARCHIVE.tar.gz> [--url <URL>] [--entry <DIR>] [--out <DIR>]
+nsh publish status linux [--entry <DIR>] [--json]
+nsh publish doctor linux [--entry <DIR>]
+```
+
+为发布压缩包写入或更新应用的 Flathub manifest（`<id>.yml`）：下载 URL 与 SHA-256。下载 URL 默认取 `nsh.json` 的 `store.linux.archiveUrl`（其中 `{version}` 替换为版本号），也可用 `--url` 指定。不会创建 Pull Request，需自行提交到 `flathub/<id>` 仓库。`status` 显示 Flathub 上的版本，与 `nsh.json` 不一致时退出码为 1；`doctor` 检查 Flathub 要求的元数据（`id`、商店文案、`store.linux`、图标），并校验 metainfo 与 desktop 文件。
+
+### nsh publish windows
+
+```sh
+nsh publish windows <APP.msix> [--entry <DIR>] [--product-id <ID>] [--notes <FILE>|<LANG>=<FILE>]... [--wait]
+nsh publish status windows [--entry <DIR>] [--product-id <ID>] [--submission <ID>] [--json]
+nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
+```
+
+用 Store submission API 把 MSIX 包提交到 Microsoft Store：基于上次发布创建 submission、替换包、设置各 listing 的更新说明（默认取商店文案各语言的 `releaseNotes`，也可用 `--notes` 指定）、上传并提交认证。提交前失败会删除该 submission；已有 pending submission 时拒绝执行。`--wait` 轮询直到认证结束。`status` 退出码：已发布 0、进行中 2、失败 1。`doctor` 只读检查 `nsh.json`、凭据和 Store ID。Store ID 写在 `nsh.json` 的 `store.windows.productId`（或用 `--product-id`）。凭据为关联 Partner Center 的 Azure AD 应用，只从 `NSH_MS_TENANT_ID`、`NSH_MS_CLIENT_ID`、`NSH_MS_CLIENT_SECRET` 读取。首次提交（定价、分级、商店页）需在 Partner Center 完成。
 
 ### nsh verify
 
@@ -437,9 +488,12 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 ## nsh publish ios
 
 ```sh
-nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+nsh publish ios <IPA> [--app-id <ID>] [--issuer-id <ID>] [--key-id <ID>] [--private-key <PATH>]
 ```
 
-在 macOS 上将经过 App Store 签名的 IPA 上传到 App Store Connect，用于 TestFlight。参数也可通过
+在 macOS 上将经过 App Store 签名的 IPA 上传到 App Store Connect，等待处理、分发 TestFlight 测试组、
+准备 App Store 版本与商店文案，加 `--submit` 时提交审核。`nsh publish status ios` 与 `nsh publish doctor ios`
+报告发布状态并检查配置。参数也可通过
 `NSH_APP_STORE_APP_ID`、`NSH_APP_STORE_ISSUER_ID`、`NSH_APP_STORE_KEY_ID` 和
-`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。
+`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。App ID 默认读 `nsh.json` 的 `store.ios.appId`，私钥默认读
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`，配置好的应用只需 `nsh publish ios <IPA>`。签名、凭据和处理流程见[发布到 App Store](./publish.md#upload-to-testflight)。

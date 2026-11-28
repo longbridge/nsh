@@ -466,7 +466,9 @@ export interface CalendarItemProps {
  * `accent`) under the pointer and for today, `primary` with its foreground
  * for the selected date and a range's ends, the range's other days on a
  * band of the quiet fill from end to end (`data-range-*`) whose corners
- * round at the weeks' ends, the other months' days muted, the disabled ones
+ * round at the weeks' ends, the same band from a half range's start to the
+ * day under the pointer or the keyboard while its end is chosen
+ * (`data-range-preview-*`), the other months' days muted, the disabled ones
  * muted at half opacity, and the keyboard's day lit as a list's highlighted
  * row is (`optionClass`: the brand tint and edge), so Select, Combobox,
  * Command and the calendar move one kind of highlight.
@@ -542,7 +544,8 @@ export function CalendarItem(props: CalendarItemProps) {
   }
   // A day, as wide as its column (the calendar's columns share its width), a week's gap over it. The band spans a
   // range's middle days and reaches from its ends' middles (a range of one day has none), rounded where a week
-  // starts or ends. The square takes the quiet fill under the pointer and for today, `primary` for the selected
+  // starts or ends; while a range's end is chosen it previews the range from the start to the day under the pointer
+  // or the keyboard, which a pick there makes. The square takes the quiet fill under the pointer and for today, `primary` for the selected
   // date and a range's ends (`aria-selected`, which ranks over the hover; a range's middle days keep the band). A
   // disabled day takes no hover fill, unless it is today. The keyboard's day takes the lists' highlight (the brand
   // tint and edge); on the selected day only the edge, over `primary`.
@@ -554,7 +557,9 @@ export function CalendarItem(props: CalendarItemProps) {
         <View
           class={
             `absolute inset-y-0 left-0 right-0 hidden ${quietFill} group-data-range-middle:flex group-data-range-start:flex group-data-range-start:left-1/2 ` +
-            "group-data-range-end:flex group-data-range-end:right-1/2 group-data-range-start:group-data-range-end:hidden"
+            "group-data-range-end:flex group-data-range-end:right-1/2 group-data-range-start:group-data-range-end:hidden " +
+            "group-data-range-preview-middle:flex group-data-range-preview-start:flex group-data-range-preview-start:left-1/2 " +
+            "group-data-range-preview-end:flex group-data-range-preview-end:right-1/2 group-data-range-preview-start:group-data-range-preview-end:hidden"
           }
           style={{
             borderTopLeftRadius: column() === 0 ? cellRadius() : 0,
@@ -563,22 +568,27 @@ export function CalendarItem(props: CalendarItemProps) {
             borderBottomRightRadius: column() === 6 ? cellRadius() : 0,
           }}
         />
-        <View
-          class={
-            `${props.item.today ? quietFill : "group-disabled:bg-transparent"} transition-colors duration-100 motion-reduce:transition-none ` +
-            `group-hover:${quietFill} group-aria-selected:bg-primary group-data-range-middle:bg-transparent border border-transparent group-focus-visible:border-brand/30 group-focus-visible:bg-brand-tint group-aria-selected:group-focus-visible:bg-primary group-data-range-middle:group-focus-visible:bg-brand-tint`
-          }
-          style={{ width: cell, height: cell, borderRadius: cellRadius(), alignItems: "center", justifyContent: "center" }}
-        >
-          <Text
+        {/* Under the end of a previewed range, the popup's own color: the band reaches the end's middle, as a picked end's
+            `primary` square covers it, and the end's quiet fill (the pointer's, or the keyboard's tint) shows as on any
+            other day, not on the band too. */}
+        <View class={`group-data-range-preview-end:${pointer ? "bg-raised" : "bg-card"}`} style={{ borderRadius: cellRadius() }}>
+          <View
             class={
-              `${own()} font-normal group-aria-selected:text-primary-foreground group-data-range-middle:${own()} ` +
-              "group-disabled:text-muted-foreground group-disabled:opacity-50"
+              `${props.item.today ? quietFill : "group-disabled:bg-transparent"} transition-colors duration-100 motion-reduce:transition-none ` +
+              `group-hover:${quietFill} group-aria-selected:bg-primary group-data-range-middle:bg-transparent group-data-range-preview-middle:bg-transparent border border-transparent group-focus-visible:border-brand/30 group-focus-visible:bg-brand-tint group-aria-selected:group-focus-visible:bg-primary group-data-range-middle:group-focus-visible:bg-brand-tint group-data-range-preview-middle:group-focus-visible:bg-brand-tint`
             }
-            style={{ fontSize: pointer ? 14 : 16, fontVariant: ["tabular-nums"] }}
+            style={{ width: cell, height: cell, borderRadius: cellRadius(), alignItems: "center", justifyContent: "center" }}
           >
-            {String(props.item.value)}
-          </Text>
+            <Text
+              class={
+                `${own()} font-normal group-aria-selected:text-primary-foreground group-data-range-middle:${own()} ` +
+                "group-disabled:text-muted-foreground group-disabled:opacity-50"
+              }
+              style={{ fontSize: pointer ? 14 : 16, fontVariant: ["tabular-nums"] }}
+            >
+              {String(props.item.value)}
+            </Text>
+          </View>
         </View>
       </View>
     </View>
@@ -603,7 +613,8 @@ export function TimeSegment(props: { label: string }) {
  * at 70%, `group` for what they draw), `segmentClass` the time's segments
  * (filled while they have the keys), the popup's layout (`content`: the
  * presets beside the calendar with a pointer, above it on a phone), the
- * presets' column of ghost buttons or chips, the header's gap over the
+ * presets' column of ghost buttons or chips (`presetDescription` a
+ * preset's second line, smaller and muted), the header's gap over the
  * weekdays (shadcn's `gap-4`), the calendar's padding (with the popup's,
  * shadcn's `p-3`), the time's row under a hairline, its well
  * (`timeFieldClass`, the number inputs'), the time's `:` in the muted
@@ -628,10 +639,14 @@ export const calendarLook = {
       : { flexDirection: "row", flexWrap: "wrap", gap: 6 };
   },
   get preset() {
-    if (terminal) return { height: 28, paddingHorizontal: 8, borderRadius: radius.control, justifyContent: "center" as const, fontSize: 13, color: colors.text };
+    // At least a line's height, growing with a description's second line: a preset without one stays as tall.
+    if (terminal) return { minHeight: 28, paddingHorizontal: 8, borderRadius: radius.control, justifyContent: "center" as const, fontSize: 13, color: colors.text };
     return pointer
-      ? { height: 28, paddingHorizontal: 10, borderRadius: radius.control, justifyContent: "center" as const, fontSize: 13, color: colors.text }
-      : { height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.border, justifyContent: "center" as const, fontSize: 14, color: colors.text };
+      ? { minHeight: 28, paddingVertical: 4, paddingHorizontal: 10, borderRadius: radius.control, justifyContent: "center" as const, fontSize: 13, color: colors.text }
+      : { minHeight: 34, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.border, justifyContent: "center" as const, fontSize: 14, color: colors.text };
+  },
+  get presetDescription() {
+    return terminal ? { color: colors.faint } : { fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums" as const] };
   },
   presetClass: terminal ? "enabled:hover:bg-accent active:opacity-70" : `transition-colors duration-100 motion-reduce:transition-none enabled:hover:${quietFill} enabled:active:${pressedFill}`,
   header: { marginBottom: terminal ? 4 : pointer ? 12 : 8 },
@@ -680,6 +695,9 @@ export function datePickerLook(o?: DatePickerLookOptions) {
     },
     get presetStyle() {
       return calendarLook.preset;
+    },
+    get presetDescriptionStyle() {
+      return calendarLook.presetDescription;
     },
     presetClass: calendarLook.presetClass,
     calendarStyle: calendarLook.calendar,

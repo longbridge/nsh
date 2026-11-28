@@ -9,6 +9,37 @@ demo: el-otp-input
 
 一次性验证码输入框接收固定位数的数字（短信里的验证码、身份验证器的验证码），并把它们显示在格子里。行为由它负责：一个透明的原生输入框覆盖在格子之上，接收键盘输入，因此打字、输入法、粘贴、数字键盘以及系统的验证码自动填充（iOS 的“来自信息”、Android 的短信验证码建议）都是平台自己的，屏幕阅读器也只看到一个文本框。只有数字能输入，最多 `length` 位；退格键删除最后一位，填满时 `onComplete` 通知应用。外观由应用决定：`OtpInput` 没有自己的颜色、尺寸、边框或文字。它的部件是格子、格子分成的组和光标，应用为每个部件设置样式。
 
+```tsx tabs
+import { mount, signal } from "nsh";
+import { OtpInput } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+function App() {
+  const code = signal("");
+  const verify = (value: string) => console.log(`checking ${value}`);
+  return (
+    <OtpInput
+      length={6}
+      groups={2}
+      value={code()}
+      onChange={({ value }) => code.set(value)}
+      onComplete={({ value }) => verify(value)}
+      accessibilityLabel="验证码，6 位数字"
+      class="flex-row gap-3"
+      groupClass="flex-row gap-2"
+      cellClass="w-10 h-12 items-center justify-center rounded-lg border border-input text-xl focus:border-ring data-filled:bg-muted"
+      caretClass="w-0.5 h-6 bg-foreground"
+    />
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_base::{OtpInputCompleteEvent, otp_input, theme};
 use nsh_core::prelude::*;
@@ -41,37 +72,6 @@ fn verification(verify: impl Fn(&str) + 'static) -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { mount, signal } from "nsh";
-import { OtpInput } from "nsh/base";
-import { Window } from "nsh/desktop";
-
-function App() {
-  const code = signal("");
-  const verify = (value: string) => console.log(`checking ${value}`);
-  return (
-    <OtpInput
-      length={6}
-      groups={2}
-      value={code()}
-      onChange={({ value }) => code.set(value)}
-      onComplete={({ value }) => verify(value)}
-      accessibilityLabel="验证码，6 位数字"
-      class="flex-row gap-3"
-      groupClass="flex-row gap-2"
-      cellClass="w-10 h-12 items-center justify-center rounded-lg border border-input text-xl focus:border-ring data-filled:bg-muted"
-      caretClass="w-0.5 h-6 bg-foreground"
-    />
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
-```
-
 `OtpInput` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`otp_input()` 创建一个输入框，每个 prop 有一个 setter（`.length(..)`、`.cell_style(..)`），每个事件有一个监听方法（`.on_complete(..)`），输入框本身用带类型的样式方法设置样式。
 
 ## 验证码
@@ -87,6 +87,7 @@ mount(() => (
 | 输入全角数字（`０`–`９`，东亚输入法输入的） | 加入对应的 ASCII 数字。 |
 | 输入其他字符 | 不变；输入框丢弃它。 |
 | 按退格键 | 删除最后一位。 |
+| `validationType="alphanumeric"` 时输入字母（大小写均可） | 和数字一样加入，转成大写（`a` 记为 `A`）；全角字母（`ａ`、`Ｂ`）记为 ASCII 字母。 |
 | 粘贴，或系统自动填充验证码 | 其中的数字同样加入；含有 `length` 位或更多数字的文本（`123-456`、短信里的验证码）用它的前 `length` 位替换验证码。 |
 
 `onChange` 报告每次变化及新的验证码；变化填满最后一个格子时，紧接着是 `onComplete`，应用在这里校验验证码。
@@ -96,6 +97,7 @@ mount(() => (
 | Prop | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `length` | `.length(..)` | `number` | 必填 | 验证码的位数：每位一个格子。 |
+| `validationType` | `.validation_type(..)` | `"numeric" \| "alphanumeric"` | `"numeric"` | 验证码接受哪些字符。`"numeric"`：数字，弹出数字键盘。`"alphanumeric"`：ASCII 字母和数字，弹出完整键盘；字母转成大写，输入 `ab12cd34` 时格子显示、`onChange` 报告的都是 `AB12CD34`，应用比较验证码时不区分大小写。 |
 | `value` | `.value(..)` | `string` | 无 | 由应用控制的验证码（原样显示）。不传时输入框自己保存。 |
 | `defaultValue` | `.default_value(..)` | `string` | 无 | 未设置 `value` 时的初始验证码。 |
 | `masked` | `.masked(..)` | `boolean` | `false` | 已填的格子显示圆点而不是数字，输入框是安全输入框：屏幕阅读器不读出验证码，系统也不会把它放进建议里。 |
@@ -148,3 +150,4 @@ mount(() => (
 - iOS：输入框是验证码输入框（`textContentType` 为 `oneTimeCode`），QuickType 栏会提供来自“信息”或“邮件”的验证码；弹出数字键盘。`masked` 的输入框失去焦点后再次输入时会从头开始，与 iOS 的安全输入框一样。
 - Android：`autofillHints` 为 `smsOTPCode`，键盘和自动填充服务可以提供短信里的验证码；弹出数字键盘。
 - macOS、Windows、Linux 和网页：输入和粘贴进入输入框（在浏览器中带 `inputmode="numeric"`，手机上弹出数字键盘），格子上显示 I 形指针。
+- `validationType="alphanumeric"` 时弹出完整键盘而不是数字键盘（浏览器中为 `inputmode="text"`），平台支持时默认大写（`autoCapitalize="characters"`）。

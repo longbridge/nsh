@@ -71,8 +71,8 @@ use objc2::{
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSView, NSWindow};
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint,
-    NSRect, NSString, NSURL,
+    NSArray, NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSOperationQueue,
+    NSPoint, NSRect, NSString, NSURL,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -760,7 +760,7 @@ fn apply_props(surface: &Rc<Surface>, view: &NshView, props: &NativeProps) {
     match (hosts.get_mut(&view.id()), props) {
         (Some(Host::Video(video)), NativeProps::Video(p)) => {
             let base = surface.native.asset_base.borrow();
-            video.set(p, base.as_ref());
+            video.set(surface, p, base.as_ref());
         }
         (Some(Host::Web(web)), NativeProps::WebView(p)) => web.set(p),
         _ => log::debug!("native: props for a view of another kind"),
@@ -1395,6 +1395,8 @@ struct Status {
     loaded: Cell<bool>,
     failed: Cell<bool>,
     buffering: Cell<bool>,
+    /// The poster layer, until the video's first frame is ready.
+    poster: RefCell<Option<Retained<objc2_quartz_core::CALayer>>>,
 }
 
 /// A video: its player and the view showing it.
@@ -1407,6 +1409,8 @@ struct VideoHost {
     shown: Option<Retained<NSView>>,
     /// The `AVPlayerLayer` (without controls).
     layer: Option<Retained<AnyObject>>,
+    /// The image shown until the first frame loads.
+    poster: Option<Retained<objc2_quartz_core::CALayer>>,
     time_observer: Option<Retained<AnyObject>>,
     end_observer: Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     status: Rc<Status>,
@@ -1428,6 +1432,7 @@ impl VideoHost {
             player: None,
             shown: None,
             layer: None,
+            poster: None,
             time_observer: None,
             end_observer: None,
             status: Rc::default(),
@@ -1445,7 +1450,7 @@ impl VideoHost {
         self.prepared = Some(p.source.clone());
     }
 
-    fn set(&mut self, p: &VideoProps, base: Option<&AssetBase>) {
+    fn set(&mut self, surface: &Rc<Surface>, p: &VideoProps, base: Option<&AssetBase>) {
         if !av_foundation() {
             return;
         }
@@ -1460,6 +1465,13 @@ impl VideoHost {
         };
         if reopened {
             self.open(p.source.as_deref(), base);
+        }
+        if reopened || p.poster != old.poster {
+            self.set_poster(surface, p.poster.as_deref(), p.resize_mode);
+        } else if p.resize_mode != old.resize_mode
+            && let Some(poster) = &self.poster
+        {
+            poster.setContentsGravity(gravity(p.resize_mode));
         }
         if first || reopened || p.controls != old.controls {
             self.show(p.controls);
@@ -1514,6 +1526,59 @@ impl VideoHost {
             }
         }
         self.props = Some(p.clone());
+    }
+
+    /// Shows `source` (an image) under the player until its first frame is
+    /// ready; `None` shows nothing.
+    fn set_poster(&mut self, surface: &Rc<Surface>, source: Option<&str>, mode: ResizeMode) {
+        self.clear_poster();
+        // The first frame is there: it replaces the poster.
+        if self.status.loaded.get() {
+            return;
+        }
+        let Some(source) = source else { return };
+        let layer = objc2_quartz_core::CALayer::new();
+        layer.setContentsGravity(gravity(mode));
+        layer.setFrame(self.view.bounds());
+        layer.setAutoresizingMask(
+            objc2_quartz_core::CAAutoresizingMask::LayerWidthSizable
+                | objc2_quartz_core::CAAutoresizingMask::LayerHeightSizable,
+        );
+        if let Some(parent) = self.view.layer() {
+            parent.insertSublayer_atIndex(&layer, 0);
+        }
+        self.poster = Some(layer.clone());
+        *self.status.poster.borrow_mut() = Some(layer.clone());
+        let scale = self
+            .view
+            .window()
+            .map_or(2.0, |window| window.backingScaleFactor()) as f32;
+        let name = source.to_owned();
+        crate::image::load(
+            surface,
+            source,
+            scale.max(1.0),
+            move |result| match result {
+                Ok(bitmap) => {
+                    // SAFETY: a CGImage is a valid CALayer contents object.
+                    unsafe {
+                        layer.setContents(Some(
+                            &*(&*bitmap.image as *const objc2_core_graphics::CGImage
+                                as *const AnyObject),
+                        ))
+                    };
+                }
+                Err(message) => log::warn!("video poster {name}: {message}"),
+            },
+        );
+    }
+
+    /// Removes the poster, if one shows.
+    fn clear_poster(&mut self) {
+        self.status.poster.take();
+        if let Some(layer) = self.poster.take() {
+            layer.removeFromSuperlayer();
+        }
     }
 
     /// Opens `source` (or nothing).
@@ -1598,6 +1663,7 @@ impl VideoHost {
 
     /// Stops the player and stops observing it.
     fn close(&mut self) {
+        self.clear_poster();
         if let (Some(player), Some(token)) = (&self.player, self.time_observer.take()) {
             // SAFETY: removes the observer this host added.
             let _: () = unsafe { msg_send![player, removeTimeObserver: &*token] };
@@ -1700,6 +1766,15 @@ impl VideoHost {
     }
 }
 
+/// How a poster fits its box, as the video's own gravity does.
+fn gravity(mode: ResizeMode) -> &'static objc2_quartz_core::CALayerContentsGravity {
+    match mode {
+        ResizeMode::Cover => unsafe { objc2_quartz_core::kCAGravityResizeAspectFill },
+        ResizeMode::Stretch => unsafe { objc2_quartz_core::kCAGravityResize },
+        _ => unsafe { objc2_quartz_core::kCAGravityResizeAspect },
+    }
+}
+
 /// Seeks `player` to `seconds`, to the frame.
 fn seek_exactly(player: &AnyObject, seconds: f64) {
     let zero = CMTime::from_seconds(0.0);
@@ -1773,6 +1848,9 @@ fn report(player: &AnyObject, emitter: &Emitter, status: &Status) {
         // AVPlayerItemStatus: 1 ready to play, 2 failed.
         let state: isize = msg_send![&item, status];
         if state == 1 && !status.loaded.replace(true) {
+            if let Some(poster) = status.poster.take() {
+                poster.removeFromSuperlayer();
+            }
             let size: CGSize = msg_send![&item, presentationSize];
             emitter.emit(EventKind::Load, || {
                 EventPayload::Map(vec![
@@ -1826,6 +1904,10 @@ struct WebIvars {
     /// here: the only files this web view may open (its pages can link to
     /// each other, never to a file outside it).
     file: RefCell<Option<String>>,
+    /// The web view's `allowOrigin`, from its latest props.
+    allow_origin: RefCell<Option<nsh_core::access::WebOrigin>>,
+    /// The web view's `allowNavigation`, from its latest props.
+    allow_navigation: RefCell<Option<nsh_core::access::WebHosts>>,
     /// `evaluate()`'s requests in this web view.
     evaluations: Rc<nsh_platform_apple::web_evaluation::Evaluations>,
 }
@@ -1874,10 +1956,16 @@ define_class!(
             let ivars = self.ivars();
             let allowed = navigation_allowed(
                 ivars.access.as_deref(),
+                ivars.allow_origin.borrow().as_ref(),
                 ivars.file.borrow().as_deref(),
                 main,
                 &url,
-            );
+            ) && (!main
+                || ivars
+                    .allow_navigation
+                    .borrow()
+                    .as_ref()
+                    .is_none_or(|h| h.allows(&url)));
             if !allowed {
                 log::warn!(target: "js", "web view navigation to {url} is not granted");
                 let message = format!("navigation to {url} is not granted");
@@ -1924,6 +2012,30 @@ define_class!(
             }
             // WKPermissionDecisionGrant = 1, Deny = 2.
             decide.call((if granted { 1 } else { 2 },));
+        }
+
+        /// `<input type="file">`: the open panel, the files the user chose
+        /// to the page. Without this method WebKit shows nothing.
+        #[unsafe(method(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:))]
+        fn run_open_panel(
+            &self,
+            _web: &AnyObject,
+            parameters: &AnyObject,
+            _frame: &AnyObject,
+            complete: &block2::Block<dyn Fn(*mut NSArray<NSURL>)>,
+        ) {
+            // SAFETY: WebKit's documented WKOpenPanelParameters.
+            let (multiple, folders) = unsafe {
+                let multiple: bool = msg_send![parameters, allowsMultipleSelection];
+                let folders: bool = msg_send![parameters, allowsDirectories];
+                (multiple, folders)
+            };
+            crate::file_requests::web_open_panel(
+                self.ivars().emitter.surface.upgrade(),
+                multiple,
+                folders,
+                complete.copy(),
+            );
         }
 
         /// What the page cannot show, or the server sends as an attachment,
@@ -2032,6 +2144,8 @@ impl WebHandler {
             navigation: Cell::default(),
             downloading: RefCell::default(),
             file: RefCell::new(None),
+            allow_origin: RefCell::default(),
+            allow_navigation: RefCell::default(),
             evaluations,
         });
         // SAFETY: NSObject's designated initializer.
@@ -2055,6 +2169,17 @@ impl WebHandler {
     /// The core asked (or stopped asking) this view to hold downloads.
     fn set_defer_downloads(&self, defer: bool) {
         self.ivars().defer_downloads.set(defer);
+    }
+
+    /// The web view's `allowOrigin`: its next navigations are checked with it.
+    fn set_allow_origin(&self, origin: Option<nsh_core::access::WebOrigin>) {
+        *self.ivars().allow_origin.borrow_mut() = origin;
+    }
+
+    /// The web view's `allowNavigation`: its next navigations are checked
+    /// with it.
+    fn set_allow_navigation(&self, hosts: Option<nsh_core::access::WebHosts>) {
+        *self.ivars().allow_navigation.borrow_mut() = hosts;
     }
 
     fn failed(&self, navigation: Option<&AnyObject>, err: &AnyObject) {
@@ -2121,9 +2246,11 @@ fn describe(object: &AnyObject) -> String {
 /// Whether a web view may navigate to `url`: a frame inside the page, a
 /// file in the folder of the `file://` page the app itself loaded there
 /// (`folder`, which the `webview` grant, made of web hosts, can't name),
-/// and what the grant allows. Never a file outside that folder.
+/// and what the grant allows, with the web view's `allowOrigin` (`origin`).
+/// Never a file outside that folder.
 fn navigation_allowed(
     access: Option<&Access>,
+    origin: Option<&nsh_core::access::WebOrigin>,
     folder: Option<&str>,
     main: bool,
     url: &str,
@@ -2136,7 +2263,7 @@ fn navigation_allowed(
             local_file_path(url).is_some_and(|path| path.starts_with(dir) && !has_dot_segment(path))
         });
     }
-    access.is_none_or(|a| a.allows_webview(url))
+    access.is_none_or(|a| a.allows_webview_with(url, origin))
 }
 
 fn is_file_url(url: &str) -> bool {
@@ -2289,7 +2416,7 @@ impl WebHost {
         // A download's redirects take the grant its navigations do.
         let grant = access.clone();
         let allows: web_download::Allows =
-            Rc::new(move |url: &str| navigation_allowed(grant.as_deref(), None, true, url));
+            Rc::new(move |url: &str| navigation_allowed(grant.as_deref(), None, None, true, url));
         let download = web_download::Transport::new(surface.mtm, emit, allows);
         let handler = WebHandler::new(
             surface.mtm,
@@ -2372,6 +2499,12 @@ impl WebHost {
                 if let Some(pool) = WEB_POOL.with(|p| p.borrow().clone()) {
                     let _: () = msg_send![&config, setProcessPool: &*pool];
                 }
+                // A page's own full-screen control (`element.requestFullscreen`)
+                // is off unless the configuration turns it on, and Safari has
+                // it on: without it every page that asks for the screen does
+                // nothing when its button is clicked.
+                let preferences: Retained<AnyObject> = msg_send![&config, preferences];
+                let _: () = msg_send![&preferences, setElementFullscreenEnabled: true];
                 if p.incognito {
                     let store: Retained<AnyObject> =
                         msg_send![class(c"WKWebsiteDataStore")?, nonPersistentDataStore];
@@ -2448,6 +2581,10 @@ impl WebHost {
     fn set(&mut self, p: &WebProps) {
         self.scrolls = p.scrollable;
         self.handler.set_defer_downloads(p.defer_downloads);
+        // Before the source loads: it applies to that navigation.
+        self.handler.set_allow_origin(p.allow_origin.clone());
+        self.handler
+            .set_allow_navigation(p.allow_navigation.clone());
         if self.props.is_none() && self.web.is_none() {
             // The core keeps `incognito` and the URL schemes from changing
             // once it is made.
@@ -2498,6 +2635,11 @@ impl WebHost {
                 web,
                 setAllowsBackForwardNavigationGestures: Bool::new(p.back_forward_gestures)
             ];
+            // `zoomable`: pinch (trackpad) magnification; off is WebKit's
+            // default. The core keeps it from changing once it is made.
+            if first {
+                let _: () = msg_send![web, setAllowsMagnification: Bool::new(p.zoomable)];
+            }
             let prefs: Retained<AnyObject> = msg_send![&config, defaultWebpagePreferences];
             let _: () =
                 msg_send![&prefs, setAllowsContentJavaScript: Bool::new(p.javascript_enabled)];
@@ -2918,8 +3060,9 @@ mod tests {
     fn a_web_view_opens_only_files_in_the_folder_it_was_given() {
         let dir = "/tmp/opened/7f/";
         let native = Policy::default().access();
-        let go =
-            |loaded: Option<&str>, url: &str| navigation_allowed(Some(&native), loaded, true, url);
+        let go = |loaded: Option<&str>, url: &str| {
+            navigation_allowed(Some(&native), None, loaded, true, url)
+        };
         for url in [
             "file:///tmp/opened/7f/a.pdf",
             "file:///tmp/opened/7f/a.pdf#page=2",
@@ -2946,7 +3089,7 @@ mod tests {
             "a web view that loaded no file (the mail reader)"
         );
         assert!(
-            !navigation_allowed(None, None, true, "file:///tmp/a.pdf"),
+            !navigation_allowed(None, None, None, true, "file:///tmp/a.pdf"),
             "nothing known of the app"
         );
         // Not a file: the grant decides, unrestricted or not.
@@ -2967,22 +3110,30 @@ mod tests {
         ] {
             assert!(!go(Some(dir), url), "not a web page: {url}");
             assert!(
-                !navigation_allowed(Some(&app), Some(dir), true, url),
+                !navigation_allowed(Some(&app), None, Some(dir), true, url),
                 "{url}"
             );
         }
         assert!(!navigation_allowed(
             Some(&app),
+            None,
             Some(dir),
             true,
             "https://evil.example/a"
         ));
         assert!(
-            navigation_allowed(Some(&app), Some(dir), true, "file:///tmp/opened/7f/a.pdf"),
+            navigation_allowed(
+                Some(&app),
+                None,
+                Some(dir),
+                true,
+                "file:///tmp/opened/7f/a.pdf"
+            ),
             "a JS app's own file page"
         );
         assert!(!navigation_allowed(
             Some(&app),
+            None,
             None,
             true,
             "file:///tmp/opened/7f/a.pdf"
@@ -2990,11 +3141,12 @@ mod tests {
         assert!(navigation_allowed(
             Some(&app),
             None,
+            None,
             true,
             "https://example.com/a"
         ));
         assert!(
-            navigation_allowed(Some(&app), None, false, "file:///etc/passwd"),
+            navigation_allowed(Some(&app), None, None, false, "file:///etc/passwd"),
             "a frame inside the page"
         );
     }
@@ -3013,14 +3165,20 @@ mod tests {
             "blob:https://example.com/9f2",
             "blob:http://example.com:6711/uuid",
         ] {
-            assert!(navigation_allowed(Some(&app), None, true, url), "{url}");
+            assert!(
+                navigation_allowed(Some(&app), None, None, true, url),
+                "{url}"
+            );
         }
         for url in [
             "blob:https://evil.example/uuid",
             "blob:null/uuid",
             "blob:file:///etc/passwd",
         ] {
-            assert!(!navigation_allowed(Some(&app), None, true, url), "{url}");
+            assert!(
+                !navigation_allowed(Some(&app), None, None, true, url),
+                "{url}"
+            );
         }
         // Nothing granted: a blob naming a host is still refused.
         let denied = Access {
@@ -3030,6 +3188,7 @@ mod tests {
         assert!(!navigation_allowed(
             Some(&denied),
             None,
+            None,
             true,
             "blob:https://example.com/uuid"
         ));
@@ -3037,11 +3196,13 @@ mod tests {
         assert!(navigation_allowed(
             Some(&app),
             None,
+            None,
             true,
             "https://example.com/a"
         ));
         assert!(!navigation_allowed(
             Some(&app),
+            None,
             None,
             true,
             "https://evil.example/a"

@@ -186,13 +186,29 @@ pub(crate) enum Decl {
 }
 
 impl Decl {
+    #[inline]
+    pub(crate) fn is_default(&self) -> bool {
+        matches!(self, Decl::Default(..) | Decl::CurrentColor(_))
+    }
+
+    #[inline]
+    pub(crate) fn needs_parts(&self) -> bool {
+        matches!(
+            self,
+            Decl::Part(_) | Decl::AdaptivePart(_) | Decl::Screen(..)
+        ) || matches!(self, Decl::CurrentPart(slot, _) if !matches!(slot, ColorSlot::Caret))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply(
         &self,
         dark: bool,
         important: bool,
+        current: Color,
+        ch: f32,
         style: &mut Style,
         props: &mut ClassProps,
-        parts: &mut Parts,
+        parts: Option<&mut Parts>,
     ) {
         match self {
             Decl::Set(key, value) => {
@@ -201,30 +217,34 @@ impl Decl {
             // Applied by `ClassList::apply` before the rules.
             Decl::Default(..) | Decl::CurrentColor(_) => {}
             Decl::SetCurrentColor(key, alpha) => {
-                style.set_color(*key, mixed(parts.current, *alpha));
+                style.set_color(*key, mixed(current, *alpha));
             }
             Decl::CurrentPart(slot, alpha) => {
-                let c = mixed(parts.current, *alpha);
+                let c = mixed(current, *alpha);
                 match slot {
                     ColorSlot::Caret => props.caret_color = Some(c),
-                    slot => parts.push(match slot {
-                        ColorSlot::Shadow => Part::ShadowColor(c),
-                        ColorSlot::InsetShadow => Part::InsetShadowColor(c),
-                        ColorSlot::TextShadow => Part::TextShadowColor(c),
-                        ColorSlot::DropShadow => Part::DropShadowColor(c),
-                        ColorSlot::Ring => Part::RingColor(c),
-                        ColorSlot::InsetRing => Part::InsetRingColor(c),
-                        ColorSlot::RingOffset => Part::RingOffsetColor(c),
-                        ColorSlot::From => Part::From(c, true),
-                        ColorSlot::Via => Part::Via(c, true),
-                        _ => Part::To(c, true),
-                    }),
+                    slot => parts
+                        .expect("parts allocated for part decl")
+                        .push(match slot {
+                            ColorSlot::Shadow => Part::ShadowColor(c),
+                            ColorSlot::InsetShadow => Part::InsetShadowColor(c),
+                            ColorSlot::TextShadow => Part::TextShadowColor(c),
+                            ColorSlot::DropShadow => Part::DropShadowColor(c),
+                            ColorSlot::Ring => Part::RingColor(c),
+                            ColorSlot::InsetRing => Part::InsetRingColor(c),
+                            ColorSlot::RingOffset => Part::RingOffsetColor(c),
+                            ColorSlot::From => Part::From(c, true),
+                            ColorSlot::Via => Part::Via(c, true),
+                            _ => Part::To(c, true),
+                        }),
                 }
             }
             Decl::Style(decl) => {
                 let _ = decl.apply(style);
             }
-            Decl::Part(part) => parts.push(part.clone()),
+            Decl::Part(part) => parts
+                .expect("parts allocated for part decl")
+                .push(part.clone()),
             Decl::Prop(p) => match p {
                 PropDecl::NoWrap(b) => {
                     props.no_wrap = Some(*b);
@@ -255,16 +275,19 @@ impl Decl {
                 }
             },
             Decl::Screen(key, fw, fh) => {
+                let parts = parts.expect("parts allocated for screen decl");
                 parts.screen.push((*key, *fw, *fh));
                 parts.touched |= touched::SCREEN;
             }
             Decl::Ch(key, n) => {
-                let _ = style.set_key(*key, StyleValue::Number(n * parts.ch));
+                let _ = style.set_key(*key, StyleValue::Number(n * ch));
             }
             Decl::Adaptive(key, values) => {
                 let _ = style.apply_value(*key, &values[usize::from(dark)]);
             }
-            Decl::AdaptivePart(pair) => parts.push(pair[usize::from(dark)].clone()),
+            Decl::AdaptivePart(pair) => parts
+                .expect("parts allocated for part decl")
+                .push(pair[usize::from(dark)].clone()),
         }
     }
 
@@ -368,7 +391,6 @@ pub(crate) mod touched {
     pub(crate) const TRANSITION: u16 = 128;
     pub(crate) const ANIMATE: u16 = 256;
     pub(crate) const TEXT_SHADOW: u16 = 512;
-    pub(crate) const ALL: u16 = u16::MAX;
 }
 
 /// The transform properties parts set ([`Parts::transform_parts`]).
@@ -900,6 +922,12 @@ fn fraction(v: &str) -> Option<f32> {
     (b > 0.0).then(|| a / b)
 }
 
+/// A ring's width or offset in brackets, with or without its hint
+/// (`[3px]`, `[length:3px]`).
+fn ring_length(theme: &Theme, value: &str) -> Option<f32> {
+    class_length(theme, arbitrary_hinted(value, "length").unwrap_or(value))
+}
+
 fn class_length(theme: &Theme, value: &str) -> Option<f32> {
     let value = value.trim();
     if css::number(value).is_some_and(|n| n != 0.0) {
@@ -1221,9 +1249,11 @@ fn opacity_factor(v: &str) -> Option<f32> {
     }
 }
 
+/// A scale factor: a percentage step (`scale-95`) or arbitrary, with or
+/// without the `number:` hint (`[0.97]`, `[number:0.97]`).
 fn scale_factor(v: &str) -> Option<f32> {
-    if v.starts_with('[') {
-        percent_factor(v)
+    if let Some(a) = arbitrary(v) {
+        css::amount(arbitrary_hinted(&a, "number").unwrap_or(&a))
     } else {
         int(v).map(|n| n / 100.0)
     }
@@ -2480,7 +2510,7 @@ static PREFIXES: &[(&str, Handler)] = &[
         Some(outline_width(arbitrary_points(t, v)?))
     }),
     ("inset-ring", |t, v, _| {
-        if let Some(n) = int(v).or_else(|| arbitrary(v).and_then(|a| class_length(t, &a))) {
+        if let Some(n) = int(v).or_else(|| arbitrary(v).and_then(|a| ring_length(t, &a))) {
             return part(Part::InsetRing(n));
         }
         if let Some(a) = current(v) {
@@ -2489,7 +2519,7 @@ static PREFIXES: &[(&str, Handler)] = &[
         part(Part::InsetRingColor(color(t, v)?))
     }),
     ("ring-offset", |t, v, _| {
-        if let Some(n) = int(v).or_else(|| arbitrary(v).and_then(|a| class_length(t, &a))) {
+        if let Some(n) = int(v).or_else(|| arbitrary(v).and_then(|a| ring_length(t, &a))) {
             return part(Part::RingOffset(n));
         }
         if let Some(a) = current(v) {
@@ -2498,7 +2528,7 @@ static PREFIXES: &[(&str, Handler)] = &[
         part(Part::RingOffsetColor(color(t, v)?))
     }),
     ("ring", |t, v, _| {
-        if let Some(n) = int(v).or_else(|| arbitrary(v).and_then(|a| class_length(t, &a))) {
+        if let Some(n) = int(v).or_else(|| arbitrary(v).and_then(|a| ring_length(t, &a))) {
             return part(Part::Ring(n));
         }
         if let Some(a) = current(v) {

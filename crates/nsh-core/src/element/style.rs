@@ -3247,6 +3247,13 @@ pub trait Styled: Sized {
         transition(self, TransitionProps::CLIP_PATH)
     }
 
+    /// Changes of the mask animate (CSS's `transition-property:
+    /// mask-image`): gradients of the same shape and stop count move stop
+    /// by stop; any other change applies at once.
+    fn transition_mask(self) -> Self {
+        transition(self, TransitionProps::MASK)
+    }
+
     /// Changes jump.
     fn transition_none(mut self) -> Self {
         self.style().push(Declaration::TransitionNone);
@@ -3742,9 +3749,9 @@ pub trait Styled: Sized {
     }
 
     /// The color a system control shows its state in (`accentColor`, CSS's
-    /// `accent-color`, Tailwind's `accent-*`): the track of
-    /// a system switch when on. Set on the control itself; it is
-    /// not inherited.
+    /// `accent-color`, Tailwind's `accent-*`), which a native component gets
+    /// as its `accentColor` prop, such as the track of a system switch when
+    /// on. Set on the control itself; it is not inherited.
     fn accent_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
         self.style().bind_value(color, |s, color: AdaptiveColor| {
             s.color(&[StyleKey::AccentColor], color);

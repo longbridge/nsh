@@ -190,8 +190,7 @@ fn runner_features(platform: &str) -> &'static [&'static str] {
 
 /// The cargo arguments of a release runner of `platform`: its features
 /// when [`set_runner_features`] chose some, each the runner's crate has
-/// (`net` is not macOS's), plus those no import tells about (Linux's
-/// `sound`, Windows' `media`).
+/// (`net` is not macOS's, `sound` only Linux's, `media` only Windows').
 fn runner_feature_args(platform: &str) -> Vec<String> {
     let Some(chosen) = RUNNER_FEATURES
         .lock()
@@ -204,7 +203,7 @@ fn runner_feature_args(platform: &str) -> Vec<String> {
     let kept: Vec<&str> = has
         .iter()
         .copied()
-        .filter(|f| matches!(*f, "sound" | "media") || chosen.iter().any(|c| c == f))
+        .filter(|f| chosen.iter().any(|c| c == f))
         .collect();
     vec![
         "--no-default-features".into(),
@@ -224,28 +223,66 @@ pub(crate) fn clear_current() {
     *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
-/// The app of this command, if it has Rust crates of its own.
 /// The app's own Rust code may make a web view: a source file under one
 /// of its crates' directories spells `WebView` or `web_view`. Its runner
 /// keeps `webview` then, as no bundle import tells about it (#2377).
 pub(crate) fn may_make_web_view(app: &RustApp) -> bool {
-    fn spells(dir: &Path) -> bool {
+    rust_code_use(app).web_view
+}
+
+/// What the app's own Rust code may use that no bundle import tells
+/// about, by what a source file under one of its crates' directories
+/// spells: a web view (`WebView`, `web_view`, anywhere in a name), or the
+/// functions that make the rest, `load_sound`, `audio_player` and `video`
+/// (called, or named by a path). Its runner keeps their features then.
+/// Those count only as whole names, not the types they return: `Sound`
+/// and `Video` are common in other names (`Win32_SoundDevice`, an icon
+/// set's `Icon::Video`).
+pub(crate) fn rust_code_use(app: &RustApp) -> crate::native_features::RustCodeUse {
+    fn read(dir: &Path, found: &mut crate::native_features::RustCodeUse) {
         let Ok(entries) = std::fs::read_dir(dir) else {
-            return false;
+            return;
         };
-        entries.flatten().any(|e| {
+        for e in entries.flatten() {
             let path = e.path();
             let name = e.file_name();
             if path.is_dir() {
-                name != "target" && !name.to_string_lossy().starts_with('.') && spells(&path)
-            } else {
-                path.extension().is_some_and(|x| x == "rs")
-                    && std::fs::read_to_string(&path)
-                        .is_ok_and(|s| s.contains("WebView") || s.contains("web_view"))
+                if name != "target" && !name.to_string_lossy().starts_with('.') {
+                    read(&path, found);
+                }
+            } else if path.extension().is_some_and(|x| x == "rs")
+                && let Ok(s) = std::fs::read_to_string(&path)
+            {
+                found.web_view |= s.contains("WebView") || s.contains("web_view");
+                for (before, name, after) in names(&s) {
+                    let sound = name == "load_sound";
+                    found.sound |= sound;
+                    found.media |= sound
+                        || name == "audio_player"
+                        || name == "video"
+                            && (before.ends_with("::") || after.trim_start().starts_with('('));
+                }
             }
+        }
+    }
+    /// The names `code` spells, each with the code before and after it.
+    fn names(code: &str) -> impl Iterator<Item = (&str, &str, &str)> {
+        let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut at = 0;
+        std::iter::from_fn(move || {
+            let start = at + code[at..].find(word)?;
+            let end = code[start..]
+                .find(|c| !word(c))
+                .map_or(code.len(), |n| start + n);
+            at = end;
+            Some((&code[..start], &code[start..end], &code[end..]))
         })
     }
-    app.watched.iter().any(|dir| spells(dir))
+    let mut found = crate::native_features::RustCodeUse::default();
+    for dir in &app.watched {
+        read(dir, &mut found);
+    }
+    found
 }
 
 /// The cargo arguments that turn web views on in a Rust app's runner
@@ -273,6 +310,57 @@ fn rust_runner_web_view(platform: Platform, may: impl FnOnce() -> bool) -> Vec<&
     }
 }
 
+/// Whether `nsh run`'s bundle may make a web view, as its development
+/// session last built it ([`set_dev_bundle_web_view`]); `None` when no
+/// session built it (`nsh test`, a failed build).
+static DEV_BUNDLE_WEB_VIEW: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+
+/// A Linux development host was built without web views
+/// ([`dev_host_web_view`]).
+static DEV_HOST_WITHOUT_WEB_VIEW: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Records whether the bundle a development session built may make a web
+/// view (it spells `webview`, or `nsh.json` keeps the feature). A bundle
+/// that makes one after the host was built without them says so once: the
+/// host shows a placeholder until `nsh run` starts again.
+pub(crate) fn set_dev_bundle_web_view(may: bool) {
+    let mut last = DEV_BUNDLE_WEB_VIEW
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if may
+        && last.replace(true) == Some(false)
+        && DEV_HOST_WITHOUT_WEB_VIEW.swap(false, std::sync::atomic::Ordering::Relaxed)
+    {
+        crate::ui::warn(
+            "the app now makes a WebView, which this development host was built without: \
+             it shows a placeholder until `nsh run` starts again",
+        );
+    } else if !may {
+        *last = Some(false);
+    }
+}
+
+/// The cargo arguments that turn web views on in a Rust app's Linux
+/// development host: only when the app may make one, by its bundle
+/// ([`set_dev_bundle_web_view`]; not known: kept) or its own Rust code
+/// (`may`), as its package would (#2377), and this machine can build them
+/// (`can`, [`crate::runtime::linux_web_views`]). An app that makes none
+/// builds no WebKitGTK.
+fn dev_host_web_view(may: impl FnOnce() -> bool, can: impl FnOnce() -> bool) -> Vec<&'static str> {
+    let bundle = *DEV_BUNDLE_WEB_VIEW
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let wanted = bundle.unwrap_or(true) || may();
+    if wanted && can() {
+        DEV_HOST_WITHOUT_WEB_VIEW.store(false, std::sync::atomic::Ordering::Relaxed);
+        vec!["--features", "nsh-platform-linux/webview"]
+    } else {
+        DEV_HOST_WITHOUT_WEB_VIEW.store(!wanted, std::sync::atomic::Ordering::Relaxed);
+        Vec::new()
+    }
+}
+
 impl RustApp {
     /// The generated workspace (`<app>/.nsh/rust`).
     pub(crate) fn workspace(&self) -> &Path {
@@ -280,6 +368,7 @@ impl RustApp {
     }
 }
 
+/// The app of this command, if it has Rust crates of its own.
 pub(crate) fn current() -> Option<RustApp> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
@@ -374,6 +463,11 @@ enum Link {
     /// says: the copy Cargo gives the app's crates, which the generated
     /// crates then share.
     Cargo(Option<String>),
+    /// One of nsh's own nshm ([`OWN_NSHM`]) that nsh's version of it
+    /// stands for: linked from where the workspace takes nsh's crates, with
+    /// the keys of [`Nsh::keys`], so it shares their `nsh-core`. The crate's
+    /// `dir` is a copy to read it from.
+    Nsh(String),
 }
 
 impl AppCrate {
@@ -393,16 +487,30 @@ impl AppCrate {
         self
     }
 
-    /// Whether `nsh.json` lists it, rather than one of the app's crates
-    /// depending on it through Cargo ([`cargo_nshm`]).
+    /// The same crate, one of nsh's own nshm ([`OWN_NSHM`]), linked from
+    /// where `nsh` takes nsh's crates ([`Link::Nsh`]).
+    pub(crate) fn linked_with(mut self, nsh: &Nsh) -> AppCrate {
+        self.link = Link::Nsh(nsh.keys(&self.package));
+        self
+    }
+
+    /// Whether the app links it from where `nsh.json` lists it, rather than
+    /// as one of the app's crates depends on it through Cargo
+    /// ([`cargo_nshm`]) or as nsh's own ([`Link::Nsh`]).
     pub(crate) fn is_listed(&self) -> bool {
         self.link == Link::Listed
     }
 
     /// Whether Cargo takes it from a registry or Git rather than a
-    /// directory: none of the app's code to watch or debug.
+    /// directory, or it is nsh's own: none of the app's code to watch or
+    /// debug.
     fn is_fetched(&self) -> bool {
-        matches!(self.link, Link::Cargo(Some(_)))
+        matches!(self.link, Link::Cargo(Some(_)) | Link::Nsh(_))
+    }
+
+    /// Whether it is one of nsh's own nshm ([`Link::Nsh`]).
+    fn is_nsh(&self) -> bool {
+        matches!(self.link, Link::Nsh(_))
     }
 
     /// What links it, for the comments of the generated code.
@@ -410,6 +518,7 @@ impl AppCrate {
         match self.link {
             Link::Listed => "nsh.json \"rust\"",
             Link::Cargo(_) => "a Cargo dependency of the app's crates",
+            Link::Nsh(_) => "nsh.json \"dependencies\", from nsh",
         }
     }
 
@@ -466,6 +575,12 @@ impl AppCrate {
                     self.package,
                 )
             }
+            Link::Nsh(source) => format!(
+                "{} = {{ package = {:?}, {source}{} }}",
+                self.name(),
+                self.package,
+                features_value(&self.features)
+            ),
         }
     }
 }
@@ -483,11 +598,12 @@ pub(crate) fn features_value(features: &[String]) -> String {
 /// crates take them from ([`Nsh::of`]), so the app and its hosts share one
 /// core (or their component and registry types differ).
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Nsh {
+pub(crate) enum Nsh {
     /// crates.io, at this `nsh`'s version ([`VERSION`]): the app's crates
     /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --template rust` writes).
     Registry,
-    /// The installed nightly builds a TSX runner at its own commit.
+    /// [`NSH_REPOSITORY`] at the installed nightly's own commit: an app
+    /// with no crates of its own builds with the nsh that runs it.
     Nightly(&'static str),
     /// The checkout the app's crates depend on by path (`nsh init
     /// --template rust --nsh-source <dir>`): nsh's own examples, or an app
@@ -504,9 +620,34 @@ enum Nsh {
 
 /// The version of nsh's crates an app builds with: this command line's, as
 /// the code it generates calls their API.
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// nsh's repository, where a nightly's crates come from.
+pub(crate) const NSH_REPOSITORY: &str = "https://github.com/longbridge/nsh";
 
 impl Nsh {
+    /// The nsh this command line is: the checkout it was built in, the
+    /// nightly's commit, or the release on crates.io.
+    pub(crate) fn installed() -> anyhow::Result<Self> {
+        Self::for_runner(
+            crate::runtime::cli_checkout(),
+            env!("NSH_CHANNEL"),
+            env!("NSH_GIT_SHA_FULL"),
+        )
+    }
+
+    /// Where an app whose own crates are `crates` takes nsh's crates from:
+    /// where those crates do ([`Nsh::of`]), or, with none (a TSX app's
+    /// runner, an app whose Rust is nshm only), this command line's
+    /// ([`Nsh::installed`]), whose runtime runs the app.
+    pub(crate) fn for_app(crates: &[AppCrate]) -> anyhow::Result<Self> {
+        if crates.is_empty() {
+            Self::installed()
+        } else {
+            Self::of(crates)
+        }
+    }
+
     /// The source of a runner generated for an app with no Rust crates.
     fn for_runner(
         checkout: Option<PathBuf>,
@@ -596,19 +737,27 @@ impl Nsh {
         }
     }
 
+    /// The directory of nsh's crate `name` in the checkout, if it is one.
+    pub(crate) fn crate_dir(&self, name: &str) -> Option<PathBuf> {
+        self.source().map(|dir| nsh_crate(dir, name))
+    }
+
     /// The dependency on nsh's crate `name` for a generated manifest, with
     /// `extra` keys (`, default-features = false`): `{ version = "=0.1.1" }`
     /// or `{ path = "…" }`.
     fn dep(&self, name: &str, extra: &str) -> String {
+        format!("{{ {}{extra} }}", self.keys(name))
+    }
+
+    /// The keys of a dependency line that take nsh's crate `name` from
+    /// here: `version = "=0.1.1"`, `git = "…", rev = "…"` or `path = "…"`.
+    fn keys(&self, name: &str) -> String {
         match self {
-            Nsh::Registry => format!("{{ version = \"={VERSION}\"{extra} }}"),
-            Nsh::Nightly(rev) => {
-                format!("{{ git = \"https://github.com/longbridge/nsh\", rev = {rev:?}{extra} }}")
+            Nsh::Registry => format!("version = \"={VERSION}\""),
+            Nsh::Nightly(rev) => format!("git = {NSH_REPOSITORY:?}, rev = {rev:?}"),
+            Nsh::Source(dir) | Nsh::Git { checkout: dir, .. } => {
+                format!("path = {:?}", nsh_crate(dir, name).to_string_lossy())
             }
-            Nsh::Source(dir) | Nsh::Git { checkout: dir, .. } => format!(
-                "{{ path = {:?}{extra} }}",
-                nsh_crate(dir, name).to_string_lossy()
-            ),
         }
     }
 }
@@ -617,16 +766,6 @@ impl Nsh {
 const HACK_USE: &str =
     "\n// The features the app's programs share (`.nsh/rust/hack`).\nuse workspace_hack as _;\n";
 const HACK_LIB_RS: &str = "//! Only dependencies: the features the app's programs share (nsh's\n//! `RustApp::unify_features`).\n";
-
-/// This machine's target triple (`rustc -vV`).
-fn host_triple() -> Option<String> {
-    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let output = Command::new(rustc).arg("-vV").output().ok()?;
-    let text = String::from_utf8(output.stdout).ok()?;
-    text.lines()
-        .find_map(|line| line.strip_prefix("host: "))
-        .map(str::to_owned)
-}
 
 /// The packages the describing program builds on its own, as
 /// `(name, version)`: `cargo tree -p <describe>` resolves its features
@@ -1084,11 +1223,7 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         .with_context(|| format!("entry not found: {}", entry.display()))?;
     // The app's directory: its `nsh.json`'s (`entry` may be below it).
     let dir = &nsh_bundler::app_dir::app_dir_of(&entry);
-    let nsh = Nsh::for_runner(
-        crate::runtime::cli_checkout(),
-        env!("NSH_CHANNEL"),
-        env!("NSH_GIT_SHA_FULL"),
-    )?;
+    let nsh = Nsh::for_app(&[])?;
     let watched = watched(&[], nsh.source());
     // A TSX app packaged from flags alone has no `nsh.json`: the runtime's.
     let minimums = match nsh_bundler::app_dir::read(&dir.join("nsh.json")) {
@@ -1118,7 +1253,14 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
 /// The `"rust"` crates of the app whose entry is `entry`, if it has any.
 /// `unify`: the command builds programs for this machine besides the
 /// describing one ([`RustApp::unify_features`]).
-pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
+/// `target`: the one whose hosts or runtime the command builds, which
+/// links only the nshm the app lists for it (`None`: every target,
+/// [`crate::nshm::crates`]).
+pub(crate) fn of(
+    entry: &Path,
+    unify: bool,
+    target: Option<nsh_core::platform::Os>,
+) -> anyhow::Result<Option<RustApp>> {
     let entry = dunce::canonicalize(entry)
         .with_context(|| format!("entry not found: {}", entry.display()))?;
     // The app's directory: its `nsh.json`'s (`entry` may be below it).
@@ -1127,11 +1269,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         return Ok(None);
     };
     let config: serde_json::Value = serde_json::from_str(&text).context("nsh.json is not JSON")?;
-    let modules = crate::nshm::crates(dir, &config)?;
     let rust = config.get("rust");
-    if rust.is_none() && modules.is_empty() {
-        return Ok(None);
-    }
     // The app's own crates, then the nshm it installed (`nsh add`):
     // one list of UI sets, checked together.
     let mut crates = match rust {
@@ -1139,16 +1277,27 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         None => Vec::new(),
     };
     // nsh's crates come from where the app's own crates take them; an
-    // nshm's requirement on them is patched to that place. An app
-    // with nshm only builds with this CLI's, as a TSX app's runner
-    // does ([`runner_only`]).
-    let nsh = if crates.is_empty() {
-        crate::runtime::cli_checkout().map_or(Nsh::Registry, Nsh::Source)
-    } else {
-        Nsh::of(&crates)?
+    // nshm's requirement on them is patched to that place. An app with
+    // nshm only builds with this CLI's, as a TSX app's runner does
+    // ([`runner_only`]). nsh's own nshm come from there too: found only
+    // when the nshm need it.
+    let found = std::cell::OnceCell::new();
+    let nsh_of = || -> anyhow::Result<Nsh> {
+        if let Some(nsh) = found.get() {
+            return Ok(Nsh::clone(nsh));
+        }
+        let nsh = Nsh::for_app(&crates)?;
+        Ok(found.get_or_init(|| nsh).clone())
     };
+    let modules = crate::nshm::crates(dir, &config, &nsh_of, target)?;
+    if rust.is_none() && modules.is_empty() {
+        return Ok(None);
+    }
+    let nsh = nsh_of()?;
+    // nsh's own nshm are linked as nsh's crates are, never patched.
     let module_patches = modules
         .iter()
+        .filter(|(_, c)| !c.is_nsh())
         .map(|(url, c)| (url.clone(), c.package.clone(), c.dir.clone()))
         .collect();
     // The nshm the app's own crates depend on through Cargo: linked after
@@ -1175,12 +1324,12 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         dir,
     );
     let minimums = AppleMinimums::of(&config)?;
-    // Only installed nshm, with a released nsh: nothing of the build is the
-    // app's, so every app with these nshm shares it.
+    // Only installed nshm, with a released or nightly nsh: nothing of the
+    // build is the app's, so every app with these nshm shares it.
     let installed = nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
     let shared = rust.is_none()
         && !is_root(&entry)
-        && matches!(nsh, Nsh::Registry)
+        && matches!(nsh, Nsh::Registry | Nsh::Nightly(_))
         && !crates.is_empty()
         && crates
             .iter()
@@ -1394,6 +1543,9 @@ fn cargo_nshm(crates: &[AppCrate]) -> anyhow::Result<Vec<(String, AppCrate)>> {
         }
         let metadata: serde_json::Value =
             serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
+        if let Some(message) = stale_nsh_core(&metadata, env!("CARGO_PKG_VERSION")) {
+            bail!("{message}");
+        }
         for (id, label, krate) in nshm_in(&metadata, &manifest)? {
             if !found.iter().any(|(seen, ..)| *seen == id) {
                 found.push((id, label, krate));
@@ -1405,6 +1557,67 @@ fn cargo_nshm(crates: &[AppCrate]) -> anyhow::Result<Vec<(String, AppCrate)>> {
         .into_iter()
         .map(|(_, label, krate)| (label, krate))
         .collect())
+}
+
+/// [`stale_nsh_core`] for the workspace at `workspace`, `None` when Cargo
+/// cannot describe it.
+fn workspace_stale_nsh_core(workspace: &Path) -> Option<String> {
+    let output = Command::new(cargo())
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--offline",
+            "--manifest-path",
+        ])
+        .arg(workspace.join("Cargo.toml"))
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let metadata = serde_json::from_slice(&output.stdout).ok()?;
+    stale_nsh_core(&metadata, env!("CARGO_PKG_VERSION"))
+}
+
+/// The packages in `metadata` (an nshm the app depends on, transitively)
+/// that require an nsh-core this NSH (`version`) is not: Cargo would build
+/// both and fail minutes later on mismatched types. `None` when every
+/// requirement accepts this NSH; a nightly counts as its release.
+fn stale_nsh_core(metadata: &serde_json::Value, version: &str) -> Option<String> {
+    let mut version = semver::Version::parse(version).ok()?;
+    version.pre = semver::Prerelease::EMPTY;
+    let mut stale: Vec<String> = metadata["packages"]
+        .as_array()?
+        .iter()
+        .filter_map(|package| {
+            let req = package["dependencies"].as_array()?.iter().find_map(|d| {
+                (d["name"].as_str() == Some("nsh-core") && d["kind"].is_null())
+                    .then(|| d["req"].as_str())?
+            })?;
+            let parsed = semver::VersionReq::parse(req).ok()?;
+            (!parsed.matches(&version)).then(|| {
+                format!(
+                    "  {} {} requires nsh-core {req}",
+                    package["name"].as_str().unwrap_or("?"),
+                    package["version"].as_str().unwrap_or("?")
+                )
+            })
+        })
+        .collect();
+    if stale.is_empty() {
+        return None;
+    }
+    stale.sort();
+    stale.dedup();
+    Some(format!(
+        "these dependencies are built for another nsh; this is nsh {version}:\n{}\n\
+         update them to a release for nsh {}.{} (in nsh.json and Cargo.toml)",
+        stale.join("\n"),
+        version.major,
+        version.minor
+    ))
 }
 
 /// The nshm in the dependency graph of the package at `manifest`, as
@@ -1841,6 +2054,11 @@ fn app_info_json(
     Ok(info.to_string())
 }
 
+/// nsh's own nshm: released with nsh's crates, at their version. An app
+/// asking for one by version takes the one of the nsh it builds with
+/// ([`Nsh`]), from where that nsh's crates come.
+pub(crate) const OWN_NSHM: &[&str] = &["nsh-extra"];
+
 /// nsh's crates an app's crate may depend on ([`Nsh::of`]; built against a
 /// checkout, `[patch.crates-io]` sends them to it).
 const NSH_CRATES: &[&str] = &[
@@ -1850,6 +2068,7 @@ const NSH_CRATES: &[&str] = &[
     "nsh-package",
     "nsh-js",
     "nsh-engine",
+    "nsh-gpu",
     "nsh-testing",
     "nsh-bundler",
     "nsh-dev",
@@ -1861,6 +2080,19 @@ const NSH_CRATES: &[&str] = &[
     "nsh-platform-windows",
     "nsh-platform-web",
     "nsh-platform-gpui",
+    "nsh-gpui-host",
+    "nsh-platform-tui",
+    "nsh-i18n",
+    "nsh-updater",
+    "nsh-tui-host",
+    "nsh-ios-host",
+    "nsh-ios-app",
+    "nsh-linux-host",
+    "nsh-linux-app",
+    "nsh-macos-host",
+    "nsh-macos-app",
+    "nsh-windows-host",
+    "nsh-windows-app",
 ];
 
 /// The dependencies of the app's crate `c` on nsh's crates, as `cargo
@@ -2272,10 +2504,16 @@ impl RustApp {
     }
 
     /// Its crates' packages, for what the steps say they build
-    /// (`charts, storage`).
+    /// (`charts, storage`), counted past two (`4 crates`): a step's line
+    /// stays one short line however many crates the app has.
     fn packages(&self) -> String {
-        let packages: Vec<&str> = self.crates.iter().map(|c| c.package.as_str()).collect();
-        packages.join(", ")
+        match self.crates.len() {
+            0..=2 => {
+                let packages: Vec<&str> = self.crates.iter().map(|c| c.package.as_str()).collect();
+                packages.join(", ")
+            }
+            n => format!("{n} crates"),
+        }
     }
 
     /// Whether `path` is part of the app's Rust code (the sources and
@@ -2377,11 +2615,12 @@ impl RustApp {
     }
 
     /// What the steps say they build: `the Rust crate charts`, `the Rust
-    /// crates charts, storage`.
+    /// crates charts, storage`, `4 Rust crates`.
     fn crates_what(&self) -> String {
         match self.crates.as_slice() {
             [one] => format!("the Rust crate {}", one.package),
-            _ => format!("the Rust crates {}", self.packages()),
+            [_, _] => format!("the Rust crates {}", self.packages()),
+            crates => format!("{} Rust crates", crates.len()),
         }
     }
 
@@ -2565,8 +2804,21 @@ panic = \"abort\"
                 self.app_components(android, "nsh", "android"),
             ),
         )?;
+        self.follow_nsh_patches(ws);
         self.unify_features(ws);
         Ok(())
+    }
+
+    /// Has the lock of the generated workspace `ws` take nsh's crates from
+    /// the patches its manifest has for them ([`crate::nsh_lock`]), when it
+    /// has any: built against a checkout, or a nightly with nshm.
+    fn follow_nsh_patches(&self, ws: &Path) {
+        let patched = self.nsh.source().is_some()
+            || matches!(self.nsh, Nsh::Nightly(_)) && !self.modules.is_empty();
+        if patched {
+            let names: Vec<&str> = NSH_CRATES.iter().chain(OWN_NSHM).copied().collect();
+            crate::nsh_lock::follow_patches(ws, &names, VERSION);
+        }
     }
 
     /// The dependency on `<ws>/hack` ([`Self::unify_features`]).
@@ -2629,7 +2881,7 @@ panic = \"abort\"
             }
             return;
         }
-        let Some(triple) = host_triple() else {
+        let Some(triple) = crate::runtime::rustc_host(None) else {
             return;
         };
         let key = self.hack_key(ws, &triple);
@@ -2845,8 +3097,10 @@ panic = \"abort\"
                 self.rust_web_lib(),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh
-                    .dep("nsh-platform-web", ", default-features = false"),
+                self.nsh.dep(
+                    "nsh-platform-web",
+                    ", default-features = false, features = [\"rust-parts\"]"
+                ),
             ),
         )?;
         self.write_rust_app(ws, root)?;
@@ -3129,11 +3383,7 @@ opt-level = \"s\"
     ) -> anyhow::Result<Option<crate::runtime::WebRuntime>> {
         const WASM: &str = "wasm32-unknown-unknown";
         let out = self.workspace.join("web-runtime");
-        let wasm = if rust {
-            out.join("nsh-rust.wasm")
-        } else {
-            out.join(kind.file())
-        };
+        let wasm = out.join(web_runtime_file(kind, rust));
         // The module's wasm-bindgen glue, when the app's crates call JS
         // through wasm-bindgen (`crate::bindgen`).
         let stem = wasm
@@ -3195,9 +3445,17 @@ opt-level = \"s\"
         };
         let built = self.build_with(cmd, &build)?;
         fs::create_dir_all(&out)?;
-        // Both kinds build to the same file: each keeps a copy of its own,
-        // through wasm-bindgen when the app's crates call JS through it.
-        runtime.glue = crate::bindgen::install(&built, &out, &stem)?;
+        // Each kind has its own file (`web_runtime_file`). The development
+        // one goes through wasm-bindgen when the app's crates call JS
+        // through it; the published one is linkable and kept as it is:
+        // `nsh package` splits it first (`web::link`).
+        runtime.glue = match kind {
+            crate::runtime::WebKind::Browser => {
+                crate::bindgen::install_linkable(&built, &out, &stem)?;
+                None
+            }
+            crate::runtime::WebKind::Dev => crate::bindgen::install(&built, &out, &stem)?,
+        };
         if self.nsh.source().is_none() {
             let js = self.resolved_crate("nsh-platform-web")?.join("web/nsh.js");
             crate::runtime::copy_browser_host(
@@ -3235,6 +3493,7 @@ opt-level = \"s\"
             true,
         )?;
         self.write_host(&ws, "gpui-host", "nsh-gpui-host", "development host")?;
+        self.follow_nsh_patches(&ws);
         Ok(ws)
     }
 
@@ -3252,6 +3511,7 @@ opt-level = \"s\"
             false,
         )?;
         self.write_tui_host(&ws)?;
+        self.follow_nsh_patches(&ws);
         Ok(ws)
     }
 
@@ -3294,7 +3554,18 @@ opt-level = \"s\"
             .map(|c| c.package.as_str())
             .collect();
         if self.nsh.source().is_some() {
-            changing.extend(NSH_CRATES);
+            changing.extend(
+                NSH_CRATES
+                    .iter()
+                    .filter(|name| gpui || !matches!(**name, "nsh-platform-gpui" | "nsh-gpui-host"))
+                    .copied(),
+            );
+            changing.extend(
+                self.crates
+                    .iter()
+                    .filter(|c| c.is_nsh())
+                    .map(|c| c.package()),
+            );
         }
         for package in changing {
             manifest.push_str(&format!(
@@ -3314,15 +3585,20 @@ opt-level = \"s\"
                 None => {}
             }
         }
+        // nsh's crates (and its own nshm) that the app's crates and nshm
+        // take from crates.io come from where the hosts take them, so all
+        // share one core.
+        let nsh_crates = NSH_CRATES
+            .iter()
+            .chain(OWN_NSHM)
+            .filter(|name| gpui || !matches!(**name, "nsh-platform-gpui" | "nsh-gpui-host"));
         if let Some(source) = self.nsh.source() {
             manifest.push_str("\n[patch.crates-io]\n");
             manifest.push_str(&crates_io);
             crates_io.clear();
             let mut patches = String::new();
-            for name in NSH_CRATES
-                .iter()
-                .filter(|name| gpui || **name != "nsh-platform-gpui")
-                .filter(|name| nsh_crate(source, name).join("Cargo.toml").is_file())
+            for name in
+                nsh_crates.filter(|name| nsh_crate(source, name).join("Cargo.toml").is_file())
             {
                 patches.push_str(&format!(
                     "{name} = {{ path = {:?} }}\n",
@@ -3334,6 +3610,14 @@ opt-level = \"s\"
                 // The app still declares Git dependencies. Redirect those
                 // too so its types and the generated hosts share one core.
                 manifest.push_str(&format!("\n[patch.{url:?}]\n{patches}"));
+            }
+        } else if let Nsh::Nightly(_) = &self.nsh
+            && !self.modules.is_empty()
+        {
+            // A Rust nshm from crates.io or Git asks for nsh's crates from
+            // crates.io.
+            for name in nsh_crates {
+                crates_io.push_str(&format!("{name} = {}\n", self.nsh.dep(name, "")));
             }
         }
         if !crates_io.is_empty() {
@@ -3435,12 +3719,10 @@ opt-level = \"s\"
                 format!("\n[features]\ndefault = [{default}]\n{forward}"),
             )
         } else {
-            // Linux's host makes web views when this machine can build
-            // them ([`crate::runtime::linux_web_views`]).
-            let lib_dep = if dir == "linux-host"
-                && cfg!(target_os = "linux")
-                && !crate::runtime::linux_web_views()
-            {
+            // Linux's host has no web views of its own (WebKitGTK, a large
+            // system library to build): its build turns them on when the
+            // app may make one ([`dev_host_web_view`]).
+            let lib_dep = if dir == "linux-host" {
                 self.nsh.dep(lib, ", default-features = false")
             } else {
                 src(lib)
@@ -3574,6 +3856,11 @@ opt-level = \"s\"
             return Ok(path);
         }
         if let Err(error) = ui::cargo(&mut cmd, what) {
+            // An nshm built for another nsh fails on mismatched types deep
+            // in its build: say which one instead.
+            if let Some(message) = workspace_stale_nsh_core(workspace) {
+                return Err(error.context(message));
+            }
             // A development session that ran: a mistake in the code just
             // saved waits for the fix (the command line runs again).
             if RESTARTED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -3618,19 +3905,15 @@ opt-level = \"s\"
     /// The development host (`runner` false) or release runner of the app,
     /// built for `platform`, for `triple` (`None`: this machine), which is
     /// the platform's own ([`Platform::triple`]) but for a macOS package
-    /// for another processor.
+    /// for a given processor.
     pub(crate) fn runtime(
         &self,
         platform: Platform,
         runner: bool,
         triple: Option<&str>,
     ) -> anyhow::Result<PathBuf> {
-        if let Some(triple) = triple
-            && Some(triple) != platform.triple()
-        {
-            // Cargo runs in this directory, so rustup picks its toolchain here.
-            crate::runtime::require_target(None, triple)?;
-        }
+        // Cargo runs in this directory, so rustup picks its toolchain here.
+        let triple = crate::runtime::build_target(platform, triple, None)?;
         if self.root.is_some() {
             return self.rust_runner(platform, runner, triple);
         }
@@ -3680,7 +3963,13 @@ opt-level = \"s\"
         } else {
             Vec::new()
         };
-        let trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
+        let mut trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
+        if matches!(platform, Platform::Linux) && !runner {
+            trimmed.extend(dev_host_web_view(
+                || may_make_web_view(self),
+                || !cfg!(target_os = "linux") || crate::runtime::linux_web_views(),
+            ));
+        }
         let (workspace, features) = match platform {
             Platform::Gpui => (self.gpui_workspace()?, crate::runtime::gpui_features()),
             Platform::Tui => (self.tui_workspace()?, &[][..]),
@@ -3944,10 +4233,13 @@ impl RustApp {
     }
 
     /// The UI sets of a Rust app's runners and web runtime: `nsh/base`'s core part
-    /// only, then the app's ([`Self::sets`]). A Rust app runs no JS, so
-    /// nothing makes a component by its registered name: its code makes
-    /// each of `nsh/base`'s components by type (`nsh_base::button()`),
-    /// which links that component's code where it is used. What the app
+    /// only, then the app's ([`Self::sets`]). A Rust app runs no JS: its
+    /// code makes each of `nsh/base`'s components by type
+    /// (`nsh_base::button()`), which links that component's code where it
+    /// is used. On the web, what it makes by name
+    /// (`ComponentElement::by_name`) registers when the page runs the
+    /// part's gate (`nsh_part_*`, the runtime's feature `rust-parts`),
+    /// from a side module that `nsh package` splits off. What the app
     /// needs of the set itself is the theme's tokens, which every set of
     /// `nsh/base` has, and the built-in scroll bars, the core part's.
     /// Registering every part would link every component into the module,
@@ -4318,7 +4610,9 @@ fn set_deployment_target(
 /// this CLI, the workspace's manifests and lock file, the package's
 /// generated files, the command line and the environment Cargo reads, and
 /// the binary's size and time. An app's own crates and nshm from a
-/// directory can change at any time: their builds are always Cargo's.
+/// directory can change at any time: their builds are always Cargo's. So
+/// is a build with the app's crates retargeted into `app-crates/`: those
+/// manifests name the app's own sources, which nothing here hashes.
 struct BuiltOnce {
     record: PathBuf,
     fingerprint: String,
@@ -4332,6 +4626,9 @@ impl BuiltOnce {
         let installed =
             nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
         let workspace = dunce::canonicalize(workspace).ok()?;
+        if workspace.join("app-crates").exists() {
+            return None;
+        }
         let mut hash = sha2::Sha256::new();
         hash.update(concat!(env!("CARGO_PKG_VERSION"), "\n").as_bytes());
         // This nsh: another build of it may generate other code.
@@ -4541,6 +4838,19 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
     }
 }
 
+/// The file in `web-runtime/` an app's web runtime of `kind` is put in;
+/// `rust`: a Rust app's. One per kind: the development one goes through
+/// wasm-bindgen as it is built and the published one does not
+/// (`bindgen::install_linkable`), so neither may replace the other's module
+/// or remove its glue (`nsh dev` serves the development one as it finds it).
+fn web_runtime_file(kind: crate::runtime::WebKind, rust: bool) -> &'static str {
+    match (rust, kind) {
+        (true, crate::runtime::WebKind::Browser) => "nsh-rust-browser.wasm",
+        (true, crate::runtime::WebKind::Dev) => "nsh-rust-dev.wasm",
+        (false, kind) => kind.file(),
+    }
+}
+
 /// The profile the app's web runtime of `kind` builds with: `web` for
 /// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
 fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
@@ -4556,8 +4866,63 @@ mod tests {
 
     use super::{AppCrate, Link, Nsh, RootConfig, RustApp};
 
+    /// An app may depend on any crate nsh publishes; one missing from
+    /// `NSH_CRATES` is left on crates.io when nsh's crates are patched to a
+    /// checkout or a nightly, and its newer release then asks for a newer
+    /// `nsh-base` than the patched one.
+    #[test]
+    fn every_published_nsh_crate_is_patched() {
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut published = Vec::new();
+        for dir in [checkout.join("crates"), checkout.join("crates/gpui")] {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Ok(manifest) = std::fs::read_to_string(entry.path().join("Cargo.toml")) else {
+                    continue;
+                };
+                if name.starts_with("nsh-")
+                    && name != "nsh-cli"
+                    && !manifest.contains("publish = false")
+                {
+                    published.push(name);
+                }
+            }
+        }
+        published.sort();
+        let mut patched: Vec<String> = super::NSH_CRATES
+            .iter()
+            .chain(super::OWN_NSHM)
+            .map(|name| name.to_string())
+            .collect();
+        patched.sort();
+        assert_eq!(published, patched);
+    }
+
     /// Serialises the tests that set [`super::RUNNER_FEATURES`].
     static RUNNER_FEATURES_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn a_linux_development_host_builds_web_views_only_for_an_app_that_makes_one() {
+        let _guard = RUNNER_FEATURES_TEST
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let set = |v| *super::DEV_BUNDLE_WEB_VIEW.lock().unwrap() = v;
+        let on = ["--features", "nsh-platform-linux/webview"];
+        // No development session built the bundle (`nsh test`): kept.
+        set(None);
+        assert_eq!(super::dev_host_web_view(|| false, || true), on);
+        // A bundle that makes none, and Rust code that makes none: left out.
+        set(Some(false));
+        assert!(super::dev_host_web_view(|| false, || true).is_empty());
+        // The app's Rust code may make one.
+        assert_eq!(super::dev_host_web_view(|| true, || true), on);
+        // The bundle makes one.
+        set(Some(true));
+        assert_eq!(super::dev_host_web_view(|| false, || true), on);
+        // The machine cannot build them.
+        assert!(super::dev_host_web_view(|| true, || false).is_empty());
+        set(None);
+    }
 
     #[test]
     fn a_release_runner_builds_with_the_chosen_features() {
@@ -4569,28 +4934,33 @@ mod tests {
         let args = super::runner_feature_args("nsh-platform-windows");
         assert_eq!(
             args,
-            [
-                "--no-default-features",
-                "--features",
-                "js,plot,svg,net,media"
-            ]
+            ["--no-default-features", "--features", "js,plot,svg,net"]
         );
-        // macOS has no `net`; Linux keeps `sound` and Windows `media`, which no
-        // import tells.
+        // macOS has no `net`; Linux has no `media`, nor Windows `sound`.
         assert_eq!(
             super::runner_feature_args("nsh-platform-macos")[2],
             "js,plot,svg"
         );
         assert_eq!(
             super::runner_feature_args("nsh-platform-linux")[2],
-            "js,plot,svg,net,sound"
+            "js,plot,svg,net"
         );
-        // `webview` only when chosen (#2377).
+        // `webview` only when chosen (#2377), `sound` and `media` too.
         super::set_runner_features(vec!["js".into(), "webview".into()]);
         assert_eq!(
             super::runner_feature_args("nsh-platform-linux")[2],
-            "js,webview,sound"
+            "js,webview"
         );
+        super::set_runner_features(vec!["js".into(), "sound".into(), "media".into()]);
+        assert_eq!(
+            super::runner_feature_args("nsh-platform-linux")[2],
+            "js,sound"
+        );
+        assert_eq!(
+            super::runner_feature_args("nsh-platform-windows")[2],
+            "js,media"
+        );
+        assert_eq!(super::runner_feature_args("nsh-platform-macos")[2], "js");
         super::set_runner_features(vec!["js".into(), "net".into(), "svg".into(), "plot".into()]);
         // Android: a TSX app's own library, trimmed the same way.
         assert_eq!(
@@ -4719,6 +5089,40 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A build that links only generated code is Cargo's once; one with the
+    /// app's crates retargeted into `app-crates/` (manifests that name the
+    /// app's own sources) is always Cargo's.
+    #[test]
+    fn a_retargeted_build_is_always_cargos() {
+        let dir = std::env::temp_dir().join(format!("nsh-built-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let member = dir.join("rust-ios");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"rust-ios\"]\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("Cargo.lock"), "").unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"rust-ios\"\n\n[dependencies]\n\
+             app = { path = \"../app-crates/app\" }\n",
+        )
+        .unwrap();
+        let cmd = std::process::Command::new("cargo");
+        assert!(super::BuiltOnce::of(&dir, "rust-ios", &cmd).is_some());
+        let app = dir.join("app-crates/app");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(
+            app.join("Cargo.toml"),
+            "[package]\nname = \"app\"\n\n[lib]\npath = \"/elsewhere/app/src/lib.rs\"\n",
+        )
+        .unwrap();
+        assert!(super::BuiltOnce::of(&dir, "rust-ios", &cmd).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// What `nsh.json`'s `"watch"` names is out of the watcher's events.
     #[test]
     fn a_watch_ignore_takes_its_events_out() {
@@ -4735,6 +5139,76 @@ mod tests {
         assert!(!app.in_watch_ignore(&dir.join("third/jpeg-turbo/lib.rs")));
         // The crate's own code stays in.
         assert!(!app.in_watch_ignore(&native.join("src/lib.rs")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The app's Rust code keeps the web view, sound and media features by
+    /// the names it spells; what it does not spell leaves them out.
+    #[test]
+    fn rust_code_keeps_what_it_spells() {
+        use crate::native_features::RustCodeUse;
+        let dir = std::env::temp_dir().join(format!("nsh-rust-code-use-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let native = dir.join("native");
+        std::fs::create_dir_all(native.join("src")).unwrap();
+        // Not the crate's code: its build output and hidden directories.
+        std::fs::create_dir_all(native.join("target")).unwrap();
+        std::fs::write(native.join("target/x.rs"), "load_sound(); web_view();").unwrap();
+        let app = app(&dir, &[("app_native", native.clone())], None);
+        let lib = native.join("src/lib.rs");
+        let case = |code: &str| {
+            std::fs::write(&lib, code).unwrap();
+            super::rust_code_use(&app)
+        };
+        assert_eq!(
+            case("fn view() -> View { text(\"hi\") }"),
+            RustCodeUse::default()
+        );
+        // Only the functions, by whole names: a system query naming sound
+        // and video devices plays nothing, nor does an icon named `Video` or
+        // a variable named `video`.
+        assert_eq!(
+            case(
+                "q(\"Win32_SoundDevice\"); q(\"Win32_VideoController\"); Icon::Video; let video = 1;"
+            ),
+            RustCodeUse::default()
+        );
+        assert_eq!(
+            case("let s = load_sound(src).await?;"),
+            RustCodeUse {
+                sound: true,
+                media: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            case("let p = audio_player(src, PlayerSettings::default());"),
+            RustCodeUse {
+                media: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            case("nsh::video (url)"),
+            RustCodeUse {
+                media: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            case("use nsh_core::prelude::video as clip;"),
+            RustCodeUse {
+                media: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            case("web_view(url)"),
+            RustCodeUse {
+                web_view: true,
+                ..Default::default()
+            }
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -4758,6 +5232,33 @@ mod tests {
             minimums: crate::apple::AppleMinimums::default(),
             shared: false,
         }
+    }
+
+    /// A step names one or two crates and counts more, so its line stays
+    /// short.
+    #[test]
+    fn steps_name_two_crates_and_count_more() {
+        let dir = Path::new("/app");
+        let named = |packages: &[&str]| {
+            let crates: Vec<(&str, PathBuf)> = packages.iter().map(|p| (*p, dir.join(p))).collect();
+            let app = app(dir, &crates, None);
+            (app.crates_what(), app.packages())
+        };
+        assert_eq!(
+            named(&["charts"]),
+            ("the Rust crate charts".to_owned(), "charts".to_owned())
+        );
+        assert_eq!(
+            named(&["charts", "storage"]),
+            (
+                "the Rust crates charts, storage".to_owned(),
+                "charts, storage".to_owned()
+            )
+        );
+        assert_eq!(
+            named(&["nsh-extra", "nsh-icon", "nsh-icon-lucide", "nsmetry"]),
+            ("4 Rust crates".to_owned(), "4 crates".to_owned())
+        );
     }
 
     /// Builds for an Apple system get the deployment target of the app's
@@ -5671,6 +6172,71 @@ mod tests {
         );
     }
 
+    /// nsh's own nshm links from where the hosts take nsh's crates, and the
+    /// crates.io nsh crates other nshm ask for go there too: one `nsh-core`.
+    #[test]
+    fn nsh_extra_links_where_nshs_crates_come_from() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-own-nshm-{}", std::process::id()));
+        let rev = "f577c51901a2857956f8ba0580da4db9ce3a3311";
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let extra = |nsh: &Nsh| {
+            AppCrate::new("nsh-extra".into(), dir.join("installed/nsh-extra"))
+                .with_features(vec!["speech".into()])
+                .linked_with(nsh)
+        };
+        let cases = [
+            (
+                Nsh::Nightly(rev),
+                format!(r#"git = "https://github.com/longbridge/nsh", rev = "{rev}""#),
+            ),
+            (Nsh::Registry, format!(r#"version = "={}""#, super::VERSION)),
+            (
+                Nsh::Source(checkout.clone()),
+                format!(
+                    "path = {:?}",
+                    checkout.join("crates").join("nsh-extra").to_string_lossy()
+                ),
+            ),
+        ];
+        for (nsh, keys) in cases {
+            let mut app = app(&dir, &[], None);
+            app.nsh = nsh.clone();
+            app.crates = vec![extra(&nsh)];
+            // Another Rust nshm from crates.io, which asks for nsh-core there.
+            app.modules = vec![(
+                "acme-gauge".into(),
+                "acme-gauge".into(),
+                dir.join("installed/acme-gauge"),
+            )];
+            assert!(!app.crates[0].is_listed() && app.crates[0].is_fetched());
+            app.write_workspace().unwrap();
+            let line = format!(
+                r#"app_nsh_extra = {{ package = "nsh-extra", {keys}, features = ["speech"] }}"#
+            );
+            let host =
+                std::fs::read_to_string(app.workspace.join("macos-host/Cargo.toml")).unwrap();
+            assert!(host.contains(&line), "{nsh:?}: {host}");
+            let core = format!("nsh-core = {}", nsh.dep("nsh-core", ""));
+            assert!(host.contains(&core), "{nsh:?}: {host}");
+            let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
+            assert_eq!(
+                manifest.matches("[patch.crates-io]").count(),
+                1,
+                "{manifest}"
+            );
+            assert!(manifest.contains("acme-gauge = { path ="), "{manifest}");
+            match nsh {
+                Nsh::Registry => assert!(!manifest.contains("nsh-core ="), "{manifest}"),
+                _ => {
+                    assert!(manifest.contains(&core), "{nsh:?}: {manifest}");
+                    let extra = format!("nsh-extra = {}", nsh.dep("nsh-extra", ""));
+                    assert!(manifest.contains(&extra), "{nsh:?}: {manifest}");
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn from_crates_io_every_crate_of_nsh_is_this_version() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-registry-{}", std::process::id()));
@@ -6112,6 +6678,48 @@ mod tests {
             assert_eq!(manifest.matches(table).count(), 1, "{table}: {manifest}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_published_web_runtime_leaves_the_development_one_and_its_glue() {
+        use crate::runtime::WebKind;
+        let out = std::env::temp_dir().join(format!("nsh-rust-web-kinds-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).unwrap();
+        for rust in [false, true] {
+            let stem = |kind| {
+                super::web_runtime_file(kind, rust)
+                    .strip_suffix(".wasm")
+                    .unwrap()
+            };
+            let (dev, browser) = (stem(WebKind::Dev), stem(WebKind::Browser));
+            assert_ne!(dev, browser);
+            // What `bindgen::install` leaves for the development runtime
+            // when its crates call JS through wasm-bindgen.
+            let dev_files = [
+                out.join(format!("{dev}.wasm")),
+                out.join(format!("{dev}-bindgen.js")),
+                out.join(format!("{dev}-bindgen/snippets/a.js")),
+            ];
+            for file in &dev_files {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, "dev").unwrap();
+            }
+            let built = out.join("built.wasm");
+            std::fs::write(&built, "linkable").unwrap();
+            crate::bindgen::install_linkable(&built, &out, browser).unwrap();
+            for file in &dev_files {
+                assert_eq!(
+                    std::fs::read_to_string(file).unwrap(),
+                    "dev",
+                    "{}",
+                    file.display()
+                );
+            }
+            let published = out.join(format!("{browser}.wasm"));
+            assert_eq!(std::fs::read_to_string(published).unwrap(), "linkable");
+        }
+        let _ = std::fs::remove_dir_all(&out);
     }
 
     #[test]
@@ -6949,5 +7557,41 @@ panic = \"abort\"
             extra.dependency(),
             r#"app_nsh_extra = { package = "nsh-extra", path = "/cache/nsh-extra", features = ["camera", "push"] }"#
         );
+    }
+}
+
+#[cfg(test)]
+mod stale_nsh_core_tests {
+    use super::stale_nsh_core;
+
+    #[test]
+    fn names_an_nshm_built_for_another_nsh() {
+        let metadata = serde_json::json!({ "packages": [
+            { "name": "app", "version": "0.1.0", "dependencies": [
+                { "name": "nsh-core", "req": "^0.7", "kind": null },
+                { "name": "nsh-omarchy", "req": "^0.1", "kind": null }
+            ]},
+            { "name": "nsh-omarchy", "version": "0.1.1", "dependencies": [
+                { "name": "nsh-core", "req": "^0.6", "kind": null }
+            ]},
+            { "name": "tool", "version": "1.0.0", "dependencies": [
+                { "name": "nsh-core", "req": "^0.5", "kind": "dev" }
+            ]}
+        ]});
+        let message = stale_nsh_core(&metadata, "0.7.0-nightly").unwrap();
+        assert!(
+            message.contains("nsh-omarchy 0.1.1 requires nsh-core ^0.6"),
+            "{message}"
+        );
+        assert!(!message.contains("app"), "{message}");
+        assert!(!message.contains("tool"), "{message}");
+        assert!(message.contains("nsh 0.7"), "{message}");
+        // On nsh 0.6 it is the app that is ahead.
+        let older = stale_nsh_core(&metadata, "0.6.1").unwrap();
+        assert!(
+            older.contains("app 0.1.0 requires nsh-core ^0.7"),
+            "{older}"
+        );
+        assert!(!older.contains("nsh-omarchy"), "{older}");
     }
 }

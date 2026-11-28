@@ -405,7 +405,8 @@ pub struct ComponentSpec {
 
 /// The props JS sets on a component's host as on a view (TSX's
 /// `ComponentHostProps` but `ref`): the app's classes and styles, its test
-/// id, its tooltip, layout, file drop, mouse and context menu events.
+/// id, its accessibility, its tooltip, layout, file drop, mouse and context
+/// menu events, and the actions assistive technologies perform.
 pub const HOST_PROPS: &[&str] = &[
     "class",
     "classList",
@@ -417,6 +418,21 @@ pub const HOST_PROPS: &[&str] = &[
     "focusVisibleStyle",
     "disabledStyle",
     "testID",
+    "accessible",
+    "accessibilityLabel",
+    "accessibilityHint",
+    "accessibilityDescription",
+    "role",
+    "accessibilityState",
+    "accessibilityValue",
+    "accessibilityElementsHidden",
+    "importantForAccessibility",
+    "accessibilityLiveRegion",
+    "accessibilityActions",
+    "accessibilityLevel",
+    "accessibilityActiveDescendant",
+    "accessibilityControls",
+    "accessibilityDescribedBy",
     "tooltip",
     "onLayout",
     "onFileDragEnter",
@@ -427,6 +443,7 @@ pub const HOST_PROPS: &[&str] = &[
     "onMouseLeave",
     "onMouseUp",
     "onContextMenu",
+    "onAccessibilityAction",
 ];
 
 /// What makes a component's props', events' and methods' specs.
@@ -530,7 +547,7 @@ pub(crate) fn name_of<C: Component>() -> &'static str {
 
 /// A type's own name, its JS export: the last segment of its path, without
 /// a generic type's arguments (the test `components_are_named_after_their_types`).
-fn export_name(type_name: &str) -> &str {
+pub(crate) fn export_name(type_name: &str) -> &str {
     let path = type_name.split('<').next().unwrap_or(type_name);
     path.rsplit("::").next().unwrap_or(path)
 }
@@ -894,6 +911,25 @@ impl fmt::Debug for Root {
     }
 }
 
+/// The name of [`missing_instance`], which `nsh-cli` looks for in a web
+/// runtime's symbol table to know the app makes a component by name (it
+/// then keeps every `nsh_part_*` gate). A test below fails when the two
+/// stop matching.
+pub const BY_NAME_MARKER: &str = "missing_instance";
+
+/// What a component element made by name ([`super::ComponentElement::by_name`])
+/// has for its `make`: never called, the registry makes it. Never inlined, so
+/// every by-name element's code references this one function.
+#[inline(never)]
+pub(crate) fn missing_instance() -> Box<dyn AnyInstance> {
+    unreachable!("a component made by name is made by its registry")
+}
+
+/// What a component element made by name has for its `spec`: never called.
+pub(crate) fn missing_spec() -> ComponentSpec {
+    unreachable!("a component made by name is made by its registry")
+}
+
 /// A new instance of `C`, its props not set yet.
 pub(crate) fn make_instance<C: Component>() -> Box<dyn AnyInstance> {
     Box::new(super::once::OnceInstance::<C>::new())
@@ -1011,8 +1047,9 @@ pub struct Registry {
     namespace: Option<&'static str>,
     /// The JS module a UI set is imported as (`app/native`).
     ui_set: Option<&'static str>,
-    /// The files its crates ship ([`Registry::assets`]).
-    assets: Arc<Vec<&'static [super::AssetFile]>>,
+    /// The files its crates ship, with the targets they are for
+    /// ([`Registry::assets_for`]; none: every target).
+    assets: Arc<Vec<(&'static [crate::platform::Os], &'static [super::AssetFile])>>,
     /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
     tokens: Option<super::TokenSource>,
     /// Makes the views' built-in scroll bars ([`Registry::scrollbars_from`]).
@@ -1025,6 +1062,8 @@ pub struct Registry {
     /// The stand-ins its modules give headless runs, by name
     /// ([`Registry::fake`]).
     fakes: Arc<Vec<(&'static str, Arc<dyn crate::fake::Fake>)>>,
+    /// GPU views' renderers by name ([`Registry::gpu_renderer_source`]).
+    gpu_renderers: Arc<Vec<(&'static str, crate::gpu::GpuSource)>>,
 }
 
 /// A function each engine serving a set runs once ([`Registry::setup`]).
@@ -1240,6 +1279,14 @@ impl Registry {
                 );
                 fakes.push((name, fake.clone()));
             }
+            let renderers = Arc::make_mut(&mut out.gpu_renderers);
+            for (name, source) in set.gpu_renderers.iter() {
+                assert!(
+                    renderers.iter().all(|(n, _)| n != name),
+                    "two GPU renderers are named `{name}`, by two UI sets"
+                );
+                renderers.push((name, source.clone()));
+            }
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
                 if let Some(old) = types.insert(name, ty.clone()) {
@@ -1321,9 +1368,23 @@ impl Registry {
     /// Ships `files` with the apps that use the set (`assets!()`: a crate's
     /// `assets/` directory): `nsh run` serves them, `nsh package` copies
     /// them into the app, and the engine registers the fonts among them
-    /// before the first render. `asset!` refers to one.
+    /// before the first render. `asset!` refers to one. Every target gets
+    /// them; [`Registry::assets_for`] limits them to some.
     pub fn assets(&mut self, files: &'static [super::AssetFile]) -> &mut Self {
-        Arc::make_mut(&mut self.assets).push(files);
+        self.assets_for(&[], files)
+    }
+
+    /// Like [`Registry::assets`], for the packages of `targets` only: the
+    /// others neither copy the files nor register their fonts, so a file
+    /// only the web downloads stays out of the desktop and mobile
+    /// packages. No `targets`: every target. A file the app reads on a
+    /// target outside the list is not there to read.
+    pub fn assets_for(
+        &mut self,
+        targets: &'static [crate::platform::Os],
+        files: &'static [super::AssetFile],
+    ) -> &mut Self {
+        Arc::make_mut(&mut self.assets).push((targets, files));
         self
     }
 
@@ -1359,6 +1420,30 @@ impl Registry {
     pub fn setup(&mut self, f: impl Fn() + Send + Sync + 'static) -> &mut Self {
         Arc::make_mut(&mut self.setups).push(Arc::new(f));
         self
+    }
+
+    /// Registers `source` as the renderer of GPU views named `name`
+    /// (`gpuView("gallery/scene", …)` in TSX, `gpu_view().renderer_named`
+    /// in Rust); a later registration of a name replaces an earlier one.
+    /// An app's crate calls `nsh-gpu`'s `gpu_renderer`, which makes the
+    /// source, from its `#[native_module]` function ([`crate::gpu`]).
+    pub fn gpu_renderer_source(
+        &mut self,
+        name: &'static str,
+        source: crate::gpu::GpuSource,
+    ) -> &mut Self {
+        let renderers = Arc::make_mut(&mut self.gpu_renderers);
+        renderers.retain(|(n, _)| *n != name);
+        renderers.push((name, source));
+        self
+    }
+
+    /// The renderer registered as `name` ([`Self::gpu_renderer_source`]).
+    pub fn registered_gpu_renderer(&self, name: &str) -> Option<&crate::gpu::GpuSource> {
+        self.gpu_renderers
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, s)| s)
     }
 
     /// Gives headless runs `fake` in place of what a module of the set asks
@@ -1430,9 +1515,21 @@ impl Registry {
         self.tokens
     }
 
-    /// The files [`Registry::assets`] ships.
+    /// The files [`Registry::assets`] and [`Registry::assets_for`] ship, for
+    /// every target.
     pub fn asset_files(&self) -> impl Iterator<Item = &'static super::AssetFile> + '_ {
-        self.assets.iter().flat_map(|files| files.iter())
+        self.assets.iter().flat_map(|(_, files)| files.iter())
+    }
+
+    /// The files of [`Registry::asset_files`] with the targets each is
+    /// for (none: every target).
+    pub fn scoped_asset_files(
+        &self,
+    ) -> impl Iterator<Item = (&'static [crate::platform::Os], &'static super::AssetFile)> + '_
+    {
+        self.assets
+            .iter()
+            .flat_map(|&(targets, files)| files.iter().map(move |file| (targets, file)))
     }
 
     /// The values of [`Registry::native_values`].
@@ -1554,6 +1651,18 @@ impl Registry {
             }
         }
         out
+    }
+
+    /// A new instance of the component of type `id`, and its registered
+    /// name (a component element made by name).
+    pub(crate) fn make_type(
+        &self,
+        id: TypeId,
+    ) -> Option<(Arc<ComponentSpec>, Box<dyn AnyInstance>)> {
+        self.types
+            .values()
+            .find(|t| t.id == id)
+            .map(|t| (t.spec.clone(), (t.make)()))
     }
 
     /// A new instance of component `name`.
@@ -1974,6 +2083,32 @@ fn handler_name(event: &str) -> String {
 mod tests {
     use super::*;
     use crate::prelude::*;
+
+    #[test]
+    fn by_name_marker_names_the_stand_in_make() {
+        let name = std::any::type_name_of_val(&missing_instance);
+        assert!(
+            name.ends_with(&format!("::{BY_NAME_MARKER}")),
+            "{name} is not {BY_NAME_MARKER}: update nsh-cli's by-name detection"
+        );
+    }
+
+    #[component]
+    fn ByName() -> impl IntoElement {
+        text("by name")
+    }
+
+    #[test]
+    fn a_component_made_by_name_has_the_marked_make() {
+        let mut element = crate::element::ComponentElement::<ByName>::named(());
+        let crate::element::ElKind::Component(c) = &element.node().kind else {
+            panic!("not a component element");
+        };
+        assert!(std::ptr::fn_addr_eq(
+            c.make,
+            missing_instance as fn() -> Box<dyn AnyInstance>
+        ));
+    }
 
     #[derive(Default)]
     struct Stepper;

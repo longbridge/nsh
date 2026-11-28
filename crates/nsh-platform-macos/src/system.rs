@@ -707,7 +707,6 @@ pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
             crate::file_requests::pick_files(surface, *id, request);
         }
         Command::PickScreenColor { id } => crate::screen_color::pick_screen_color(surface, *id),
-        Command::Share { id, sheet } => crate::share::schedule(surface, *id, sheet),
         Command::RenderCanvas {
             id,
             drawing,
@@ -764,7 +763,7 @@ pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
         | Command::SetStatusBar(_)
         | Command::LayoutAnimation(_)
         | Command::CancelPress => {}
-        other => log::debug!("macos: command {other:?} is not supported"),
+        other => nsh_core::platform::warn_unsupported("macos", &other),
     }
 }
 
@@ -1290,7 +1289,7 @@ pub(crate) fn answer_dialog(surface: &Rc<Surface>, button: Option<&str>) -> Resu
 
 /// The pasteboard types of images NSH reads and writes, by MIME type, in
 /// the order they are read: the first one the pasteboard holds wins.
-const IMAGE_TYPES: [(&str, &str); 6] = [
+pub(crate) const IMAGE_TYPES: [(&str, &str); 6] = [
     ("image/png", "public.png"),
     ("image/jpeg", "public.jpeg"),
     ("image/gif", "com.compuserve.gif"),
@@ -1427,7 +1426,7 @@ fn paste_item(item: &objc2_app_kit::NSPasteboardItem, paste: &mut nsh_core::Past
 
 /// Keep directories and special files as URLs. Opening a regular file
 /// checks the current process's read access without reading its contents.
-fn prefer_file_url(path: &std::path::Path) -> bool {
+pub(crate) fn prefer_file_url(path: &std::path::Path) -> bool {
     use std::os::unix::fs::OpenOptionsExt;
     if path.metadata().is_ok_and(|metadata| !metadata.is_file()) {
         return true;
@@ -1560,21 +1559,14 @@ fn attributed_html(text: &NSAttributedString) -> Option<String> {
     Some(String::from_utf8_lossy(&data.to_vec()).into_owned())
 }
 
-/// Whether `pasteboard` holds what a text view's own paste leaves out:
-/// images or local files (reading the types is no paste: no privacy
-/// notice).
-pub(crate) fn has_pasted_files(pasteboard: &NSPasteboard) -> bool {
-    pasteboard.types().is_some_and(|types| {
-        IMAGE_TYPES
-            .iter()
-            .map(|(_, kind)| *kind)
-            .chain(["public.file-url"])
-            .any(|kind| types.containsObject(&NSString::from_str(kind)))
-    })
+/// Whether `pasteboard` holds any type (reading the types is no paste:
+/// no privacy notice).
+pub(crate) fn has_pasted_types(pasteboard: &NSPasteboard) -> bool {
+    pasteboard.types().is_some_and(|types| !types.is_empty())
 }
 
 /// Encoded image `bytes` (a TIFF) encoded again as PNG.
-fn to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn to_png(bytes: &[u8]) -> Option<Vec<u8>> {
     let rep = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(bytes))?;
     // SAFETY: an empty dictionary of properties is valid for every type.
     let png = unsafe {
@@ -1646,7 +1638,7 @@ mod tests {
         NSData, NSDictionary, NSPropertyListFormat, NSPropertyListSerialization, NSString,
     };
 
-    use super::{Shows, answered_index, next_alone, paste_item, pasted_html};
+    use super::{Shows, answered_index, has_pasted_types, next_alone, paste_item, pasted_html};
 
     #[test]
     fn alerts_on_their_own_show_one_at_a_time_oldest_first() {
@@ -1809,5 +1801,26 @@ mod tests {
     fn no_formatted_content() {
         let board = board("public.utf8-plain-text", b"plain");
         assert_eq!(pasted_html(&board), None);
+    }
+
+    #[test]
+    fn pasteboard_types_include_custom_and_exclude_empty() {
+        let empty = NSPasteboard::pasteboardWithUniqueName();
+        empty.clearContents();
+        assert!(!has_pasted_types(&empty));
+
+        let custom = board("com.example.custom-content", br#"{"text":"hi"}"#);
+        assert!(has_pasted_types(&custom));
+
+        let image = board("public.png", b"\x89PNG");
+        assert!(has_pasted_types(&image));
+
+        let file = board("public.file-url", b"file:///tmp/a.txt");
+        assert!(has_pasted_types(&file));
+
+        for pb in [&empty, &custom, &image, &file] {
+            // SAFETY: NSPasteboard's method; these private test pasteboards are not used again.
+            let _: () = unsafe { objc2::msg_send![pb, releaseGlobally] };
+        }
     }
 }

@@ -22,6 +22,24 @@ Each interface extends the one before it:
 | `InputStyle` | `TextStyle` | `<Input>`: adds `placeholderColor` and `caretColor` |
 | `ImageStyle` | `ViewStyle` | `<Image>` |
 
+```tsx tabs
+import type { ViewStyle, TextStyle } from "nsh";
+import { Text, View } from "nsh";
+
+const card: ViewStyle = {
+  padding: 16,
+  borderRadius: 12,
+  backgroundColor: "#fff",
+  boxShadow: "0 4px 12px rgb(0 0 0 / 0.08)",
+};
+
+const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
+
+<View style={card}>
+  <Text style={title}>Hello</Text>
+</View>;
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -41,32 +59,14 @@ fn title(label: &str) -> Text {
 card().child(title("Hello"))
 ```
 
-```tsx tabs
-import type { ViewStyle, TextStyle } from "nsh";
-import { Text, View } from "nsh";
-
-const card: ViewStyle = {
-  padding: 16,
-  borderRadius: 12,
-  backgroundColor: "#fff",
-  boxShadow: "0 4px 12px rgb(0 0 0 / 0.08)",
-};
-
-const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
-
-<View style={card}>
-  <Text style={title}>Hello</Text>
-</View>;
-```
-
 `style` also takes an array; entries merge left to right and falsy entries are skipped, so conditional styles need no spreading. In Rust, `.style_when(condition, …)` adds styles while the condition holds:
-
-```rust tabs
-card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
-```
 
 ```tsx tabs
 <View style={[card, selected() && { borderColor: "#2563eb", borderWidth: 2 }]} />
+```
+
+```rust tabs
+card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 ```
 
 > [!NOTE]
@@ -152,6 +152,13 @@ Set `display: "grid"` to lay out children in a CSS grid. Track lists use CSS syn
 | `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | How grid items sit in their areas along the row. |
 | `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | Overrides `justifyItems` for this item. |
 
+```tsx tabs
+<View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+  <View style={{ gridColumn: "span 2", height: 60, backgroundColor: "#c7d2fe" }} />
+  <View style={{ height: 60, backgroundColor: "#a5b4fc" }} />
+</View>
+```
+
 ```rust tabs
 view()
     .grid()
@@ -159,13 +166,6 @@ view()
     .gap_2()
     .child(view().col_span(2).h(px(60.0)).bg(rgb(0xc7d2fe)))
     .child(view().h(px(60.0)).bg(rgb(0xa5b4fc)))
-```
-
-```tsx tabs
-<View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-  <View style={{ gridColumn: "span 2", height: 60, backgroundColor: "#c7d2fe" }} />
-  <View style={{ height: 60, backgroundColor: "#a5b4fc" }} />
-</View>
 ```
 
 ### Size
@@ -223,12 +223,12 @@ Everything drawn by a view. All keys of `LayoutStyle` apply too.
 | `backgroundColor` | `ColorValue \| AnimatedNode` | `.bg(color)`, `.bind_background(&node)` | The fill color. Takes a native animated color. |
 | `backgroundImage` | `string` | `.bg_linear(angle)`, `.bg_radial()`, `.bg_conic()` with `.gradient_from` / `_via` / `_to` | CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas. |
 
-```rust tabs
-view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))
-```
-
 ```tsx tabs
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #6366f1, #ec4899)" }} />
+```
+
+```rust tabs
+view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))
 ```
 
 ### Borders
@@ -287,16 +287,16 @@ A view casts shadows with CSS's `boxShadow`: several layers, spread and inset sh
 |---|---|---|---|
 | `boxShadow` | `string \| BoxShadowLayer[]` | `.shadow([BoxShadow { … }])`, `.shadow_md()`, `.shadow_color(c)` | CSS `box-shadow`: offsets, blur, spread and color, several layers separated by commas, `inset` for inner shadows; or its layers as numbers, `[{ x, y, blur, spread, color, inset }]` (only `x` and `y` required); a layer without a color is drawn in the text color, as CSS's `currentColor`. `.shadow_color(c)` recolors the layers of a preset or of `.shadow(…)`. |
 
+```tsx tabs
+<View style={{ padding: 16, borderRadius: 12, backgroundColor: "#fff",
+  boxShadow: "0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -4px rgb(0 0 0 / 0.12)" }} />
+```
+
 ```rust tabs
 view().p_4().rounded(px(12.0)).bg(white()).shadow([
     BoxShadow { offset_y: px(1.0), blur: px(2.0), color: rgba(0x0000000f).into(), ..BoxShadow::default() },
     BoxShadow { offset_y: px(8.0), blur: px(24.0), spread: px(-4.0), color: rgba(0x0000001f).into(), ..BoxShadow::default() },
 ])
-```
-
-```tsx tabs
-<View style={{ padding: 16, borderRadius: 12, backgroundColor: "#fff",
-  boxShadow: "0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -4px rgb(0 0 0 / 0.12)" }} />
 ```
 
 > [!NOTE]
@@ -335,12 +335,12 @@ A `TransformStep` is an object with one key, applied in the order of the list:
 | `skewX`, `skewY` | `number` (degrees) or `string` | no |
 | `perspective` | `number` (points) | no |
 
-```rust tabs
-view().perspective(px(600.0)).child(view().rotate_y(deg(20.0)).scale(0.95))
-```
-
 ```tsx tabs
 <View style={{ transform: "perspective(600px) rotateY(20deg) scale(0.95)" }} />
+```
+
+```rust tabs
+view().perspective(px(600.0)).child(view().rotate_y(deg(20.0)).scale(0.95))
 ```
 
 An animated value drives `translate`, `rotate` and `scale` directly, and the steps of a `transform` list:
@@ -362,7 +362,7 @@ const angle = createAnimatedValue(0);
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`, `.brightness(…)`, `.contrast(…)`, `.grayscale(…)`, `.hue_rotate(…)`, `.invert(…)`, `.saturate(…)`, `.sepia(…)` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`. |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`, `.backdrop_brightness(…)`, ... | CSS filters of what is behind the view, such as `"blur(10px)"` for frosted glass. |
-| `maskImage` | `string` | `.mask_linear(angle, stops)`, `.mask_radial(stops)`, `.mask_none()` | A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included, whose blur then draws without the system material's tint. Not drawn on Windows and GPUI. |
+| `maskImage` | `string` | `.mask_linear(angle, stops)`, `.mask_radial(stops)`, `.mask_none()` | A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included, whose blur then draws without the system material's tint. A transition animates it (`transitionProperty: "mask-image"`, `.transition_mask()`) between gradients of the same kind and number of stops, stop by stop; any other change, and to or from `"none"`, applies at once, as in CSS. Not drawn on Windows and GPUI. |
 | `glassEffect` | `"none" \| "regular" \| "clear"` | `.glass_effect(GlassEffect::Regular)` | Liquid Glass behind the view's content on iOS 26 and macOS 26 and later. `"regular"` uses the standard material; `"clear"` takes less color from the background. `"none"` is the default. Pair with `backdropFilter` for the blur shown on earlier iOS versions and other platforms. |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | How the view blends with what is behind it. |
 
@@ -378,10 +378,18 @@ When a transitioned property changes (from a new style, a class or a variant suc
 
 | Key | Type | Rust | Description |
 |---|---|---|---|
-| `transitionProperty` | `string` | `.transition()`, `.transition_all()`, `.transition_colors()`, `.transition_opacity()`, `.transition_shadow()`, `.transition_transform()`, `.transition_clip_path()`, `.transition_none()` | Comma-separated properties that animate: `"all"`, `"colors"` (`color`, `backgroundColor`, `borderColor`, ...), `"opacity"`, `"transform"` (every transform property), `"boxShadow"`, `"borderRadius"`, `"borderWidth"`, `"clip-path"`, or `"none"`. |
+| `transitionProperty` | `string` | `.transition()`, `.transition_all()`, `.transition_colors()`, `.transition_opacity()`, `.transition_shadow()`, `.transition_transform()`, `.transition_clip_path()`, `.transition_mask()`, `.transition_none()` | Comma-separated properties that animate: `"all"`, `"colors"` (`color`, `backgroundColor`, `borderColor`, ...), `"opacity"`, `"transform"` (every transform property), `"boxShadow"`, `"borderRadius"`, `"borderWidth"`, `"clip-path"`, `"mask-image"`, or `"none"`. |
 | `transitionDuration` | `number \| "${number}ms" \| "${number}s"` | `.duration(ms)` | Milliseconds as a number, or `"150ms"` / `"0.2s"`. |
 | `transitionDelay` | `number \| "${number}ms" \| "${number}s"` | `.delay(ms)` | Delay before the transition starts. |
 | `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)" \| "spring(...)"` | `.ease_linear()`, `.ease_in()`, `.ease_out()`, `.ease_in_out()`, `.ease_bezier(…)`, `.ease_spring(…)` | The easing curve (a `cubic-bezier()` `y` past 0..1 overshoots), or NSH's `spring(stiffness, damping[, mass])`: a spring that times itself until it settles, `transitionDuration` unused. |
+
+```tsx tabs
+<View
+  onPress={() => open.set(!open())}
+  style={{ height: open() ? 160 : 56, opacity: open() ? 1 : 0.8,
+    transitionProperty: "opacity, transform", transitionDuration: 200 }}
+/>
+```
 
 ```rust tabs
 view()
@@ -390,14 +398,6 @@ view()
     .opacity(move || if open.get() { 1.0 } else { 0.8 })
     .transition()
     .duration(200.0)
-```
-
-```tsx tabs
-<View
-  onPress={() => open.set(!open())}
-  style={{ height: open() ? 160 : 56, opacity: open() ? 1 : 0.8,
-    transitionProperty: "opacity, transform", transitionDuration: 200 }}
-/>
 ```
 
 ### Keyframe animations
@@ -498,6 +498,10 @@ selectable texts take it too.
 |---|---|---|---|
 | `textShadow` | `string \| TextShadowLayer[]` | `.text_shadow([TextShadow { … }])`, `.text_shadow_sm()`, `.text_shadow_color(c)` | CSS's `text-shadow`: offsets, blur and color (`"0 1px 2px rgb(0 0 0 / 0.3)"`), or its layers as numbers, `[{ x, y, blur, color }]`; several layers drawn as the widest one; a layer without a color is drawn in the text color; `"none"`. |
 
+```tsx tabs
+<Text style={{ textShadow: "0 1px 2px rgb(0 0 0 / 0.3)" }}>Title</Text>
+```
+
 ```rust tabs
 text("Title").text_shadow([TextShadow {
     offset_y: px(1.0),
@@ -505,10 +509,6 @@ text("Title").text_shadow([TextShadow {
     color: rgba(0x0000004d).into(),
     ..TextShadow::default()
 }])
-```
-
-```tsx tabs
-<Text style={{ textShadow: "0 1px 2px rgb(0 0 0 / 0.3)" }}>Title</Text>
 ```
 
 > [!NOTE]

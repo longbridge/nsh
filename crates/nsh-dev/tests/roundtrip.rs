@@ -11,13 +11,20 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A host named `device` with bytecode `bytecode` serving `nsh/base`.
 fn host(device: &str, bytecode: &str) -> HostInfo {
-    HostInfo {
-        device: device.into(),
-        platform: HostPlatform::Android,
-        bytecode_version: bytecode.into(),
-        ui_sets: vec!["app/native".into(), "app/charts".into()],
-        tests: false,
-    }
+    let mut host = HostInfo::new(HostPlatform::Android);
+    host.device = device.into();
+    host.bytecode_version = bytecode.into();
+    host.ui_sets = vec!["app/native".into(), "app/charts".into()];
+    host
+}
+
+/// A host that takes test steps, and steps from `nsh test --attach` when
+/// `attach`.
+fn stepping_host(device: &str, bytecode: &str, attach: bool) -> HostInfo {
+    let mut host = host(device, bytecode);
+    host.tests = true;
+    host.attach = attach;
+    host
 }
 
 fn next_non_status(rx: &mpsc::Receiver<DevEvent>) -> DevEvent {
@@ -27,6 +34,7 @@ fn next_non_status(rx: &mpsc::Receiver<DevEvent>) -> DevEvent {
             | DevEvent::Disconnected
             | DevEvent::Building
             | DevEvent::Testing
+            | DevEvent::Attachable
             | DevEvent::Step { .. } => continue,
             event => return event,
         }
@@ -48,6 +56,7 @@ fn bundles_errors_and_logs_round_trip() {
         AppInfo {
             capabilities: Some("{\"statusBar\":true}".into()),
             id: Some("com.example.roundtrip".into()),
+            url_schemes: vec!["claim-test".into()],
             window: Some("{\"title\":\"Roundtrip\"}".into()),
             application: Some("{\"quitMode\":\"explicit\"}".into()),
         },
@@ -72,11 +81,13 @@ fn bundles_errors_and_logs_round_trip() {
             source_map,
             capabilities,
             app_id,
+            url_schemes,
             window,
             application,
             limits,
         } => {
             assert_ne!(session, 0, "the server names its run");
+            assert_eq!(url_schemes, ["claim-test"]);
             assert_eq!(window.as_deref(), Some("{\"title\":\"Roundtrip\"}"));
             assert_eq!(application.as_deref(), Some("{\"quitMode\":\"explicit\"}"));
             assert_eq!(limits.as_deref(), Some("memory=64MB,call=500ms"));
@@ -339,30 +350,28 @@ fn a_test_session_asks_its_host_for_steps_and_hears_their_outcomes() {
     let (tx, rx) = mpsc::channel();
     let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
     let answering = client.clone();
-    let started = DevClient::start(
-        url,
-        HostInfo {
-            tests: true,
-            ..host("tester", "bc-1")
-        },
-        move |event| match event {
-            DevEvent::Step { id, step } => {
-                let outcome = match step {
-                    TestStep::Texts => StepOutcome::Done {
-                        value: serde_json::json!(["Hello"]),
-                    },
-                    other => StepOutcome::Failed {
-                        message: format!("cannot {other:?}"),
-                    },
-                };
-                answering.get().expect("client").step_done(id, outcome);
-            }
-            event => {
-                let _ = tx.send(event);
-            }
-        },
-    )
-    .unwrap();
+    let started =
+        DevClient::start(
+            url,
+            stepping_host("tester", "bc-1", false),
+            move |event| match event {
+                DevEvent::Step { id, step } => {
+                    let outcome = match step {
+                        TestStep::Texts => StepOutcome::Done {
+                            value: serde_json::json!(["Hello"]),
+                        },
+                        other => StepOutcome::Failed {
+                            message: format!("cannot {other:?}"),
+                        },
+                    };
+                    answering.get().expect("client").step_done(id, outcome);
+                }
+                event => {
+                    let _ = tx.send(event);
+                }
+            },
+        )
+        .unwrap();
     let _ = client.set(started);
     // Told of the test session before anything else of the server's.
     loop {
@@ -385,6 +394,186 @@ fn a_test_session_asks_its_host_for_steps_and_hears_their_outcomes() {
         server.step(TestStep::Back, TIMEOUT),
         Err("cannot Back".into())
     );
+}
+
+/// A host on `server` that takes steps `nsh test --attach` sends, answering
+/// `texts` with its name, once it heard it may ([`DevEvent::Attachable`]).
+fn attached_host(
+    server: &DevServer,
+    device: &str,
+) -> std::sync::Arc<std::sync::OnceLock<DevClient>> {
+    use nsh_dev::protocol::{StepOutcome, TestStep};
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
+    let answering = client.clone();
+    let (tx, rx) = mpsc::channel();
+    let name = device.to_owned();
+    let started =
+        DevClient::start(
+            url,
+            stepping_host(device, "bc-1", true),
+            move |event| match event {
+                DevEvent::Step { id, step } => {
+                    let outcome = match step {
+                        TestStep::Texts => StepOutcome::Done {
+                            value: serde_json::json!([name.clone()]),
+                        },
+                        other => StepOutcome::Failed {
+                            message: format!("cannot {other:?}"),
+                        },
+                    };
+                    answering.get().expect("client").step_done(id, outcome);
+                }
+                event => {
+                    let _ = tx.send(event);
+                }
+            },
+        )
+        .unwrap();
+    loop {
+        match rx.recv_timeout(TIMEOUT).expect("event") {
+            DevEvent::Attachable => break,
+            DevEvent::Connected => continue,
+            other => panic!("{other:?} before the server said it takes attached steps"),
+        }
+    }
+    let _ = client.set(started);
+    client
+}
+
+#[test]
+fn an_attached_session_drives_the_hosts_that_take_its_steps() {
+    use nsh_dev::{Attachment, protocol::TestStep};
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    let addr = server.local_addr();
+    server.set_attach_token(Some("secret".into()));
+    let _window = attached_host(&server, "window");
+    // A host that takes test steps but not attached ones (an older one).
+    let (tx, rx) = mpsc::channel();
+    let _page = DevClient::start(
+        format!("ws://{addr}{WS_PATH}"),
+        stepping_host("page", "bc-1", false),
+        move |event| {
+            let _ = tx.send(event);
+        },
+    )
+    .unwrap();
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while server.clients() < 2 {
+        assert!(std::time::Instant::now() < deadline, "the hosts never came");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let (attached, hosts) = Attachment::connect(addr, "secret").unwrap();
+    let listed: Vec<(&str, bool)> = hosts.iter().map(|h| (h.device.as_str(), h.steps)).collect();
+    assert_eq!(listed, [("window", true), ("page", false)]);
+    assert_eq!(
+        attached.step(hosts[0].id, TestStep::Texts, TIMEOUT),
+        Ok(serde_json::json!(["window"]))
+    );
+    assert_eq!(
+        attached.step(hosts[0].id, TestStep::Back, TIMEOUT),
+        Err("cannot Back".into())
+    );
+    assert_eq!(
+        attached.step(hosts[1].id, TestStep::Texts, TIMEOUT),
+        Err("the host left, or takes no steps".into())
+    );
+    // The app keeps running after the attached session.
+    assert_eq!(
+        attached.step(hosts[0].id, TestStep::Quit, TIMEOUT),
+        Err("an attached session leaves the app running: it does not quit it".into())
+    );
+    // The host that takes no attached steps was never told it may.
+    assert!(
+        rx.try_iter()
+            .all(|e| !matches!(e, DevEvent::Attachable | DevEvent::Testing))
+    );
+}
+
+#[test]
+fn a_test_session_takes_no_attached_steps() {
+    use nsh_dev::Attachment;
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.test_session();
+    server.set_attach_token(Some("secret".into()));
+    let (tx, rx) = mpsc::channel();
+    let _client = DevClient::start(
+        format!("ws://{}{WS_PATH}", server.local_addr()),
+        stepping_host("tester", "bc-1", true),
+        move |event| {
+            let _ = tx.send(event);
+        },
+    )
+    .unwrap();
+    loop {
+        match rx.recv_timeout(TIMEOUT).expect("event") {
+            DevEvent::Testing => break,
+            DevEvent::Connected => continue,
+            other => panic!("{other:?} before the test session"),
+        }
+    }
+    // Its steps are the test's: an attached session sees it but cannot
+    // tell it it may take steps of its own.
+    let (_, hosts) = Attachment::connect(server.local_addr(), "secret").unwrap();
+    assert_eq!(hosts.len(), 1);
+}
+
+#[test]
+fn an_attached_session_comes_from_this_machine_and_no_web_page() {
+    use nsh_dev::protocol::ATTACH_PATH;
+    use tungstenite::client::IntoClientRequest;
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.set_attach_token(Some("secret".into()));
+    let addr = server.local_addr();
+    let mut request = format!("ws://{addr}{ATTACH_PATH}")
+        .into_client_request()
+        .unwrap();
+    // Even the dev server's own page, which `/ws` takes.
+    request
+        .headers_mut()
+        .insert("Origin", format!("http://{addr}").parse().unwrap());
+    match tungstenite::connect(request) {
+        Err(tungstenite::Error::Http(response)) => assert_eq!(response.status(), 403),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+    // A name rebound to this machine, as for the server's other paths.
+    let mut request = format!("ws://{addr}{ATTACH_PATH}")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("Host", "rebound.example".parse().unwrap());
+    match tungstenite::connect(request) {
+        Err(tungstenite::Error::Http(response)) => assert_eq!(response.status(), 403),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn an_attached_session_needs_the_sessions_token() {
+    use nsh_dev::Attachment;
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    let addr = server.local_addr();
+    // A development session that takes no attached steps.
+    assert_eq!(
+        Attachment::connect(addr, "secret").err().as_deref(),
+        Some("this session takes no attached steps")
+    );
+    server.set_attach_token(Some("secret".into()));
+    // A wrong token, one of the same length, and none.
+    for token in ["guess", "secreT", ""] {
+        assert_eq!(
+            Attachment::connect(addr, token).err().as_deref(),
+            Some("the session's token differs: it was replaced or restarted"),
+            "{token:?}"
+        );
+    }
+    // The session's own.
+    assert!(Attachment::connect(addr, "secret").is_ok());
 }
 
 #[test]
@@ -418,31 +607,29 @@ fn a_traced_test_session_hears_the_batches_before_the_step_ends() {
     let (setup_tx, setup) = mpsc::channel();
     let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
     let answering = client.clone();
-    let started = DevClient::start(
-        url,
-        HostInfo {
-            tests: true,
-            ..host("tester", "bc-1")
-        },
-        move |event| match event {
-            DevEvent::TestSetup { trace, .. } => {
-                let _ = setup_tx.send(trace);
-            }
-            // A step's batch goes before its outcome.
-            DevEvent::Step { id, .. } => {
-                let client = answering.get().expect("client");
-                client.trace(vec!["Create { id: 2, kind: View }".into()]);
-                client.step_done(
-                    id,
-                    StepOutcome::Done {
-                        value: serde_json::Value::Null,
-                    },
-                );
-            }
-            _ => {}
-        },
-    )
-    .unwrap();
+    let started =
+        DevClient::start(
+            url,
+            stepping_host("tester", "bc-1", false),
+            move |event| match event {
+                DevEvent::TestSetup { trace, .. } => {
+                    let _ = setup_tx.send(trace);
+                }
+                // A step's batch goes before its outcome.
+                DevEvent::Step { id, .. } => {
+                    let client = answering.get().expect("client");
+                    client.trace(vec!["Create { id: 2, kind: View }".into()]);
+                    client.step_done(
+                        id,
+                        StepOutcome::Done {
+                            value: serde_json::Value::Null,
+                        },
+                    );
+                }
+                _ => {}
+            },
+        )
+        .unwrap();
     let _ = client.set(started);
     assert!(
         setup.recv_timeout(TIMEOUT).expect("the setup"),
@@ -902,4 +1089,233 @@ fn a_host_that_reconnects_after_missed_builds_gets_their_hot_updates() {
         next_non_status(&rx),
         DevEvent::Bundle { version: 5, .. }
     ));
+}
+
+/// A test host on `server` that answers each step with `answer`'s outcome,
+/// once the server counts it as the test's host.
+fn tester(
+    server: &DevServer,
+    answer: impl Fn(nsh_dev::protocol::TestStep) -> nsh_dev::protocol::StepOutcome + Send + 'static,
+) -> std::sync::Arc<std::sync::OnceLock<DevClient>> {
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
+    let answering = client.clone();
+    let started = DevClient::start(url, stepping_host("tester", "bc-1", false), move |event| {
+        if let DevEvent::Step { id, step } = event {
+            answering.get().expect("client").step_done(id, answer(step));
+        }
+    })
+    .unwrap();
+    let _ = client.set(started);
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while !server.has_tester() {
+        assert!(std::time::Instant::now() < deadline, "the host never came");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    client
+}
+
+/// A paste of `files` into `#field`.
+fn paste(files: Vec<nsh_dev::protocol::TestFile>) -> nsh_dev::protocol::TestStep {
+    nsh_dev::protocol::TestStep::Paste {
+        selector: "#field".into(),
+        text: String::new(),
+        html: String::new(),
+        files,
+        uris: Vec::new(),
+    }
+}
+
+#[test]
+fn a_test_pastes_a_large_file_into_its_host() {
+    use nsh_dev::protocol::{StepOutcome, TestFile, TestStep};
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.test_session();
+    // The host answers with what arrived: each file's size and whether
+    // every byte is the one sent.
+    let _client = tester(&server, |step| match step {
+        TestStep::Paste { files, .. } => StepOutcome::Done {
+            value: files
+                .iter()
+                .map(|f| {
+                    serde_json::json!([f.name, f.data.len(), f.data.iter().all(|&b| b == b'a')])
+                })
+                .collect(),
+        },
+        other => StepOutcome::Failed {
+            message: format!("cannot {other:?}"),
+        },
+    });
+    // 20 MB of text: more than a WebSocket frame takes by default.
+    let size = 20 << 20;
+    assert_eq!(
+        server.step(
+            paste(vec![TestFile::new(
+                "big.txt",
+                "text/plain",
+                vec![b'a'; size]
+            )]),
+            Duration::from_secs(30),
+        ),
+        Ok(serde_json::json!([["big.txt", size, true]]))
+    );
+    // The connection stays up for the next step.
+    assert_eq!(
+        server.step(TestStep::Back, TIMEOUT),
+        Err("cannot Back".into())
+    );
+}
+
+#[test]
+fn a_paste_beyond_the_message_limit_fails_with_its_size() {
+    use nsh_dev::protocol::{StepOutcome, TestFile, TestStep};
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.test_session();
+    let _client = tester(&server, |step| match step {
+        TestStep::Back => StepOutcome::Done {
+            value: serde_json::Value::Null,
+        },
+        other => StepOutcome::Failed {
+            message: format!("cannot {other:?}"),
+        },
+    });
+    let err = server
+        .step(
+            paste(vec![TestFile::new(
+                "huge.bin",
+                "application/octet-stream",
+                vec![0; 60 << 20],
+            )]),
+            Duration::from_secs(30),
+        )
+        .unwrap_err();
+    assert!(err.contains("64 MiB"), "{err}");
+    // The host never saw it and is still there.
+    assert_eq!(
+        server.step(TestStep::Back, TIMEOUT),
+        Ok(serde_json::Value::Null)
+    );
+}
+
+#[test]
+fn a_host_that_takes_smaller_frames_leaving_on_a_paste_is_told_apart() {
+    use nsh_dev::protocol::{PROTOCOL_VERSION, TestFile};
+
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.test_session();
+    // A host on tungstenite's defaults (16 MiB frames), as hosts were
+    // before they took the protocol's whole message size.
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    let (mut socket, _) = tungstenite::connect(url).unwrap();
+    socket
+        .send(tungstenite::Message::Text(
+            serde_json::json!({
+                "type": "hello",
+                "protocol": PROTOCOL_VERSION,
+                "bytecode_version": "bc-1",
+                "device": "older",
+                "tests": true,
+            })
+            .to_string()
+            .into(),
+        ))
+        .unwrap();
+    let host = std::thread::spawn(move || while socket.read().is_ok() {});
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while !server.has_tester() {
+        assert!(std::time::Instant::now() < deadline, "the host never came");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let err = server
+        .step(
+            paste(vec![TestFile::new(
+                "big.txt",
+                "text/plain",
+                vec![b'a'; 20 << 20],
+            )]),
+            Duration::from_secs(30),
+        )
+        .unwrap_err();
+    assert!(err.contains("older nsh"), "{err}");
+    host.join().unwrap();
+}
+
+#[test]
+fn a_server_that_drops_each_session_at_once_is_retried_with_backoff() {
+    // A server that ends every session right after the handshake, as one
+    // sending a frame over the host's limit does.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = accepted.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { return };
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut socket) = tungstenite::accept(stream) {
+                let _ = socket.close(None);
+                let _ = socket.flush();
+            }
+        }
+    });
+    let url = format!("ws://{addr}{WS_PATH}");
+    let client = DevClient::start(url, host("phone", "bc-1"), |_| {}).unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+    drop(client);
+    let sessions = accepted.load(std::sync::atomic::Ordering::Relaxed);
+    // 100 ms apart that would be ~30; backing off it is a handful.
+    assert!((1..=8).contains(&sessions), "{sessions} sessions in 3 s");
+}
+
+#[test]
+fn scheme_claims_survive_source_bytecode_and_rebuilds_including_removal() {
+    let server =
+        DevServer::start("127.0.0.1:0".parse().unwrap(), "claims-bc", None, |_| {}).unwrap();
+    let publish = |schemes: Vec<String>| {
+        server.publish(
+            vec![1],
+            "export {};".into(),
+            None,
+            AppInfo {
+                url_schemes: schemes,
+                ..AppInfo::default()
+            },
+            None,
+            Vec::new(),
+        )
+    };
+    publish(vec!["claim-test".into()]);
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    let mut clients = Vec::new();
+    let mut receivers = Vec::new();
+    for (device, bytecode, format) in [
+        ("same", "claims-bc", BundleFormat::Bytecode),
+        ("source", "older", BundleFormat::Source),
+    ] {
+        let (tx, rx) = mpsc::channel();
+        clients.push(
+            DevClient::start(url.clone(), host(device, bytecode), move |event| {
+                let _ = tx.send(event);
+            })
+            .unwrap(),
+        );
+        assert!(
+            matches!(next_non_status(&rx), DevEvent::Bundle { version: 1, format: actual, url_schemes, .. } if actual == format && url_schemes == ["claim-test"])
+        );
+        receivers.push(rx);
+    }
+    publish(vec!["changed".into()]);
+    for rx in &receivers {
+        assert!(
+            matches!(next_non_status(rx), DevEvent::Bundle { version: 2, url_schemes, .. } if url_schemes == ["changed"])
+        );
+    }
+    publish(Vec::new());
+    for rx in &receivers {
+        assert!(
+            matches!(next_non_status(rx), DevEvent::Bundle { version: 3, url_schemes, .. } if url_schemes.is_empty())
+        );
+    }
 }

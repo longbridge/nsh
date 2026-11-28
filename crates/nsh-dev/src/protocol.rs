@@ -11,6 +11,14 @@
 //! (a [`TestStep`] with an id) gets one [`ClientMessage::StepDone`] with
 //! that id, from the host's test agent (`nsh_testing::agent`).
 //!
+//! `nsh test --attach` drives the app of a development session (`nsh run`,
+//! `nsh dev`) that is already running, through the same steps: it connects
+//! to [`ATTACH_PATH`] from this machine with the session's token
+//! ([`AttachRequest`], [`AttachReply`]), and the server hands each step to
+//! the host it names. A host that takes them says so in its hello
+//! (`attach`), and the server's hello tells it to keep the model of its
+//! app that steps need from the first bundle on.
+//!
 //! Every float field decodes through `float` (`deserialize_with`): the
 //! messages are internally tagged enums, which serde buffers before it
 //! decodes their fields, and a serde_json built with `arbitrary_precision`
@@ -26,8 +34,16 @@ pub const PROTOCOL_VERSION: u32 = 2;
 /// WebSocket endpoint path.
 pub const WS_PATH: &str = "/ws";
 
+/// The endpoint `nsh test --attach` connects to (WebSocket), on loopback
+/// only ([`AttachRequest`]).
+pub const ATTACH_PATH: &str = "/attach";
+
 /// Default dev-server port.
 pub const DEFAULT_PORT: u16 = 8790;
+
+/// The largest message either end takes, in one frame or many. Pasted
+/// files and screenshots travel inside a single JSON message.
+pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20;
 
 /// A build a host runs ([`ClientMessage::Hello`]).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,6 +81,10 @@ pub enum ClientMessage {
         /// The host takes test steps ([`ServerMessage::Step`]).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tests: bool,
+        /// The host takes steps outside a test session too, from `nsh test
+        /// --attach` ([`ServerMessage::Hello`]'s `attach`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        attach: bool,
         /// The build the host's app runs, when it reconnects: a server of
         /// the same run sends the hot updates it missed
         /// ([`ServerMessage::Patch`]) before the latest bundle, so the app
@@ -261,6 +281,12 @@ pub enum ServerMessage {
         /// need from the first bundle on ([`ServerMessage::Step`]).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         test: bool,
+        /// A development session `nsh test --attach` may drive: a host
+        /// that takes its steps ([`ClientMessage::Hello`]'s `attach`) keeps
+        /// the model of its app from the first bundle on, as in a test
+        /// session, and leaves the app as it runs (no test's setup).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        attach: bool,
     },
     /// What a test session's app starts with (after [`ServerMessage::Hello`],
     /// before the first bundle): the storage it finds, in place of its
@@ -344,6 +370,9 @@ pub enum ServerMessage {
         /// data.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         app_id: Option<String>,
+        /// Checked claims for URL events, also carried by development/test bundles.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        url_schemes: Vec<String>,
         /// The main window's launch-time options (`nsh.json` `"window"`,
         /// JSON): `nsh_engine::Bundle::with_main_window` reads them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -369,7 +398,11 @@ pub struct TestFile {
     pub name: String,
     /// Its MIME type.
     pub mime: String,
-    /// Its bytes.
+    /// Its bytes, base64 on the wire.
+    #[serde(
+        serialize_with = "base64_bytes::serialize",
+        deserialize_with = "base64_bytes::deserialize_or_numbers"
+    )]
     pub data: Vec<u8>,
 }
 
@@ -397,6 +430,15 @@ pub struct SpanStyle {
     pub font_size: f32,
     /// Its font weight (400 regular, 700 bold).
     pub font_weight: u16,
+    /// Its line height, in points; zero for the font's natural line height.
+    #[serde(default)]
+    pub line_height: f32,
+    /// The extra space between its characters, in points.
+    #[serde(default)]
+    pub letter_spacing: f32,
+    /// Its `fontFamily` as the app wrote it; `None` for the system font.
+    #[serde(default)]
+    pub font_family: Option<String>,
     /// Whether it is italic.
     pub italic: bool,
     /// Whether it is underlined.
@@ -455,6 +497,9 @@ pub struct AccessibilityNode {
     pub role: Option<String>,
     /// Its `accessibilityLabel`.
     pub label: Option<String>,
+    /// Its accessible name: its label, else the texts inside it.
+    #[serde(default)]
+    pub name: String,
     /// It takes no presses.
     pub disabled: bool,
     /// It is selected.
@@ -463,6 +508,15 @@ pub struct AccessibilityNode {
     pub checked: Option<String>,
     /// Whether it is expanded.
     pub expanded: Option<bool>,
+    /// A toggle button's toggle state (`accessibilityState.pressed`):
+    /// `"true"`, `"false"` or `"mixed"`; absent when it is unset.
+    pub pressed: Option<String>,
+    /// Its `accessibilityState.busy`.
+    #[serde(default)]
+    pub busy: bool,
+    /// Its `accessibilityValue.text`.
+    #[serde(default)]
+    pub value: Option<String>,
     /// Its `accessibilityLevel`.
     pub level: Option<u32>,
     /// Its `accessibilityDescription`.
@@ -486,6 +540,18 @@ pub enum TestStep {
     Press {
         /// The view.
         selector: String,
+    },
+    /// Presses the view at a point in it (`app.press`'s `position`), in
+    /// points from its top left corner.
+    PressAt {
+        /// The view.
+        selector: String,
+        /// Points right of its left edge.
+        #[serde(deserialize_with = "float::f32")]
+        x: f32,
+        /// Points below its top edge.
+        #[serde(deserialize_with = "float::f32")]
+        y: f32,
     },
     /// Holds a press on the view for its long press delay (`app.longPress`).
     LongPress {
@@ -1012,6 +1078,41 @@ mod base64_bytes {
             .decode(text)
             .map_err(serde::de::Error::custom)
     }
+
+    /// Base64 text, or the array of numbers servers sent before files
+    /// travelled as base64.
+    pub(super) fn deserialize_or_numbers<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        struct Bytes;
+
+        impl<'de> serde::de::Visitor<'de> for Bytes {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("base64 text or an array of bytes")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Vec<u8>, E> {
+                base64::engine::general_purpose::STANDARD
+                    .decode(text)
+                    .map_err(E::custom)
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Vec<u8>, A::Error> {
+                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(byte) = seq.next_element()? {
+                    bytes.push(byte);
+                }
+                Ok(bytes)
+            }
+        }
+
+        d.deserialize_any(Bytes)
+    }
 }
 
 /// Float fields, decoded whatever serde_json's features: as a number, or
@@ -1132,6 +1233,74 @@ pub enum StepOutcome {
     },
 }
 
+/// Messages from `nsh test --attach` to the dev server, at [`ATTACH_PATH`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AttachRequest {
+    /// First message after connecting; the server answers with
+    /// [`AttachReply::Hosts`], or [`AttachReply::Refused`] and closes.
+    Hello {
+        /// [`PROTOCOL_VERSION`] of the client.
+        protocol: u32,
+        /// The development session's token, which its command keeps in a
+        /// file only its user reads.
+        token: String,
+    },
+    /// Asks host `host` ([`AttachHost::id`]) to take `step`, waiting
+    /// `timeout_ms` at most; answered by an [`AttachReply::StepDone`] of
+    /// the same id.
+    Step {
+        /// The request's id, chosen by the client.
+        id: u64,
+        /// The host's connection.
+        host: u64,
+        /// What to do.
+        step: TestStep,
+        /// How long the server waits for the host's outcome.
+        timeout_ms: u64,
+    },
+}
+
+/// Messages from the dev server to `nsh test --attach`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AttachReply {
+    /// The hosts connected now, oldest first.
+    Hosts {
+        /// The hosts.
+        hosts: Vec<AttachHost>,
+    },
+    /// The outcome of the [`AttachRequest::Step`] with this id.
+    StepDone {
+        /// The request's id.
+        id: u64,
+        /// What it gave, or why it failed.
+        outcome: StepOutcome,
+    },
+    /// The server does not take this client: the token or the protocol
+    /// differs, or the session takes no attached steps.
+    Refused {
+        /// Why.
+        message: String,
+    },
+}
+
+/// A host connected to a development session ([`AttachReply::Hosts`]).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[non_exhaustive]
+pub struct AttachHost {
+    /// Its connection, which [`AttachRequest::Step`] names.
+    pub id: u64,
+    /// Its name, as the session's terminal shows it.
+    pub device: String,
+    /// What kind of host it is (`None`: a host that does not say).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<HostPlatform>,
+    /// Whether it takes steps ([`ClientMessage::Hello`]'s `attach`).
+    #[serde(default)]
+    pub steps: bool,
+}
+
 /// Format of a bundle payload.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1175,6 +1344,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_bundles_have_no_scheme_claims_and_new_claims_round_trip() {
+        let old = r#"{"type":"bundle","version":1,"format":"source"}"#;
+        let message: ServerMessage = serde_json::from_str(old).unwrap();
+        assert!(
+            matches!(message, ServerMessage::Bundle { url_schemes, .. } if url_schemes.is_empty())
+        );
+        let new = r#"{"type":"bundle","version":2,"format":"source","url_schemes":["claim-test"]}"#;
+        let message: ServerMessage = serde_json::from_str(new).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&message).unwrap())
+                .unwrap()["url_schemes"],
+            serde_json::json!(["claim-test"])
+        );
+    }
+
+    #[test]
     fn wire_format_is_stable() {
         let msg = ServerMessage::Bundle {
             version: 3,
@@ -1182,6 +1367,7 @@ mod tests {
             source_map: true,
             capabilities: None,
             app_id: None,
+            url_schemes: Vec::new(),
             window: None,
             application: None,
             limits: None,
@@ -1217,6 +1403,54 @@ mod tests {
                 ..
             } if sets == ["app/native", "app/charts"]
         ));
+    }
+
+    #[test]
+    fn attached_sessions_speak_their_own_messages() {
+        let step = AttachRequest::Step {
+            id: 2,
+            host: 5,
+            step: TestStep::Texts,
+            timeout_ms: 30_000,
+        };
+        assert_eq!(
+            serde_json::to_string(&step).unwrap(),
+            r#"{"type":"step","id":2,"host":5,"step":{"step":"texts"},"timeout_ms":30000}"#
+        );
+        let hosts: AttachReply = serde_json::from_str(
+            r#"{"type":"hosts","hosts":[{"id":1,"device":"GPUI (macOS)","platform":"gpui","steps":true}]}"#,
+        )
+        .unwrap();
+        let AttachReply::Hosts { hosts } = hosts else {
+            panic!("{hosts:?}")
+        };
+        assert_eq!(
+            (hosts[0].platform, hosts[0].steps),
+            (Some(HostPlatform::Gpui), true)
+        );
+        // Hosts and servers that do not say take and send no attached steps.
+        let hello: ServerMessage =
+            serde_json::from_str(r#"{"type":"hello","protocol":2,"session":1}"#).unwrap();
+        assert!(matches!(hello, ServerMessage::Hello { attach: false, .. }));
+    }
+
+    #[test]
+    fn pasted_files_travel_as_base64() {
+        let file = TestFile::new("a.png", "image/png", vec![0, 1, 254, 255]);
+        let text = serde_json::to_string(&file).unwrap();
+        assert_eq!(
+            text,
+            r#"{"name":"a.png","mime":"image/png","data":"AAH+/w=="}"#
+        );
+        assert_eq!(serde_json::from_str::<TestFile>(&text).unwrap(), file);
+        // An older server sends the bytes as an array of numbers.
+        assert_eq!(
+            serde_json::from_str::<TestFile>(
+                r#"{"name":"a.png","mime":"image/png","data":[0,1,254,255]}"#
+            )
+            .unwrap(),
+            file
+        );
     }
 
     /// The messages with float fields, each with fractions.

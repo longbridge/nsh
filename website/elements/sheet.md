@@ -11,6 +11,29 @@ A sheet is a panel at an edge of the screen over a backdrop that covers the rest
 drawer. A press on the backdrop, Escape, the Android back button and VoiceOver's escape gesture close it. It shows on top of everything in its
 window, the same on every device, and draws nothing of its own: the panel and the backdrop are the app's.
 
+```tsx tabs
+import { signal, Text, View } from "nsh";
+import { Sheet } from "nsh/base";
+
+function Filters() {
+  const open = signal(false);
+  return (
+    <>
+      <View onPress={() => open.set(true)}><Text>Filters</Text></View>
+      <Sheet
+        open={open()}
+        onOpenChange={(e) => open.set(e.open)}
+        popupClass="gap-3 rounded-t-2xl bg-white p-6"
+        backdropClass="bg-black/40"
+      >
+        <Text class="font-semibold">Filters</Text>
+        <View onPress={() => open.set(false)}><Text>Done</Text></View>
+      </Sheet>
+    </>
+  );
+}
+```
+
 ```rust tabs
 use nsh_base::{SheetEvent, sheet};
 use nsh_core::prelude::*;
@@ -32,29 +55,6 @@ fn filters(open: Signal<bool>) -> impl IntoElement {
                 .child(text("Filters").font_weight(FontWeight::SEMIBOLD))
                 .child(view().on_press(move || open.set(false)).child(text("Done"))),
         )
-}
-```
-
-```tsx tabs
-import { signal, Text, View } from "nsh";
-import { Sheet } from "nsh/base";
-
-function Filters() {
-  const open = signal(false);
-  return (
-    <>
-      <View onPress={() => open.set(true)}><Text>Filters</Text></View>
-      <Sheet
-        open={open()}
-        onOpenChange={(e) => open.set(e.open)}
-        popupClass="gap-3 rounded-t-2xl bg-white p-6"
-        backdropClass="bg-black/40"
-      >
-        <Text class="font-semibold">Filters</Text>
-        <View onPress={() => open.set(false)}><Text>Done</Text></View>
-      </Sheet>
-    </>
-  );
 }
 ```
 
@@ -145,18 +145,24 @@ detent meanwhile.
 
 ## The software keyboard
 
-On native Android, the Sheet's modal window already excludes the whole IME. The sheet or drawer restores only the part shared with the bottom safe area, so its existing safe-area padding sits behind the keyboard; it does not apply a second keyboard lift. Its title and close button stay on screen and its content ends above the keyboard as on the other platforms, which move the panel within the full-height presentation. This offset belongs to the Sheet's modal root; other popups keep their own presentation and keyboard handling.
-
 While the software keyboard is up, a panel that reaches the bottom of the screen (a bottom sheet, a drawer at the left
 or right) ends at the keyboard's top instead of the screen's bottom, and moves with the keyboard as it comes and goes,
 on the keyboard's own curve. Pad the panel's bottom by the safe area (`pb-[env(safe-area-inset-bottom)]`, Rust
 `.pb_safe_area()`), as without a keyboard: that padding then sits behind the keyboard, so the panel's content ends
-right above it, the larger of the safe area and the keyboard. Lifted by the keyboard, a bottom sheet stays below the
-status bar, however tall its content. A `maxHeight` in `popupStyle` takes the place of that limit: a lower one
-subtracts the room the keyboard takes past the safe area (`keyboardFrame().height - safeArea().bottom`) itself, as
-in `windowSize().height - safeArea().top - Math.max(0, keyboardFrame().height - safeArea().bottom) - 24`. Menus,
-selects and date pickers that a phone shows as sheets do the same, and a `maxHeight` in their `popupStyle` or
-`popupClass` takes the place of their limit the same way.
+right above it, the larger of the safe area and the keyboard. This is the same on iOS, Android and the web: one sheet
+needs no platform-specific code.
+
+Lifted by the keyboard, a bottom sheet stays below the status bar, however tall its content. The sheet's own
+`maxHeight` (`popupStyle={{ maxHeight: "92%" }}`, a `max-h-*` class) applies as long as it fits between the status bar
+and the keyboard; a taller one gives way to that room while the keyboard is up and comes back when it goes down. Let
+the content shrink to the panel (`max-h-full` on it, a `Scroll` with `shrink` inside) so the header stays on screen and
+the rest scrolls.
+
+Inside the lifted panel `env(keyboard-inset-height)` reads 0: the panel already stands on the keyboard, so content
+padded by it (`pb-[env(keyboard-inset-height)]`, as a page avoids the keyboard) is not lifted a second time. Menus,
+selects and date pickers that a phone shows as sheets keep their own limit, and a `maxHeight` in their `popupStyle` or
+`popupClass` takes its place: a lower one subtracts the room the keyboard takes past the safe area
+(`keyboardFrame().height - safeArea().bottom`) itself.
 
 ## Screen readers and keyboard focus
 

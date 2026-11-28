@@ -20,6 +20,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref, `{ x, y }` or `{ origin, size }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
 | `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (iOS/macOS's `WKDownload`, WebKitGTK's session downloads or WebView2's `DownloadStarting` into the app's data directory's `downloads/<id>/`, only with a listener; a Rust `onDownloadPending` listener chooses destinations instead), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
+| `gpuView` (`nsh`'s `gpuView`) | `NshView` + the renderer's frame under the children | a renderer the app's Rust crate registered by name draws the box with wgpu on a render thread; own props, animated props and events as `nativeComponent`'s; see [gpu-views.md](gpu-views.md) |
 | `nativeComponent` (`nsh`'s `nativeComponent`) | a `NshView` box filled by the registered component's view; own props may be bound to animated values | see [embedding.md](embedding.md) |
 | `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, the `objectFit` style (`object-*`), `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
@@ -275,7 +276,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a
   component's keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
   it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
-  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). Return and Space press
+  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). A binding that takes
+  them over a pointer's focus (`KeyOptions::over_focused`'s `OverFocused::Pointer`, TS's `overFocused: "pointer"`: a media player's Space)
+  fires instead, before the focus' own, when it is eligible in the current window and a pointer gave the focus: the core notes it as the focus is reported
+  (the input modality then, or a popup a press opened giving it back, `Core::pointer_focus_back`) and mounts the
+  keymap again as it changes, carrying it (`Keymap::pointer_focus`), only while a binding asks; the platforms ask
+  `Keymap::find_with` or, matching the bindings themselves (GTK), `Keymap::gives_way`. Return and Space press
   only a focused stop inside the newest modal, and a focus the newest modal covers (one the app left under a dialog) has
   no keys of its own: its bindings for the focus give way to the others, the dialog's (`KeyFocus::covered`,
   `Keymap::find_with`; the headless driver, macOS and GPUI, where `focus()` can leave it there). A page a newer one
@@ -336,8 +342,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   it is, giving it up if the view is still not shown 3 s later: the latest request wins; a `blur()` of it, of a view
   holding it, or `Keyboard.dismiss()`, any focus taken meanwhile (in hosted native content or the embedding app's
   views too) or the view's removal end it; a request dropped without effect logs a warning (`PendingFocus`; an input
-  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). Windows and GPUI
-  leave `focus()` on views to them; iOS focuses inputs only.
+  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). iOS makes the
+  stop the first responder, a transparent one too (`keyboard::shown`: a popup coming in from `opacity: 0` focuses the
+  item it asked for as it opens), and asks UIKit's focus engine to follow (`keyboard::request_focus`), which it does
+  for a visible stop: Tab and the engine pass over a transparent one (`keyboard::visible`). Windows and GPUI leave
+  `focus()` on views to them.
 - **`onPanEnd` / `onPanStart`** carry `value` (`{ x?, y? }`, the axes `pan` binds): the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
@@ -384,7 +393,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   Each touch carries `pointerType`, `pressure` and `tiltX` / `tiltY` as the DOM's `PointerEvent` (`TouchPoint`): iOS
   reads `UITouch` force and the Pencil's angles, Android `MotionEvent` pressure, tool type and tilt, Windows
   `GetPointerPenInfo` / `GetPointerTouchInfo`, macOS and GTK a tablet's pen events, and the web `PointerEvent`. A device
-  without pressure reports 0.5 while down and 0 once lifted. On web, `browser/events.rs` sends these fields in each point
+  without pressure reports 0.5 while down and 0 once lifted. A pen also carries `eraser` and `barrel`, and a moved
+  point carries `coalesced`: the samples merged into it, oldest first, without its own (the DOM's
+  `getCoalescedEvents()`): iOS `coalescedTouchesForTouch`, Android `MotionEvent` history, Windows
+  `GetPointerPenInfoHistory`, the web `getCoalescedEvents()`; `TouchEvent::merge_move` adds the positions of the moves
+  it folds, so no platform loses them to the per-turn merge. On web, `browser/events.rs` sends these fields in each point
   from Wasm. `web/browser/gesture.js`, bundled into the realm's `bootstrap.js`, copies them to the event and the points
   in `touches` and `changedTouches`. The negotiation asks the app's handlers as in React Native (`nsh-js` `touch.rs`
   on native targets, `gesture.js` on web). A grant returning true
@@ -437,7 +450,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the description and then the hint (`Accessibility::help_text`). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
   `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`, `dialog` / `alertdialog` (`nsh-base`'s
   `Dialog` is a `dialog` unless the app gives it another role, named by its label; the platforms map it to their own
-  dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content); `accessibilityState.pressed` (`aria-pressed`:
+  dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content), `tabpanel` (the content
+  a tab list's selected tab shows, which the tabs name with `accessibilityControls`: a `DockArea` group's content
+  frame; GTK's tab panel role, which GTK gives AT-SPI as a panel, AccessKit's, macOS's `AXGroup` with WebKit's
+  `AXTabPanel` subrole, a UIA pane read as "tab panel", a semantic group on iOS, the role description "tab panel" on
+  Android); `accessibilityState.pressed` (`aria-pressed`:
   a button that has one is a toggle button) and `current` (`aria-current`: `true`, `page`, `step`, `location`, `date`,
   `time`), `hasPopup` (`aria-haspopup`: the element opens a popup, a menu or a list, and its `expanded` says whether
   it is open; `nsh-base`'s `Popover`, `Menu`, `HoverCard`, `Select`, `Combobox` and `DatePicker` set it on their
@@ -486,9 +503,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   send one, as its props change. The state words iOS and Android supply (checked, expanded, current, invalid...)
   are in the language of the app's text, as NSH's menus on the desktops are (`i18n::text_locale`): the core sends
   `Command::TextLocale` on the root of those surfaces when it changes, and the words of mounted views follow it the
-  next time a screen reader reads them. Android's `DateTimePicker` shows its value in that language too (the user's 12-
-  or 24-hour clock kept), formatted again when it changes, and its date and time dialogs their own words (buttons,
-  month and day names, the date dialog's header) from the next dialog opened.
+  next time a screen reader reads them.
   The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
@@ -627,6 +642,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `KeyboardMotion::aligned`), and runs the scroll view's inset and scroll in one animation of that curve; Android takes
   the IME's `WindowInsetsAnimation` (interpolator, duration, start; API 30+) and fast-forwards its animators to it
   (`Mounter.keyboardAligned`), the scroll to the input included.
+- **Presses on inputs**: an input's field keeps its own clicks and taps (the caret, a selection, the focus, its edit
+  menu), on its text or on its padding; only an `Input` that listens to presses hears them, after the focus the press
+  gives the field, and no view around it does, on every platform. A drag or a touch held on the field is the field's,
+  not a press. An input that listens is still read as its text field, not as a button around it, and is no stop of
+  Tab of its own.
 - **Controlled inputs**: each native edit carries an edit count; a `value` from JS is applied only if it is based on the latest
   edit, so a slow JS round trip can never overwrite newer typing (React Native's eventCount).
   While an input method composes, a `value` is held natively and applied when the composition ends, if no edit came
@@ -672,7 +692,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   and the line rules applied, `onChangeText` reporting it, no key, and a step of the platform's undo history, which a
   new value is not. Linux: the editors' `delete-from-cursor` / `insert-at-cursor` signals (`GtkText`; inserting
   from outside an edit would clear its history) or one user action on the `GtkTextBuffer`; web: `execCommand("insertText")`;
-  headless: at the end, as a paste; Windows, Android and GPUI insert nothing yet and log a warning.
+  Android: `Editable.replace` on the selection (filters such as `maxLength` apply); headless: at the end, as a paste; Windows and GPUI insert nothing yet and log a warning.
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
@@ -680,7 +700,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   named as its item provider suggests) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
   themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
-  goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field
+  goes back to the EditText while it inserts) and `onTextContextMenuItem` before; on every version a paste from the
+  EditText's text toolbar ends that toolbar, one that inserted nothing included; macOS: `TextArea` and a field
   editor of NSH's (`FieldEditor`, from `FieldCell`'s `fieldEditorForView:`, one per window; masked fields keep
   AppKit's) override `paste:` / `pasteAsPlainText:` and `validateUserInterfaceItem:`; Windows and GPUI: their own
   editors' paste (the clipboard's PNG or bitmap, `CF_HDROP`; GPUI's `ClipboardEntry::Image` / `ExternalPaths`);
@@ -857,6 +878,14 @@ sends `onError` with `ERR_NSH_WEBVIEW_TERMINATED` (Rust `on_process_terminated`)
 next `reload()`, `load()` or new source shows a page again. Android's `WebBox` handles
 `onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
 same web view.
+
+`scrollable={false}` stops only the user scrolling the page's viewport: the page still
+gets every touch (its own drag handlers, sliders and sortable lists work) and its scripts
+still scroll it, as a `UIScrollView` with `scrollEnabled` off on iOS. Android and Windows
+put `html { overflow: hidden !important; }` in each document (Android from `WebBox.java`
+as the document starts and when the prop changes, never by keeping moves from the
+WebView), Linux a user style sheet hiding the top document's overflow; macOS keeps wheel
+and trackpad scrolls from the page.
 
 
 

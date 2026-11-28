@@ -659,8 +659,11 @@ frame id:avoid-padding-inner 0 0 390 30
 frame id:avoid-off 0 185 390 30
 tap text:Dismiss the keyboard
 expect Dismiss: called
+# No region reserved headless.
+expect Reserved regions: 0
 covers [nsh] safeArea
 covers [nsh] safeAreaInsets
+covers [nsh] reservedRegions
 covers [nsh] keyboardFrame
 covers [nsh] Keyboard
 # base-text-view
@@ -746,6 +749,7 @@ expect Extended: text,custom
 expect CJK emphasis: strong,text
 expect CJK URL: https://example.com,text
 expect Math off: Math $x$
+expect Links off: a i
 expect From HTML: Hi there
 expect Text style: textStyle red
 expect Unknown tag: <US tech> up
@@ -804,6 +808,12 @@ expect Own selected: none
 listens id:area onSelectionChange
 event id:area onSelectionChange text=first
 expect Area selected: first
+event id:area onSelectionChange text=
+expect Area selected: nothing
+# The list items the ends are in (`anchor`, `focus`: a key and the offset
+# in the item's text), the focus first after a drag upward.
+event id:area onSelectionChange text=tests anchorKey=row-b anchorOffset=10 focusKey=row-a focusOffset=4
+expect Area selected: tests from row-b@10 to row-a@4
 event id:area onSelectionChange text=
 expect Area selected: nothing
 event id:own onSelectionChange text=Own
@@ -2487,8 +2497,9 @@ tap id:case-base-scrollbar
 # puts the thumb's middle there (the thumb 48 long, `minThumbLength`'s
 # default, over the 40 of 200 of 1000 shown on 200), half its travel: 400
 # of 800; a drag 38 down goes on from there, 38 of the thumb's 152 of
-# travel: 200 more.
-style label:Pages pointerEvents auto
+# travel: 200 more. On a phone the track lets touches through to the
+# content (`box-none`); the steps below drive its responder directly.
+style label:Pages pointerEvents box-none
 frame label:Pages 290 0 10 200
 touch start label:Pages 5 100
 prop id:pages contentOffset y=400
@@ -2501,7 +2512,7 @@ touch end
 # of travel, a tenth: 90 of 900.
 style label:Feed pointerEvents none
 scroll id:feed 0 100
-style label:Feed pointerEvents auto
+style label:Feed pointerEvents box-none
 touch start label:Feed 5 22
 touch end
 prop id:feed contentOffset y=90
@@ -2621,14 +2632,27 @@ style label:2026-10-06 backgroundColor #00ff00ff
 style label:2026-10-07 backgroundColor #0000ffff
 style text:D10.6 color #00ff00ff
 style label:2026-09-27 opacity 0.5
-# The first press starts a range, shown but not reported until the
-# second ends it; then the popup closes. Half a range is its start,
-# selected, with no range marked.
+# The first press starts a range: no value until the second ends it,
+# its start reported by `onChangeStart` (`[start, null]`), the popup
+# open for the end. Half a range is its start, selected, with no range
+# marked.
 tap label:2026-10-12
 prop label:2026-10-12 accessibilityState selected=true
 nostyle label:2026-10-12 backgroundColor
 nostyle label:2026-10-06 backgroundColor
-expect Trip: none
+expect Trip: start ["2026-10-12",null]
+expect M11
+# The mouse moving over a later day previews the range a press there
+# makes: the days from the start to it styled by the item's
+# `data-range-preview-start:`, `data-range-preview-middle:` and
+# `data-range-preview-end:` classes, the days between not selected.
+event label:2026-10-14 onMouseMove position.x=1 position.y=1
+style label:2026-10-12 backgroundColor #ff00ffff
+style label:2026-10-13 backgroundColor #ffff00ff
+style label:2026-10-14 backgroundColor #00ffffff
+prop label:2026-10-13 accessibilityState {}
+nostyle label:2026-10-15 backgroundColor
+expect Trip: start ["2026-10-12",null]
 tap label:2026-10-14
 expect Trip: ["2026-10-12","2026-10-14"]
 absent M11
@@ -2640,6 +2664,11 @@ expect Week
 prop label:Week role button
 style label:Week backgroundColor #00ff00ff
 style parent:label:Week backgroundColor #0000ffff
+# Its description: a second line in the look of its own part, which
+# screen readers read after the label.
+expect Oct 19-25
+prop label:Week accessibilityDescription Oct 19-25
+style text:"Oct 19-25" color #ff0000ff
 tap label:Week
 expect Trip: ["2026-10-19","2026-10-25"]
 absent Week
@@ -2650,6 +2679,8 @@ covers [props] DatePicker.itemClass
 covers [props] DatePicker.presets
 covers [props] DatePicker.presetsStyle
 covers [props] DatePicker.presetStyle
+covers [props] DatePicker.presetDescriptionStyle
+covers [events] DatePicker.onChangeStart
 # A date and time (`timePrecision`) on a 12-hour clock (`hourCycle`):
 # heard with the time; the popup holds the app's label of the time and
 # the field's segments (`renderSegment`, `segmentStyle`).
@@ -2686,6 +2717,57 @@ covers [props] DatePicker.timeLabel
 covers [props] DatePicker.timeAccessibilityLabel
 covers [props] DatePicker.renderSegment
 covers [props] DatePicker.segmentStyle
+# Kept open on a `select` (`open`): the sheet holds the app's header above the
+# calendar and its footer below; a range's two days are reported and
+# shown selected, the sheet still open, until the app's Apply in the
+# footer commits the pending value and closes it (`open`).
+tap id:stay
+expect StayHeader
+expect StayApply
+tap label:2026-10-12
+tap label:2026-10-14
+prop label:2026-10-13 accessibilityState selected=true
+expect StayHeader
+expect Stay: none
+tap id:stayApply
+expect Stay: ["2026-10-12","2026-10-14"]
+absent StayHeader
+prop label:Stay accessibilityValue text=2026/10/12 - 2026/10/14
+covers [props] DatePicker.header
+covers [props] DatePicker.footer
+covers [props] DatePicker.open
+
+# base-calendar
+tap id:case-base-calendar
+# The app's range, every day of it selected for screen readers.
+expect Draft: ["2026-10-05","2026-10-07"]
+prop label:2026-10-06 accessibilityState selected=true
+# The first press starts a range: no value yet, its start reported by
+# `onChangeStart` (`[start, null]`), which the app keeps as its value and
+# shows outside the grid; the range before is no longer selected.
+tap label:2026-10-12
+expect Heard: start ["2026-10-12",null]
+expect Draft: ["2026-10-12",null]
+prop label:2026-10-12 accessibilityState selected=true
+prop label:2026-10-06 accessibilityState {}
+# The app's Cancel sets the range before back, which replaces the start:
+# the next press starts a range again rather than ending that one.
+tap id:cancel
+expect Draft: ["2026-10-05","2026-10-07"]
+prop label:2026-10-06 accessibilityState selected=true
+prop label:2026-10-12 accessibilityState {}
+tap label:2026-10-20
+expect Heard: start ["2026-10-20",null]
+# The second press ends it: `onChange` reports the complete range.
+tap label:2026-10-22
+expect Heard: change ["2026-10-20","2026-10-22"]
+expect Draft: ["2026-10-20","2026-10-22"]
+prop label:2026-10-21 accessibilityState selected=true
+covers [nsh/base] Calendar
+covers [props] Calendar.range
+covers [props] value
+covers [events] Calendar.onChangeStart
+covers [events] onChange
 
 # base-select
 tap id:case-base-select
@@ -2869,6 +2951,38 @@ covers [props] Select.searchTestID
 covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty
+# The app's query (`query`, `onQueryChange`): typing in the search field is
+# reported, the app's query filters, and the app's rows mark the match from
+# it; the app clears it once the list is gone (`onClose`).
+tap id:ask
+expect Apple
+type label:AskField rr
+expect Query: rr
+expect Che_rr_y
+expect Ca_rr_ot
+absent Apple
+event label:Cherry onCancel
+absent Che_rr_y
+expect Query: none
+tap id:ask
+expect Apple
+expect Cherry
+tap below:parent:scroll:label:Apple
+absent Apple
+covers [props] Select.query
+covers [events] Select.onQueryChange
+# The field's own query starts each opening from `defaultQuery`.
+tap id:preset
+expect Carrot
+absent Apple
+event label:Carrot onCancel
+absent Carrot
+tap id:preset
+expect Carrot
+absent Apple
+event label:Carrot onCancel
+absent Carrot
+covers [props] Select.defaultQuery
 
 # base-color-picker
 tap id:case-base-color-picker
@@ -3040,16 +3154,40 @@ prop label:Volume accessibilityValue min=0 max=100 now=60 text=60
 frame label:Volume 120 2 10 10
 # A range: a thumb each, the start's value up to the end, the end's from
 # the start. A press on the track moves the nearer thumb there (at 75%,
-# past the middle of the two at 40%: the end's).
+# past the middle of the two at 40%: the end's), which is dragging from
+# the press to the release: the content `renderThumb` draws in it shows
+# `group-data-dragging:`, the start's not (see below).
 expect Price 200-600
 prop label:"Min price" accessibilityValue min=0 max=600 now=200 text=200
 prop label:"Max price" accessibilityValue min=200 max=1000 now=600 text=600
 frame label:"Min price" 40 2 10 10
 frame label:"Max price" 120 2 10 10
+nostyle id:max-bubble backgroundColor
 touch start parent:parent:label:"Max price" 150 10
+style id:max-bubble backgroundColor #ff0000ff
+nostyle id:min-bubble backgroundColor
 touch end
+nostyle id:max-bubble backgroundColor
 expect Price 200-750
 prop label:"Min price" accessibilityValue min=0 max=750 now=200 text=200
+# Content in each thumb (`renderThumb`, told which it is), in its corner:
+# it follows its own thumb's states through `group-*:` classes. A press
+# on a thumb marks it dragging (`group-data-dragging:`) before it moves,
+# the other not; the release ends it. The pointer over a thumb is its
+# `group-hover:`.
+frame id:max-bubble 0 0 4 4
+nostyle id:max-bubble backgroundColor
+touch start label:"Max price" 5 5
+style id:max-bubble backgroundColor #ff0000ff
+nostyle id:min-bubble backgroundColor
+touch end
+nostyle id:max-bubble backgroundColor
+expect Price 200-750
+state label:"Min price" hovered
+style id:min-bubble backgroundColor #00ff00ff
+nostyle id:max-bubble backgroundColor
+state label:"Min price" none
+nostyle id:min-bubble backgroundColor
 # Its own value, on a logarithmic scale along a vertical axis: a screen
 # reader's increment steps it by 1.
 prop label:Zoom accessibilityValue min=1 max=1000 now=10 text=10
@@ -3091,6 +3229,7 @@ covers [props] Slider.rangeClass
 covers [props] Slider.rangeStyle
 covers [props] Slider.thumbClass
 covers [props] Slider.thumbStyle
+covers [props] Slider.renderThumb
 covers [events] onChange
 covers [events] Slider.onChangeEnd
 
@@ -3841,6 +3980,15 @@ expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
 style id:faded color #138a5a80
+# A number token is a factor to scale, kept while held down, and a ring's
+# width or offset with the `length:` hint.
+style id:token-scale transform scale(0.97)
+state id:token-press pressed
+style id:token-press transform scale(0.97)
+state id:token-press none
+style id:token-ring boxShadow 0 0 0 3 #138a5aff
+style id:token-ring-offset boxShadow 0 0 0 2 #ffffffff, 0 0 0 4 #138a5aff
+style id:token-inset-ring boxShadow inset 0 0 0 3 #138a5aff
 covers [nsh] token
 
 # base-set-theme
@@ -4012,6 +4160,8 @@ expect Tab a*
 expect Tab b
 expect Tab c
 expect Panel a
+# The frame showing the panel is the tab panel for screen readers.
+prop parent:parent:parent:parent:id:panel-a role tabpanel
 # A tab of the other group shows that group.
 tap text:Tab c
 expect Tab c*
@@ -4195,12 +4345,18 @@ frame id:grow 0 0 300 40
 tap id:grow-more
 wait 100
 frame id:grow 0 0 300 60
+# A replacing decoration shows its label in place of its range's text
+# while no caret touches it (the editor is not focused): `a` as `alpha`.
+expect alpha
 # The app's fold ranges (the outer one shorter than the indentation's):
 # level 2 folds the inner block alone.
 # The gutter's strip of decorations' marks is `gutterDecorationsWidth`
 # wide, before the line numbers and the fold markers: the gutter is
 # 12 + 4 + 15 + 20 + 4 wide.
 frame below:parent:parent:parent:parent:span:c(); 0 0 55 200
+# Its vertical scroll view (below the layer drawn over it) keeps its bar
+# within `scrollbarInset`.
+prop below:parent:parent:parent:parent:parent:parent:span:c(); scrollbarInset top=6 right=2 bottom=6
 tap id:fold-level
 expect Folded: 1-2
 # Folding the outer block recursively keeps the inner one folded, so
@@ -4279,6 +4435,12 @@ expect Defined: 3 key 7 5-11
 # Code actions at the selection, start first, with the caret's box.
 tap id:code-actions
 expect Acted: 5-11 5 placed
+# The seventh editor reports where its text is scrolled once laid out:
+# 30 rows of 20 points with no room past the last, wrapped (as wide as
+# its 390 × 100 viewport), at the top. The ref scrolls it, reported.
+expect Scroll: 0 0 390x600 390x100
+tap id:scroll-to
+expect Scroll: 0 470 390x600 390x100
 covers [nsh/base] Editor
 covers [events] Editor.onHover
 covers [events] Editor.onHoverEnd
@@ -4298,8 +4460,19 @@ covers [events] Editor.onInlineCompletionRequest
 covers [props] Editor.diagnostics
 covers [props] Editor.styles
 covers [props] Editor.gutterDecorationsWidth
+covers [props] scrollbarInset
 covers [events] Editor.onDefinitionRequest
 covers [events] Editor.onCodeActionRequest
+covers [events] onScroll
+
+# base-editor-fonts
+tap id:case-base-editor-fonts
+# A decoration's 26 point heading takes a row twice the editor's 20,
+# the caret there is as tall, and the code's row below keeps its 20.
+expect end
+tap id:measure
+expect Rows: 40 20 40
+covers [props] Editor.decorations
 
 # base-diff
 tap id:case-base-diff
@@ -4431,10 +4604,14 @@ expect Selected: row 2 column 2
 tap id:read
 expect Read: 2:1 0-5
 tap id:scroll
+# A typed rectangle round-trips through the same ref, with its active cell.
+tap id:select-range
+tap id:read
+expect Read: range 2:1 to 1:0 active 2:1
 # A title press reports its column. The name cell of row 1 carries the
 # class from `cellClasses`. The rendered text sits in the render's holder,
-# in the placeholder, in that cell.
-style parent:parent:parent:text:"Cell 1:name fig" backgroundColor #00ff00ff
+# in that cell.
+style parent:parent:text:"Cell 1:name fig" backgroundColor #00ff00ff
 tap text:Name
 expect Column: 0 1
 # A sortable column's sort button reports the next sort, which the app
@@ -4509,7 +4686,7 @@ expect Attr: true
 expect Split: true 3
 expect Content: Plain line **b**
 expect Html: <h2>T</h2><p>a <em>b</em></p>
-expect Insert: xyb
+expect Insert: xyb aXb aZb
 expect Dispatch: all xy
 expect Node: true node
 expect Items: true true
@@ -4565,6 +4742,8 @@ covers [nsh/base] wrappingRule
 
 # base-rich-editor-tables
 tap id:case-base-rich-editor-tables
+prop scroll:text:"InternationalConferenceAuditorium" horizontal true
+scroll id:rich-editor-table-scroll 30 0
 tap text:RunTables
 expect Insert: true *|*/|
 expect AddRow: true *|*/|/|
@@ -4656,12 +4835,14 @@ expect Named: text threw
 expect Editable: false
 expect Both: threw
 expect Duplicate: threw
-expect Classes: starterKit,doc,paragraph,heading,blockquote,bulletList,orderedList,listItem,taskList,taskItem,codeBlock,hardBreak,horizontalRule,image,bold,italic,strike,code,underline,link,highlight,subscript,superscript,textStyle,textAlign,history,trailingNode,typography,listKeymap
+expect Classes: starterKit,doc,paragraph,heading,blockquote,bulletList,orderedList,listItem,taskList,taskItem,codeBlock,codeBlockHighlight,hardBreak,horizontalRule,image,bold,italic,strike,code,underline,link,highlight,subscript,superscript,textStyle,textAlign,history,trailingNode,typography,listKeymap
+expect Language: null rust true
 covers [nsh/base] Blockquote
 covers [nsh/base] Bold
 covers [nsh/base] BulletList
 covers [nsh/base] Code
 covers [nsh/base] CodeBlock
+covers [nsh/base] CodeBlockHighlight
 covers [nsh/base] Document
 covers [nsh/base] HardBreak
 covers [nsh/base] Heading
@@ -4717,6 +4898,20 @@ expect Observed: true 1 日Seed
 # Host event names have one shared coverage key, including a component
 # that emits its own payload under that name.
 covers [events] onCompositionChange
+
+# base-rich-editor-readonly-input
+tap id:case-base-rich-editor-readonly-input
+expect Doc: Notes
+# Drive the editor's native input as a soft keyboard does: a typed
+# character, then an input method's commit.
+event label:ReadonlyNotes onChange text=x
+expect Heard: 1
+event label:ReadonlyNotes onCompositionChange composing=true text=ni
+event label:ReadonlyNotes onChange text=x你
+event label:ReadonlyNotes onCompositionChange composing=false text=""
+expect Heard: 2
+expect Doc: Notes
+covers [events] RichEditor.onReadonlyInput
 
 # base-rich-editor-accessory
 tap id:case-base-rich-editor-accessory
@@ -4927,3 +5122,38 @@ absent No files
 expect Pinned files
 covers [props] Tree.header
 covers [props] Tree.empty
+
+# base-host-accessibility
+# A component's host takes a view's accessibility props, as a view does.
+tap id:case-base-host-accessibility
+prop id:button accessibilityDescription Deletes the draft
+prop id:details accessible true
+prop id:details role region
+prop id:details accessibilityLabel Details
+prop id:details accessibilityHint Shows the details
+prop id:details accessibilityState expanded=true
+prop id:details accessibilityValue text=three
+prop id:details accessibilityElementsHidden false
+prop id:details accessibilityLiveRegion polite
+prop id:details accessibilityActions activate
+# The error line's text describes the details while it is there.
+prop id:details accessibilityDescription Enter a name
+listens id:details onAccessibilityAction
+# "no-hide-descendants": not an element, and its subtree hidden.
+prop id:hidden accessible false
+prop id:hidden accessibilityElementsHidden true
+# `accessibilityElementsHidden`: the host's subtree hidden.
+prop id:hidden-elements accessibilityElementsHidden true
+covers [props] accessibilityDescription
+covers [props] accessible
+covers [props] role
+covers [props] accessibilityLabel
+covers [props] accessibilityHint
+covers [props] accessibilityState
+covers [props] accessibilityValue
+covers [props] accessibilityElementsHidden
+covers [props] accessibilityLiveRegion
+covers [props] accessibilityActions
+covers [props] accessibilityDescribedBy
+covers [props] importantForAccessibility
+covers [events] onAccessibilityAction

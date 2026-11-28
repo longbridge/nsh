@@ -15,22 +15,28 @@ mod dev;
 mod dev_port;
 mod entry;
 mod init;
+mod linux_store;
 mod logger;
 mod module_meta;
+mod msix;
 mod native_features;
+mod nsh_lock;
 mod nshm;
 mod package;
 mod platforms;
 mod play;
 mod provisioning;
 mod publish_ios;
+mod publish_windows;
 mod run;
 mod runtime;
 mod rust_app;
 mod self_update;
 mod sign;
+mod store;
 mod test;
 mod test_android;
+mod test_attach;
 mod test_host;
 mod test_ios;
 mod test_web;
@@ -38,9 +44,11 @@ mod ui;
 mod updater;
 mod web;
 mod windows;
+mod windows_link;
 
 use std::{
-    path::PathBuf,
+    net::Ipv4Addr,
+    path::{Path, PathBuf},
     process::ExitCode,
     sync::{Arc, OnceLock, RwLock},
 };
@@ -207,7 +215,9 @@ enum Command {
         /// UDID); default: a booted one, else the newest iPhone. With
         /// `--target android`: the device or emulator (its serial, as `adb
         /// devices` lists it); default: the one `ANDROID_SERIAL` names, else
-        /// the first one.
+        /// the first one. With `--attach`: the session's host (its name, or
+        /// its platform as `--target` names it); default: the one that
+        /// connected last.
         #[arg(long, value_name = "DEVICE")]
         device: Option<String>,
         /// With `--target macos` or `gpui`: the display the apps' windows
@@ -226,6 +236,15 @@ enum Command {
         /// except on a display nobody types on, such as Xvfb).
         #[arg(long)]
         foreground: bool,
+        /// Drive the app of a development session that runs already (`nsh
+        /// run`, `nsh dev`) in the window it shows, as it is, instead of
+        /// opening one: the session on this port, else the one running on
+        /// this machine (the app's, when several run). Its host the
+        /// connected last takes the steps, or the one `--device` names (its
+        /// name, or its platform as `--target` names it). From this machine
+        /// only; `open` takes no options, and the app keeps running after.
+        #[arg(long, value_name = "PORT", num_args = 0..=1, require_equals = true)]
+        attach: Option<Option<u16>>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed); an app with
@@ -254,6 +273,10 @@ enum Command {
         /// from 8790; with --server-only, 8790.
         #[arg(long)]
         port: Option<u16>,
+        /// IPv4 address to bind. Defaults to all interfaces for --server-only
+        /// and network targets, or loopback for local targets.
+        #[arg(long)]
+        host: Option<Ipv4Addr>,
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
@@ -349,6 +372,13 @@ enum Command {
         /// (TSX entries).
         #[arg(long)]
         background: bool,
+        /// Code signing identity for the macOS host (`--target macos`), as
+        /// `nsh package --sign` takes it, e.g. "Apple Development: …": the
+        /// host's signature then stays the same across rebuilds, so what
+        /// macOS ties to it (the app's keychain items) stays the app's.
+        /// Default: signed ad hoc.
+        #[arg(long)]
+        sign: Option<String>,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -573,28 +603,81 @@ enum Command {
 /// The stores `nsh publish` uploads to.
 #[derive(Subcommand, Clone)]
 enum PublishStore {
-    /// Upload an App Store-signed IPA to App Store Connect for TestFlight.
+    /// Upload an App Store-signed IPA to App Store Connect, wait for
+    /// processing, give it to TestFlight groups, prepare the App Store
+    /// version and listing, and submit it for review with `--submit`.
     Ios(publish_ios::Args),
-    /// Upload an Android App Bundle (`.aab`) to Google Play's internal
-    /// testing track, with a service account's JSON key.
+    /// Report where a store has the app's newest release. Exits 0 live,
+    /// 10 pending (processing or in review), 11 draft, 12 action needed.
+    Status {
+        #[command(subcommand)]
+        store: StatusStore,
+    },
+    /// Check a store's credentials and the app's store config, read-only.
+    Doctor {
+        #[command(subcommand)]
+        store: DoctorStore,
+    },
+    /// Upload an Android App Bundle (`.aab`) to a Google Play track
+    /// (default: internal testing), or promote a release between tracks,
+    /// with a service account's JSON key.
+    Android(play::PublishArgs),
+    /// Write or update the app's Flathub manifest for a release archive.
+    Linux(linux_store::Args),
+    /// Submit an MSIX package to the Microsoft Store.
+    Windows(publish_windows::Args),
+}
+
+/// The stores `nsh publish status` reports on.
+#[derive(Subcommand, Clone)]
+enum StatusStore {
+    /// App Store Connect.
+    Ios(publish_ios::StatusArgs),
+    /// Every Google Play track's releases, status and rollout.
     Android {
-        /// The bundle (`.aab`) to upload.
-        bundle: PathBuf,
-        /// The app's directory or entry, whose `nsh.json` `id` is the
-        /// package name.
+        #[command(flatten)]
+        app: play::AppArgs,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// The app's version on Flathub against `nsh.json`'s. Exits 1 when
+    /// they differ.
+    Linux {
+        /// The app's directory or entry.
         #[arg(long, default_value = ".")]
         entry: PathBuf,
-        /// The package name on Google Play (default: `nsh.json` `id`).
+        /// Print JSON.
         #[arg(long)]
-        package: Option<String>,
-        /// The service account's JSON key; keep it out of the repository.
-        #[arg(long, env = "NSH_PLAY_CREDENTIALS", hide_env_values = true)]
-        credentials: Option<PathBuf>,
-        /// Release as a draft, which Play requires until the app's first
-        /// release is made in Play Console.
-        #[arg(long)]
-        draft: bool,
+        json: bool,
     },
+    /// The app's latest Microsoft Store submission. Exits 0 published, 2
+    /// in progress, 1 failed.
+    Windows(publish_windows::StatusArgs),
+}
+
+/// The stores `nsh publish doctor` checks.
+#[derive(Subcommand, Clone)]
+enum DoctorStore {
+    /// App Store Connect.
+    Ios(publish_ios::DoctorArgs),
+    /// Google Play.
+    Android {
+        #[command(flatten)]
+        app: play::AppArgs,
+        /// The store directory (default: `store` in the app's directory).
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
+    /// Flathub: the metadata Flathub asks for, read-only.
+    Linux {
+        /// The app's directory or entry.
+        #[arg(long, default_value = ".")]
+        entry: PathBuf,
+    },
+    /// Microsoft Store: the package identity, the Store ID and the
+    /// credentials.
+    Windows(publish_windows::AppArgs),
 }
 
 /// Arguments of `nsh package`.
@@ -626,7 +709,10 @@ struct PackageArgs {
     #[arg(long)]
     icon: Option<PathBuf>,
     /// Code signing identity for iOS devices or macOS packages, e.g.
-    /// "Apple Development: …" or "Developer ID Application: …".
+    /// "Apple Development: …" or "Developer ID Application: …"; for a
+    /// Windows MSIX package, a certificate (`.pfx`, its password in
+    /// `NSH_WINDOWS_CERT_PASSWORD`) to sign it for installing outside the
+    /// Store.
     #[arg(long)]
     sign: Option<String>,
     /// Provisioning profile for devices (`.mobileprovision`). Repeat it to
@@ -647,8 +733,11 @@ struct PackageArgs {
     /// arm64-v8a and armeabi-v7a; with --run also the device's).
     #[arg(long, value_delimiter = ',', value_parser = crate::android::ABIS)]
     abi: Vec<String>,
-    /// Android: what to write, an APK (installed directly) or an Android
-    /// App Bundle (`aab`, uploaded to Google Play).
+    /// What to write: on Android an APK (installed directly) or an Android
+    /// App Bundle (`aab`, uploaded to Google Play); on Linux also an
+    /// AppImage (`appimage`) or a Flatpak (`flatpak`); on Windows also an
+    /// MSIX package (`msix`, the Microsoft Store), signed with `--sign
+    /// <cert.pfx>` when given.
     #[arg(long, value_enum, default_value_t)]
     format: crate::android::Format,
     /// macOS: the processors the app runs on, `arm64` (Apple silicon),
@@ -673,6 +762,13 @@ struct PackageArgs {
     /// relatively, so the site runs from any directory.
     #[arg(long, value_name = "URL", conflicts_with = "run")]
     asset_url: Option<String>,
+    /// Web only (ignored for other targets): package nsh's runtime in its shared form, the same files for
+    /// every app on this NSH version, so a site embedding several apps
+    /// downloads it once. Each app can be packaged on its own (separate CI
+    /// jobs); serve the runtime files from one place (`--asset-url`).
+    /// Not for an app with Rust components or wasm-bindgen glue.
+    #[arg(long)]
+    shared_runtime: bool,
 }
 
 /// `nsh component`'s actions.
@@ -763,6 +859,43 @@ fn parse_limits(spec: &str) -> Result<nsh_core::js::HostLimits, String> {
     nsh_core::js::HostLimits::parse(spec)
 }
 
+/// Where the dev server of `nsh run` and `nsh dev` listens. `--server-only`
+/// serves hosts started elsewhere, on other machines too; a host `nsh dev`
+/// starts is on the network only as `nsh run` starts it; `--host` replaces
+/// the address.
+fn dev_listen(
+    port: Option<u16>,
+    target: run::Target,
+    server_only: bool,
+    host: Option<Ipv4Addr>,
+) -> dev::Listen {
+    let mut listen = dev::Listen::new(
+        port.unwrap_or_default(),
+        server_only || target.uses_network(),
+    );
+    if let Some(host) = host {
+        listen.host = host;
+    }
+    listen
+}
+
+/// Owns the dev server's `port` for `entry`, or the first free one at
+/// `host` (the address the server will listen on) when none was given.
+fn acquire_port(
+    entry: &Path,
+    port: &mut Option<u16>,
+    host: Ipv4Addr,
+) -> anyhow::Result<Option<dev_port::Session>> {
+    match port {
+        Some(port) => dev_port::Session::acquire(*port, entry),
+        None => {
+            let (session, free) = dev_port::Session::acquire_free(entry, host)?;
+            *port = Some(free);
+            Ok(session)
+        }
+    }
+}
+
 /// Refuses `--limits` for an app of Rust only: they are its JS VM's, and it
 /// runs no JS.
 fn no_limits_for_rust(
@@ -784,13 +917,36 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     {
         return match store {
             PublishStore::Ios(args) => publish_ios::publish(&args),
-            PublishStore::Android {
-                bundle,
-                entry,
-                package,
-                credentials,
-                draft,
-            } => play::publish(&bundle, &entry, package, credentials, draft),
+            PublishStore::Status {
+                store: StatusStore::Ios(args),
+            } => {
+                let code = publish_ios::print_status(&args)?;
+                std::process::exit(code)
+            }
+            PublishStore::Status {
+                store: StatusStore::Android { app, json },
+            } => play::print_status(&app, json),
+            PublishStore::Doctor {
+                store: DoctorStore::Ios(args),
+            } => publish_ios::doctor(&args),
+            PublishStore::Doctor {
+                store: DoctorStore::Android { app, store },
+            } => play::doctor(&app, store.as_deref()),
+            PublishStore::Android(args) => play::publish(&args),
+            PublishStore::Linux(args) => linux_store::publish(&args),
+            PublishStore::Status {
+                store: StatusStore::Linux { entry, json },
+            } => linux_store::status(&entry, json),
+            PublishStore::Doctor {
+                store: DoctorStore::Linux { entry },
+            } => linux_store::doctor(&entry),
+            PublishStore::Windows(args) => publish_windows::publish(&args),
+            PublishStore::Status {
+                store: StatusStore::Windows(args),
+            } => publish_windows::status(&args),
+            PublishStore::Doctor {
+                store: DoctorStore::Windows(app),
+            } => publish_windows::doctor(&app),
         };
     }
     // A package given to `nsh publish` has no app to resolve or build.
@@ -849,14 +1005,27 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             let port = port.get_or_insert(nsh_dev::protocol::DEFAULT_PORT);
             dev_port::Session::acquire(*port, entry)?
         }
-        Command::Run { entry, port, .. } | Command::Dev { entry, port, .. } => match port {
-            Some(port) => dev_port::Session::acquire(*port, entry)?,
-            None => {
-                let (session, free) = dev_port::Session::acquire_free(entry)?;
-                *port = Some(free);
-                session
-            }
-        },
+        // Without `--port`, the first port free where the server will listen.
+        Command::Run {
+            entry,
+            port,
+            target,
+            ..
+        } => {
+            let host = dev_listen(None, *target, false, None).host;
+            acquire_port(entry, port, host)?
+        }
+        Command::Dev {
+            entry,
+            port,
+            target,
+            host,
+            server_only,
+            ..
+        } => {
+            let host = dev_listen(None, *target, *server_only, *host).host;
+            acquire_port(entry, port, host)?
+        }
         _ => None,
     };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
@@ -883,10 +1052,11 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     // (`read_config`), it says before the type check calls the app fine.
     // A Rust app's manifest is its describing's (`root_config`), which
     // refuses what it does not know.
-    if let Command::Check { entry, .. } = &command
-        && !rust_app::is_root(entry)
-    {
-        package::read_config(entry)?;
+    if let Command::Check { entry, .. } = &command {
+        if !rust_app::is_root(entry) {
+            package::read_config(entry)?;
+        }
+        check::warn_locales(entry);
     }
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
@@ -924,10 +1094,30 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             build: args.build,
         });
     }
+    // The target whose hosts or runtime the command builds: an nshm the
+    // app lists for other targets only (`"targets"`) is not linked. A
+    // command for every target (a check, a bundle, an over-the-air
+    // package, a dev server for hosts started elsewhere) links every one.
+    let target = match &command {
+        Command::Test { target, .. } => Some(target.unwrap_or_else(run::Target::native).os()),
+        Command::Run { target, .. }
+        | Command::Dev {
+            target,
+            server_only: false,
+            ..
+        } => Some(target.os()),
+        Command::Package(args) => args.target.asset_target(),
+        _ => None,
+    };
     let app = match command.entry_mut() {
-        Some(entry) => rust_app::of(entry, unify)?,
+        Some(entry) => rust_app::of(entry, unify, target)?,
         None => None,
     };
+    // `.nsh/types` declare the app's modules as every target has them: a
+    // command that leaves some out keeps the ones written before.
+    if types && let Some(entry) = command.entry_mut() {
+        types = nshm::left_out(entry, target)?.is_empty();
+    }
     let Some(app) = app else {
         if let Some(entry) = command.entry_mut() {
             if rust_app::is_root(entry) {
@@ -1018,6 +1208,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device,
             display,
             foreground,
+            attach,
         } => test::test(
             &path,
             &entry,
@@ -1033,10 +1224,12 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device.as_deref(),
             display.map(|n| n as usize),
             foreground,
+            attach,
         ),
         Command::Dev {
             entry,
             port,
+            host,
             release,
             limits,
             target,
@@ -1044,13 +1237,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             server_only,
         } => {
             no_limits_for_rust(&entry, limits)?;
-            // `--server-only` serves hosts started elsewhere, on other
-            // machines too; a host `nsh dev` starts is on the network only
-            // as `nsh run` starts it.
-            let listen = dev::Listen {
-                port: port.unwrap_or_default(),
-                network: server_only || target.uses_network(),
-            };
+            let listen = dev_listen(port, target, server_only, host);
             if server_only {
                 let session = dev::DevSession::start(&entry, listen, release, limits)?;
                 session.print_urls();
@@ -1065,6 +1252,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                         trace: false,
                         fps: false,
                         points_per_cell: None,
+                        sign: None,
                     },
                     target,
                     device.as_deref(),
@@ -1093,6 +1281,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run,
                 device,
                 asset_url,
+                shared_runtime,
             } = *args;
             let mut config = package::read_config(&entry)?;
             config.name = name.or(config.name);
@@ -1120,6 +1309,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run,
                 device: device.as_deref(),
                 asset_url: asset_url.as_deref(),
+                shared_runtime,
                 development: false,
             })
         }
@@ -1137,20 +1327,19 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             display,
             background,
             points_per_cell,
+            sign,
         } => {
             no_limits_for_rust(&entry, limits)?;
             run::run(
                 &entry,
-                dev::Listen {
-                    port: port.unwrap_or_default(),
-                    network: target.uses_network(),
-                },
+                dev_listen(port, target, false, None),
                 release,
                 run::HostFlags {
                     limits,
                     trace,
                     fps,
                     points_per_cell,
+                    sign,
                 },
                 target,
                 device.as_deref(),
@@ -1260,6 +1449,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod command_tests {
+    use std::net::Ipv4Addr;
+
     use clap::Parser as _;
 
     use super::{Cli, Command, run::Target};
@@ -1370,9 +1561,55 @@ mod command_tests {
         let cli = Cli::try_parse_from(["nsh", "publish", "android", "app.aab", "--draft"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Publish { store: Some(super::PublishStore::Android { bundle, draft: true, .. }), .. }
-                if bundle == std::path::Path::new("app.aab")
+            Command::Publish { store: Some(super::PublishStore::Android(ref args)), .. }
+                if args.draft && args.bundle.as_deref() == Some(std::path::Path::new("app.aab"))
+                    && args.track == "internal"
         ));
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "publish",
+            "android",
+            "--from",
+            "beta",
+            "--track",
+            "production",
+            "--rollout",
+            "0.1",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Publish { store: Some(super::PublishStore::Android(ref args)), .. }
+                if args.bundle.is_none() && args.from.as_deref() == Some("beta")
+                    && args.rollout == Some(0.1)
+        ));
+        assert!(Cli::try_parse_from(["nsh", "publish", "android"]).is_err());
+        assert!(
+            Cli::try_parse_from(["nsh", "publish", "android", "a.aab", "--from", "beta"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "nsh", "publish", "android", "a.aab", "--draft", "--status", "halted"
+            ])
+            .is_err()
+        );
+        let cli = Cli::try_parse_from(["nsh", "publish", "status", "android", "--json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Publish {
+                store: Some(super::PublishStore::Status {
+                    store: super::StatusStore::Android { json: true, .. },
+                }),
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "android"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "status", "linux", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "linux"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "linux", "a.tar.gz"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "windows", "a.msix"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "status", "windows", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "windows"]).is_ok());
         assert!(Cli::try_parse_from(["nsh", "publish", "."]).is_err());
         assert!(Cli::try_parse_from(["nsh", "publish", "android", "a.aab", "--key", "k"]).is_err());
     }
@@ -1487,6 +1724,24 @@ mod command_tests {
     }
 
     #[test]
+    fn run_and_package_take_the_same_signing_identity() {
+        let identity = "Apple Development: Jane Doe (ABCDE12345)";
+        let cli = Cli::try_parse_from(["nsh", "run", "--sign", identity]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Run { sign: Some(ref sign), .. } if sign == identity
+        ));
+        let cli = Cli::try_parse_from(["nsh", "run"]).unwrap();
+        assert!(matches!(cli.command, Command::Run { sign: None, .. }));
+        let cli = Cli::try_parse_from(["nsh", "package", "--target", "macos", "--sign", identity])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Package(ref args) if args.sign.as_deref() == Some(identity)
+        ));
+    }
+
+    #[test]
     fn mobile_hosts_are_selected_explicitly() {
         for command in ["dev", "run"] {
             for (value, expected) in [("ios", Target::Ios), ("android", Target::Android)] {
@@ -1498,6 +1753,19 @@ mod command_tests {
                 assert_eq!(target, expected);
             }
         }
+    }
+
+    #[test]
+    fn dev_accepts_an_explicit_bind_address() {
+        let cli =
+            Cli::try_parse_from(["nsh", "dev", "--server-only", "--host", "127.0.0.1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Dev {
+                host: Some(Ipv4Addr::LOCALHOST),
+                ..
+            }
+        ));
     }
 
     #[test]

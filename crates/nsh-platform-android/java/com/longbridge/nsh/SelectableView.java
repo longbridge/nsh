@@ -35,7 +35,7 @@ final class SelectableView implements SelectionHandle.Owner {
 
     private static native void nativeDestroy(long handle);
 
-    private static native boolean nativeSetTexts(long handle, SelectableView area, String[] contents, int[] keys, boolean[] continues, float[] frames);
+    private static native boolean nativeSetTexts(long handle, SelectableView area, String[] contents, int[] keys, boolean[] continues, float[] frames, String[] chromes, float[] chromeFrames);
 
     private static native boolean nativeGesture(long handle, SelectableView area, float[] frames, int kind, float x, float y);
 
@@ -44,6 +44,8 @@ final class SelectableView implements SelectionHandle.Owner {
     private static native int[] nativeBounds(long handle);
 
     private static native String nativeText(long handle, SelectableView area);
+
+    private static native int[] nativeEnds(long handle, SelectableView area);
 
     private static native int[] nativeReadingOrder(int count, float[] runs);
 
@@ -56,6 +58,8 @@ final class SelectableView implements SelectionHandle.Owner {
     private final int id;
     /** The selected text last reported to the area's {@code onSelectionChange}. */
     private String reported = "";
+    /** Its ends (anchor node, offset, focus node, offset; empty for none). */
+    private int[] reportedEnds = new int[0];
     /** The area's view is gone: clearing reports nothing. */
     private boolean removed;
     /** The native model while there is a selection, else 0. */
@@ -67,6 +71,8 @@ final class SelectableView implements SelectionHandle.Owner {
     /** The texts drawing a highlight. */
     private final java.util.ArrayList<TextBox> highlighted = new java.util.ArrayList<>();
     private SelectionHandle startHandle, endHandle;
+    /** The color the handles are tinted in (`selectionColor`; null: the theme's). */
+    private Integer handleColor;
     /** A dragged handle passed the other: each marks the other end until the finger lifts. */
     private boolean swapped;
     private android.view.ActionMode mode;
@@ -99,8 +105,10 @@ final class SelectableView implements SelectionHandle.Owner {
     private final android.graphics.Path path = new android.graphics.Path();
     private final Runnable longPress = this::selectWordAtDown;
     private final Runnable recollect = this::recollect;
+    /** The area's width the toolbar was laid out for. */
+    private int toolbarWidth;
     private final android.view.ViewTreeObserver.OnPreDrawListener follow = () -> {
-        placeHandles();
+        follow();
         return true;
     };
 
@@ -110,17 +118,42 @@ final class SelectableView implements SelectionHandle.Owner {
         this.id = id;
     }
 
+    /** Before each frame while there is a selection: the handles and the toolbar follow the text. */
+    private void follow() {
+        placeHandles();
+        if (mode == null) return;
+        // Laid out again at another width (the phone turned): the toolbar is measured again too.
+        if (view.getWidth() != toolbarWidth) {
+            toolbarWidth = view.getWidth();
+            mode.invalidate();
+        }
+        // Scrolled with its text: the toolbar goes along.
+        mode.invalidateContentRect();
+    }
+
     /** The area's view is gone: ends the selection without reporting it. */
     void remove() {
         removed = true;
         clear();
     }
 
-    /** Reports {@code text}, the selected text, to {@code onSelectionChange} when it changed and JS listens. */
-    private void report(String text) {
-        if (text.equals(reported) || !mounter.wants(id, Native.SELECTION_CHANGE)) return;
+    /**
+     * Reports {@code text}, the selected text, and {@code ends}, its anchor's and focus's text nodes and offsets
+     * ({@code nativeEnds}, which the core places in list items), to {@code onSelectionChange} when they changed
+     * and JS listens.
+     */
+    private void report(String text, int[] ends) {
+        if ((text.equals(reported) && java.util.Arrays.equals(ends, reportedEnds))
+                || !mounter.wants(id, Native.SELECTION_CHANGE)) return;
         reported = text;
-        mounter.eventMap(id, Native.SELECTION_CHANGE, new String[] {"text"}, new Object[] {text});
+        reportedEnds = ends;
+        if (ends.length < 4) {
+            mounter.eventMap(id, Native.SELECTION_CHANGE, new String[] {"text"}, new Object[] {text});
+            return;
+        }
+        mounter.eventMap(id, Native.SELECTION_CHANGE,
+                new String[] {"text", "anchorNode", "anchorNodeOffset", "focusNode", "focusNodeOffset"},
+                new Object[] {text, ends[0], ends[1], ends[2], ends[3]});
     }
 
     /** Whether the long press selected and the gesture goes on (presses are cancelled). */
@@ -135,14 +168,17 @@ final class SelectableView implements SelectionHandle.Owner {
                 touched = text;
                 downX = e.getRawX();
                 downY = e.getRawY();
-                // A tap ends the selection (a long press makes a new one).
-                clear();
+                // A long press makes a new selection; a tap ends this one
+                // (`Mounter.touchUp`), a scroll keeps it.
+                view.removeCallbacks(longPress);
                 view.postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout());
                 break;
             case MotionEvent.ACTION_MOVE: {
                 if (extending) {
                     float[] p = toArea(e.getRawX(), e.getRawY());
                     if (gesture(DRAG, p[0], p[1])) tick();
+                    view.getLocationOnScreen(at);
+                    magnify(-1, e.getRawX() - at[0], e.getRawY() - at[1]);
                     break;
                 }
                 float slop = android.view.ViewConfiguration.get(view.getContext()).getScaledTouchSlop();
@@ -152,6 +188,7 @@ final class SelectableView implements SelectionHandle.Owner {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 view.removeCallbacks(longPress);
+                dismissMagnifier();
                 if (extending) {
                     extending = false;
                     showToolbar();
@@ -180,15 +217,28 @@ final class SelectableView implements SelectionHandle.Owner {
         extending = true;
     }
 
+    /** {@code ref.selectAll()}: selects every text, with the handles and the toolbar. */
+    void selectAll() {
+        if (!view.isAttachedToWindow() || (handle == 0 && !begin())) return;
+        gesture(SELECT_ALL, 0, 0);
+        if (empty()) {
+            clear();
+            return;
+        }
+        showToolbar();
+    }
+
     /** Starts a selection: the texts, the model, this surface's only selection. */
     private boolean begin() {
         collect();
         if (texts.isEmpty()) return false;
         if (handle == 0) handle = nativeCreate();
-        nativeSetTexts(handle, this, contents(), keys(), continues(), frames());
+        nativeSetTexts(handle, this, contents(), keys(), continues(), frames(), chromeTexts(), chromeFrames());
         if (mounter.selectedText != null) mounter.selectedText.clearSelection();
         if (mounter.selectedArea != null && mounter.selectedArea != this) mounter.selectedArea.clear();
         mounter.selectedArea = this;
+        mounter.keepSelection();
+        mounter.updateBack();
         observer = view.getViewTreeObserver();
         observer.addOnPreDrawListener(follow);
         return true;
@@ -197,6 +247,7 @@ final class SelectableView implements SelectionHandle.Owner {
     /** Ends the selection, its highlight, handles and toolbar. */
     void clear() {
         view.removeCallbacks(longPress);
+        dismissMagnifier();
         extending = false;
         if (handle == 0) return;
         long h = handle;
@@ -211,14 +262,21 @@ final class SelectableView implements SelectionHandle.Owner {
         }
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(follow);
         observer = null;
-        if (mounter.selectedArea == this) mounter.selectedArea = null;
+        if (mounter.selectedArea == this) {
+            mounter.selectedArea = null;
+            mounter.updateBack();
+        }
         Native.keepRendered(mounter.handle(), new int[0]);
         android.view.ActionMode m = mode;
         mode = null;
         if (m != null) m.finish();
         nativeDestroy(h);
-        if (removed) reported = "";
-        else report("");
+        if (removed) {
+            reported = "";
+            reportedEnds = new int[0];
+        } else {
+            report("", new int[0]);
+        }
     }
 
     /** Whether the screen point is on one of the handles (a touch there keeps the selection). */
@@ -254,7 +312,7 @@ final class SelectableView implements SelectionHandle.Owner {
             clear();
             return;
         }
-        nativeSetTexts(handle, this, contents(), keys(), continues(), frames());
+        nativeSetTexts(handle, this, contents(), keys(), continues(), frames(), chromeTexts(), chromeFrames());
         update();
         if (empty() && !extending) clear();
     }
@@ -269,19 +327,41 @@ final class SelectableView implements SelectionHandle.Owner {
      */
     private void collect() {
         texts.clear();
+        chromes.clear();
+        chrome = null;
         runsLength = 0;
         collect(view);
         if (texts.size() < 2) return;
         int[] order = nativeReadingOrder(texts.size(), java.util.Arrays.copyOf(runs, runsLength));
         if (order == null || order.length != texts.size()) return;
         java.util.ArrayList<TextBox> listed = new java.util.ArrayList<>(texts);
-        for (int i = 0; i < order.length; i++) texts.set(i, listed.get(order[i]));
+        java.util.ArrayList<TextBox> listedChromes = new java.util.ArrayList<>(chromes);
+        for (int i = 0; i < order.length; i++) {
+            texts.set(i, listed.get(order[i]));
+            chromes.set(i, listedChromes.get(order[i]));
+        }
     }
+
+    /**
+     * For each text, the text left out ({@code selectable={false}}) listed last before it, or null: maybe its
+     * list marker, which a copy puts before it ({@code selection::marker_of} decides).
+     */
+    private final java.util.ArrayList<TextBox> chromes = new java.util.ArrayList<>();
+    /** The text left out listed last while collecting. */
+    private TextBox chrome;
 
     private void collect(View v) {
         if (v instanceof TextBox) {
             TextBox t = (TextBox) v;
-            if (!t.excluded && t.layout() != null) texts.add(t);
+            if (t.layout() != null) {
+                if (t.excluded) {
+                    chrome = t;
+                } else {
+                    texts.add(t);
+                    chromes.add(chrome);
+                    chrome = null;
+                }
+            }
         }
         if (v instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) v;
@@ -351,6 +431,33 @@ final class SelectableView implements SelectionHandle.Owner {
         return out;
     }
 
+    /** The text of each text's {@link #chromes} entry, or null. */
+    private String[] chromeTexts() {
+        String[] out = new String[chromes.size()];
+        for (int i = 0; i < out.length; i++) {
+            TextBox c = chromes.get(i);
+            if (c != null && c.layout() != null) out[i] = c.layout().getText().toString();
+        }
+        return out;
+    }
+
+    /** The content boxes of {@link #chromes} in the area (dp: x, y, width, height each; zeros for none). */
+    private float[] chromeFrames() {
+        float[] out = new float[chromes.size() * 4];
+        float d = mounter.density;
+        view.getLocationOnScreen(at);
+        for (int i = 0; i < chromes.size(); i++) {
+            TextBox c = chromes.get(i);
+            if (c == null) continue;
+            c.getLocationOnScreen(at2);
+            out[i * 4] = (at2[0] - at[0] + c.contentX()) / d;
+            out[i * 4 + 1] = (at2[1] - at[1] + c.contentY()) / d;
+            out[i * 4 + 2] = c.contentWidth() / d;
+            out[i * 4 + 3] = c.contentHeight() / d;
+        }
+        return out;
+    }
+
     /** A screen point in the area (dp). */
     private float[] toArea(float rawX, float rawY) {
         view.getLocationOnScreen(at);
@@ -416,7 +523,8 @@ final class SelectableView implements SelectionHandle.Owner {
         if (kept != null) Native.keepRendered(mounter.handle(), kept);
         if (mounter.wants(id, Native.SELECTION_CHANGE)) {
             String text = empty() ? "" : nativeText(handle, this);
-            report(text != null ? text : "");
+            int[] ends = empty() ? null : nativeEnds(handle, this);
+            report(text != null ? text : "", ends != null ? ends : new int[0]);
         }
         int[] ranges = nativeRanges(handle, this);
         java.util.ArrayList<TextBox> now = new java.util.ArrayList<>();
@@ -449,10 +557,16 @@ final class SelectableView implements SelectionHandle.Owner {
             return;
         }
         TextBox start = texts.get(b[0]), end = texts.get(b[2]);
+        Integer color = start.selectionColor();
         if (startHandle == null) {
-            Integer color = start.selectionColor();
             startHandle = new SelectionHandle(view, true, color, this);
             endHandle = new SelectionHandle(view, false, color, this);
+            handleColor = color;
+        } else if (!java.util.Objects.equals(color, handleColor)) {
+            // The handles outlive a selection: the next one's text (another color, the appearance changed) tints them.
+            startHandle.tint(color);
+            endHandle.tint(color);
+            handleColor = color;
         }
         // While a dragged handle has passed the other, each marks the other end.
         SelectionHandle forStart = swapped ? endHandle : startHandle, forEnd = swapped ? startHandle : endHandle;
@@ -508,10 +622,59 @@ final class SelectableView implements SelectionHandle.Owner {
             swapped = !swapped;
             placeHandles();
         }
+        magnify(moveStart != passed ? 0 : 1, x - at[0], y - at[1]);
+    }
+
+    /** Android's magnifier while an end of the selection is dragged (API 28 and later), as TextView shows it. */
+    private android.widget.Magnifier magnifier;
+
+    /**
+     * Shows the magnifier over end {@code end} of the selection (0 the start, 1 the end, -1 whichever is
+     * nearer the finger) on its line, the finger's {@code x} kept within the line, as TextView's; area
+     * coordinates in px.
+     */
+    private void magnify(int end, float x, float y) {
+        if (android.os.Build.VERSION.SDK_INT < 28 || handle == 0 || !view.isAttachedToWindow()) return;
+        int[] b = bounds();
+        if (b == null) return;
+        float best = Float.NaN, cx = 0, cy = 0;
+        view.getLocationInWindow(at);
+        for (int which = 0; which < 2; which++) {
+            if (end >= 0 && which != end) continue;
+            int i = b[which * 2], offset = b[which * 2 + 1];
+            if (i < 0 || i >= texts.size()) continue;
+            TextBox t = texts.get(i);
+            Layout layout = t.layout();
+            if (layout == null || !t.isShown()) continue;
+            offset = Math.min(offset, layout.getText().length());
+            int line = layout.getLineForOffset(offset);
+            // An end at a line's start is drawn on the line before (`placeHandles`).
+            if (which == 1 && line > 0 && offset == layout.getLineStart(line)) line--;
+            t.getLocationInWindow(at2);
+            float ox = at2[0] - at[0] + t.contentX(), oy = at2[1] - at[1] + t.contentY();
+            float lineY = oy + (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f;
+            float distance = Math.abs(lineY - y);
+            if (!Float.isNaN(best) && distance >= best) continue;
+            best = distance;
+            cx = Math.max(ox + layout.getLineLeft(line), Math.min(ox + layout.getLineRight(line), x));
+            cy = lineY;
+        }
+        if (Float.isNaN(best)) return;
+        if (magnifier == null) {
+            magnifier = android.os.Build.VERSION.SDK_INT >= 29
+                    ? new android.widget.Magnifier.Builder(view).build()
+                    : new android.widget.Magnifier(view);
+        }
+        magnifier.show(cx, cy);
+    }
+
+    private void dismissMagnifier() {
+        if (magnifier != null) magnifier.dismiss();
     }
 
     @Override
     public void handleUp() {
+        dismissMagnifier();
         if (swapped) {
             swapped = false;
             placeHandles();
@@ -528,8 +691,12 @@ final class SelectableView implements SelectionHandle.Owner {
     }
 
     /**
-     * The app's items (`selectionMenu`) after the system's and the text
-     * actions, in their order; a separator starts a new group.
+     * The app's items (`selectionMenu`) after the system's, in their order,
+     * and before other apps' text actions (Translate and the like): they act
+     * on this app's content, as TextView's own items come before those. The
+     * floating toolbar shows the first items that fit and the rest under its
+     * overflow, so an app's item behind every installed app's action was out
+     * of sight. A separator starts a new group.
      */
     private void addAppItems(android.view.Menu m) {
         int group = 1;
@@ -539,7 +706,7 @@ final class SelectableView implements SelectionHandle.Owner {
                 group++;
                 continue;
             }
-            m.add(group, APP_ITEM + i, 200 + i, entry.label).setEnabled(entry.enabled);
+            m.add(group, APP_ITEM + i, 50 + i, entry.label).setEnabled(entry.enabled);
         }
     }
 
@@ -603,7 +770,7 @@ final class SelectableView implements SelectionHandle.Owner {
                             .setType("text/plain")
                             .putExtra(android.content.Intent.EXTRA_TEXT, nativeText(handle, SelectableView.this));
                     android.content.Intent chooser = android.content.Intent.createChooser(send, null);
-                    if (!(context instanceof android.app.Activity)) {
+                    if (SystemUi.activity(context) == null) {
                         chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                     }
                     try {
@@ -620,7 +787,7 @@ final class SelectableView implements SelectionHandle.Owner {
                     android.content.Intent send = new android.content.Intent(process)
                             .putExtra(android.content.Intent.EXTRA_PROCESS_TEXT, nativeText(handle, SelectableView.this))
                             .putExtra(android.content.Intent.EXTRA_PROCESS_TEXT_READONLY, true);
-                    if (!(context instanceof android.app.Activity)) {
+                    if (SystemUi.activity(context) == null) {
                         send.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                     }
                     try {

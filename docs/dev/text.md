@@ -9,13 +9,20 @@
   `fontFamily` (system or imported fonts:
   `import Inter from "./Inter.ttf"` evaluates to the family name and registers the font before the first frame; a host can register the same files itself, `NshView.registerFont` / `NshAppView.registerFont`, and the app names the family), `fontWeight`,
   `fontStyle` (italic runs leave color emoji upright, in runs of their own: `AttributedText::push`, as WebKit does;
-  Chrome and Android would slant them), `letterSpacing`, `textDecorationLine` + `textDecorationColor`, `textTransform`, `lineHeight`, `textAlign`,
+  Chrome and Android would slant them; a family without an italic face leans by CSS's oblique angle, 14°, as browsers
+  and Android synthesize it: on macOS and iOS a shear in the font's matrix, which `nsh_platform_apple::core_text`'s
+  `slant_fallbacks` also sets on the upright fonts CoreText falls back to, such as CJK in the system font's italic),
+  `letterSpacing`, `textDecorationLine` + `textDecorationColor`, `textTransform`, `lineHeight`, `textAlign`,
   `textAlignVertical` (the core moves the content box down). `adjustsFontSizeToFit` shrinks the fonts (down to
   `minimumFontScale`, at least 0.1) until the text fits its box and lines (`Paragraph::fit`, a binary search in the core).
   On iOS and macOS, a positive fixed-height box keeps its first line even when that line is taller than the box
   (Dynamic Type on iOS; on both, a box a fraction of a point shorter than the line's measured height).
   CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
   excess. Empty and zero-height boxes stay empty.
+  On both, the box a text measures holds its cut last line as drawn: the end of the text that `ellipsis-start` and
+  `ellipsis-middle` keep (and an ellipsis, which takes the font of the text's end) grows that line when it is set in a
+  larger font or holds a taller attachment, below the line above, as on a line not cut; a fixed `lineHeight` holds a
+  larger font there as on any line. A box too short for the text keeps such a line below the line above too.
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height); Rust
   components can subscribe with `Text::on_text_layout` (`TextGeometry`) to query `lines`, `hit_test`, `caret_rect` and
   `range_rects` directly on the engine's final layout in source UTF-16 offsets (skipping synthetic span-padding
@@ -34,8 +41,9 @@
   truncations and omits the ellipsis from range boxes; mixed-direction ranges split by visual run on both Apple
   backends. Web hit testing measures cluster rectangles in the complete drawn DOM run on first use, keeps both
   edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.
-  Test-id-only span updates remount the text metadata with its cached final layout (`LaidText`), retaining fitted
-  font sizes. They preserve prepared state and measurement caches and raise no `onTextLayout`.
+  Span updates of metadata only (a test id, a link's `href`) remount the text metadata with its cached final layout
+  (`LaidText`), retaining fitted font sizes. They preserve prepared state and measurement caches and raise no
+  `onTextLayout`.
 - A text laid out gives Taffy its first line's baseline, below its top through its padding and border
   (`TextEngine::first_baseline`: every built-in engine, CoreText on macOS and iOS, Android, Pango, DirectWrite, GPUI,
   the web, Cells and the headless one; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
@@ -104,12 +112,15 @@
   own selection takes the clicks). Positions are (text index, UTF-16 offset),
   never inside a surrogate pair. A point outside every text is hit-tested in reading order: when it sits below a text
   in a closer, horizontally disjoint column than any text whose row contains it, it stays in that column (clamping to
-  the vertically nearer text above or below in the column); otherwise the horizontally nearest text on its row, above
+  the vertically nearer text above or below in the column, but never a text below the end of the point's row, as
+  the next row of a table whose wrapped cell makes this one taller); otherwise the horizontally nearest text on its row, above
   every text the first text's start, and between rows or below a column the vertically nearer edge in the point's
   column (falling back to document order when no column has width). Words are runs of letters, digits and `_`, runs
   of spaces, or single other characters (each CJK ideograph, kana, emoji or punctuation mark); a triple click selects
   a whole text. Desktops select as their single texts do (drag, double click words, triple click paragraphs, drags go
-  on by them, Shift+click extends; Ctrl / Cmd+A, Ctrl / Cmd+C, Escape; a press elsewhere clears), touch screens with a
+  on by them, Shift+click extends; Ctrl / Cmd+A, Ctrl / Cmd+C, Escape; a press elsewhere clears; keys extend the
+  selection's focus with `SelectionModel::extend` by a `Movement` (a character cluster, a word, a line at a kept x, a
+  line's or paragraph's edge, the document's) and the backend reveals `focus_caret`: macOS so far), touch screens with a
   long press (a word) and then the platform's handles and edit menu (Copy, Select All). Texts with `userSelect: "none"`
   stay out; an area inside another is part of the outer one (only the outermost area keeps a model); texts outside
   areas select alone, as above. Views without the flag change nothing (no extra mount items). iOS
@@ -129,6 +140,16 @@
   (`selectable_view.rs`, `SelectableView.java`): the shared Rust model runs on the UI thread over JNI, hit-testing
   through a Java callback; a long press selects a word (the long press haptic), then handles (the text handles' tick
   as an end moves) and a floating `ActionMode` (Copy, Select all, Share).
+- **Ends in list items**: `onSelectionChange`'s `anchor` and `focus` name the list item each end of a selectable
+  view's selection is in (`{ key, offset }`). Backends report each end as its text's node and the offset in it
+  (`SelectionModel::ends`, `selection::end_fields`) and keep the rows of the ends rendered (`KeptRows`). The engine
+  has the core name them (`Core::name_selection_ends`, `core/selection_ends.rs`): from the innermost list cell around
+  the text out, the runtime says what it calls each row (`selection::ListItemKey`, `nsh-js` `list::row_key`, the same
+  naming as `onViewableItemsChange`). The first row it names gives the key, and the offset is in the copy of that
+  row's item; a row it cannot name leaves the end out; rows of lists it does not hold (a Rust component's) go by the
+  innermost one's index. The core lists a cell's texts with `selection::list_texts`, which macOS and the headless
+  backend also use for an area; the other backends still walk their views themselves. An end outside a list item
+  leaves its field out. The web does not report them yet.
 - **Selection menu**: `selectionMenu` on a selectable view (Rust `Element::selection_menu`, the host prop
   `Prop::SelectionMenu`, `ViewProps::selection_menu`) takes `nsh/desktop`'s `MenuItem`s, each running its `onSelect`;
   they go after the system's items, which always stay. The core keeps plain items and separators
@@ -139,7 +160,7 @@
   built by `chrome::menu`), Windows and GPUI to their popup (`selectable_view::context_menu`), GTK as a section of
   the edit popover (`selection-menu.item-N` actions), iOS 16 and later to the edit menu
   (`editMenuInteraction:menuForConfiguration:suggestedActions:`; groups between separators are inline sections; iOS
-  15's `UIMenuController` shows the system's items alone), Android to the floating `ActionMode` after the
+  15's `UIMenuController` shows the system's items alone), Android to the floating `ActionMode` before the
   `PROCESS_TEXT` actions (`encode.rs` `selection_menu`, `SelectableView.addAppItems`). The web shows the browser's
   menu alone: the browser's renderer drops the prop.
 - **Color changes**: a text whose spans change only their colors (text, decoration and background) or which of them
@@ -156,6 +177,11 @@
   restyled span merges into its text again. The platforms only hit-test their links as they already do for hints
   and presses. A color change takes the path above; a decoration line typesets the paragraph again without laying
   out the views around it (`layout_eq`).
+- **Where links go**: a link's span with an `href` (`ViewProps::href`, from the hidden builder `Link` sets its own
+  with: `TextView` gives each of its links its URL) records it in its block's text (`AttributedText::link_hrefs`, by
+  the link's index in `links`, `Core::collect_text`). It is metadata, as `test_ids`: a new one is mounted without
+  typesetting again (`metadata_eq`), on a fitted text's drawn spans too (`set_metadata`). Platforms that make a
+  link a hyperlink take it: the web draws the link's characters as an `a` (`docs/dev/web.md` "Links of text").
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.
@@ -201,7 +227,12 @@
   baseline, so a line grows where an attachment reaches past the font, as Android's `ImageSpan` grows it. With a fixed
   `lineHeight` a line holding an attachment is at least as tall as its text's lines (the font with the line height
   spread around it, CSS's strut) and grows only where the attachment reaches past that box, on every engine: the
-  line height is never a cap that cuts an attachment to the line. CSS's
+  line height is never a cap that cuts an attachment to the line. The strut is the root `<Text>`'s, carried on
+  `AttributedText` as the hidden `paragraph_strut` `ResolvedTextStyle` (only its font size, weight, family, italic,
+  font variant and resolved line height count): a smaller nested span never lowers the paragraph or moves its baseline.
+  The core always sets it; a directly constructed text without one keeps the engines' historic first-span fallback
+  (`AttributedText::paragraph_strut_or_first`). Windows, Linux and GPUI put that box into every custom line;
+  CoreText uses it for the paragraph height and returns smaller-span-only lines to the strut baseline. CSS's
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
   before lines exist. The headless engine's natural font is 1.2 em (ascent 1.2 em, descent 0, x height 0.5 em), with explicit `lineHeight` spread around that ascent by half-leading. After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or

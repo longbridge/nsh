@@ -239,7 +239,9 @@ pub(crate) struct Surface {
     /// The GPU device shader views render with, opened when the first
     /// shader is mounted (`None` inside: there is none).
     shader_renderer: std::cell::OnceCell<Option<Rc<nsh_engine::shader::Renderer>>>,
-    /// The model of a test session's app (`nsh test --target gpui`).
+    /// The model of the app the agent's steps see: a test session's (`nsh
+    /// test --target gpui`), or a development session's (`nsh test
+    /// --attach`).
     #[cfg(feature = "dev")]
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// Frame statistics, while they are logged ([`crate::stats`]).
@@ -830,7 +832,7 @@ impl Surface {
         self.anim.borrow().finishing() || !self.frame_clients.borrow().is_empty()
     }
 
-    /// Keeps the model `nsh test --target` steps see of the app
+    /// Keeps the model the agent's steps see of the app
     /// ([`nsh_testing::agent::Model`]): every batch applied and every error
     /// go to it from now on.
     #[cfg(feature = "dev")]

@@ -131,6 +131,10 @@ pub struct HostTarget {
     /// window, a browser's page); false where the app fills a device's
     /// screen.
     pub sized: bool,
+    /// The apps are a development session's that runs already (`nsh test
+    /// --attach`): `open` drives that app as it is, so it refuses every
+    /// option that sets an app up, and closing it leaves it running.
+    pub attached: bool,
 }
 
 /// How [`StartHost`] starts an app.
@@ -689,6 +693,9 @@ impl Session {
                     bottom: safe_area.bottom,
                     left: safe_area.left,
                 },
+                reserved_regions: nsh_core::platform::ReservedRegions::new(
+                    launch.reserved_regions.iter().flatten().copied(),
+                ),
                 color_scheme: launch.color_scheme.unwrap_or_default().into(),
                 locale: locale.unwrap_or(Locale::EN_US),
                 // The locale's (it alone as the languages, its region's
@@ -955,9 +962,39 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
             "the system hands links to packaged apps: run the test without --target",
         );
     }
+    if launch.reserved_regions.is_some() {
+        return unsupported(
+            "reservedRegions",
+            "the device reports the regions it reserves: run the test without --target",
+        );
+    }
     let Some(target) = target else {
         return Ok(());
     };
+    if target.attached {
+        let given = [
+            ("storage", !launch.storage.0.is_empty()),
+            ("network", !matches!(launch.network, NetworkSetup::None)),
+            ("width", launch.width.is_some()),
+            ("height", launch.height.is_some()),
+            ("safeArea", launch.safe_area.is_some()),
+            ("clipboard", launch.clipboard.is_some()),
+            ("colorScheme", launch.color_scheme.is_some()),
+            ("locale", launch.locale.is_some()),
+            (
+                "localeSettings",
+                launch.locale_settings != crate::module::LocaleSettingsOptions::default(),
+            ),
+            ("reducedMotion", launch.reduced_motion.is_some()),
+            ("platform", launch.platform.is_some()),
+            ("clock", launch.clock.is_some()),
+            ("host.params", !launch.host.params().is_empty()),
+        ];
+        if let Some((option, _)) = given.iter().find(|(_, set)| *set) {
+            return Err(crate::failure::unsupported_attached(entry, option));
+        }
+        return Ok(());
+    }
     if !target.sized {
         let given = [("width", launch.width), ("height", launch.height)];
         if let Some((option, _)) = given.iter().find(|(_, v)| v.is_some()) {
@@ -1320,6 +1357,7 @@ mod tests {
             width: None,
             height: None,
             safe_area: None,
+            reserved_regions: None,
             clipboard: None,
             color_scheme: None,
             locale: None,
@@ -1339,7 +1377,29 @@ mod tests {
             name: name.into(),
             platform,
             sized,
+            attached: false,
         }
+    }
+
+    #[test]
+    fn an_attached_open_takes_the_app_as_it_runs() {
+        let attached = HostTarget {
+            attached: true,
+            ..target("gpui", Platform::Macos, true)
+        };
+        let check = |launch: &Launch| check_launch("./App.tsx", launch, Some(&attached));
+        assert_eq!(check(&launch()), Ok(()));
+        let mut sized = launch();
+        sized.width = Some(Points(800.0));
+        let error = check(&sized).unwrap_err();
+        assert!(
+            error.starts_with("open(\"./App.tsx\"): `width` is unsupported with --attach"),
+            "{error}"
+        );
+        assert_eq!(code_of(&error), Some(UNSUPPORTED));
+        let mut stored = launch();
+        stored.storage.0.insert("theme".into(), "dark".into());
+        assert!(check(&stored).unwrap_err().contains("`storage`"));
     }
 
     #[test]
@@ -1364,6 +1424,17 @@ mod tests {
         let error = check(&linked, &macos).unwrap_err();
         assert!(
             error.contains("`url` is unsupported on --target macos"),
+            "{error}"
+        );
+        assert_eq!(code_of(&error), Some(UNSUPPORTED));
+
+        // Reserved regions: the device reports its own, the test's are
+        // headless only.
+        let mut folded = launch();
+        folded.reserved_regions = Some(Vec::new());
+        let error = check(&folded, &ios).unwrap_err();
+        assert!(
+            error.contains("`reservedRegions` is unsupported on --target ios"),
             "{error}"
         );
         assert_eq!(code_of(&error), Some(UNSUPPORTED));

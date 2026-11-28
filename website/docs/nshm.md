@@ -19,7 +19,38 @@ nsh add nsh-omarchy                  # from crates.io
 nsh add github:huacnlee/nsh-omarchy  # or from GitHub
 ```
 
-Then use it from the language the app is written in, Rust or TSX. **In a Rust app**, its components are functions of the crate:
+Then use it from the language the app is written in. **In a TSX app**, an nshm that exports components, modules or classes to TSX is ready to use once `nsh add` installs it: import them by its specifier, here `nsh-omarchy`. The app needs no newer NSH and no Rust code of its own, since `nsh` builds the app's hosts with the crate.
+
+```tsx
+// App.tsx
+import { mount, signal, View } from "nsh";
+import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
+
+function App() {
+  // Draw with the system's Omarchy theme, and follow it as it changes.
+  Omarchy.followSystem();
+  const notify = signal(true);
+  const saved = signal(0);
+  const save = () => {
+    saved.set(saved() + 1);
+    toast({ title: "Settings saved" });
+  };
+  return (
+    <View class="flex-1 gap-4 p-6 bg-background">
+      <Panel title="Settings">
+        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
+        <Button label="Save" variant="primary" onPress={save} />
+      </Panel>
+      <Body>{`Saved ${saved()} times`}</Body>
+      <Toaster />
+    </View>
+  );
+}
+
+mount(() => <App />);
+```
+
+**In a Rust app**, its components are functions of the crate:
 
 ```rust
 // src/lib.rs: the app's root component
@@ -52,37 +83,6 @@ pub fn App() -> impl IntoElement {
         .child(nsh_omarchy::body(move || format!("Saved {} times", saved.get())))
         .child(nsh_omarchy::toaster())
 }
-```
-
-**In a TSX app**, an nshm that exports components, modules or classes to TSX is ready to use once `nsh add` installs it: import them by its specifier, here `nsh-omarchy`. The app needs no newer NSH and no Rust code of its own, since `nsh` builds the app's hosts with the crate.
-
-```tsx
-// App.tsx
-import { mount, signal, View } from "nsh";
-import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
-
-function App() {
-  // Draw with the system's Omarchy theme, and follow it as it changes.
-  Omarchy.followSystem();
-  const notify = signal(true);
-  const saved = signal(0);
-  const save = () => {
-    saved.set(saved() + 1);
-    toast({ title: "Settings saved" });
-  };
-  return (
-    <View class="flex-1 gap-4 p-6 bg-background">
-      <Panel title="Settings">
-        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
-        <Button label="Save" variant="primary" onPress={save} />
-      </Panel>
-      <Body>{`Saved ${saved()} times`}</Body>
-      <Toaster />
-    </View>
-  );
-}
-
-mount(() => <App />);
 ```
 
 An nshm is how a feature reaches the apps that need it without being part of NSH: it ships on its own schedule, and only the apps that install it pay its size, build time and dependencies.
@@ -122,6 +122,8 @@ Each version is installed once per machine, in `~/.nsh/nshms` (`NSH_HOME` moves 
 
 A Rust nshm is also added to the `[dependencies]` of the app's own crate when it has one, so the app's Rust uses it directly. An app whose nshm include a Rust one gets hosts built with it, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)). An app whose nshm are all TSX builds with `nsh` alone.
 
+The hosts of an app whose Rust comes from nshm only are built with the nsh that runs the app: a release with its crates from crates.io, a nightly with those of its own commit, an `nsh` built in a checkout with the checkout's. `nsh-extra` is released together with nsh, so an app that asks for it by version gets the `nsh-extra` of that same nsh (an app with a crate of its own, the one of the nsh its crate uses), and `nsh.lock` records which. A version requirement that nsh's version does not meet is an error that names both. A `"path"`, `"github"` or `"git"` entry for it is used as written.
+
 An app with a crate of its own can also depend on a Rust nshm in its `Cargo.toml` alone, as on any other crate, from crates.io, Git (a crate in a subdirectory of the repository too) or a path. `nsh` finds the Rust nshm among the crate's dependencies, direct or not, and links them as it links those of `"dependencies"`: their `#[native_module]` entries run when the app starts, with the features the crate turns on, in `nsh run`, `nsh test` and the packages alike, and TSX imports them by their specifiers. One listed in `"dependencies"` too is linked once.
 
 A crate that holds several modules keeps each behind a Cargo feature, so an app turns on only those it uses and pays
@@ -137,6 +139,32 @@ nsh add nsh-extra --features camera
 }
 ```
 
+An nshm whose Rust only some targets need is linked for those alone with `"targets"`, named as `platform.os` names
+them: `macos`, `windows`, `linux`, `ios`, `android` and `web` (Mac Catalyst is `ios`; a GPUI or terminal host is
+its machine's OS). An app that dictates through the browser's own recognizer on the web, for example:
+
+```json
+{
+  "dependencies": {
+    "nsh-extra": { "version": "^0.7", "features": ["speech"], "targets": ["macos", "windows", "ios", "android"] }
+  },
+  "resolve": { "alias": { "nsh-extra": "./src/speech-web.ts" } }
+}
+```
+
+The other targets build none of its Rust: here `nsh run --target web` and `nsh package --target web` use the prebuilt
+web runtime. `nsh.lock` is the same on every target. `nsh run`, `nsh dev` and `nsh package` link the nshm for the
+target they build, and `nsh test` for the one it runs on (this machine's OS when headless). `nsh check`, `nsh build`,
+`nsh publish` and `nsh dev --server-only` serve every target and link every nshm, so the app's TSX is checked against
+its declarations, and `.nsh/types` keeps them when a command for another target runs.
+
+On a target that leaves the nshm out, its module is not there. A static `import` of it fails the build, unless
+`"resolve"` `"alias"` gives the specifier a stand-in, as above: only the targets without the nshm use it, and the
+others import the module. An `import()` of it builds on every target and rejects where the nshm is not linked, so
+code behind a `platform.os` check can load it. `"targets"` is for nshm with Rust (a TSX nshm is part of the bundle on
+every target) and for the app's own entries: an nshm's dependencies are linked wherever it is, and an nshm that a
+linked one depends on is linked whatever the app's entry for it says.
+
 An app listing them in the older `"modules"` array still builds; the next `nsh add` rewrites it as `"dependencies"`, keeping each requirement (a bare name becomes `"*"`) and what `nsh.lock` pinned.
 
 [CLI: nsh add](./cli.md#nsh-add) covers every source form; [nsh upgrade](./cli.md#nsh-upgrade) and [nsh remove](./cli.md#nsh-remove) the others.
@@ -149,8 +177,10 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | Feature | TSX | What it does |
 |---|---|---|
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
+| `location` | `Location` | Reads the device's position once the user allows it, on macOS, iOS and the web |
 | `photos` | `Photos` | Reads the user's recent photos on iOS, once the user allows it |
 | `push` | `Push` | Receives remote notifications from any push service on iOS, and on Android through the service's binding |
+| `share` | `Share` | Hands text, a link or local files to the system's share sheet on iOS, Android, macOS and the web |
 | `speech` | `Speech` | Turns what the user says into text as they speak, on macOS, iOS, Android, Windows and the web |
 
 ```tsx
@@ -169,6 +199,54 @@ sheet has closed. `available()` is `false` where there is no camera to show (the
 and there `takePhoto` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The feature adds what the packaged app needs:
 the camera's usage description on iOS (an app sets its own wording with `ios.infoPlist`'s
 `NSCameraUsageDescription`) and the query of camera apps on Android.
+
+### Location
+
+`Location` reads the device's position once the user allows it: once with `current`, or each time it changes with
+`watch`, shaped as the browser's `navigator.geolocation`. macOS and iOS read it with CoreLocation, the web with the
+browser's `navigator.geolocation`; the system or the browser asks the user the first time the app reads it. Only while
+the app is in use: there is no background location.
+
+```sh
+nsh add nsh-extra --features location
+```
+
+```tsx
+import { Location } from "nsh-extra";
+
+if (await Location.available()) {
+  const position = await Location.current({ accuracy: "high", timeout: 10_000 });
+  showOnMap(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+
+  const stop = Location.watch(
+    (position) => moveMarker(position.coords),
+    (error) => showError(error.code),
+    { distanceFilter: 10 },
+  );
+  // Later: stop(). The watch also stops when the component that started it goes.
+}
+```
+
+- `available()` resolves `true` on macOS and iOS apps packaged with the feature, and in browsers with
+  `navigator.geolocation`; `false` on Android, Windows, Linux, in a terminal, in headless runs, and in an Apple app
+  run as a bare binary (`nsh run --target macos`), whose missing `Info.plist` the system never asks for.
+- `authorization()` resolves with what the user allows now, without asking: `"notDetermined"`, `"whenInUse"`,
+  `"always"`, `"denied"` or `"restricted"`. The web knows only `"whenInUse"` (granted), `"denied"` and
+  `"notDetermined"` (it will ask). `requestAuthorization()` asks the user and resolves with the answer; reading asks by
+  itself, so ask first only to choose the moment.
+- `current({ accuracy, timeout })` resolves with a `Position` (`coords.latitude`, `longitude`, `accuracy` in metres,
+  `altitude`, `altitudeAccuracy`, `heading`, `speed`, each `null` when the device does not know it, and `timestamp`
+  in milliseconds since the epoch). `accuracy` is `"best"`, `"high"`, `"balanced"` (the default) or `"low"`.
+- `watch(listener, onError?, { accuracy, distanceFilter })` calls `listener` with each new position and returns a
+  function that stops it. `onError` gets the failure that ends the watch.
+- A read fails with an `Error` whose `code` is `"EACCES"` (the user does not allow it), `"ETIMEDOUT"` (nothing came
+  within `timeout`), `"ERR_POSITION_UNAVAILABLE"` (the device found no position) or
+  `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` (no position here); options out of range throw a `RangeError`.
+
+The feature adds `NSLocationWhenInUseUsageDescription` to the app's `Info.plist` on iOS and macOS, and the location
+entitlement of a sandboxed macOS app. Rust code uses `nsh_extra::location`: `available()`, `authorization().await`,
+`request_authorization().await`, `current(LocationRequest).await`, and `watch(LocationRequest)`, whose `next().await`
+gives each position (dropping it stops it).
 
 ### Photos
 
@@ -339,6 +417,160 @@ implements `PushProvider` (it registers the device with its service), sets it wi
 `provide_registration_failure`, `provide_notification` and `provide_background`. A press of a notification the binding
 posted opens the app with the payload as the intent's extras, and reaches `press` with them as its `payload` (Android
 does not say which notification it was, so it has no `id` or `threadId`).
+
+### Share
+
+`Share` hands text, a link or local files to the system's share sheet, where the user sends them on: to another app, a
+message, a mail, AirDrop or a saved file. iOS shows `UIActivityViewController`, Android the chooser of
+`Intent.ACTION_SEND`, macOS the share menu (`NSSharingServicePicker`) and a browser `navigator.share`.
+
+```sh
+nsh add nsh-extra --features share
+```
+
+```ts
+const Share: {
+  available(): Promise<boolean>;
+  show(content: ShareContent): Promise<ShareResult>;
+};
+
+interface ShareContent {
+  title?: string; // the subject (a mail's subject line) and the sheet's title where it has one
+  text?: string;
+  url?: string; // a link: http(s), mailto, an app's own scheme
+  files?: string[]; // local files by absolute path, or `${dataDir}/…` (up to 100)
+  anchor?: ViewRef; // the view the sheet points at where it is a popover (iPad, macOS)
+}
+
+interface ShareResult {
+  action: "shared" | "dismissed";
+  target: string | null; // what the user shared with, as the platform names it
+}
+```
+
+A trip planner shares a trip from its share button:
+
+```tsx
+import { Text, View, type ViewRef } from "nsh";
+import { Share } from "nsh-extra";
+
+function ShareButton(props: { trip: string }) {
+  let button: ViewRef | undefined;
+  const share = async () => {
+    try {
+      const { action } = await Share.show({
+        title: "Weekend in Kyoto",
+        url: `https://example.com/trips/${props.trip}`,
+        anchor: button,
+      });
+      if (action === "shared") console.log("shared");
+    } catch (e) {
+      console.warn("cannot share", e);
+    }
+  };
+  return (
+    <View ref={button} role="button" accessibilityLabel="Share" onPress={share}>
+      <Text>Share</Text>
+    </View>
+  );
+}
+```
+
+- `show` resolves with what the user did: `"shared"` with the `target` the user shared with (an activity type on
+  iOS, an app's package on Android, a service's title on macOS, `null` where the platform does not say), or
+  `"dismissed"` when the user closed the sheet. A dismissal is the user's answer, not a failure. `"shared"` says as
+  much as the platform knows: on iOS the target finished sharing (a cancelled mail is `"dismissed"`); on macOS the
+  service reported that it finished, or it reported nothing and the user came back to the window the menu opened
+  from (after copying or adding to a list, and also with a mail draft still open), while a service that reports a
+  cancel, or reports nothing while the user stays away for ten minutes, is `"dismissed"`; on Android the user chose
+  an app, and Android tells nothing of what the app does next; on the web `navigator.share` resolved.
+- `show` rejects with a `TypeError` for content with none of `text`, `url` and `files` (empty text counts as none),
+  or a URL that does not parse, runs code (`javascript:`) or names a local file (`file:`; share it as `files`); a
+  `RangeError` for more than 100 files, text or a title past 1 MiB, or a URL past 16 KiB; `ERR_ACCESS_DENIED` for a
+  file `capabilities.fs.read` does not grant, `ENOENT` for one that does not exist, `EISDIR` for a folder; and
+  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where there is no share sheet, or for content the platform does not share (a
+  file outside an Android app's own storage, files in a browser, a browser that does not allow sharing here or still
+  shows an earlier share's sheet).
+- A `show` while a sheet is open resolves the earlier promise `"dismissed"` at once. On iOS and macOS the new sheet
+  takes the earlier one's place; on Android and the web the earlier sheet stays until the user closes it, and a
+  browser refuses the new share while it is open.
+- On an iPad and on macOS the sheet is a popover: give `anchor` the view that opened it (the share button, in a page,
+  a header, a dialog or another window); without one it shows at the middle of the window.
+- `available()` resolves `true` on iOS, Android, macOS (AppKit windows) and in browsers with `navigator.share` whose
+  page allows `web-share`, when the app's capabilities grant it; `false` on Windows, Linux, in GPUI windows, in
+  terminal apps and in headless runs until the test answers, where `show` rejects with
+  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, so the app can offer another way (copying the link, say).
+- An app that declares `"capabilities"` grants `Share` with [`"share": true`](./sandbox-and-capabilities.md#share),
+  and each shared file must also be readable by `fs.read`. Without the grant `available()` resolves `false` and
+  `show` rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"share"`.
+
+| Platform | Share sheet | Files |
+|---|---|---|
+| iOS | `UIActivityViewController`; a popover on an iPad | Any file the app reads |
+| Android | The chooser of `ACTION_SEND` (`ACTION_SEND_MULTIPLE` for several files) | Files in the app's own storage (`process.dataDir`, the cache), as `content:` URIs |
+| macOS | The share menu, `NSSharingServicePicker` | Any file the app reads |
+| Web | `navigator.share`, where the browser has it and the page allows `web-share` | Text and links |
+
+The feature needs no declaration. On iOS the sheet offers saving an image to Photos when the app says why it adds to
+the photo library: `NSPhotoLibraryAddUsageDescription` in `ios.infoPlist`
+([Info.plist keys](./packaging.md#infoplist-keys-and-entitlements)).
+
+Rust code uses `nsh_extra::share`: `show(ShareRequest).await` resolves with a `ShareOutcome` (`action`, a
+`ShareAction`, and `target`) or a `ShareError` (`code`, `message`), and `available().await` tells whether a
+sheet shows here.
+
+| TS | Rust |
+|---|---|
+| `await Share.available()` | `available().await -> bool` |
+| `await Share.show(content)` | `show(request).await -> Result<ShareOutcome, ShareError>` |
+| `title`, `text`, `url`, `files` | `ShareRequest::new().title(..).text(..).url(..).file(..)` |
+| `anchor` | `.anchor(&element_ref)` |
+| `result.action`, `.target` | `outcome.action` (`ShareAction`), `outcome.target` |
+| `error.code` | `error.code` |
+
+```rust
+use nsh_core::prelude::*;
+use nsh_extra::share::{self, ShareAction, ShareRequest};
+
+fn share_button(trip: &'static str) -> impl IntoElement {
+    let button = element_ref();
+    view()
+        .element_ref(&button)
+        .role(AccessibilityRole::Button)
+        .accessibility_label("Share")
+        .on_press(move || {
+            let request = ShareRequest::new()
+                .title("Weekend in Kyoto")
+                .url(format!("https://example.com/trips/{trip}"))
+                .anchor(&button);
+            spawn(async move {
+                match share::show(request).await {
+                    Ok(outcome) if outcome.action == ShareAction::Shared => log::info!("shared"),
+                    Ok(_) => {}
+                    Err(error) => log::warn!("cannot share: {error}"),
+                }
+            });
+        })
+        .child(text("Share"))
+}
+```
+
+In `nsh test` (and `nsh_testing::Headless`), shares reach the module's fake share sheet, named `"nsh-extra/share"`.
+Until the test answers there is no sheet: `available()` resolves `false` and `show` rejects with
+`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The test answers for the user with [`app.fake`](./testing-and-trace.md)
+(`Headless::call_fake` in Rust):
+
+| Method | `args` | What it does, and its answer |
+|---|---|---|
+| `answer` | `[{ action, target }]` | The run has a share sheet from now on, and the user answers every share with it: `"shared"` (to `target`, if given) or `"dismissed"`. Resolves with `null`. |
+| `hold` | `[]` | The run has a share sheet from now on, and the user leaves each one open: the next share answers it `"dismissed"`. Resolves with `null`. |
+| `shares` | `[]` | Resolves with what the app shared, in order: `[{ title, text, url, files, anchored }]` (`null` for what was not given, `files` their real paths, `anchored` whether the sheet points at the share's `anchor`). |
+
+```tsx
+await app.fake("nsh-extra/share", "answer", [{ action: "shared", target: "com.apple.UIKit.activity.Mail" }]);
+await app.press("label:Share");
+expect(await app.fake("nsh-extra/share", "shares")).toHaveLength(1);
+```
 
 ### Speech
 
@@ -598,7 +830,7 @@ pub fn Gauge(props: GaugeProps) -> impl IntoElement {
 }
 ```
 
-The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-core = "0.6"`), which `nsh add` checks against the running `nsh` before anything compiles. Its TypeScript declarations are generated from its Rust types, so apps check their TSX against it as they do against their own crate.
+The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-core = "0.6"`, or its workspace's with `nsh-core.workspace = true`), which `nsh add` checks against the running `nsh` before anything compiles. An nshm developed in a Cargo workspace takes its version and this requirement from the workspace as Cargo does, its own manifest's when it is the workspace's root package. Its TypeScript declarations are generated from its Rust types, so apps check their TSX against it as they do against their own crate.
 
 [nsh-omarchy's `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) is a complete one: its components, exported to TSX by `#[native_module("nsh-omarchy")]`, with the `Omarchy` theme module.
 
@@ -654,6 +886,29 @@ by the app as above, in `ios.infoPlistStrings` (`macos.infoPlistStrings`).
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 
+### System UI and files from Rust
+
+A module that shows system UI (a picker, a share sheet, a menu) or hands a file to the system works through the
+same public hooks NSH's own modules use, so it behaves as they do:
+
+| Need | Hook |
+|---|---|
+| A file path the app passes, checked as `fs/promises` reads it | `sys.readable_file(path)` (a `sys: System` argument): the real path within `capabilities.fs.read` or a file the user pasted or dropped, else `ERR_ACCESS_DENIED`, `ENOENT`, `EISDIR` for a folder, or `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` on the web |
+| What to present over (iOS) | `nsh_platform_ios::presenting_controller(mtm)` in a `run_on_main_thread` task ([iOS](./ios.md#presenting-from-rust)) |
+| What to show from (macOS) | `nsh_platform_macos::presenting_view(mtm)` in a `run_on_main_thread` task ([macOS](./macos.md#presenting-from-rust)) |
+| What to show over (Android) | `nsh::presenting_activity(env)` in a `run_on_main_thread` task ([Android](./android.md#presenting-from-rust)) |
+| The window that owns it (Windows, Linux) | `presenting_window()` of `nsh_platform_windows` (an `HWND`) or `nsh_platform_linux` (a `gtk::Window`) in a `run_on_main_thread` task ([Windows](./windows.md#presenting-from-rust), [Linux](./linux.md#presenting-from-rust)) |
+| The view of an element, for a popover or a menu that belongs to it | `native_view` with the node of the element's `ref` (a `NodeRef` argument): `native_view(mtm, node)` of `nsh_platform_ios` or `nsh_platform_macos`, `nsh::native_view(env, node)` on Android, `nsh_platform_linux::native_view(node)`; on Windows, where NSH draws its elements, `nsh_platform_windows::element_bounds(node)`: the element's window and its bounds there |
+| Another app, started for a result (Android) | `nsh::activity::start_for_result` ([Android](./android.md#activities-from-rust)) |
+| A file of the app's storage another app reads (Android) | `nsh::activity::content_uri(env, path)` |
+| A Java listener or callback (Android) | `nsh::proxy::implement` ([Android](./android.md#java-listeners-in-rust)) |
+| A broadcast an API answers with (Android) | `nsh::receiver::register(env, action, handler)` ([Android](./android.md#broadcasts-in-rust)) |
+
+Check the path first, then hand it on: a file the app may not read never reaches the other app. Native views and
+windows are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a
+view NSH owns. Under an embedding backend without these hooks (GPUI) the views and windows are `None`, so a module
+falls back or reports the UI unavailable.
+
 ### Wrapping a native SDK
 
 An nshm that wraps an Apple SDK calls it from Rust under `#[cfg(target_os = "ios")]` or `#[cfg(target_os = "macos")]`. System frameworks used through the `objc2` crates need nothing more. A vendor's prebuilt library (an `.xcframework` or `.a`) is linked from the nshm's own `build.rs`: Cargo passes the `rustc-link-lib` and `rustc-link-search` of every dependency to the app's executable, so the app lists nothing and NSH has no per-platform SDK settings.
@@ -681,6 +936,7 @@ fn main() {
 - Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
 - Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
 - NSH does not embed dynamic frameworks; prefer the SDK's static build.
+- A library whose licence asks that users can replace it (LGPL, such as libmpv) stays dynamic, and the app carries it itself; NSH's packages have no setting for it. Link it from the nshm's `build.rs` as above (`rustc-link-lib=framework=…`, `rustc-link-search=framework=…`). Give the executables their run path in the app's `.cargo/config.toml` (`rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<the framework's directory>"]` under `[target.aarch64-apple-darwin]`), since a crate's `rustc-link-arg` does not reach `nsh run`, `nsh check` or `nsh test`. After `nsh package --target macos`, copy the framework into the app's `Contents/Frameworks/`, remove the development run path with `install_name_tool -delete_rpath`, then sign again, the framework first and the app last, with the identity the package used (`codesign --force --sign <identity> --options runtime --entitlements <the app's entitlements>`, or `--sign -` for an ad hoc package), and check it with `codesign --verify --deep --strict`.
 - On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either; prefer the SDK's static build.
 
 ### A TSX nshm
@@ -717,7 +973,7 @@ A Rust nshm can export TSX as well, by the same `"exports"` in an `nsh.json` bes
 
 ### Dependencies
 
-An nshm lists the nshm it needs in its `nsh.json` `"dependencies"`, in the app's form: from crates.io or Git, with a version requirement as wide as it works with, so that apps and the other nshm they use can agree on one version. A published nshm cannot depend on a directory. The app's own entry for a package decides where it comes from: an app can take an nshm its nshm depend on from a fork or a local directory while their version requirements still apply.
+An nshm lists the nshm it needs in its `nsh.json` `"dependencies"`, in the app's form: from crates.io or Git, with a version requirement as wide as it works with, so that apps and the other nshm they use can agree on one version. A published nshm cannot depend on a directory, nor name `"targets"`: the app chooses where what it links goes ([Using an nshm](#using-an-nshm)). The app's own entry for a package decides where it comes from: an app can take an nshm its nshm depend on from a fork or a local directory while their version requirements still apply.
 
 ## Platform nshm
 
@@ -731,4 +987,4 @@ After `nsh add nsh-harmony`, the app's `nsh run`, `nsh dev`, `nsh test` and `nsh
 
 ## Security
 
-An nshm's build scripts and procedural macros run when the app builds, and its code, Rust or TSX, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components, Java and Android libraries (with their native code) and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.
+An nshm's build scripts and procedural macros run when the app builds, and its code, TSX or Rust, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components, Java and Android libraries (with their native code) and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.

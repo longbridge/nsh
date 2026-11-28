@@ -18,6 +18,9 @@
 //! with the TypeScript tests', so a Rust app without test files is tested
 //! too. Their tests run on this machine: with `--target` only the test
 //! files run.
+//!
+//! With `--attach` the apps the tests open are the app of a development
+//! session that runs already, in the host it shows (`test_attach.rs`).
 
 use std::{
     collections::HashMap,
@@ -71,12 +74,13 @@ pub(crate) fn test(
     device: Option<&str>,
     display: Option<usize>,
     foreground: bool,
+    attach: Option<Option<u16>>,
 ) -> anyhow::Result<()> {
     let app_dir = nsh_bundler::app_dir::app_dir_of(entry);
     let work_dir = app_dir.join(".nsh/test");
     // The app's crates in the directory, which `cargo test` tests.
     let crates: Vec<AppCrate> = match crate::rust_app::current() {
-        Some(app) if path.is_dir() => app
+        Some(app) if path.is_dir() && attach.is_none() => app
             .crates()
             .iter()
             .filter(|c| c.dir().starts_with(path))
@@ -86,6 +90,11 @@ pub(crate) fn test(
     };
     let files = if is_test_file(path) {
         vec![path.to_owned()]
+    } else if attach.is_some() {
+        // The running app takes the steps of standard input, given its
+        // directory too: a directory's test files would each set up apps
+        // of their own.
+        vec![steps_file(&work_dir, entry, true)?]
     } else if path.is_dir() {
         let mut files = Vec::new();
         find_tests(&test_root(path), &mut files);
@@ -103,7 +112,7 @@ pub(crate) fn test(
         }
         files
     } else {
-        vec![steps_file(&work_dir, path)?]
+        vec![steps_file(&work_dir, path, false)?]
     };
     // How the files are shown: an entry's steps by the entry.
     let shown = |file: &Path| {
@@ -118,13 +127,28 @@ pub(crate) fn test(
     if browser.is_some() && target.is_none() {
         bail!("--browser goes with --target web");
     }
-    if device.is_some()
+    if attach.is_some() {
+        let given = [
+            ("--target", target.is_some()),
+            ("--trace", trace),
+            ("--fps", fps),
+            ("--browser", browser.is_some()),
+            ("--web-host", web_host.is_some()),
+            ("--display", display.is_some()),
+            ("--foreground", foreground),
+        ];
+        if let Some((flag, _)) = given.iter().find(|(_, set)| *set) {
+            bail!(
+                "{flag} sets up the app a test opens, and --attach drives a running session's app as it is"
+            );
+        }
+    } else if device.is_some()
         && !matches!(
             target,
             Some(crate::run::Target::Ios | crate::run::Target::Android)
         )
     {
-        bail!("--device goes with --target ios or android");
+        bail!("--device goes with --target ios or android, or --attach");
     }
     if display.is_some() && !target.is_some_and(crate::test_host::opens_on_a_display) {
         bail!("{}", crate::test_host::DISPLAY_TARGETS);
@@ -165,18 +189,28 @@ pub(crate) fn test(
             }
         }
     }
-    let host = target
-        .filter(|_| !files.is_empty())
-        .map(|target| {
-            crate::test_host::starter(
-                target, browser, &work_dir, fps, device, display, foreground, release,
-            )
-        })
-        .transpose()?;
-    // What `open` checks its options against on that host.
-    let host_target = target
-        .filter(|_| host.is_some())
-        .map(crate::test_host::host_target);
+    let attached = match attach {
+        Some(port) if !files.is_empty() => Some(crate::test_attach::starter(port, device, entry)?),
+        _ => None,
+    };
+    let (host, host_target) = match attached {
+        Some((host, host_target)) => (Some(host), Some(host_target)),
+        None => {
+            let host = target
+                .filter(|_| !files.is_empty())
+                .map(|target| {
+                    crate::test_host::starter(
+                        target, browser, &work_dir, fps, device, display, foreground, release,
+                    )
+                })
+                .transpose()?;
+            // What `open` checks its options against on that host.
+            let host_target = target
+                .filter(|_| host.is_some())
+                .map(crate::test_host::host_target);
+            (host, host_target)
+        }
+    };
     // On a real platform the apps run in hosts built with the app's crates:
     // the test files run here, whatever the app is.
     match crate::rust_app::current().filter(|_| host.is_none()) {
@@ -192,7 +226,14 @@ pub(crate) fn test(
                 verbose: ui::verbose(),
                 page_host,
             };
-            in_runner(&app, &request, release, &shown, &mut tally)?;
+            // A trace takes one file at a time.
+            let jobs = if trace {
+                1
+            } else {
+                jobs.or_else(|| std::thread::available_parallelism().ok())
+                    .map_or(1, std::num::NonZeroUsize::get)
+            };
+            in_runners(&app, &request, jobs, release, &shown, &mut tally)?;
         }
         None => {
             let run = TestRun {
@@ -452,17 +493,107 @@ fn xml(text: &str) -> String {
     out
 }
 
+/// What a runner said of a test file, kept until the file's turn to be
+/// shown.
+enum Said {
+    Log {
+        level: log::Level,
+        target: String,
+        message: String,
+    },
+    Plain(String),
+    Result(PathBuf, TestResult),
+    Failed(PathBuf, String),
+}
+
+impl Said {
+    fn show(self, shown: &dyn Fn(&Path) -> String, tally: &mut Tally) {
+        match self {
+            Said::Log {
+                level,
+                target,
+                message,
+            } => logger::forward(level, &target, &message),
+            Said::Plain(line) => ui::plain(line),
+            Said::Result(file, result) => tally.show(&shown(&file), &result),
+            Said::Failed(file, message) => tally.failed(&shown(&file), &message),
+        }
+    }
+}
+
 /// Runs `request` in the headless runner of the app with Rust crates
-/// `app`: builds the entries it asks for, shows its results and its log.
-fn in_runner(
+/// `app`, `jobs` files at a time: a runner process a file, as the files of
+/// an app without crates take an engine each. Their results show file by
+/// file, in order, a file's once those before it were shown.
+fn in_runners(
     app: &RustApp,
     request: &TestRequest,
+    jobs: usize,
     release: bool,
     shown: &dyn Fn(&Path) -> String,
     tally: &mut Tally,
 ) -> anyhow::Result<()> {
     let runner = app.test_runner()?;
-    let mut child = Command::new(&runner)
+    // The entries the runners ask for are numbered across the run: they
+    // share its work directory.
+    let builds = std::sync::atomic::AtomicUsize::new(0);
+    if jobs <= 1 || request.files.len() <= 1 {
+        return in_runner(&runner, request, &builds, release, &mut |said| {
+            said.show(shown, tally);
+        });
+    }
+    let files = &request.files;
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (done, ended) = std::sync::mpsc::channel();
+    let mut failure = None;
+    std::thread::scope(|scope| {
+        for _ in 0..jobs.min(files.len()) {
+            let done = done.clone();
+            let (next, builds, runner) = (&next, &builds, &runner);
+            scope.spawn(move || {
+                loop {
+                    let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(file) = files.get(n) else { break };
+                    let one = TestRequest {
+                        files: vec![file.clone()],
+                        ..request.clone()
+                    };
+                    let mut said = Vec::new();
+                    let ran = in_runner(runner, &one, builds, release, &mut |s| said.push(s));
+                    if done.send((n, said, ran)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(done);
+        let mut waiting = HashMap::new();
+        let mut shown_up_to = 0;
+        for (n, said, ran) in ended {
+            waiting.insert(n, (said, ran));
+            while let Some((said, ran)) = waiting.remove(&shown_up_to) {
+                said.into_iter().for_each(|s| s.show(shown, tally));
+                if let Err(e) = ran {
+                    failure.get_or_insert(e);
+                }
+                shown_up_to += 1;
+            }
+        }
+    });
+    failure.map_or(Ok(()), Err)
+}
+
+/// Runs `request` in the runner process `runner`: builds the entries it
+/// asks for, numbered by `builds`, and hands `said` its results and its
+/// log.
+fn in_runner(
+    runner: &Path,
+    request: &TestRequest,
+    builds: &std::sync::atomic::AtomicUsize,
+    release: bool,
+    said: &mut dyn FnMut(Said),
+) -> anyhow::Result<()> {
+    let mut child = Command::new(runner)
         .arg(serde_json::to_string(request)?)
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
@@ -470,7 +601,6 @@ fn in_runner(
         .with_context(|| format!("run {}", runner.display()))?;
     let mut input = child.stdin.take().context("the runner's standard input")?;
     let stderr = child.stderr.take().context("the runner's standard error")?;
-    let mut builds = 0;
     for line in BufReader::new(stderr).lines() {
         let line = line?;
         match RunnerMessage::parse(&line) {
@@ -478,28 +608,27 @@ fn in_runner(
                 level,
                 target,
                 message,
-            }) => {
-                let level = level.parse().unwrap_or(log::Level::Info);
-                logger::forward(level, &target, &message);
-            }
+            }) => said(Said::Log {
+                level: level.parse().unwrap_or(log::Level::Info),
+                target,
+                message,
+            }),
             Some(RunnerMessage::Build { entry, kind }) => {
-                builds += 1;
-                let reply = build_for_runner(&entry, kind, &request.work_dir, builds, release);
+                let n = builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                let reply = build_for_runner(&entry, kind, &request.work_dir, n, release);
                 writeln!(input, "{}", serde_json::to_string(&reply)?)
                     .context("answer the runner")?;
             }
-            Some(RunnerMessage::Result { file, result }) => tally.show(&shown(&file), &result),
-            Some(RunnerMessage::Failed { file, message }) => {
-                tally.failed(&shown(&file), &message);
-            }
-            None => ui::plain(line),
+            Some(RunnerMessage::Result { file, result }) => said(Said::Result(file, result)),
+            Some(RunnerMessage::Failed { file, message }) => said(Said::Failed(file, message)),
+            None => said(Said::Plain(line)),
         }
     }
     let status = child.wait()?;
     if !status.success() {
         bail!(
             "the headless runner {} exited with {status}",
-            ui::path(&runner)
+            ui::path(runner)
         );
     }
     Ok(())
@@ -884,8 +1013,9 @@ fn find_tests(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// A test file that opens the app at `entry` on the network, lets it run
 /// for a while, then takes the steps standard input gives (none from a
-/// terminal), with `app` the app.
-fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
+/// terminal), with `app` the app; `attached` (`--attach`), the running
+/// app as it is, at once.
+fn steps_file(work_dir: &Path, entry: &Path, attached: bool) -> anyhow::Result<PathBuf> {
     let mut steps = String::new();
     let stdin = std::io::stdin();
     if !stdin.is_terminal() {
@@ -898,12 +1028,18 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
         .file_name()
         .map_or("app".into(), |n| n.to_string_lossy().into_owned());
     let entry_js = serde_json::to_string(&entry.to_string_lossy().replace('\\', "/"))?;
+    let open = if attached {
+        format!("const app = await open({entry_js});\n")
+    } else {
+        format!(
+            "const app = await open({entry_js}, {{ network: \"live\" }});\nawait app.wait({IDLE_MS});\n"
+        )
+    };
     let code = format!(
         "// Made by `nsh test {name}`: the steps of standard input.\n\
          import {{ expect, open, test }} from \"nsh/test\";\n\n\
          test(\"steps\", async () => {{\n\
-         const app = await open({entry_js}, {{ network: \"live\" }});\n\
-         await app.wait({IDLE_MS});\n\
+         {open}\
          {steps}\n\
          }});\n"
     );
@@ -1068,12 +1204,13 @@ test src/lib.rs - App (line 3) ... ok
             Some("iPhone 16"),
             None,
             false,
+            None,
         )
         .err();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
             err.map(|e| e.to_string()).as_deref(),
-            Some("--device goes with --target ios or android")
+            Some("--device goes with --target ios or android, or --attach")
         );
     }
 

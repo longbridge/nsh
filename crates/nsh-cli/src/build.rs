@@ -57,6 +57,8 @@ pub(crate) struct Built {
     pub(crate) watch_files: Vec<PathBuf>,
     /// What the app declares it may reach (`nsh.json` `capabilities`).
     pub(crate) capabilities: Option<nsh_core::access::Capabilities>,
+    /// Checked URL claims, including fileTypes-derived claims, from the bundler.
+    pub(crate) url_schemes: Vec<String>,
     /// The UI sets it imports, by specifier ([`imported_sets`]).
     pub(crate) ui_sets: Vec<String>,
     /// What its code uses of the native modules, by export
@@ -87,6 +89,7 @@ pub(crate) fn rust_root() -> Built {
         asset_root: None,
         watch_files: Vec::new(),
         capabilities: None,
+        url_schemes: Vec::new(),
         ui_sets: Vec::new(),
         native_use: None,
         entry_native_use: None,
@@ -119,6 +122,9 @@ pub(crate) struct Asset {
     pub(crate) path: String,
     /// The file.
     pub(crate) source: PathBuf,
+    /// The targets it is for; none: every target
+    /// (`Registry::assets_for`).
+    pub(crate) targets: Vec<nsh_core::platform::Os>,
 }
 
 /// The files the UI sets' crates ship (`Registry::assets`), published
@@ -130,6 +136,7 @@ pub(crate) fn crate_assets() -> impl Iterator<Item = Asset> {
         .map(|file| Asset {
             path: file.path.clone(),
             source: PathBuf::from(&file.source),
+            targets: file.targets.clone(),
         })
         .collect();
     assets.into_iter()
@@ -158,6 +165,7 @@ fn assets(root: &Path, imported: &[PathBuf]) -> Vec<Asset> {
                 .collect::<Vec<_>>()
                 .join("/"),
             source: root.join(rel),
+            targets: Vec::new(),
         })
         .chain(crate_assets())
         .collect();
@@ -167,6 +175,20 @@ fn assets(root: &Path, imported: &[PathBuf]) -> Vec<Asset> {
 }
 
 impl Built {
+    /// The files the package for `target` ships: the app's own, and the
+    /// crates' of every target or of `target` ([`Registry::assets_for`]).
+    /// No `target`: all of them.
+    ///
+    /// [`Registry::assets_for`]: nsh_core::element::Registry::assets_for
+    pub(crate) fn assets_for(
+        &self,
+        target: Option<nsh_core::platform::Os>,
+    ) -> impl Iterator<Item = &Asset> {
+        self.assets.iter().filter(move |asset| {
+            asset.targets.is_empty() || target.is_none_or(|target| asset.targets.contains(&target))
+        })
+    }
+
     /// `capabilities.json` (written next to the bundle), when the app
     /// declares capabilities.
     pub(crate) fn capabilities_json(&self) -> Option<String> {
@@ -296,6 +318,7 @@ fn compile_with(
         asset_root: Some(bundle.asset_root),
         watch_files: bundle.watch_files,
         capabilities: bundle.capabilities,
+        url_schemes: bundle.links.schemes().to_vec(),
         ui_sets: imported_sets(&bundle.natives),
         native_use: Some(bundle.native_use),
         entry_native_use: Some(bundle.entry_native_use),
@@ -310,7 +333,7 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
     let start = Instant::now();
     let hot = nsh_bundler::bundle_hot(entry, &crate::ui_sets())?;
     let (code, source_map) = hot.script();
-    let bytecode = nsh_js::compile_bytecode_with(&code, false, &crate::ui_sets())?;
+    let bytecode = nsh_js::compile_bytecode_with(&code, nsh_js::Strip::Source, &crate::ui_sets())?;
     let built = Built {
         code,
         bytecode,
@@ -321,6 +344,7 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
         asset_root: Some(hot.asset_root.clone()),
         watch_files: hot.watch_files.clone(),
         capabilities: hot.capabilities.clone(),
+        url_schemes: hot.links.schemes().to_vec(),
         ui_sets: imported_sets(hot.natives()),
         native_use: None,
         entry_native_use: None,
@@ -452,13 +476,17 @@ mod tests {
                 let (code, _) = hot.script();
                 let assembled = start.elapsed();
                 let start = Instant::now();
-                let bytecode = nsh_js::compile_bytecode_with(&code, false, &sets).unwrap();
+                let bytecode =
+                    nsh_js::compile_bytecode_with(&code, nsh_js::Strip::Source, &sets).unwrap();
                 let compiled = start.elapsed();
                 assert!(!bytecode.is_empty());
+                // What keeping the functions' source text would cost.
+                let unstripped = nsh_js::compile_bytecode_with(&code, false, &sets).unwrap();
                 eprintln!(
-                    "{app} run {run}: bundle {bundled:?}, script {assembled:?}, bytecode {compiled:?}; {} source bytes, {} bytecode bytes",
+                    "{app} run {run}: bundle {bundled:?}, script {assembled:?}, bytecode {compiled:?}; {} source bytes, {} bytecode bytes ({} with function source)",
                     code.len(),
-                    bytecode.len()
+                    bytecode.len(),
+                    unstripped.len()
                 );
             }
         }
@@ -487,6 +515,33 @@ mod tests {
                 ("img/a.png", PathBuf::from("/app/img/a.png")),
             ]
         );
+    }
+
+    #[test]
+    fn a_package_ships_the_files_of_its_target() {
+        use nsh_core::platform::Os;
+        let file = |path: &str, targets: &[Os]| crate::build::Asset {
+            path: path.to_owned(),
+            source: PathBuf::from(path),
+            targets: targets.to_vec(),
+        };
+        let built = crate::build::Built {
+            assets: vec![
+                file("all.png", &[]),
+                file("web.json", &[Os::Web]),
+                file("phones.json", &[Os::Ios, Os::Android]),
+            ],
+            ..crate::build::rust_root()
+        };
+        let paths = |target| {
+            built
+                .assets_for(target)
+                .map(|a| a.path.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(paths(Some(Os::Web)), ["all.png", "web.json"]);
+        assert_eq!(paths(Some(Os::MacOs)), ["all.png"]);
+        assert_eq!(paths(Some(Os::Ios)), ["all.png", "phones.json"]);
     }
 
     /// An entry below its app (`tests/SubApp.tsx`, which a test opens)

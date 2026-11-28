@@ -32,6 +32,8 @@
 // by default `nsh-<name>.bin` next to this file), `prepareChunk(id)` (a
 // promise for what chunk `id` needs once it
 // runs, such as fonts for `readAsset`; awaited with the chunk's download),
+// `prefetched(url)` (a response promise the page already requested for a
+// side module's `url`, taken instead of fetching it again, or undefined),
 // `dark`, `idiom` ("phone", "pad" or "desktop" instead of the one the
 // pointer and the viewport suggest), `dialogs` ("viewport": `Dialog`,
 // `Sheet` and `AlertDialog` cover the whole window, in the browser's top layer, rather
@@ -77,8 +79,12 @@ const MOUSE_BUTTON_NAMES = ["left", "middle", "right", "back", "forward"];
 const MOUSE_BUTTON_BITS = [1, 4, 2, 8, 16];
 /** The keys whose press or release is reported as a mouse move. */
 const MOUSE_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
-/** A link the browser can open itself: a `Link` with an `href`, drawn as an `a`. */
-const LINK_SELECTOR = "a.nsh-v[href]";
+/** A link the browser can open itself, drawn as an `a`: a `Link` with an
+ * `href`, and a link of text that goes somewhere (`fillRun`). */
+const LINK_SELECTOR = "a.nsh-v[href], a.nsh-link[href]";
+/** The schemes of the addresses a link of text is drawn as an `a` for
+ * (`textLinkAddress`): what a browser opens from a page. */
+const TEXT_LINK_SCHEMES = new Set(["http:", "https:", "mailto:", "tel:"]);
 
 /**
  * Whether pointer event `e` holds a modifier key. A click with one on a link
@@ -167,6 +173,10 @@ const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
 const READING_ORDER = typeof CSS !== "undefined" && !!CSS.supports?.("reading-flow", "source-order");
 /** How far back a pointer's velocity is measured (ms). */
 const VELOCITY_WINDOW = 100;
+/** How long a tap's press on a field waits for the focus the mouse events
+ * the browser makes of the tap give it (`awaitFieldFocus`): they follow
+ * the lift at once, or after a double tap's wait (about 300 ms). */
+const FIELD_PRESS_WAIT_MS = 1000;
 /** How long after something animated comes due a timer makes it happen
  * when no animation frame did (`keepDeadline`, `moveScreens`, ...): more
  * than a frame, so that while the page shows its frames always come first. */
@@ -377,6 +387,10 @@ img.nsh-fill { pointer-events: none; }
 .nsh-selectable, .nsh-selectable * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .nsh-selectable ::selection { background: var(--nsh-selection, Highlight); }
 .nsh-link { cursor: pointer; }
+/* A link of text drawn as an a (fillRun) looks as the span it would be:
+   its run's color and decoration, none of the browser's link blue,
+   underline or focus ring. */
+a.nsh-link { color: inherit; text-decoration: none; outline: none; }
 /* With the desktop idiom text is selectable as on a web page unless it is
    set off (selectable={false}) or inside something that takes presses
    or touches (nsh-press). */
@@ -561,18 +575,6 @@ function localOffset(ms) {
   return 0 - new Date(ms).getTimezoneOffset() * 60;
 }
 
-/**
- * Whether the page can show the browser's share sheet: it has
- * `navigator.share` and the page's permissions policy allows `web-share`
- * (a frame of another origin needs `allow="web-share"`).
- */
-function webShareAllowed() {
-  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
-  const doc = typeof document === "undefined" ? undefined : document;
-  const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
-  return typeof policy?.allowsFeature === "function" ? policy.allowsFeature("web-share") : true;
-}
-
 /** The kinds `network()` names for `navigator.connection.type`'s. */
 const CONNECTION_KINDS = {
   wifi: "wifi", cellular: "cellular", ethernet: "wired", none: "none",
@@ -719,6 +721,15 @@ const RUNTIME_SHEET = Symbol.for("nsh.runtimeSheet");
 /** Adds (or, for a view's own rule, replaces) class `name` with `text`.
  * The class is doubled: it wins over the runtime's rules of a class and a
  * pseudo-class (`.nsh-v:focus`), as inline styles did. */
+/** The CSS font of run style class `name` (its `font` and the longhands a
+ * `font` shorthand cannot say, as `font-variant-numeric`, leave its
+ * `font` empty); null for none. */
+function runFont(name) {
+  const style = name && CLASSES.rules.get(name)?.style;
+  if (!style?.fontFamily) return null;
+  return style.font || `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+}
+
 function defineClass(name, text, replace, weight = 2) {
   const rule = CLASSES.rules.get(name);
   if (rule) {
@@ -762,9 +773,6 @@ function swapClass(el, slot, name) {
   el[slot] = name;
 }
 
-/** Fills a run with `text`, the characters of links (`parts`: `[from, to,
- * link]`, UTF-16) in spans inside it that name their link (`links`):
- * inline, they keep the run's shaping and bidi order. */
 /**
  * The one color text view `el` is drawn in (null: several, which its runs
  * carry): on the element, which the runs inherit it from, so a change of it
@@ -790,21 +798,42 @@ function setTextColor(el, color) {
   }
 }
 
+/**
+ * Fills a run with `text`, the characters of links (`parts`: `[from, to,
+ * link]`, UTF-16) in elements inside it that name their link (`links`):
+ * inline, they keep the run's shaping and bidi order. A link that takes
+ * presses and goes somewhere a browser opens (its `address`,
+ * `textLinkAddress`) is an `a`, as a `Link` is: the browser shows where it
+ * goes, a click with a modifier key or the middle button opens it there
+ * (`LINK_SELECTOR`), and its menu is the browser's link menu
+ * (`contextMenu`). Any other link is a span.
+ */
 function fillRun(run, text, parts, links) {
   if (!parts) {
     run.textContent = text;
     return;
   }
   let at = 0;
-  for (const [from, to, link] of parts) {
+  for (const [from, to, index] of parts) {
     if (from > at) run.append(text.slice(at, from));
-    const span = document.createElement("span");
-    span.textContent = text.slice(from, to);
-    span._link = links[link];
+    const link = links[index];
+    const presses = PRESS_EVENTS.some((e) => link.events?.has(e));
+    const el = document.createElement(presses && link.address ? "a" : "span");
+    el.textContent = text.slice(from, to);
+    el._link = link;
+    if (el.localName === "a") {
+      el.setAttribute("href", link.address);
+      // A drag selects its characters, as a span's do. Tab passes it, as
+      // it passes every link of text here: the core's stops of links of
+      // text (`TextLink::focus_stop`) come to the web in a change of their
+      // own (docs/dev/elements.md, "Keyboard focus").
+      el.draggable = false;
+      el.tabIndex = -1;
+    }
     // A link's pointer over the I-beam of selectable text, as a browser's
     // `<a>` and the other desktops' link spans.
-    if (PRESS_EVENTS.some((e) => span._link.events.has(e))) span.classList.add("nsh-link");
-    run.append(span);
+    if (presses) el.classList.add("nsh-link");
+    run.append(el);
     at = to;
   }
   if (at < text.length) run.append(text.slice(at));
@@ -848,7 +877,11 @@ function runOffset(run, container, offset) {
   return range.toString().length;
 }
 
-let players = 0;
+/** How many players the page made, kept on the document: every copy of the
+ * runtime on the page counts with it, so the views' own style rules
+ * (`classPrefix`) and DOM ids of two copies' players do not collide, as
+ * the rules all apply to the whole document. */
+const PLAYERS = Symbol.for("nsh.players");
 
 /** How many players imported each wasm-bindgen glue, by URL. */
 const glueImports = new Map();
@@ -897,11 +930,36 @@ function webBridge(token) {
 /// Blink's shape cache around 5 MB.
 const MEASURE_ROUNDS = 5000;
 
+/// The context text is measured with: a `<canvas>` element where there is a
+/// document. On macOS, Chrome 69 to 103 crash the renderer when an
+/// `OffscreenCanvas` context's `font` names `BlinkMacSystemFont`, as the
+/// system font stack (`src/text/css.rs`) does; a `<canvas>` measures the same
+/// font the DOM draws.
 function measureContext() {
-  const canvas = typeof OffscreenCanvas !== "undefined"
-    ? new OffscreenCanvas(1, 1)
-    : document.createElement("canvas");
+  const canvas = typeof document !== "undefined"
+    ? document.createElement("canvas")
+    : new OffscreenCanvas(1, 1);
   return canvas.getContext("2d");
+}
+
+/**
+ * The width of `text` in CSS `font` as the DOM draws it, measured in `cx`.
+ * Canvas text places glyphs as at a pixel ratio of 1, the DOM at the page's:
+ * a hinted font rounds its advances to device pixels, so at 1.25 or 1.5 the
+ * DOM draws it narrower or wider than canvas measures it (NSimSun, Chrome's
+ * `monospace` on Chinese Windows, at 13px: 6.5 against 7 per character).
+ * Laid out at canvas widths, its runs then stand apart or overlap. At the
+ * ratio's font size, and scaled back, canvas measures the DOM's width.
+ */
+function measureWidth(cx, font, text) {
+  const ratio = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  if (ratio === 1) {
+    cx.font = font;
+    return cx.measureText(text).width;
+  }
+  // `css_font` puts the size first: `[italic ]<weight> <size>px <family>`.
+  cx.font = font.replace(/(\d*\.?\d+)px/, (_, size) => `${size * ratio}px`);
+  return cx.measureText(text).width / ratio;
 }
 
 /** The span `measureNumericText` measures in (one for the page's players). */
@@ -1162,7 +1220,8 @@ class Player {
     // Shader views (`op_sh`), drawn on one WebGL 2 context (`shaderGl`).
     this.shaderViews = new Set();
     // Of the views' own style rules (`op_css`).
-    this.classPrefix = `nsh-p${++players}-`;
+    document[PLAYERS] = (document[PLAYERS] ?? 0) + 1;
+    this.classPrefix = `nsh-p${document[PLAYERS]}-`;
     this.timer = 0;
     // The engine trapped: it takes no more calls (`call`).
     this.trapped = false;
@@ -1261,15 +1320,13 @@ class Player {
             this.measureUses = 0;
             this.measure = measureContext();
           }
-          this.measure.font = this.str(fp, fl);
-          return this.measure.measureText(this.str(tp, tl)).width;
+          return measureWidth(this.measure, this.str(fp, fl), this.str(tp, tl));
         },
         measure_numeric_text: (fp, fl, np, nl, tp, tl) => {
           const font = this.str(fp, fl), text = this.str(tp, tl);
           const width = measureNumericText(font, this.str(np, nl), text);
           if (width != null) return width;
-          this.measure.font = font;
-          return this.measure.measureText(text).width;
+          return measureWidth(this.measure, font, text);
         },
         text_cluster_boxes: (fp, fl, np, nl, spacing, tp, tl, rp, op, count) => {
           const input = new Uint32Array(this.wasm.memory.buffer, rp, count * 2);
@@ -1504,8 +1561,10 @@ class Player {
   }
 
   async compileSide(url, init) {
+    // A request the page made ahead (`prefetched`): an entry's side module.
+    const ahead = this.options.prefetched?.(url);
     try {
-      return await WebAssembly.compileStreaming(fetch(url, init));
+      return await WebAssembly.compileStreaming(ahead ?? fetch(url, init));
     } catch (err) {
       // Served without `application/wasm`: compiled from its bytes.
       if (!(err instanceof TypeError)) throw err;
@@ -1822,6 +1881,51 @@ class Player {
   }
 
   /**
+   * How far below its top a run in `font` with `line-height` `height`
+   * (points) has its baseline, as the DOM lays it out (half-leading around
+   * the font's own ascent and descent, snapped as the browser snaps it);
+   * null without a document to measure in. Kept per font and height:
+   * texts have few of either.
+   */
+  lineBaseline(font, height) {
+    const key = `${height}|${font}`;
+    const cache = (this.lineBaselines ??= new Map());
+    if (cache.has(key)) return cache.get(key);
+    let baseline = null;
+    if (this.domMetrics(font)) {
+      const { run, mark } = this.metricsProbe;
+      run.style.lineHeight = `${height}px`;
+      baseline = mark.getBoundingClientRect().top - run.getBoundingClientRect().top;
+      run.style.lineHeight = "";
+    }
+    cache.set(key, baseline);
+    return baseline;
+  }
+
+  /**
+   * Places `span`, a run whose glyphs' top is at `top` (`[x, y]` of its
+   * line's layout): a run in a line taller or shorter than its font
+   * (`height`, a line height the text sets) gets a line box that tall
+   * around the same baseline, so a selection highlights the whole line as
+   * on a browser's own text, not the font's height.
+   */
+  placeRun(span, name, left, top, height) {
+    let lead = 0;
+    const font = height ? runFont(name) : null;
+    const baseline = font ? this.lineBaseline(font, height) : null;
+    if (baseline != null) lead = baseline - this.metrics(font)[0];
+    else height = null;
+    const line = height ? `${height}px` : "";
+    const y = `${top - lead}px`, x = `${left}px`;
+    if (span.style.left !== x) span.style.left = x;
+    if (span.style.top !== y) span.style.top = y;
+    if (span.style.lineHeight !== line) span.style.lineHeight = line;
+    // Where its glyphs' top is in its box (a snapshot draws them there).
+    if (lead) span._lead = lead;
+    else delete span._lead;
+  }
+
+  /**
    * A face registered from data loads asynchronously: text is measured
    * again once it can be drawn. Faces registered while the app starts hide
    * it until they load, so its first frame shows the right fonts.
@@ -1848,6 +1952,7 @@ class Player {
         }
         this.fontsPending = [];
         this.metricsCache.clear();
+        this.lineBaselines?.clear();
         this.call((w) => w.nsh_fonts_loaded());
         clearTimeout(this.fontTimer);
         this.root.classList.remove("nsh-hidden");
@@ -1977,6 +2082,26 @@ class Player {
    * first: a side module, or an export of a module published whole.
    */
   async loadData(name) {
+    // A part of nsh/base a Rust app made a component of by name, or the
+    // shaders of a Rust app (`feature:shader`): its side module, or its
+    // gate in a module published whole; then the engine makes or draws
+    // what waited for it. Nothing comes back on failure: the component or
+    // shader keeps showing nothing, and the next one asks again.
+    const lazy = /^(part|feature):(.+)$/.exec(name);
+    if (lazy) {
+      const gate = `nsh_${lazy[1]}_${lazy[2]}`;
+      const after = () => this.call((w) => this.withStrings([gate], (p, l) => w.nsh_after_gate(p, l)));
+      try {
+        if (this.options.sides?.[gate]) await this.loadSide(gate, this.options.sides);
+        else this.wasm[gate]?.();
+        after();
+      } catch (err) {
+        console.warn("[nsh]", `${err.message ?? err} (${gate})`);
+        // The runtime asks for a feature once at a time: it may ask again.
+        if (lazy[1] === "feature") after();
+      }
+      return;
+    }
     const url = this.data?.[name] ?? new URL(`nsh-${name}.bin`, import.meta.url);
     let bytes = null;
     try {
@@ -2120,7 +2245,13 @@ class Player {
     this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
       this.frameAt = performance.now();
-      this.call((w) => w.nsh_frame(this.frameTime(now), 1));
+      // What the frame changes is drawn in it (`drawSoon`).
+      this.inFrame = true;
+      try {
+        this.call((w) => w.nsh_frame(this.frameTime(now), 1));
+      } finally {
+        this.inFrame = false;
+      }
     });
   }
 
@@ -2327,7 +2458,6 @@ class Player {
       screenColor: typeof window.EyeDropper === "function",
       // `writeClipboard` reports each write's result.
       clipboardWriteResult: true,
-      share: webShareAllowed(),
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
       // Shader views draw until the first one finds no WebGL 2 (`shaderGl`).
@@ -3037,14 +3167,12 @@ class Player {
       el.insertBefore(span, before ?? null);
       spans.push(span);
     }
-    runs.forEach(([x, y, text, style, start, , after], i) => {
+    runs.forEach(([x, y, text, style, start, , after, height], i) => {
       const span = spans[i];
       const name = this.styleClass(styles[style]);
       const className = name ? `nsh-run ${name}` : "nsh-run";
       if (span.className !== className) span.className = className;
-      const left = `${cx + x}px`, top = `${cy + y}px`;
-      if (span.style.left !== left) span.style.left = left;
-      if (span.style.top !== top) span.style.top = top;
+      this.placeRun(span, name, cx + x, cy + y, height);
       if (span.firstChild.data !== text) span.firstChild.data = text;
       span._start = start;
       span._run = i;
@@ -3087,13 +3215,18 @@ class Player {
         `border-radius:${r}px;background:${color}`;
       frag.append(box);
     }
-    // Nested texts that take presses: `[node, events]`, which runs name.
-    const spans = (links ?? []).map(([node, events]) => ({ node, events: new Set(events) }));
-    runs.forEach(([x, y, text, style, start, parts, after], i) => {
+    // Nested texts that take presses: `[node, events, href?]`, which runs
+    // name; one that goes somewhere a browser opens is drawn as an `a`.
+    const spans = (links ?? []).map(([node, events, href]) => ({
+      node,
+      events: new Set(events),
+      address: this.textLinkAddress(href),
+    }));
+    runs.forEach(([x, y, text, style, start, parts, after, height], i) => {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
-      span.style.cssText = `left:${cx + x}px;top:${cy + y}px`;
+      this.placeRun(span, name, cx + x, cy + y, height);
       fillRun(span, text, parts, spans);
       // Where its characters are in the text (UTF-16, as JS strings).
       span._start = start;
@@ -3186,7 +3319,8 @@ class Player {
     if (!position) {
       if (!always) return null;
       const r = el.getBoundingClientRect();
-      position = [e.clientX - r.left, e.clientY - r.top];
+      const z = this.cssZoom(el);
+      position = [(e.clientX - r.left) / z, (e.clientY - r.top) / z];
     }
     const [pageX, pageY] = this.point(e);
     const held = MOUSE_BUTTONS.find(([bit]) => e.buttons & bit);
@@ -3299,7 +3433,10 @@ class Player {
   updateAria(el) {
     const p = el._props ?? {};
     const set = (name, value) => setAriaAttribute(el, name, value);
-    const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
+    // An input that takes presses is still a text box, read on its field:
+    // its view is no button around it.
+    const button = el._pressable && el._kind !== "input";
+    const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : button ? "button" : null);
     // A combo box that is an input is its field, which keeps the focus
     // (`fieldAria`).
     set("role", el._field && p.role === "combobox" ? null : role);
@@ -3338,11 +3475,13 @@ class Player {
    * decides: pressables (Enter and Space press them) unless `focusable`
    * false, and any `focusable` view, pressable or not (its keys reach it
    * through the app's keymap); never disabled ones, those hidden from
-   * assistive technologies or those with no area (`seenByKeys`). */
+   * assistive technologies or those with no area (`seenByKeys`). An input's
+   * view is none, `focusable` or pressable: its field is its one stop
+   * (`fieldStop`), as on the desktops. */
   updateFocusable(el) {
     const p = el._props;
     const seen = this.seenByKeys(el);
-    const focusable = (p?.focusable ?? !!el._pressable) && !p?.disabled && !p?.hidden && seen;
+    const focusable = el._kind !== "input" && (p?.focusable ?? !!el._pressable) && !p?.disabled && !p?.hidden && seen;
     if (focusable) el.tabIndex = 0;
     // Programmatic focus only for what screen-reader focus moved to; an
     // element Tab reaches without a `tabindex` (a link, `web={{ element }}`)
@@ -3984,6 +4123,8 @@ class Player {
    * the root with a screen effect) as they show without the effect.
    */
   paintHost(cx, host, r, stop, owner) {
+    // A canvas changed since the last frame shows its new drawing.
+    this.flushDraws();
     this.watchPaint();
     // What changed since the last picture: its styles are read again.
     this.touchAll(this._paintObserver.takeRecords());
@@ -4238,7 +4379,8 @@ class Player {
         cx.textBaseline = "alphabetic";
         const text = child.textContent;
         const m = cx.measureText(text);
-        cx.fillText(text, x, y + (m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent));
+        // Its glyphs sit `_lead` below its top in a line box of its line's height.
+        cx.fillText(text, x, y + (child._lead ?? 0) + (m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent));
       }
       // A view that clips its content (a scroll view among them) clips it here too.
       if (cs.clips) {
@@ -5023,7 +5165,8 @@ class Player {
     const thumb = this.barThumb(el);
     if (!thumb) return false;
     const r = el.getBoundingClientRect();
-    const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+    const z = this.cssZoom(el);
+    const [x, y] = [(e.clientX - r.left) / z, (e.clientY - r.top) / z];
     const [along, across] = el._horizontal ? [x, y] : [y, x];
     const edge = this.barEdge(el);
     return across >= edge - BAR_GRAB && across <= edge && along >= thumb[0] - 4 && along <= thumb[0] + thumb[1] + 4;
@@ -5063,7 +5206,8 @@ class Player {
     const el = p.scroll;
     const thumb = this.barThumb(el);
     if (!thumb || thumb[2] <= 0) return;
-    const d = ((el._horizontal ? e.clientX : e.clientY) - p.start) * (thumb[3] / thumb[2]);
+    const z = this.cssZoom(el);
+    const d = (((el._horizontal ? e.clientX : e.clientY) - p.start) / z) * (thumb[3] / thumb[2]);
     if (el._horizontal) el.scrollLeft = p.offset + d;
     else el.scrollTop = p.offset + d;
   }
@@ -5294,12 +5438,13 @@ class Player {
     }
     if (p.takes) e.preventDefault();
     const r = p.el.getBoundingClientRect();
+    const z = this.cssZoom(p.el);
     const [pageX, pageY] = this.point(e);
     // Nothing changes at the end, as on the native backends.
     const delta = phase === 2 ? 0 : e.scale / (p.scale || 1) - 1;
     p.scale = e.scale;
     this.event(p.el._id, "onPinch", {
-      position: { x: e.clientX - r.left, y: e.clientY - r.top },
+      position: { x: (e.clientX - r.left) / z, y: (e.clientY - r.top) / z },
       pagePosition: { x: pageX, y: pageY },
       delta,
       phase: phase === 0 ? "start" : phase === 1 ? "move" : "end",
@@ -5342,7 +5487,10 @@ class Player {
     const el = this.view(id);
     if (!el || el._kind !== "scroll" || el._horizontal) return;
     this.ensureLayer(el);
+    const was = !!el._refreshing;
     el._refreshing = refreshing;
+    if (refreshing) el._refreshDismissing = false;
+    else if (was && el._pull > 0) el._refreshDismissing = true;
     if (!el._pulling) {
       if (refreshing && el.scrollTop <= 0.5) this.animatePull(el, this.refreshSpace(el));
       else if (!refreshing && el._pull > 0) this.animatePull(el, 0);
@@ -5385,6 +5533,7 @@ class Player {
       if (!start.pulling) {
         start.pulling = true;
         el._pulling = true;
+        if (!el._refreshing) el._refreshDismissing = false;
         cancelAnimationFrame(el._pullAnimation);
       }
       this.dragPull(el, v);
@@ -5418,6 +5567,7 @@ class Player {
     if (!el._refreshing && el._events.has("onRefresh") && el._pull >= this.refreshThreshold(el)) {
       // Shown right away, as UIRefreshControl does; JS turns it off.
       el._refreshing = true;
+      el._refreshDismissing = false;
       this.event(el._id, "onRefresh");
     }
     this.animatePull(el, el._refreshing && el._pull > 0 ? this.refreshSpace(el) : 0);
@@ -5426,6 +5576,7 @@ class Player {
   setPull(el, pull) {
     if (pull === el._pull) return;
     el._pull = pull;
+    if (pull <= 0) el._refreshDismissing = false;
     this.placeLayer(el);
     this.updateSpinner(el);
     this.scrolled(el);
@@ -5445,13 +5596,17 @@ class Player {
     el._pullAnimation = requestAnimationFrame(step);
   }
 
-  /** The spinner above the content: its spokes appear as it is pulled, and turn while refreshing. */
+  /** The spinner above the content: its spokes appear as it is pulled, turn while refreshing, and keep turning while fading out on dismiss. */
   updateSpinner(el) {
     // Off, the app draws its own (from `pullValue`).
     const shown = el._pull > 0 && !el._behavior?.refreshIndicator;
     let spinner = el._spinner;
     if (!shown) {
-      spinner?.classList.add("nsh-gone");
+      if (spinner) {
+        spinner.classList.add("nsh-gone");
+        spinner.classList.remove("spin", "full");
+        spinner.style.opacity = "";
+      }
       return;
     }
     if (!spinner) {
@@ -5463,13 +5618,16 @@ class Player {
       el.append(spinner);
     }
     spinner.classList.remove("nsh-gone");
-    spinner.style.top = `${el._pull - this.refreshSpace(el) / 2 - 10}px`;
-    const progress = el._refreshing ? 1 : Math.min(1, el._pull / this.refreshThreshold(el));
+    const space = this.refreshSpace(el);
+    spinner.style.top = `${el._pull - space / 2 - 10}px`;
+    const active = !!(el._refreshing || el._refreshDismissing);
+    const progress = active ? 1 : Math.min(1, el._pull / this.refreshThreshold(el));
     const count = Math.min(8, Math.ceil(progress * 8));
     [...spinner.children].forEach((spoke, i) => spoke.classList.toggle("nsh-hidden", i >= count));
     // Pulled all the way, the spokes fade behind the lead one.
     spinner.classList.toggle("full", progress >= 1);
-    spinner.classList.toggle("spin", !!el._refreshing);
+    spinner.classList.toggle("spin", active);
+    spinner.style.opacity = el._refreshDismissing ? String(Math.min(1, el._pull / space)) : "";
   }
 
 
@@ -5482,13 +5640,35 @@ class Player {
     this.drawSoon(el);
   }
 
+  /**
+   * Draws canvas view `el` once before the next paint. Each input event,
+   * timer or socket message is a task with a batch of its own, and several
+   * can come between two frames (pointer moves, a stream of updates): each
+   * replays the whole drawing, only the last of them is ever shown, and the
+   * replays hold the main thread the input waits on. So a change waits for
+   * the next frame, and the canvases changed before it draw once there. A
+   * change made in a frame (the engine's `nsh_frame` stepping an animated
+   * value) draws at the end of its callback, before that frame's paint: a
+   * `requestAnimationFrame` asked for there would come a frame late.
+   */
   drawSoon(el) {
-    if (el._drawQueued) return;
-    el._drawQueued = true;
-    queueMicrotask(() => {
-      el._drawQueued = false;
-      this.draw(el);
-    });
+    (this.drawQueue ??= new Set()).add(el);
+    if (this.drawQueued) return;
+    this.drawQueued = true;
+    const run = () => {
+      this.drawQueued = false;
+      this.flushDraws();
+    };
+    if (this.inFrame) queueMicrotask(run);
+    else requestAnimationFrame(run);
+  }
+
+  /** Draws the canvases waiting for a frame (`drawSoon`) now: a picture of them (`paintHost`) shows what they draw. */
+  flushDraws() {
+    const queue = this.drawQueue;
+    if (!queue?.size) return;
+    this.drawQueue = new Set();
+    for (const el of queue) this.draw(el);
   }
 
   draw(el) {
@@ -5876,6 +6056,7 @@ class Player {
         field._selectOnUp = true;
         this.selectionChanged(el, field);
       }
+      this.fieldPressed(field);
     });
     field.addEventListener("blur", () => {
       field._selectOnUp = false;
@@ -5888,6 +6069,43 @@ class Player {
     // Scrolling the text moves the caret.
     field.addEventListener("scroll", () => this.caretMoved(el, field));
     field.addEventListener("paste", (e) => this.pasted(el, e));
+  }
+
+  /** Holds the press of a tap on `field`'s input for the focus the mouse
+   * events the browser makes of the tap give the field (`pressOut`), and
+   * no longer than those events last: the tap's click, a key or
+   * `FIELD_PRESS_WAIT_MS` drops it, so that a focus that comes later
+   * another way (Tab, the app's) reports no press. */
+  awaitFieldFocus(field, report) {
+    this.dropFieldPress();
+    const timer = setTimeout(() => this.dropFieldPress(), FIELD_PRESS_WAIT_MS);
+    this.fieldPress = { field, report, timer };
+  }
+
+  /** Reports the press that waits for `field`'s focus, if any
+   * (`awaitFieldFocus`). */
+  fieldPressed(field) {
+    const press = this.fieldPress;
+    if (press?.field !== field) return;
+    this.dropFieldPress();
+    press.report();
+  }
+
+  /** Forgets the press that waits for a field's focus, if any. */
+  dropFieldPress() {
+    clearTimeout(this.fieldPress?.timer);
+    this.fieldPress = null;
+  }
+
+  /** The click of a tap ends the mouse events the browser makes of it: a
+   * press still waiting for its field's focus (`awaitFieldFocus`) is
+   * reported when the click is on that field's input (the focus did not
+   * come), and dropped otherwise. */
+  fieldClicked(e) {
+    const press = this.fieldPress;
+    if (!press) return;
+    if (this.viewOf(e.target)?._field === press.field) this.fieldPressed(press.field);
+    else this.dropFieldPress();
   }
 
   /** Reports how far `el`'s textarea scrolled, and its text's height and
@@ -6407,6 +6625,28 @@ class Player {
     } catch {
       return String(href);
     }
+  }
+
+  /**
+   * The `href` a link of text going to `href` (`TextView`'s links,
+   * `AttributedText::link_hrefs`) is drawn with as an `a` (`fillRun`), as a
+   * `Link`'s is (`linkHref` under the site's base), or null to draw it as a
+   * span: an address a browser opens from a page (`TEXT_LINK_SCHEMES`: a
+   * web page, a path of the site, mail and phone links). An `#anchor` is a
+   * heading of the text's own document, and any other scheme (an app's own
+   * routes, `javascript:`) is the app's to route: a span.
+   */
+  textLinkAddress(href) {
+    href = href?.trim();
+    if (!href || href.startsWith("#")) return null;
+    let url;
+    try {
+      url = new URL(href, this.siteBase ?? document.baseURI);
+    } catch {
+      return null;
+    }
+    if (!TEXT_LINK_SCHEMES.has(url.protocol)) return null;
+    return this.siteBase ? url.href : href;
   }
 
   /** What the app's relative addresses and links resolve against: the
@@ -7330,11 +7570,19 @@ class Player {
     this.webNavigation(el, "onLoad", false);
   }
 
-  op_video([, id, src, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
+  op_video([, id, src, poster, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
     const el = this.view(id);
     const video = el?._video;
     if (!video) return;
     const url = src ? this.asset(src) : "";
+    // The poster shows until the first frame is ready (`loadeddata`), as
+    // on the other platforms, not until playback starts as `<video>`'s own.
+    const posterUrl = poster ? this.asset(poster) : "";
+    if (posterUrl !== el._poster || url !== el._src) {
+      el._poster = posterUrl;
+      if (posterUrl && (url !== el._src || video.readyState < 2)) video.poster = posterUrl;
+      else video.removeAttribute("poster");
+    }
     // `paused` is acted on when it changes (or for a new source): `play()`
     // on a video that ended starts it over, and one its controls paused
     // would play on, whenever another prop (the volume, say) changed.
@@ -7391,6 +7639,7 @@ class Player {
     });
     video.addEventListener("loadedmetadata", () =>
       emit("onLoad", { duration: video.duration || 0, width: video.videoWidth, height: video.videoHeight }));
+    video.addEventListener("loadeddata", () => video.removeAttribute("poster"));
     video.addEventListener("playing", () => {
       buffer(false);
       stopProgress();
@@ -7439,6 +7688,13 @@ class Player {
         const anchor = sel?.rangeCount ? sel.anchorNode : null;
         const area = anchor && this.areaOf(anchor.nodeType === 1 ? anchor : anchor.parentElement);
         if (el && area && (el.contains(area) || area.contains(el))) sel.removeAllRanges();
+        break;
+      }
+      case "selectAll": {
+        // All the texts of the selectable view `el` is or is in, as Ctrl+A
+        // does there: `selectionchange` then reports them.
+        const area = el && this.areaOf(el);
+        if (area) getSelection()?.selectAllChildren(area);
         break;
       }
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
@@ -7540,7 +7796,6 @@ class Player {
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
-      case "share": this.share(args[0], args[1], args[2], args[3], args[4]); break;
       case "renderCanvas": this.renderCanvas(...args); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
@@ -7767,43 +8022,6 @@ class Player {
       color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
     } catch {}
     this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
-  }
-
-  // `share`: the browser's share sheet (`navigator.share`, which the
-  // environment's `share` reports). A page has no local files to share, and
-  // a browser that cannot share this content says so: both are reported as
-  // unavailable, never as shared. The user closing the sheet rejects with
-  // an `AbortError`: dismissed.
-  async share(request, title, text, url, files) {
-    const unavailable = (error) => this.event(ROOT_ID, "onShare",
-      { id: request, error, code: "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM" });
-    const data = {};
-    if (title != null) data.title = title;
-    if (text != null) data.text = text;
-    if (url != null) data.url = url;
-    if (files) return unavailable("share: a page shares no local files");
-    if (!webShareAllowed()) return unavailable("share: this browser has no share sheet for this page");
-    if (typeof navigator.canShare === "function" && !navigator.canShare(data)) {
-      return unavailable("share: this browser cannot share this content");
-    }
-    try {
-      await navigator.share(data);
-      this.event(ROOT_ID, "onShare", { id: request, action: "shared" });
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        this.event(ROOT_ID, "onShare", { id: request, action: "dismissed" });
-      } else if (err?.name === "NotAllowedError") {
-        // The browser refuses the sheet here: the page's permissions policy
-        // (a frame without `web-share`) or a share without a user gesture.
-        unavailable(`share: the browser does not allow sharing here (${err?.message ?? err})`);
-      } else if (err?.name === "InvalidStateError") {
-        // An earlier share's sheet is still open: a browser shows one at a
-        // time and keeps it until the user closes it.
-        unavailable(`share: the browser still shows an earlier share (${err?.message ?? err})`);
-      } else {
-        this.event(ROOT_ID, "onShare", { id: request, error: `share: ${err?.message ?? err}` });
-      }
-    }
   }
 
   // Audio (`Sound`, `AudioPlayer`) -----------------------------------------
@@ -8998,9 +9216,16 @@ class Player {
         const [sx, sy = sx] = style.scale.split(" ").map(Number);
         [a, b, c, d] = [sx * a, sy * b, sx * c, sy * d];
       }
+      const zoom = parseFloat(style.zoom);
+      if (zoom > 0 && zoom !== 1) [a, b, c, d] = [zoom * a, zoom * b, zoom * c, zoom * d];
       // Top-layer views ignore their DOM ancestors' transforms (including
-      // the preserved app scale inside an elevated iframe).
-      if (node.classList?.contains("nsh-viewport")) break;
+      // the preserved app scale inside an elevated iframe), while CSS zoom
+      // still scales them through their ancestors.
+      if (node.classList?.contains("nsh-viewport")) {
+        const z = this.cssZoom(node.parentElement);
+        if (z !== 1) [a, b, c, d] = [z * a, z * b, z * c, z * d];
+        break;
+      }
     }
     const r = el.getBoundingClientRect();
     const det = a * d - b * c;
@@ -9077,6 +9302,7 @@ class Player {
     root.addEventListener("click", (e) => {
       const link = e.target instanceof Element ? e.target.closest(LINK_SELECTOR) : null;
       if (link && e.button === 0 && !heldModifier(e)) e.preventDefault();
+      this.fieldClicked(e);
     });
     window.addEventListener("pointermove", (e) => this.pointerMove(e), { passive: false });
     window.addEventListener("pointerup", (e) => this.pointerUp(e, false));
@@ -9143,6 +9369,8 @@ class Player {
   contextMenu(e, keyboard = false) {
     const view = this.viewOf(e.target);
     if (!view) return false;
+    // A link of text drawn as an `a` (`fillRun`), inside `view`.
+    const textLink = e.target?.closest?.("a.nsh-link[href]") ?? null;
     for (const el of this.ancestors(view)) {
       if (el._events?.has("onContextMenu")) {
         e.preventDefault();
@@ -9156,17 +9384,20 @@ class Player {
           at = { clientX: rtl ? r.right : r.left, clientY: r.bottom, target: e.target };
         }
         const [pageX, pageY] = this.point(at);
+        const z = this.cssZoom(el);
         this.event(el._id, "onContextMenu", {
-          position: { x: at.clientX - r.left, y: at.clientY - r.top },
+          position: { x: (at.clientX - r.left) / z, y: (at.clientY - r.top) / z },
           pagePosition: { x: pageX, y: pageY },
           modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
           pointerType: ["mouse", "pen", "touch"].includes(pointerType) ? pointerType : pointerType && "mouse",
         });
         return true;
       }
-      // A link (`Link` with an `href`) the app shows no menu for has
-      // the browser's: open in a new tab, copy the link.
+      // A link (`Link` with an `href`, or a link of the text that is `view`)
+      // the app shows no menu for has the browser's: open in a new tab,
+      // copy the link.
       if (el.localName === "a" && el.hasAttribute("href")) return true;
+      if (el === view && textLink) return true;
       if (el.matches(".nsh-field, .nsh-selectable")) return false;
     }
     return false;
@@ -9313,6 +9544,8 @@ class Player {
   }
 
   keyDown(e) {
+    // A key ends a tap's mouse events (`awaitFieldFocus`).
+    this.dropFieldPress();
     if (this.wasm) this.modifiersChanged(e);
     if (!this.wasm || !this.takesKeys()) return;
     // Where the key was pressed, not where the focus is by now: a field's
@@ -9527,22 +9760,69 @@ class Player {
   }
 
   /** Where the selection starts in the copy of all of `area` (UTF-16
-   * units): what maps it back to the document the area shows. */
+   * units): what maps it back to the document the area shows. The copy up
+   * to the selection's end less the selection's own: at the start of a
+   * text, the break a copy puts before that text comes before it, as on
+   * the native platforms (a copy only up to the start would leave it
+   * out). */
   selectionStart(area) {
     const sel = getSelection();
     if (!sel?.rangeCount) return 0;
     const range = sel.getRangeAt(0);
     if (!area.contains(range.startContainer)) return 0;
-    const before = document.createRange();
-    before.setStart(area, 0);
-    before.setEnd(range.startContainer, range.startOffset);
-    if (before.collapsed) return 0;
-    return (this.selectedText(area, before) ?? "").length;
+    const upTo = document.createRange();
+    upTo.setStart(area, 0);
+    if (area.contains(range.endContainer)) upTo.setEnd(range.endContainer, range.endOffset);
+    else upTo.setEnd(area, area.childNodes.length);
+    const all = (this.selectedText(area, upTo) ?? "").length;
+    const own = (this.selectedText(area, range) ?? "").length;
+    return Math.max(0, all - own);
+  }
+
+  /** The box around the selection's characters in `area` (`[x, y, width,
+   * height]` in the area, from its top left corner, as its layout places
+   * it), or null when they show nowhere: the boxes of the selected parts of
+   * the texts it reaches, united, as the native platforms report it
+   * (`SelectionModel::selected_bounds`). */
+  selectionBounds(area) {
+    const sel = getSelection();
+    if (!sel?.rangeCount || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const run of area.querySelectorAll(".nsh-run")) {
+      // The runs a copy takes (`selectedText`).
+      if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
+      if (getComputedStyle(run).visibility === "hidden") continue;
+      const part = document.createRange();
+      part.selectNodeContents(run);
+      if (run.contains(range.startContainer)) part.setStart(range.startContainer, range.startOffset);
+      if (run.contains(range.endContainer)) part.setEnd(range.endContainer, range.endOffset);
+      for (const r of part.getClientRects()) {
+        // The empty box at a line's end where the selection only reaches its break.
+        if (r.width <= 0 || r.height <= 0) continue;
+        left = Math.min(left, r.left);
+        top = Math.min(top, r.top);
+        right = Math.max(right, r.right);
+        bottom = Math.max(bottom, r.bottom);
+      }
+    }
+    if (left > right) return null;
+    // In the area's own points: a transform around it (a scaled player,
+    // a zoomed scroll view) scales what the browser measures on screen.
+    const box = area.getBoundingClientRect();
+    const sx = area.offsetWidth ? box.width / area.offsetWidth : 1;
+    const sy = area.offsetHeight ? box.height / area.offsetHeight : 1;
+    return [(left - box.left) / sx, (top - box.top) / sy, (right - left) / sx, (bottom - top) / sy];
   }
 
   /** The document's selection changed: the selectable view it is in (the
-   * outermost) hears its text (`onSelectionChange`), and one it left hears
-   * "" (nothing selected), each only when its text changed. */
+   * outermost) hears its text (`onSelectionChange`) with the box around it
+   * as of now (`bounds`, to which the core adds `pageBounds`), and one it
+   * left hears "" (nothing selected), each only when its text or the box
+   * changed (the same text selected elsewhere is a change). */
   areaSelectionChanged() {
     const sel = getSelection();
     const anchor = sel?.rangeCount ? sel.anchorNode : null;
@@ -9555,14 +9835,23 @@ class Player {
         this.event(last._id, "onSelectionChange", { text: "", start: 0 });
       }
       last._selectedText = "";
+      last._selectedBox = "";
     }
     if (!area) return;
     this._selectedArea = area;
     if (!area._events?.has("onSelectionChange")) return;
     const text = this.selectedText(area) ?? "";
-    if (text === (area._selectedText ?? "")) return;
+    const box = text ? this.selectionBounds(area) : null;
+    const key = box ? box.join() : "";
+    if (text === (area._selectedText ?? "") && key === (area._selectedBox ?? "")) return;
     area._selectedText = text;
-    this.event(area._id, "onSelectionChange", { text, start: text ? this.selectionStart(area) : 0 });
+    area._selectedBox = key;
+    const payload = { text, start: text ? this.selectionStart(area) : 0 };
+    if (box) {
+      const [x, y, width, height] = box;
+      payload.bounds = { origin: { x, y }, size: { width, height } };
+    }
+    this.event(area._id, "onSelectionChange", payload);
   }
 
   /** Select all and Escape in selectable text with a selection: within it. */
@@ -9760,10 +10049,11 @@ class Player {
     this.wheelTaker = takes ? { el, t: now } : null;
     if (!el) return false;
     const r = el.getBoundingClientRect();
+    const z = this.cssZoom(el);
     const [pageX, pageY] = this.point(e);
     const page = e.deltaMode === 2 ? this.size[1] : 1;
     this.event(el._id, "onWheel", {
-      position: { x: e.clientX - r.left, y: e.clientY - r.top },
+      position: { x: (e.clientX - r.left) / z, y: (e.clientY - r.top) / z },
       pagePosition: { x: pageX, y: pageY },
       delta: { x: e.deltaX * page, y: e.deltaY * page },
       deltaMode: e.deltaMode === 1 ? "lines" : "points",
@@ -10180,10 +10470,23 @@ class Player {
     this.call(() => this.withStrings([json, bytes], (jp, jl, bp, bl) => this.wasm.nsh_file_drop(el._id, kind, jp, jl, bp, bl)));
   }
 
-  /** The scale layer `layer` is drawn at (`scaleLayer`): its points are
-   * the window's divided by it. */
+  /** Effective CSS zoom factor on `el` (accumulated through ancestors). */
+  cssZoom(el) {
+    if (el && typeof el.currentCSSZoom === "number" && el.currentCSSZoom > 0) return el.currentCSSZoom;
+    if (typeof getComputedStyle !== "function") return 1;
+    let z = 1;
+    for (let node = el; node; node = node.parentElement) {
+      const v = parseFloat(getComputedStyle(node).zoom);
+      if (v > 0) z *= v;
+    }
+    return z;
+  }
+
+  /** The scale layer `layer` is drawn at (`scaleLayer`), including external CSS zoom. */
   layerScale(layer) {
-    return (layer && this.frameScale) || [1, 1];
+    const [fx, fy] = (layer && this.frameScale) || [1, 1];
+    const z = this.cssZoom(layer || this.root);
+    return [fx * z, fy * z];
   }
 
   /** The top left of `el` in the coordinates `point` gives for `layer`. */
@@ -10206,7 +10509,8 @@ class Player {
   origin(layer) {
     if (layer) return [0, 0];
     const r = this.root.getBoundingClientRect();
-    return [r.left, r.top];
+    const [sx, sy] = this.layerScale(null);
+    return [r.left / sx, r.top / sy];
   }
 
   touchEvent(phase, changedId, activated) {
@@ -10224,7 +10528,10 @@ class Player {
         changed: id === changedId,
         pointerType: p.pointerType,
         pressure: p.pressure, tiltX: p.tiltX, tiltY: p.tiltY,
+        eraser: !!p.eraser, barrel: !!p.barrel,
+        coalesced: id === changedId ? p.coalesced ?? [] : [],
       });
+      if (id === changedId) p.coalesced = [];
     }
     if (!points.length) return;
     // The keys held when the changed pointer went down, as its press's.
@@ -10242,6 +10549,16 @@ class Player {
    * focus to the pressable, and close the keyboard as it opens. */
   mouseDown(e) {
     if (this.editable(e.target)) return;
+    // A press on an input around its field (its padding) is the field's,
+    // as on Linux and Windows: it takes the focus there, from a click as it
+    // goes down and from a tap as the finger lifts, as on the field itself.
+    const field = this.viewOf(e.target)?._field;
+    if (field && e.button === 0) {
+      e.preventDefault();
+      if (!document.hasFocus()) window.focus();
+      field.focus();
+      return;
+    }
     if (this.lastPointer === "touch" && !(this.pressFocus && this.pressFocus === document.activeElement)) return;
     e.preventDefault();
     // Which would also keep the keys from an app in an iframe.
@@ -10252,6 +10569,8 @@ class Player {
     this.lastPointer = e.pointerType;
     // The field this press makes the app focus, if any (`mouseDown`).
     this.pressFocus = null;
+    // A field's press that waited for a focus that never came (`pressOut`).
+    this.dropFieldPress();
     // A press without a move still holds a button: a modifier key then
     // fires no hover move (`modifiersChanged`).
     if (e.pointerType === "mouse") this.hoverButtons = e.buttons;
@@ -10274,7 +10593,8 @@ class Player {
     }
     const target = this.viewOf(e.target);
     if (!target) return;
-    const isField = e.target.classList?.contains("nsh-field");
+    // A press anywhere on an input (its field or the padding around it).
+    const field = target._field ?? null;
     const chain = this.ancestors(target);
     // Its positions are in the coordinates of the root view it went down on.
     const layer = this.windowLayer(e.target);
@@ -10283,8 +10603,8 @@ class Player {
     // the scroll bar do: dragging the content is a touchscreen's way);
     // touches scroll natively, except in zoomable views, which pan and
     // pinch here.
-    const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
-    const link = isField ? null : this.linkPress(e.target, target);
+    const scrollView = field ? null : chain.find((v) => v._kind === "scroll") ?? null;
+    const link = field ? null : this.linkPress(e.target, target);
     // An edge pan starts only from its edge of the page (of the window for
     // a dialog over it): away from it, neither of its pans does.
     const [w, h] = layer ? [innerWidth, innerHeight] : [this.root.clientWidth, this.root.clientHeight];
@@ -10293,8 +10613,14 @@ class Player {
       x, y, layer, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       pointerType: e.pointerType,
       pressure: e.pressure, tiltX: e.tiltX || 0, tiltY: e.tiltY || 0,
+      ...penButtons(e),
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
-      ...(isField ? { press: null } : link ? { press: link } : this.pickPress(chain)),
+      // A text field takes its own presses (the caret, a selection, the
+      // focus), on it or on the padding around it: its input hears them as
+      // a press when it listens, as on Linux and Windows, but no view
+      // around it does.
+      ...(field ? this.pickPress([target]) : link ? { press: link } : this.pickPress(chain)),
+      field,
       // What presses report: the modifier keys at the press and its clicks.
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
       clicks: e.pointerType === "mouse" ? this.clickCount(x, y) : 1,
@@ -10316,8 +10642,9 @@ class Player {
     if (p.press) this.pressIn(p);
     for (const v of p.states) this.setState(v, PRESSED, true);
     // A field in a draggable view still takes focus: preventing the default
-    // keeps the browser from focusing it.
-    if ((p.scroll || p.pan) && !isField) e.preventDefault();
+    // would keep the browser from focusing it (and, around the field, keep
+    // the mouse events that do from coming).
+    if ((p.scroll || p.pan) && !field) e.preventDefault();
   }
 
   /** The press of the views in `chain` (innermost first): `{ press,
@@ -10374,7 +10701,18 @@ class Player {
     p.pressed = false;
     clearTimeout(p.longTimer);
     if (el._events.has("onPressOut")) this.event(el._id, "onPressOut", this.pressPayload(p));
-    if (inside && !p.long && el._events.has("onPress")) this.event(el._id, "onPress", this.pressPayload(p));
+    if (!inside || p.long || !el._events.has("onPress")) return;
+    const payload = this.pressPayload(p);
+    // Linux and Windows report a field's press after the focus it gives. A
+    // click focuses it as it goes down; a touch only with the mouse events
+    // the browser makes of it once the finger lifts: its press waits for
+    // that focus (or the click that follows, should the focus not come).
+    const field = p.field;
+    if (field && p.pointerType !== "mouse" && document.activeElement !== field) {
+      this.awaitFieldFocus(field, () => this.event(el._id, "onPress", payload));
+    } else {
+      this.event(el._id, "onPress", payload);
+    }
   }
 
   /** The payload of pointer `p`'s press events, `{ position, pagePosition,
@@ -10443,6 +10781,12 @@ class Player {
     p.pressure = e.pressure;
     p.tiltX = e.tiltX || 0;
     p.tiltY = e.tiltY || 0;
+    Object.assign(p, penButtons(e));
+    // The samples the browser merged into this move, but its own.
+    p.coalesced = (e.getCoalescedEvents?.() ?? []).slice(0, -1).map((c) => {
+      const [cx, cy] = this.point(c, p.layer);
+      return { pageX: cx, pageY: cy, pressure: c.pressure, tiltX: c.tiltX || 0, tiltY: c.tiltY || 0, time: c.timeStamp };
+    });
     this.track(p, now);
     const tx = x - p.startX;
     const ty = y - p.startY;
@@ -10804,4 +11148,11 @@ class Player {
     if (t.el._gestures?.rotation) this.call((w) => w.nsh_transform_gesture(t.el._id, 1, 2, rotation));
     this.pointers.clear();
   }
+}
+
+/** A pen's eraser end (the DOM's eraser button, `buttons & 32`) and held
+ * barrel button (`buttons & 2`) in pointer event `e`. */
+function penButtons(e) {
+  const pen = e.pointerType === "pen";
+  return { eraser: pen && (e.buttons & 32) !== 0, barrel: pen && (e.buttons & 2) !== 0 };
 }

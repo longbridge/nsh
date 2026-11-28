@@ -254,9 +254,23 @@ pub(crate) fn append_clipped(
         }
     };
     let (bottom, right) = (bottom.max(top), right.max(left));
-    plain(rect(0.0, top, s.w, bottom));
-    plain(rect(left, 0.0, right, top));
-    plain(rect(left, bottom, right, s.h));
+    // The box's own edges off device pixels: a rectangle clip there is cut
+    // to whole pixels by some renderers (GL scissors), dropping the
+    // partially covered row or column the path keeps. The bands stop at the
+    // last whole device pixel inside the box; the thin strip beyond it is
+    // masked with the path like the corners.
+    let inner = |v: f32, o: f32, up: bool| {
+        let d = (o + v) * k;
+        let d = if up { d.ceil() } else { d.floor() };
+        d / k - o
+    };
+    let x0 = inner(0.0, ox, true).clamp(0.0, left);
+    let x1 = inner(s.w, ox, false).clamp(right, s.w);
+    let y0 = inner(0.0, oy, true).clamp(0.0, top);
+    let y1 = inner(s.h, oy, false).clamp(bottom, s.h);
+    plain(rect(x0, top, x1, bottom));
+    plain(rect(left, y0, right, top));
+    plain(rect(left, bottom, right, y1));
     let path = s.path();
     // The corners' outer sides reach past the box: there the path alone
     // antialiases the edge, not the path and the clip twice over.
@@ -266,6 +280,10 @@ pub(crate) fn append_clipped(
         rect(right, -o, s.w + o, top),
         rect(right, bottom, s.w + o, s.h + o),
         rect(-o, bottom, left, s.h + o),
+        rect(-o, top, x0, bottom).filter(|_| x0 > 0.0),
+        rect(x1, top, s.w + o, bottom).filter(|_| x1 < s.w),
+        rect(left, -o, right, y0).filter(|_| y0 > 0.0),
+        rect(left, y1, right, s.h + o).filter(|_| y1 < s.h),
     ]
     .into_iter()
     .flatten()
@@ -315,7 +333,20 @@ struct ContinuousShadow {
     inset: bool,
 }
 
+/// How long a resized shadow's size holds still before it is baked.
+const SETTLED: std::time::Duration = std::time::Duration::from_millis(150);
+
 impl ContinuousShadow {
+    /// The same shadow of a box of another size.
+    fn resized(&self, other: &Self) -> bool {
+        self.inset == other.inset
+            && self.color == other.color
+            && self.params == other.params
+            && self.shape.radii == other.shape.radii
+            && self.shape.continuous == other.shape.continuous
+            && (self.shape.w != other.shape.w || self.shape.h != other.shape.h)
+    }
+
     fn append(self, snapshot: &gtk::Snapshot, widget: &gtk::Widget) {
         // A retained BlurNode still runs its GPU passes on every snapshot.
         // Render immutable decoration once, without downloading its pixels.
@@ -323,6 +354,9 @@ impl ContinuousShadow {
         // movement and ancestor opacity are applied by the parent snapshot.
         thread_local! {
             static SHADOWS: RefCell<VecDeque<(ContinuousShadow, f32, gsk::RenderNode, usize)>> =
+                const { RefCell::new(VecDeque::new()) };
+            /// Shadows recently drawn without a baked image.
+            static SEEN: RefCell<VecDeque<(ContinuousShadow, f32)>> =
                 const { RefCell::new(VecDeque::new()) };
         }
         let native = widget.native();
@@ -358,6 +392,56 @@ impl ContinuousShadow {
                 let entry = shadows.remove(ix).unwrap();
                 snapshot.append_node(&entry.2);
                 shadows.push_front(entry);
+                return;
+            }
+            // Baking renders offscreen and waits for it on the main thread
+            // (a window-sized shadow takes ~20 ms). A resizing view's shadow
+            // has a new shape every frame and would be baked every frame,
+            // never reused. While the same shadow was just drawn at another
+            // size, an outer shadow is GSK's outset shadow of the
+            // round-cornered box, which GSK draws from a cached nine slice
+            // at any size (blurring the continuous shape is a full-size
+            // offscreen per frame); the corners differ by a few blurred
+            // pixels. A redraw once the size holds still bakes the exact one.
+            let resizing = SEEN.with_borrow_mut(|seen| {
+                if let Some(ix) = seen
+                    .iter()
+                    .position(|(key, cached_scale)| *key == self && *cached_scale == scale)
+                {
+                    seen.remove(ix);
+                    return false;
+                }
+                let resizing = seen
+                    .iter()
+                    .any(|(key, cached_scale)| *cached_scale == scale && key.resized(&self));
+                if seen.len() >= 64 {
+                    seen.pop_back();
+                }
+                seen.push_front((self.clone(), scale));
+                resizing
+            });
+            if resizing {
+                if self.inset {
+                    draw_continuous_inset_shadow(snapshot, &self.shape, &self.color, self.params);
+                } else {
+                    let s = &self.shape;
+                    let corner = |(h, v): (f32, f32)| graphene::Size::new(h, v);
+                    let outline = gsk::RoundedRect::new(
+                        graphene::Rect::new(s.x, s.y, s.w, s.h),
+                        corner(s.radii[0]),
+                        corner(s.radii[1]),
+                        corner(s.radii[2]),
+                        corner(s.radii[3]),
+                    );
+                    let (dx, dy, spread, blur) = self.params;
+                    snapshot.append_outset_shadow(&outline, &self.color, dx, dy, spread, blur);
+                }
+                let weak = widget.downgrade();
+                gtk::glib::timeout_add_local_once(SETTLED, move || {
+                    if let Some(widget) = weak.upgrade() {
+                        widget.queue_draw();
+                    }
+                });
                 return;
             }
             let drawing = gtk::Snapshot::new();
@@ -1305,6 +1389,35 @@ mod tests {
                     previous = Some(cached);
                 }
             }
+            // A resizing view's shadow has a new shape every frame: after the
+            // first size it is GSK's outset shadow, never an offscreen render
+            // per frame; drawn again at a size that held still, it is baked.
+            let resized = |width: f32| ContinuousShadow {
+                shape: Shape::new((0.0, 0.0, width, 100.0), [20.0; 4], true),
+                color: rgba(RED),
+                params: (-3.0, 0.0, 0.0, 18.0),
+                inset: false,
+            };
+            let node = |key: ContinuousShadow| {
+                let drawing = gtk::Snapshot::new();
+                key.append(&drawing, view.upcast_ref());
+                drawing.to_node().unwrap()
+            };
+            assert_eq!(
+                node(resized(120.0)).node_type(),
+                gsk::RenderNodeType::TextureNode
+            );
+            for step in 1..8 {
+                let width = 120.0 + step as f32 * 7.5;
+                assert_eq!(
+                    node(resized(width)).node_type(),
+                    gsk::RenderNodeType::OutsetShadowNode
+                );
+            }
+            assert_eq!(
+                node(resized(172.5)).node_type(),
+                gsk::RenderNodeType::TextureNode
+            );
             // An ancestor/widget scale must bypass an otherwise matching
             // image, so zooming does not magnify a low-resolution shadow.
             view.allocate(200, 100, -1, Some(gsk::Transform::new().scale(1.5, 1.5)));
@@ -1330,8 +1443,22 @@ mod tests {
             let window = gtk::Window::new();
             window.set_default_size(200, 100);
             window.present();
-            assert!(crate::gtk_test::wait_until(|| window.renderer().is_some()));
-            let renderer = window.renderer().unwrap();
+            assert!(crate::gtk_test::wait_until(|| window.surface().is_some()));
+            let surface = window.surface().unwrap();
+            // The renderers whose path mask antialiases a fractional edge, not
+            // the window's: GTK picks the older GL renderer for software GL
+            // (llvmpipe), which draws a fill node as a cairo texture placed
+            // with hard edges, so on a half device pixel the reference fills
+            // the row the box covers half while a plain clip leaves it out.
+            // Cairo opens on every display; NGL, GTK's renderer on GPUs,
+            // wherever OpenGL does.
+            let cairo = gsk::CairoRenderer::new().upcast::<gsk::Renderer>();
+            cairo.realize(Some(&surface)).expect("the cairo renderer");
+            let ngl = gsk::NglRenderer::new().upcast::<gsk::Renderer>();
+            let renderers = match ngl.realize(Some(&surface)) {
+                Ok(()) => vec![cairo, ngl],
+                Err(_) => vec![cairo],
+            };
             // A translucent gradient, so a doubly drawn or missed seam shows.
             let content = || {
                 let s = gtk::Snapshot::new();
@@ -1346,55 +1473,67 @@ mod tests {
                 );
                 s.to_node().unwrap()
             };
-            for (scale, origin, radii) in [
-                (1.0, (0.0, 0.0), [20.0; 4]),
-                (1.6, (13.3, 7.7), [20.0; 4]),
-                (2.0, (0.5, 0.25), [24.0, 0.0, 12.0, 60.0]),
-                (1.6, (0.0, 0.0), [100.0; 4]),
-            ] {
-                let shape = Shape::new((0.0, 0.0, 300.0, 180.0), radii, true);
-                let render = |draw: &dyn Fn(&gtk::Snapshot)| {
-                    let drawing = gtk::Snapshot::new();
-                    drawing.scale(scale, scale);
-                    drawing.translate(&graphene::Point::new(origin.0, origin.1));
-                    draw(&drawing);
-                    let bounds = graphene::Rect::new(
-                        0.0,
-                        0.0,
-                        ((origin.0 + 300.0) * scale).ceil(),
-                        ((origin.1 + 180.0) * scale).ceil(),
+            for renderer in &renderers {
+                for (scale, origin, radii) in [
+                    (1.0, (0.0, 0.0), [20.0; 4]),
+                    (1.6, (13.3, 7.7), [20.0; 4]),
+                    (2.0, (0.5, 0.25), [24.0, 0.0, 12.0, 60.0]),
+                    (1.6, (0.0, 0.0), [100.0; 4]),
+                ] {
+                    let shape = Shape::new((0.0, 0.0, 300.0, 180.0), radii, true);
+                    let render = |draw: &dyn Fn(&gtk::Snapshot)| {
+                        let drawing = gtk::Snapshot::new();
+                        drawing.scale(scale, scale);
+                        drawing.translate(&graphene::Point::new(origin.0, origin.1));
+                        draw(&drawing);
+                        let bounds = graphene::Rect::new(
+                            0.0,
+                            0.0,
+                            ((origin.0 + 300.0) * scale).ceil(),
+                            ((origin.1 + 180.0) * scale).ceil(),
+                        );
+                        let texture =
+                            renderer.render_texture(drawing.to_node().unwrap(), Some(&bounds));
+                        let mut downloader = gdk::TextureDownloader::new(&texture);
+                        downloader.set_format(gdk::MemoryFormat::R8g8b8a8Premultiplied);
+                        downloader.download_bytes()
+                    };
+                    let node = content();
+                    let (expected, stride) = render(&|s| {
+                        s.push_fill(&shape.path(), gsk::FillRule::Winding);
+                        s.append_node(&node);
+                        s.pop();
+                    });
+                    let clip = PiecewiseClip {
+                        shape,
+                        origin,
+                        scale,
+                    };
+                    let (actual, _) = render(&|s| append_clipped(s, &clip, &node));
+                    let (at, error) = actual
+                        .iter()
+                        .zip(expected.iter())
+                        .map(|(a, b)| a.abs_diff(*b))
+                        .enumerate()
+                        .max_by_key(|&(_, error)| error)
+                        .unwrap();
+                    let i = at / 4 * 4;
+                    // Seams or doubled corners differ by 30 levels and more;
+                    // the path mask itself covers the box's outer edge pixels
+                    // a few levels short of exact (76 for 76.5 at half
+                    // coverage).
+                    assert!(
+                        error <= 10,
+                        "{}: scale {scale}, radii {radii:?}: differs by {error} channel \
+                         levels at ({}, {}): {:?} for {:?}",
+                        renderer.type_().name(),
+                        at % stride / 4,
+                        at / stride,
+                        &actual[i..i + 4],
+                        &expected[i..i + 4],
                     );
-                    let texture =
-                        renderer.render_texture(drawing.to_node().unwrap(), Some(&bounds));
-                    let mut downloader = gdk::TextureDownloader::new(&texture);
-                    downloader.set_format(gdk::MemoryFormat::R8g8b8a8Premultiplied);
-                    downloader.download_bytes().0
-                };
-                let node = content();
-                let expected = render(&|s| {
-                    s.push_fill(&shape.path(), gsk::FillRule::Winding);
-                    s.append_node(&node);
-                    s.pop();
-                });
-                let clip = PiecewiseClip {
-                    shape,
-                    origin,
-                    scale,
-                };
-                let actual = render(&|s| append_clipped(s, &clip, &node));
-                let error = actual
-                    .iter()
-                    .zip(expected.iter())
-                    .map(|(a, b)| a.abs_diff(*b))
-                    .max()
-                    .unwrap();
-                // Seams or doubled corners differ by 30 levels and more; the
-                // path mask itself covers the box's outer edge pixels a few
-                // levels short of exact (76 for 76.5 at half coverage).
-                assert!(
-                    error <= 10,
-                    "scale {scale}, radii {radii:?}: differs by {error} channel levels"
-                );
+                }
+                renderer.unrealize();
             }
             window.destroy();
         });

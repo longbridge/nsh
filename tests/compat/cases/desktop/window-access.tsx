@@ -1,12 +1,16 @@
 // A case of the API's test suite (docs/dev/compatibility.md): the `windows`
 // capability, checked natively. This app grants four kinds and four open
 // windows at once, its first window included: an overlay (a kind it does not
-// grant, and never granted unless declared) and a window beyond the fourth
+// grant, and never granted unless declared), a window of a granted kind that
+// lets the pointer through where it has no views (`pointerEvents:
+// "box-none"`, the same grant as an overlay's) and a window beyond the fourth
 // reject with `ERR_ACCESS_DENIED` (`permission: "windows"`, `resource`: the
 // window's id); `currentWindow()` outside a component (a handler) throws a
-// `TypeError`.
-import { Text, View, signal } from "nsh";
-import { Window, currentWindow } from "nsh/desktop";
+// `TypeError`, while `titleBar()` and `windowState()` safely fall back to the
+// open `"main"` window (and an effect reading them while a window closes does
+// not throw).
+import { Text, View, effect, signal } from "nsh";
+import { Window, currentWindow, titleBar, windowState } from "nsh/desktop";
 
 const describe = (e: unknown) => {
   const error = e as { name?: string; code?: string; permission?: string; resource?: string };
@@ -30,6 +34,19 @@ function App() {
         }}
       >
         <Text>Overlay</Text>
+      </View>
+      <View
+        testID="box-none"
+        onPress={() => {
+          try {
+            Window.open(() => <Text>Palette</Text>, { id: "palette", kind: "popup", transparent: true, pointerEvents: "box-none" });
+            result.set("box-none opened");
+          } catch (e) {
+            result.set(`box-none ${describe(e)}`);
+          }
+        }}
+      >
+        <Text>Box none</Text>
       </View>
       <View
         testID="many"
@@ -60,12 +77,29 @@ function App() {
       <View
         testID="outside"
         onPress={() => {
+          let current = "returned";
           try {
             currentWindow();
-            result.set("outside returned");
           } catch (e) {
-            result.set(`outside ${describe(e)}`);
+            current = describe(e);
           }
+          const bar = titleBar();
+          const state = windowState();
+          const transient = Window.open(() => {
+            effect(() => {
+              void windowState();
+              void titleBar();
+            });
+            return <Text>Transient</Text>;
+          }, { id: "transient", kind: "popup" });
+          transient.close();
+          Promise.resolve().then(() => {
+            const asyncBar = titleBar();
+            const asyncState = windowState();
+            result.set(
+              `outside ${current}, bar ${bar.height} ${asyncBar.height}, state ${state} ${asyncState}`,
+            );
+          });
         }}
       >
         <Text>Outside</Text>

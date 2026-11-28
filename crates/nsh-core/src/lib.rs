@@ -13,7 +13,6 @@ pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
 pub mod audio;
-pub mod auth_session;
 pub mod canvas;
 pub mod clipboard;
 pub mod color;
@@ -29,6 +28,7 @@ pub mod file_dialog;
 pub mod file_type;
 pub mod filesystem;
 pub mod geometry;
+pub mod gpu;
 mod grid;
 pub mod host_channel;
 pub mod i18n;
@@ -62,7 +62,6 @@ pub mod scroll;
 pub mod selection;
 pub mod shader;
 pub mod shape;
-pub mod share;
 pub mod single_instance;
 pub mod storage;
 mod style;
@@ -116,7 +115,10 @@ pub use text::ApproxPrepared;
 
 pub use crate::{
     color::{Hsla, Rgba},
-    core::{ApplyError, Core, ListBind, ListScrollPosition, MAX_TREE_DEPTH, Measurement},
+    core::{
+        ApplyError, Core, ListBind, ListScrollPosition, MAX_TREE_DEPTH, Measurement,
+        set_part_requester,
+    },
     effects::{
         BackdropMaterial, BlendMode, BoxShadow, ClipInset, ColorStop, Cursor, Effects, Filter,
         GlassEffect, Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes,
@@ -133,7 +135,7 @@ pub use crate::{
         VideoProps, ViewKind, WebProps,
     },
     ops::{
-        AutoCapitalize, AutoFill, BackPhase, BackProgressEvent, CellSlot, Command,
+        AutoCapitalize, AutoFill, BackPhase, BackProgressEvent, CellSlot, CoalescedSample, Command,
         ContextMenuEvent, Dialog, DialogButton, DialogButtonStyle, DialogInput, EditAction,
         EventKind, EventMask, EventPayload, FileContents, FpsMode, Haptic, HapticImpact,
         HapticNotification, HeaderItem, HeaderItemContent, HeaderSlot, HeaderSystemItem,
@@ -165,9 +167,9 @@ pub use crate::{
     },
     text::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttachmentCopyText,
-        AttributedText, BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId,
-        TextAttachment, TextBackground, TextEngine, TextGeometry, TextLayout, TextLine, TextLink,
-        TextPosition, TextSpan, font_data, font_family, keep_font,
+        AttributedText, BackgroundBox, FontExtent, LinePiece, LinkHref, ResolvedTextStyle,
+        SpanTestId, TextAttachment, TextBackground, TextEngine, TextGeometry, TextLayout, TextLine,
+        TextLink, TextPosition, TextSpan, font_data, font_family, keep_font,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,

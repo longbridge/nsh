@@ -23,8 +23,8 @@
 //! }
 //! ```
 //!
-//! `share` lets the app show the system's share sheet (`Share` of `nsh`,
-//! [`crate::share`]): what it shares leaves the app where the user sends
+//! `share` lets the app show the system's share sheet (`Share` of
+//! `nsh-extra`, which checks it): what it shares leaves the app where the user sends
 //! it, and the files it shares are also checked against `fs.read`.
 //! `openUrl` lets the app open URLs outside it (`openUrl` of `nsh/device`,
 //! [`crate::open_url`]: the browser, the mail or phone app, other apps'
@@ -40,7 +40,10 @@
 //! pages' own subresources are the web content's business); its `input`
 //! lets a web view's ref give the page trusted input (`sendInput`), which
 //! carries user activation and is granted only when declared, also for
-//! apps without a declaration. `host` lists
+//! apps without a declaration; its `runtimeOrigin` lets a web view's
+//! `allowOrigin` prop add one origin, decided while the app runs, to the
+//! hosts that web view may show ([`WebOrigin`]), also granted only when
+//! declared. `host` lists
 //! the functions of the embedding app `nsh/host` may call: names (1 to 128
 //! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
 //! name), or prefixes of them ending in `*` (`true`: all of them); the
@@ -640,6 +643,10 @@ pub struct Capabilities {
     /// Web views may take trusted input (`sendInput`, `webview.input`):
     /// never without a declaration ([`Capabilities::all`] leaves it off).
     pub webview_input: bool,
+    /// A web view's `allowOrigin` adds one origin to the hosts it may show
+    /// (`webview.runtimeOrigin`): never without a declaration
+    /// ([`Capabilities::all`] leaves it off).
+    pub webview_runtime_origin: bool,
     /// What web views' pages may capture (`webview.media`): never without a
     /// declaration ([`Capabilities::all`] leaves it empty).
     pub webview_media: Vec<WebMedia>,
@@ -650,7 +657,7 @@ pub struct Capabilities {
     /// The app may show the system's picker (`nsh/picker`): the files the
     /// user picks in it reach the app.
     pub picker: bool,
-    /// The app may show the system's share sheet (`Share` of `nsh`): the
+    /// The app may show the system's share sheet (`Share` of `nsh-extra`): the
     /// text, links and files it shares leave the app where the user sends
     /// them.
     pub share: bool,
@@ -697,7 +704,8 @@ pub struct WindowsGrant {
     /// How many windows it may have open at once, its first window included;
     /// `None`: any number.
     pub max: Option<u32>,
-    /// Overlays and click-through windows (`pointerEvents: "none"`).
+    /// Overlays and click-through windows (`pointerEvents: "none"` or
+    /// `"box-none"`).
     pub overlay: bool,
 }
 
@@ -1075,6 +1083,144 @@ fn read_url(url: &str) -> Result<UrlParts<'_>, Unread> {
     })
 }
 
+/// One origin a web view may show besides the hosts `webview.hosts`
+/// grants: its `allowOrigin`, for an origin known only while the app runs
+/// (a server the user named, a computer on the local network). Exact:
+/// the same scheme (`http` or `https`), the same host (ASCII, compared in
+/// lower case, never a subdomain or a suffix) and the same port (the
+/// scheme's default when none is written).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WebOrigin {
+    scheme: String,
+    host: String,
+    port: u16,
+}
+
+impl WebOrigin {
+    /// Reads `origin`, `scheme://host[:port]` with `http` or `https` and
+    /// nothing else: no user info, no path but `/`, no query or fragment,
+    /// an ASCII host (IDNA hosts are written in punycode) and no wildcard.
+    pub fn parse(origin: &str) -> Result<Self, String> {
+        let refused = |why: &str| Err(format!("`{origin}` is not an origin: {why}"));
+        let Some((scheme, rest)) = origin.split_once("://") else {
+            return refused("it is not `http://host` or `https://host`");
+        };
+        let scheme = scheme.to_ascii_lowercase();
+        if !matches!(scheme.as_str(), "http" | "https") {
+            return refused("its scheme is not http or https");
+        }
+        let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let (authority, after) = rest.split_at(end);
+        if !matches!(after, "" | "/") {
+            return refused("it has a path, a query or a fragment");
+        }
+        if authority.contains('@') {
+            return refused("it has user info");
+        }
+        if !authority.is_ascii() || authority.contains('*') {
+            return refused("its host is not an ASCII host name or address");
+        }
+        let Ok(parts) = read_url(origin) else {
+            return refused("its host or port cannot be read");
+        };
+        let port = parts.port.unwrap_or(default_port(&scheme));
+        Ok(Self {
+            scheme,
+            host: parts.host,
+            port,
+        })
+    }
+
+    /// Whether `url` is at this origin: its scheme, host and port (the
+    /// scheme's default when it writes none). A `blob:` URL is at the
+    /// origin it embeds; an opaque one (`blob:null/…`) is at none.
+    pub fn contains(&self, url: &str) -> bool {
+        let url = blob_origin(url).unwrap_or(url);
+        read_url(url).is_ok_and(|parts| {
+            parts.scheme == self.scheme
+                && parts.host == self.host
+                && parts.port.unwrap_or(default_port(&parts.scheme)) == self.port
+        })
+    }
+}
+
+/// `scheme://host`, with `:port` when it is not the scheme's default.
+impl std::fmt::Display for WebOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}://{}", self.scheme, self.host)?;
+        if self.port != default_port(&self.scheme) {
+            write!(f, ":{}", self.port)?;
+        }
+        Ok(())
+    }
+}
+
+/// The hosts one web view may show and navigate to, narrower than the
+/// app's grant: its `allowNavigation`, the same host patterns as
+/// `webview.hosts` (`*`, `*.example.com`, a host name). It only takes
+/// away: an `http` or `https` URL must match one of them as well as be
+/// granted by the app's capabilities, and an empty list refuses every web
+/// page. URLs of other schemes (`about:blank`, the app's own `file://`
+/// page and URL schemes) are left to the app's rules. The check runs where
+/// the platform decides a navigation, before its request is made.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WebHosts(Vec<HostPattern>);
+
+impl WebHosts {
+    /// Reads `patterns`, failing on the first that is not a host pattern.
+    pub fn parse<S: AsRef<str>>(patterns: &[S]) -> Result<Self, String> {
+        patterns
+            .iter()
+            .map(|p| HostPattern::new(p.as_ref()))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Self)
+    }
+
+    /// Whether `url` stays within these hosts: true for a URL that is not
+    /// `http` or `https`.
+    pub fn allows(&self, url: &str) -> bool {
+        let url = blob_origin(url).unwrap_or(url);
+        let scheme = url.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
+        if !matches!(scheme.as_deref(), Some("http" | "https")) {
+            return true;
+        }
+        match read_url(url) {
+            Ok(parts) => self.0.iter().any(|h| h.matches(&parts.host)),
+            Err(Unread::Ambiguous(_)) => self.0.iter().any(HostPattern::is_any),
+            Err(Unread::NotUrl) => false,
+        }
+    }
+
+    /// The patterns, as written (lower case).
+    pub fn patterns(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(HostPattern::as_str)
+    }
+}
+
+/// The patterns one per line, which [`WebHosts::parse`] reads back after
+/// splitting the lines.
+impl std::fmt::Display for WebHosts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, p) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str("\n")?;
+            }
+            f.write_str(p.as_str())?;
+        }
+        Ok(())
+    }
+}
+
+/// The port a URL of `scheme` uses when it writes none (0: none).
+fn default_port(scheme: &str) -> u16 {
+    match scheme {
+        "http" => 80,
+        "https" => 443,
+        _ => 0,
+    }
+}
+
 /// The origin a `blob:` URL embeds (`blob:<origin>/<id>`, as
 /// `URL.createObjectURL` writes it), when `url` is one. A blob's origin is
 /// its creator's: a browser only makes a blob URL in the origin of the
@@ -1270,7 +1416,7 @@ impl Capabilities {
             if check(
                 webview,
                 "capabilities.webview",
-                &["hosts", "input", "media"],
+                &["hosts", "input", "media", "runtimeOrigin"],
                 "capabilities.webview",
             )? {
                 caps.webview = Some(match webview.get("hosts") {
@@ -1281,6 +1427,11 @@ impl Capabilities {
                     caps.webview_input = input
                         .as_bool()
                         .ok_or("capabilities.webview.input must be a boolean")?;
+                }
+                if let Some(runtime_origin) = webview.get("runtimeOrigin") {
+                    caps.webview_runtime_origin = runtime_origin
+                        .as_bool()
+                        .ok_or("capabilities.webview.runtimeOrigin must be a boolean")?;
                 }
                 if let Some(media) = webview.get("media") {
                     caps.webview_media = strings(media, "capabilities.webview.media")?
@@ -1573,6 +1724,9 @@ impl Capabilities {
             // Only when granted: older runtimes read what newer signers write.
             if self.webview_input {
                 w.insert("input".into(), true.into());
+            }
+            if self.webview_runtime_origin {
+                w.insert("runtimeOrigin".into(), true.into());
             }
             if !self.webview_media.is_empty() {
                 let media = self.webview_media.iter().map(|m| m.as_str().into());
@@ -2362,6 +2516,34 @@ impl Access {
         }
     }
 
+    /// Whether a web view may show (or navigate to) `url`, granted by
+    /// `webview.hosts` ([`Self::allows_webview`]) or, when the app may add
+    /// one at run time ([`Self::allows_runtime_origin`]), at `origin`, the
+    /// web view's own `allowOrigin`.
+    pub fn allows_webview_with(&self, url: &str, origin: Option<&WebOrigin>) -> bool {
+        self.allows_webview(url)
+            || origin.is_some_and(|o| self.allows_runtime_origin() && o.contains(url))
+    }
+
+    /// [`Self::allows_webview_with`], narrowed by the web view's own
+    /// `allowNavigation` (`hosts`, none: not narrowed). What a web view's
+    /// backend checks each top-level navigation with.
+    pub fn allows_webview_in(
+        &self,
+        url: &str,
+        origin: Option<&WebOrigin>,
+        hosts: Option<&WebHosts>,
+    ) -> bool {
+        hosts.is_none_or(|h| h.allows(url)) && self.allows_webview_with(url, origin)
+    }
+
+    /// Whether a web view's `allowOrigin` may add an origin to the hosts
+    /// it may show (`webview.runtimeOrigin`): declared and granted, never
+    /// by default.
+    pub fn allows_runtime_origin(&self) -> bool {
+        self.each(|c| c.webview.is_some() && c.webview_runtime_origin)
+    }
+
     /// Whether a web view's ref may give its page trusted input
     /// (`sendInput`): declared and granted, never by default.
     pub fn allows_web_input(&self) -> bool {
@@ -2463,7 +2645,7 @@ impl Access {
     }
 
     /// Whether the app may show the system's share sheet (`Share` of
-    /// `nsh`).
+    /// `nsh-extra`, which checks it).
     pub fn allows_share(&self) -> bool {
         self.each(|c| c.share)
     }
@@ -2636,6 +2818,12 @@ mod tests {
             all.check_window(WindowKind::Normal, &click_through, 0)
                 .is_err()
         );
+        // Through where nothing in it takes the pointer: the same grant.
+        let box_none = WindowAttributes {
+            pointer_events: Some(WindowPointerEvents::BoxNone),
+            ..Default::default()
+        };
+        assert!(all.check_window(WindowKind::Popup, &box_none, 0).is_err());
         // Declared without `windows`: none.
         let declared = |json: &str| Access {
             declared: caps(json),
@@ -2661,6 +2849,11 @@ mod tests {
         assert!(
             overlay
                 .check_window(WindowKind::Overlay, &click_through, 0)
+                .is_ok()
+        );
+        assert!(
+            overlay
+                .check_window(WindowKind::Popup, &box_none, 0)
                 .is_ok()
         );
         // `set()` keeps what is granted and leaves out the rest.
@@ -3192,6 +3385,131 @@ mod tests {
             granted: Some(caps(r#"{ "host": ["bridge.*"] }"#)),
         };
         assert!(narrowed.allows_host("bridge.call") && !narrowed.allows_host("getUserInfo"));
+    }
+
+    #[test]
+    fn a_runtime_origin_is_exact() {
+        let o = |s: &str| WebOrigin::parse(s).unwrap();
+        let lan = o("http://192.168.1.5:9876");
+        for url in [
+            "http://192.168.1.5:9876/session-page/T/index.html",
+            "http://192.168.1.5:9876",
+            "HTTP://192.168.1.5:9876/x",
+            "blob:http://192.168.1.5:9876/6f3c2f0e",
+        ] {
+            assert!(lan.contains(url), "{url}");
+        }
+        for url in [
+            "http://192.168.1.5:9877/",
+            "https://192.168.1.5:9876/",
+            "http://a.192.168.1.5:9876/",
+            "http://192.168.1.5:9876@evil.com/",
+            "http://192.168.1.5:9876.evil.com/",
+            "blob:null/6f3c2f0e",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "http://192.168.1.5\\@evil.com:9876/",
+        ] {
+            assert!(!lan.contains(url), "{url}");
+        }
+        let named = o("https://Name.Example.net:443");
+        assert_eq!(named.to_string(), "https://name.example.net");
+        assert!(named.contains("https://name.example.net/x"));
+        assert!(named.contains("https://NAME.example.net:443/x"));
+        for url in [
+            "https://evil.name.example.net/",
+            "https://name.example.net.evil.com/",
+            "http://name.example.net/",
+        ] {
+            assert!(!named.contains(url), "{url}");
+        }
+        assert_eq!(o("http://h:80/").to_string(), "http://h");
+        assert_eq!(o("http://[::1]:8080").to_string(), "http://[::1]:8080");
+        for bad in [
+            "http://h/path",
+            "http://h?q",
+            "http://h#f",
+            "http://u@h",
+            "*",
+            "http://*",
+            "ftp://h",
+            "h:80",
+            "http://",
+            "http://h:99999",
+            "http://bücher.example",
+        ] {
+            assert!(WebOrigin::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn allow_navigation_only_narrows_a_web_view() {
+        let access = Access {
+            declared: caps(r#"{ "webview": { "hosts": ["*"] } }"#),
+            granted: None,
+        };
+        let hosts = WebHosts::parse(&["127.0.0.1", "*.localhost"]).unwrap();
+        let ok = |url: &str| access.allows_webview_in(url, None, Some(&hosts));
+        assert!(ok("http://127.0.0.1:8001/"));
+        assert!(ok("http://app.localhost:3000/a"));
+        assert!(ok("blob:http://127.0.0.1:8001/1234"));
+        assert!(!ok("http://127.0.0.1.evil.test:8002/leaked"));
+        assert!(!ok("https://example.com/"));
+        assert!(!ok("http://localhost/"));
+        // Other schemes stay with the app's own rules.
+        assert!(ok("about:blank"));
+        // It never widens what the app grants.
+        let narrow = Access {
+            declared: caps(r#"{ "webview": { "hosts": ["example.com"] } }"#),
+            granted: None,
+        };
+        assert!(!narrow.allows_webview_in("http://127.0.0.1/", None, Some(&hosts)));
+        assert!(narrow.allows_webview_in("https://example.com/", None, None));
+        // An empty list refuses every web page.
+        let none = WebHosts::default();
+        assert!(!access.allows_webview_in("https://example.com/", None, Some(&none)));
+        // Bad patterns do not read; the written form reads back.
+        assert!(WebHosts::parse(&["http://127.0.0.1"]).is_err());
+        let text = hosts.to_string();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(WebHosts::parse(&lines).unwrap(), hosts);
+    }
+
+    #[test]
+    fn a_runtime_origin_needs_an_explicit_grant() {
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let lan = WebOrigin::parse("http://192.168.1.5:9876").unwrap();
+        let page = "http://192.168.1.5:9876/index.html";
+        let declared = r#"{ "webview": { "hosts": ["127.0.0.1"], "runtimeOrigin": true } }"#;
+        assert!(access(declared).allows_runtime_origin());
+        assert!(access(declared).allows_webview_with(page, Some(&lan)));
+        assert!(!access(declared).allows_webview_with(page, None));
+        assert!(access(declared).allows_webview_with("http://127.0.0.1:1/", Some(&lan)));
+        // Not declared: the origin adds nothing, also for an app with every
+        // host's grant (which has the page through `hosts`).
+        let hosts = r#"{ "webview": { "hosts": ["127.0.0.1"] } }"#;
+        assert!(!access(hosts).allows_runtime_origin());
+        assert!(!access(hosts).allows_webview_with(page, Some(&lan)));
+        assert!(!Access::all().allows_runtime_origin());
+        assert!(Access::all().allows_webview_with(page, None));
+        assert!(
+            Capabilities::from_json(&serde_json::json!({ "webview": { "runtimeOrigin": 1 } }))
+                .is_err()
+        );
+        // It round-trips, and the embedding app may withhold it.
+        assert_eq!(
+            Capabilities::from_json(&caps(declared).to_json()),
+            Ok(caps(declared))
+        );
+        let narrowed = Access {
+            declared: caps(declared),
+            granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),
+        };
+        assert!(!narrowed.allows_runtime_origin());
     }
 
     #[test]
@@ -4303,16 +4621,35 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn file_urls_name_their_decoded_path() {
-        assert_eq!(
-            file_url_path("file:///tmp/a%20b.png"),
-            Some(PathBuf::from("/tmp/a b.png"))
-        );
-        assert_eq!(
-            file_url_path("file://localhost/tmp/a.png"),
-            Some(PathBuf::from("/tmp/a.png"))
-        );
         #[cfg(unix)]
-        assert_eq!(file_url_path("file://host/tmp/a.png"), None);
+        {
+            assert_eq!(
+                file_url_path("file:///tmp/a%20b.png"),
+                Some(PathBuf::from("/tmp/a b.png"))
+            );
+            assert_eq!(
+                file_url_path("file://localhost/tmp/a.png"),
+                Some(PathBuf::from("/tmp/a.png"))
+            );
+            assert_eq!(file_url_path("file://host/tmp/a.png"), None);
+        }
+        #[cfg(windows)]
+        {
+            // A `file:` URL there names a drive: a path without one is no
+            // Windows path (this is what the URL standard says, and what
+            // the loaders resolve), and `localhost` is still no host to
+            // refuse.
+            assert_eq!(
+                file_url_path("file:///C:/a%20b.png"),
+                Some(PathBuf::from("C:\\a b.png"))
+            );
+            assert_eq!(
+                file_url_path("file://localhost/C:/a.png"),
+                Some(PathBuf::from("C:\\a.png"))
+            );
+            assert_eq!(file_url_path("file:///tmp/a.png"), None);
+            assert_eq!(file_url_path("file://localhost/tmp/a.png"), None);
+        }
         assert_eq!(file_url_path("not a url"), None);
         assert_eq!(file_url_path("https://a/b"), None);
     }

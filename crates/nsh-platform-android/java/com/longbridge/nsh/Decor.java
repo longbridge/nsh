@@ -464,6 +464,16 @@ final class Decor extends Drawable {
         backdrop.setBlur(px);
     }
 
+    /** Whether this draws a blurred backdrop and nothing else. */
+    boolean onlyBackdrop() {
+        if (backdrop == null || Color.alpha(fill) > 0 || gradients.length > 0 || hasBorder()) return false;
+        if (outlineWidth > 0 && Color.alpha(outlineColor) > 0) return false;
+        for (int color : boxShadowColors) {
+            if (Color.alpha(color) > 0) return false;
+        }
+        return true;
+    }
+
     /** Distance shadow casters are moved away to draw only their shadows. */
     private static final float AWAY = 1 << 14;
     private final Path shadowPath = new Path();
@@ -1146,9 +1156,16 @@ final class Decor extends Drawable {
         if (view.getVisibility() != visibility) view.setVisibility(visibility);
     }
 
-    /** Clips `view` to the rounded shape (outline clipping where possible). */
+    /**
+     * Clips `view` to the rounded shape (outline clipping where possible).
+     * A box with continuous corners does not clip by outline: their outline
+     * is a path of cubics, and the GPU clips to such a path through a
+     * coverage mask made for each draw inside it, every frame
+     * (`Box.drawChildren` clips its children instead).
+     */
     void clip(View view, boolean clip) {
-        view.setClipToOutline(clip && (uniformRadius() || Build.VERSION.SDK_INT >= 33));
+        boolean byLayer = continuous && view instanceof Box;
+        view.setClipToOutline(clip && !byLayer && (uniformRadius() || Build.VERSION.SDK_INT >= 33));
         view.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View v, Outline outline) {
@@ -1174,9 +1191,12 @@ final class Decor extends Drawable {
         view.invalidateOutline();
     }
 
-    /** Odd corners before API 33 cannot clip by outline: clip in dispatchDraw. */
+    /**
+     * A box's odd corners before API 33 cannot clip by outline, and its
+     * continuous ones do not ({@link #clip}): it clips in dispatchDraw.
+     */
     boolean needsPathClip(boolean clip) {
-        return clip && !uniformRadius() && Build.VERSION.SDK_INT < 33;
+        return clip && (continuous || (!uniformRadius() && Build.VERSION.SDK_INT < 33));
     }
 
     @Override

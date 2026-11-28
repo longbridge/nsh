@@ -7,34 +7,15 @@ demo: el-number-input
 
 # NumberInput
 
-数字输入框存放一个用户输入或步进的数字：数量、价格、尺寸。它负责自己的行为：输入框只接受数字或正在输入成数字的文本（`-`、`1.`），拒绝其他内容，其他键盘输入的数字和符号也能识别；
-按钮、Up 和 Down 以及屏幕阅读器的增加和减少操作按 `step` 步进数字，保留小数位，并止于 `min` 和 `max`；离开输入框时，输入的数字会被限制在这个范围内。外观由应用决定：
-`NumberInput` 没有自己的颜色、尺寸、边框、图标或文字。它由减少按钮、夹在应用的 `prefix` 和 `suffix` 之间的输入框、增加按钮组成（或用 `controlsRight` 变成夹在两者之间的输入框和一列放着两个按钮的控件列），
-应用为每个部件设置样式并填充按钮内容。
+数字输入框保存一个由用户输入或步进的数字，比如数量、价格或尺寸。
 
-```rust tabs
-use nsh_base::{number_input, theme};
-use nsh_core::prelude::*;
+`NumberInput` 负责行为：
 
-fn tickets(count: Signal<Option<f64>>) -> impl IntoElement {
-    number_input()
-        .value(move || count.get())
-        .min(1.0)
-        .max(10.0)
-        .accessibility_label("Tickets")
-        .on_change(move |next: &Option<f64>| count.set(*next))
-        .h(px(32.0))
-        .flex_row()
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(move || theme().input)
-        .input_style(|s| s.flex_1().text_center().text_color(move || theme().foreground))
-        .decrement_button_style(|s| s.w(px(32.0)).items_center().justify_center())
-        .increment_button_style(|s| s.w(px(32.0)).items_center().justify_center())
-        .decrement_button(text("−"))
-        .increment_button(text("+"))
-}
-```
+- 输入框只接受数字，或正在输入中的数字文本（`-`、`1.`），拒绝其他内容，包括其他键盘输入的数字和符号。
+- 按钮、Up 和 Down 键，以及屏幕阅读器的增加和减少操作，按 `step` 改变数字，保留 step 的小数位，并止于 `min` 和 `max`。
+- 输入框失去焦点时，输入的数字会被限制在 `min` 和 `max` 之间。
+
+外观由应用决定。`NumberInput` 没有自己的颜色、尺寸、边框、图标或文字。它由减少按钮、夹在 `prefix` 和 `suffix` 之间的输入框、增加按钮组成。设置 `controlsRight` 后，输入框在前，两个按钮竖排在它后面。应用为每个部件设置样式，并填充按钮内容。
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
@@ -65,6 +46,30 @@ mount(() => (
     <App />
   </Window>
 ));
+```
+
+```rust tabs
+use nsh_base::{number_input, theme};
+use nsh_core::prelude::*;
+
+fn tickets(count: Signal<Option<f64>>) -> impl IntoElement {
+    number_input()
+        .value(move || count.get())
+        .min(1.0)
+        .max(10.0)
+        .accessibility_label("Tickets")
+        .on_change(move |next: &Option<f64>| count.set(*next))
+        .h(px(32.0))
+        .flex_row()
+        .rounded(px(8.0))
+        .border_1()
+        .border_color(move || theme().input)
+        .input_style(|s| s.flex_1().text_center().text_color(move || theme().foreground))
+        .decrement_button_style(|s| s.w(px(32.0)).items_center().justify_center())
+        .increment_button_style(|s| s.w(px(32.0)).items_center().justify_center())
+        .decrement_button(text("−"))
+        .increment_button(text("+"))
+}
 ```
 
 `NumberInput` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`number_input()` 创建一个数字输入框，每个属性一个

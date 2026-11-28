@@ -19,45 +19,6 @@ range's band). The grid fills the width it is given, as a table's columns do: th
 row share the row equally, so a calendar in a phone's sheet spans the screen and one in a popup sized to its content
 keeps its items' widths (`flex-none` in `itemClass` or `monthClass` keeps an item or a month at its own width).
 
-```rust tabs
-use nsh_base::{CalendarEntry, CalendarItemKind, Date, Matcher, calendar};
-use nsh_core::prelude::*;
-
-const MONTHS: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-];
-const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-
-fn due_date() -> impl IntoElement {
-    let due = signal(Date::default());
-    calendar()
-        .value(move || due.get())
-        .on_change(move |next: &Date| due.set(*next))
-        .disabled_matcher(Matcher::DayOfWeek(vec![0, 6]))
-        .previous_accessibility_label("Previous month")
-        .next_accessibility_label("Next month")
-        .item_class("rounded-md selected:bg-primary selected:text-primary-foreground disabled:opacity-50")
-        .render_item(|item: &CalendarEntry| {
-            let label = match item.kind {
-                CalendarItemKind::Previous => "‹".to_string(),
-                CalendarItemKind::Next => "›".to_string(),
-                CalendarItemKind::Weekday => WEEKDAYS[item.value as usize].to_string(),
-                CalendarItemKind::MonthToggle | CalendarItemKind::Month => {
-                    MONTHS[item.value as usize - 1].to_string()
-                }
-                _ => item.value.to_string(),
-            };
-            view()
-                .w_8()
-                .h_8()
-                .items_center()
-                .justify_center()
-                .child(text(label).text_sm())
-        })
-}
-```
-
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Calendar, type CalendarValue } from "nsh/base";
@@ -103,6 +64,45 @@ mount(() => (
 ));
 ```
 
+```rust tabs
+use nsh_base::{CalendarEntry, CalendarItemKind, Date, Matcher, calendar};
+use nsh_core::prelude::*;
+
+const MONTHS: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+];
+const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+fn due_date() -> impl IntoElement {
+    let due = signal(Date::default());
+    calendar()
+        .value(move || due.get())
+        .on_change(move |next: &Date| due.set(*next))
+        .disabled_matcher(Matcher::DayOfWeek(vec![0, 6]))
+        .previous_accessibility_label("Previous month")
+        .next_accessibility_label("Next month")
+        .item_class("rounded-md selected:bg-primary selected:text-primary-foreground disabled:opacity-50")
+        .render_item(|item: &CalendarEntry| {
+            let label = match item.kind {
+                CalendarItemKind::Previous => "‹".to_string(),
+                CalendarItemKind::Next => "›".to_string(),
+                CalendarItemKind::Weekday => WEEKDAYS[item.value as usize].to_string(),
+                CalendarItemKind::MonthToggle | CalendarItemKind::Month => {
+                    MONTHS[item.value as usize - 1].to_string()
+                }
+                _ => item.value.to_string(),
+            };
+            view()
+                .w_8()
+                .h_8()
+                .items_center()
+                .justify_center()
+                .child(text(label).text_sm())
+        })
+}
+```
+
 `Calendar` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `calendar()` makes
 one with a setter per prop (`.value(..)`, `.range(..)`, `.number_of_months(..)`) and a listener per event
 (`.on_change(..)`). Its value is a `Date` (`Date::Single`, `Date::Range`, from a `chrono::NaiveDate` or a pair of
@@ -120,7 +120,47 @@ The value is an ISO date, `"2026-10-28"`, as an HTML `<input type="date">`'s; wi
 - Without `range`, a press on a day picks it.
 - With `range`, the first press starts the range and the second ends it, the days between them in the range (each
   `selected`, its ends included, see [Items](#items)). A second press on an earlier day starts the range over from it,
-  as does a press once the range is complete. A half range shows until it is complete and only then is reported.
+  as does a press once the range is complete. A half range shows until it is complete, and `onChange` reports the
+  range only then.
+
+With `range`, `onChangeStart({ value })` reports each range the user starts, as `[start, null]`. Use it when the range
+also shows outside the grid: start and end fields above it, a summary line, or an Apply button that waits for the end.
+`onChange` still reports complete ranges only.
+
+To keep the start in your own state, set `value` to it. The calendar shows the value you set, so the next value you set
+replaces the start: a Cancel that puts back the applied range drops the half range, and the next press starts a new
+one.
+
+```tsx
+import { signal, Text, View } from "nsh";
+import { Button, Calendar, type CalendarValue } from "nsh/base";
+
+function TripDates() {
+  const applied = signal<CalendarValue>(["2026-10-05", "2026-10-07"]);
+  const draft = signal<CalendarValue>(applied());
+  const ends = () => {
+    const value = draft();
+    return Array.isArray(value) ? value : [null, null];
+  };
+  return (
+    <View class="gap-2">
+      <Text>{`${ends()[0] ?? "Start"} – ${ends()[1] ?? "End"}`}</Text>
+      <Calendar
+        range
+        value={draft()}
+        onChangeStart={({ value }) => draft.set(value)}
+        onChange={({ value }) => draft.set(value)}
+      />
+      <Button onPress={() => draft.set(applied())}>
+        <Text>Cancel</Text>
+      </Button>
+      <Button disabled={ends()[1] === null} onPress={() => applied.set(draft())}>
+        <Text>Apply</Text>
+      </Button>
+    </View>
+  );
+}
+```
 
 The calendar opens on the month of the value (a range's start), else today's.
 
@@ -170,6 +210,8 @@ months and the years. Each is drawn in a part styled by `itemClass` and `itemSty
 | `focus:` | Has the keyboard. |
 | `data-range-start:`, `data-range-end:` | Is a complete range's first or last day (a range of one day is both). |
 | `data-range-middle:` | Is a day inside a complete range, not an end. |
+| `data-range-preview-start:`, `data-range-preview-end:` | While a range is half picked: is its start, or the day under the mouse or with the keyboard that a pick would end it on (a range of one day is both). |
+| `data-range-preview-middle:` | While a range is half picked: is a day between its start and that day. |
 | `data-today:` | Is today. |
 | `data-outside:` | Is a day of the month before or after, filling its weeks. |
 
@@ -185,9 +227,24 @@ and so on. `selected:` means every day of a range, so a range's ends take their 
 />
 ```
 
+While the second end is chosen, the `data-range-preview-*` variants mark the range a pick would make: from the start
+to the day the mouse last moved over, or to the keyboard's day once it moves, as React Aria's range calendar
+highlights it, whichever moved last. A day before the start shows none, since a pick there starts the range again; a
+disabled day under the mouse, or the mouse leaving the days, leaves the preview where it was. The second pick replaces
+it with the range's own variants. Without a mouse or a keyboard (on a touch screen) the half
+range shows its start alone. Drawing the preview like the range shows the band before it is picked, the day at its end
+lit by `hover:` or `focus:`:
+
+```tsx
+<Calendar
+  range
+  itemClass="group rounded-md hover:bg-accent focus:bg-accent selected:bg-primary selected:text-primary-foreground data-range-preview-middle:rounded-none data-range-preview-middle:bg-accent data-range-preview-start:rounded-r-none data-range-preview-end:rounded-l-none data-range-preview-start:data-range-preview-end:rounded-md"
+/>
+```
+
 `renderItem` draws an item's content from what it is, a `CalendarEntry`, never from its state: the drawing is made
-once and kept while the item is selected, focused or put in a range, so the keys, a pick and the focus draw nothing
-again, and a turn of the months draws the days it brings once each (a day keeps its drawing by its month and date:
+once and kept while the item is selected, focused or put in a range, so the keys, the mouse, a pick and the focus draw
+nothing again, and a turn of the months draws the days it brings once each (a day keeps its drawing by its month and date:
 with several months, the months still shown keep theirs).
 
 | Field | Meaning |
@@ -220,7 +277,7 @@ language.
 | `bodyClass`, `bodyStyle` | `.body_class(..)`, `.body_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The body: the months side by side, or the month or year view's rows. |
 | `monthClass`, `monthStyle` | `.month_class(..)`, `.month_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Each month of the day view. |
 | `rowClass`, `rowStyle` | `.row_class(..)`, `.row_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Each row: the weekdays, a week, a row of months or years. |
-| `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each item: `selected:`, `disabled:`, `focus:`; a day's `data-range-start:`, `data-range-end:`, `data-range-middle:`, `data-today:`, `data-outside:` ([Items](#items)). |
+| `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each item: `selected:`, `disabled:`, `focus:`; a day's `data-range-start:`, `data-range-end:`, `data-range-middle:`, `data-range-preview-start:`, `data-range-preview-end:`, `data-range-preview-middle:`, `data-today:`, `data-outside:` ([Items](#items)). |
 | `renderItem` | `.render_item(..)` | `(item: CalendarEntry) => JSX.Element` | none | An item's content, drawn by the app from what the item is; its number otherwise. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The calendar: the header above the body. |
 
@@ -229,6 +286,7 @@ language.
 | Event | Rust | Description |
 |---|---|---|
 | `onChange` | `.on_change(\|value\| ..)` | The user picked a complete value: `{ value }`, a day or a range. Set `value` to follow it. A `value` the app passes is never reported. |
+| `onChangeStart` | `.on_change_start(\|value\| ..)` | With `range`, the user started a range: `{ value }`, `[start, null]`. `onChange` reports it once the second press ends it. Set `value` to it to keep the start as your own ([Value](#value)). |
 
 ## Parts
 

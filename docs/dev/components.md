@@ -176,7 +176,12 @@ reasons: `reactive-components.md`.
   implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `EdgeInsets` (`number |
   Partial<Edges>`, as the host prop `hitSlop` takes it), `Option`, `Vec`, `JsonValue`, `element::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
-  values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
+  values included; Rust builds one with `Style::from_decls` / `with`; a component merges its parts' styles with
+  `Style::then`, which keeps their typed styles where `from_decls` over `decls()` drops them (in `nsh-base`,
+  `text_view::merge_styles`, which gathers declarations alone in one pass): later ones win among declarations and,
+  at equal variant rank, among typed styles of one kind, static or bound, while an element applies its declarations
+  after its typed styles and its bound typed styles after its static ones, so a component applies an app's part
+  style after its own bound styles), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
   instance each is a memo of its own, so a new value from JS or from a parent reaches only what read it
   (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. The JS face
   decodes a prop when JS sets it and sends the typed value (`Prop::RustProp`, an `AnyValue`); one of the wrong type
@@ -202,7 +207,9 @@ reasons: `reactive-components.md`.
     `is_first()`, `is_last()`, signals read in bindings).
   - `render_code: Prop<Option<Renderer<CodeBlock>>>`: a render function, `renderCode?: (value: CodeBlock) =>
     JSX.Element` in TS (optional; `T`'s TS type, its named types declared), for content the app draws for values the
-    view has (a code block of a document, a mention). In a binding or region the view calls
+    view has (a code block of a document, a mention). A renderer of `InContext<A, B>` (a value and what surrounds it) is `(value: A, context:
+    B) => JSX.Element`: JS spreads it into two arguments (`JsValue::RENDER_SPREAD`), for a value and what
+    surrounds it (`TextView`'s `renderImage(image, { link })`); a Rust closure takes `|InContext(value, context)| ..`. In a binding or region the view calls
     `props.render_code.get().map(|r| r.render(key, value))`: a `Rendered`, a view to style and place as any (in a
     `text(..)` an inline view), whose child is the content. A Rust parent passes `Renderer::new(|v| el)`, a closure
     called on the spot. The app's JS function is called by JS: the element is a placeholder (a view of the core's,
@@ -350,7 +357,7 @@ reasons: `reactive-components.md`.
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
   | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, the `{ value }` of `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
-  | `keymap.bind("mod+k", f, { scope, when, repeat, passThrough, forFocus, overFocused })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, f)`, bound while the current owner lives and only in the window bound in (`current_window`, or, for a component JS places in a `Window`, the window its view is in: a binding fires only for keys pressed in that window, `KeyBinding::window`; JS bindings made inside a `<Window>` are that window's, and app-root ones are app-wide, as `KeyScope` says); `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke; bindings `over_focused`, JS's or a view's, come after both, so the app takes a key a focused component binds, and the overlay's Escape stays last) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
+  | `keymap.bind("mod+k", f, { scope, when, repeat, passThrough, forFocus, overFocused })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, f)`, bound while the current owner lives and only in the window bound in (`current_window`, or, for a component JS places in a `Window`, the window its view is in: a binding fires only for keys pressed in that window, `KeyBinding::window`; JS bindings made inside a `<Window>` are that window's, and app-root ones are app-wide, as `KeyScope` says); `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke; bindings `OverFocused::Always` (`overFocused: true`), JS's or a view's, come after both, so the app takes a key a focused component binds, and the overlay's Escape stays last) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
   | (none: a JS app's scroll view or list is its own; Rust views watch one they did not make) | `watch_scroll(target, \|e: &ScrollEvent\| ..)` (offset, content size and viewport, when first found and on every change, whoever listens to its `on_scroll`), while the current owner lives; `target` (`\|\| r.node()`) is resolved again in every commit, so a ref set later in the render is found; `NodeRef(id).scroll_to(offset, animated)` scrolls a node such a target names. The core runs a scroll watch at the end of the commit round that changed what it reports, and another round sends what it changed; a hover watch has the node listen to the pointer, as a hint's anchor (`element/watch.rs`, `core/watch.rs`; `nsh_base::Scrollbar`) |
   | (none: JS's elements are in the order JS makes them) | `nsh_core::element::watch_order(\|\| refs, \|order: &[usize]\| ..)` (`#[doc(hidden)]`, for `nsh-base`'s roving focus; not in the prelude), while the current owner lives: the order the tree has the elements in, as indices into the list `refs` gives (those no node in the tree carries last), heard only when it differs from the list's; the core looks at the end of the commit round the watch is made in, of one after the returned `OrderWatch` is `invalidate()`d (an item came) and of one that moved a node inside the subtree the elements share (`Core::insert` of a node with a parent notes the parents it left and joined; a watch looks again when its elements' nearest common ancestor at its last look is one of them or above one: an app's keyed reorder of its elements, never a list of rows each with a group of its own reordered), and another round sends what the handler changed. A round that moved nothing there and invalidated nothing costs nothing (`element/watch.rs`, `core/watch.rs`) |
   | `BackHandler.on("press", f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`element/back.rs`) |
@@ -365,11 +372,12 @@ reasons: `reactive-components.md`.
   | a ref to a component, `await counter.value()`, `counter.setValue(5)` | `component_ref::<Counter>()`, `counter().component_ref(&r)`, `r.api::<CounterApi>()`: the API its view registered, its methods called directly |
   | `<List header footer empty separator stickyHeaderIndices stickyHeaderOffset viewabilityConfig onViewableItemsChange loadMoreThreshold initialScrollIndex initialScrollAtEnd>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).sticky_header_offset(..).viewability(..).minimum_view_time(..).on_viewable_items_change(..).load_more_threshold(..).initial_scroll_index(..)` (or `.initial_scroll_at_end()`): the header, footer and empty view are part of the view, never recycled |
   | `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}>` | `.follow_end(px(40.0))` (`ListLayout`: on `virtual_list(..)` and on a placed `ListElement`) |
+| `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40, animated: true }}>` | `.follow_end(px(40.0)).follow_end_animated(true)` |
 | `<List viewport="parent">` (in a `Scroll` with the rest of the page) | `.viewport(ListViewport::Parent)` (`ListLayout`): laid out at its full length, its rows follow the scroll view around it; fixed when the list is made |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `feed().items(virtual_list(n, row).keys(move \|\| ids).header(..))` (the `Items` field's setter) |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
   | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `focus-visible:`, `focus-within:`, `activeStyle` / `hoverStyle` / `focusStyle` / `focusVisibleStyle` / `focusWithinStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)`, `.focus_visible(\|s\| ..)`, `.focus_within(\|s\| ..)` (native, no binding) |
-  | `<Button disabled={saving()} onPress={save} class="px-4 active:opacity-60">Save</Button>` | `button().disabled(move \|\| saving.get()).on_press(move \|\| save()).px_4().active(\|s\| s.opacity(0.6)).child(text("Save"))`: a setter per prop, a listener method per event |
+  | `<Button disabled={saving()} onPress={save} class="px-4 active:opacity-60"><Text>Save</Text></Button>` | `button().disabled(move \|\| saving.get()).on_press(move \|\| save()).px_4().active(\|s\| s.opacity(0.6)).child(text("Save"))`: a setter per prop, a listener method per event |
   | `<Button class="bg-blue-500 active:opacity-70 selected:bg-green-500">` (state styles on a component) | `button().bg(..).active(\|s\| s.opacity(0.7))`: `ComponentBuilder`'s `active` / `hover` / `focus` / `disabled_style` and `Styled`'s `selected` / `checked`, on the component's root (`Styled::selected(el, \|s\| ..)` where a `selected` prop's setter comes first) |
   | `<NavPage headerClass="bg-white text-black tint-blue-500">` | `nav_page().header_style_with(\|s\| s.bg(..).text_color(..).tint_color(..))` (theme colors follow the appearance natively; `header_style(Style)`, TS `headerStyle`, wins key by key) |
   | `bg-sky-500` (the palette) | `.bg(palette::SKY.shade(500))` |
@@ -390,7 +398,7 @@ reasons: `reactive-components.md`.
     app's `color` or `fontSize` check (the part's texts inherit them), and a part that edits text an `InputPartStyle`
     (`NumberInput`'s `input_style`, `Select`'s `search_style`), typed `StyleProp<InputStyle>` for `placeholderColor`,
     `caretColor` and `selectionColor` too; both are applied with `.inline_style(move || props.input_style.get())`; a render prop's (`Option<Renderer<T>>`: `TextView`'s
-    `render_image`) the closure rendering a `&T` (`.render_image(|image| ..)`, made a `Renderer`); the children are
+    `render_image`) the closure rendering a `&T` (`.render_code_block(|code| ..)`, made a `Renderer`); the children are
     the element's `.child(..)`ren;
   - a **listener method per event**, named as its TSX handler in snake case (`onPressDown` is
     `.on_press_down(..)`): a unit variant's takes `move || ..` (or `move |_: &()| ..`), a one-field variant's
@@ -650,7 +658,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `Checkbox` | `[✓]` (the `✓` in the accent), `[ ]` (muted) or `[–]` (the dash in the accent) and a space in place of the indicator, then the children in a view of their own beside it (a column: a choice card's title over its description) |
 | `Radio` | `[●]` (the dot in the accent) or `[ ]` (muted), a checkbox's width, and a space before the children, in a row (an app's own dot among its children is the app's to leave out) |
 | `Switch` | a checkbox's mark and a space in place of the track and thumb: on `[✓]`, off `[ ]`, as terminal apps show an on / off setting (a knob on a track would read as a slider); the role stays a switch for screen readers |
-| `Slider` | one row of `─` as wide as the slider, `━` from `min` to the value (a range: between its thumbs) in the accent, the rest muted, a `●` view per thumb on its value's Cell (focus, keys, drags and screen readers as elsewhere); vertical: a column of `│` / `┃` |
+| `Slider` | one row of `─` as wide as the slider, `━` from `min` to the value (a range: between its thumbs) in the accent, the rest muted, a `●` view per thumb on its value's Cell (focus, keys, drags and screen readers as elsewhere; no `renderThumb` content); vertical: a column of `│` / `┃` |
 | `Progress` | one row as wide as the bar: full Cells `█`, the partial Cell by eighths `▏▎▍▌▋▊▉`, then `░`, the filled Cells in the accent; indeterminate: a four-Cell segment moving one Cell every 120 ms (only while indeterminate; reduced motion: `░` only) |
 | `ColorSlider` | one row of Cells over the slider's width, each filled with the channel's color at that point of the track (role `Image`, hidden from screen readers: the terminal paints it as the color itself, quantized at 256 colors, no fill where it paints none) the thumb a `│` on the Cell of the value (`terminal::COLOR_THUMB`), no line along the track; the slider is the focusable adjustable control, keys as elsewhere, a press or a drag on a Cell picks its value (`color_picker/tui.rs`) |
 | `ColorArea` | a grid of such Cells filling the area, as many as its width and its whole rows hold (at most 240 by 64): the hue at each column's saturation and each row's brightness, the picked Cell `◆`; keys, presses and drags as elsewhere |
@@ -671,7 +679,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `AccordionTrigger` | `▸ ` closed / `▾ ` open, then the children in a row of their own a Cell apart (the trigger's own gap does not part them from the disclosure; an app's own chevron is the app's to leave out) |
 | `AccordionPanel` | its content after two blank Cells, under the trigger's title |
 | `Tree` | a row the tree draws (no `renderItem`): two Cells of indent a level, `▸ ` / `▾ ` on a folder, two spaces on a leaf, the label; an app's row (`renderItem`) is the app's, its folders marked by the painter in the leading columns the terminal's layout gives a disclosure |
-| `TextView` | blocks are one blank row apart, headings included, with no blank row after the last; a rule draws nothing; a heading is its text without the `#` marks, set in bold over its inline styles: h1 and h2 in the accent, h3 in the foreground, h4 and below muted, and h1 alone ruled with `─` across the view in the line color; list markers are text a Cell before the content (`1. ` right-aligned to the widest number, `• ` / `◦ ` / `▪ ` by depth) and stay on their item's first row, a task's `☐` / `☑` (the accent when checked); a footnote reference `[1]`; a quote has `▎` in the accent a Cell before its text, the text muted; a code block is a band one Cell wider than its longest line on each side (its lines wrap at the view's width), under its language as ` ts ` on the line color; an alert is one band from the body text's left edge to its right, a Cell of padding, its icon and then its text, tinted (on 16 colors and mono, a `│` in its color down its left side); a table is rows of Cells ruled `┌─┬─┐`, `│`, `├─┼─┤`, `└─┴─┘`, a Cell each side of a cell's text, the header bold, its widest column narrowed a Cell at a time (to six at least) until it fits the view, cells wrapping with the `│` sides on every line; an image alone in its paragraph reads as `[alt]` on a line, muted (left out with its row when it has no alt text); a formula without the app's `renderMath` is read as text on a band, its TeX's commands their Unicode symbols, `\text{…}` its content, `\frac{a}{b}` `a/b`, spacing a space (`text_view/math.rs`) |
+| `TextView` | blocks are one blank row apart, headings included, with no blank row after the last; a rule draws nothing; a heading is its text without the `#` marks, set in bold over its inline styles: h1 and h2 in the accent, h3 in the foreground, h4 and below muted, and h1 alone ruled with `─` across the view in the line color; list markers are text a Cell before the content (`1. ` right-aligned to the widest number, `• ` / `◦ ` / `▪ ` by depth) and stay on their item's first row, a task's `☐` / `☑` (the accent when checked); a footnote reference `[1]`; a quote has `▎` in the accent a Cell before its text, the text muted; a code block is a band one Cell wider than its longest line on each side (its lines wrap at the view's width), under its language as ` ts ` on the line color; an alert is one band from the body text's left edge to its right, a Cell of padding, its icon and then its text, tinted (on 16 colors and mono, a `│` in its color down its left side); a table is rows of Cells ruled `┌─┬─┐`, `│`, `├─┼─┤`, `└─┴─┘`, a Cell each side of a cell's text, the header bold, its widest column narrowed a Cell at a time (to six at least) until it fits the view, cells wrapping with the `│` sides on every line; an image is drawn in its box as on the desktops (the TUI shows its `[alt]` there where it cannot draw pictures); a formula without the app's `renderMath` is read as text on a band, its TeX's commands their Unicode symbols, `\text{…}` its content, `\frac{a}{b}` `a/b`, spacing a space (`text_view/math.rs`) |
 | `RichEditor` | a list marker in flow before its item's content, a space after it, numbers right-aligned to the list's widest (Cells round the indent it sits in elsewhere); a table's box closed on every side; a `blockquote` (its `to_dom` tag) has `▎` in the accent down its left side, a Cell before its blocks; an `hr` is a row of `─` across the editor, in place of the app's hairline (`horizontalRule` part); the caret is the terminal's own cursor, at the sink, which sits on the caret's Cell |
 | `DataTable` | a sortable title's indicator is text: `↑` ascending, `↓` descending, `↕` unsorted |
 | `Scrollbar` | nothing: the terminal draws its own scroll bars |
@@ -700,7 +708,10 @@ The URI is `asset:/@<package>/<path>`, apart from the app's own files. The regis
 ships the directory: `registry.assets(assets!())` lists every file (`AssetFile`: URI, the file where the crate was
 built, kind), which `nsh` (`rust_app.rs`, from the description of the set: each file's path and source) serves in development and
 copies into packages next to the imported assets, and whose fonts the engine registers before the first view
-(`EngineConfig::ui_sets`, read through `EngineConfig::assets`).
+(`EngineConfig::ui_sets`, read through `EngineConfig::assets`). `registry.assets_for(&[Os::Web], assets!())`
+(`nsh_core::platform::Os`, the `platform.os` values) scopes files to the listed targets: the description carries each file's `targets` (none: every target), `Built::assets_for`
+gives each packager (and the web's) its files, and the engine registers only the fonts of its `Environment::os`;
+`nsh run`, `nsh sign` and the in-place runners keep every file.
 
 ## Styles
 
@@ -825,9 +836,11 @@ root become nodes the core creates itself. Apps without components pay one check
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
 region goes in the host view. Besides the component's own props, JS sets a view's props on the host
-(`nsh_core::element::HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
+(`nsh_core::element::HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, its
+accessibility, `tooltip`,
 `onLayout`, the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), the mouse over it
-(`onMouseEnter`, `onMouseMove`, `onMouseLeave`, `onMouseUp`) and `onContextMenu`, so a component is a drop
+(`onMouseEnter`, `onMouseMove`, `onMouseLeave`, `onMouseUp`), `onContextMenu` and the actions assistive
+technologies perform (`onAccessibilityAction`), so a component is a drop
 destination, and hears the mouse, only where the app listens. A component's own prop or event of one of these names
 takes its place (`ComponentSpec::host_props`: JS sets the rest on the host, in QuickJS and in the browser, and its
 declaration omits it from `ComponentHostProps`): `DataTable`'s and `Editor`'s `onContextMenu` report a row and column
@@ -894,7 +907,11 @@ what changed.
 
 ## Children, slots and rows
 
-- JS inserts a component's children into the host; the core places them where the view's `Children` is, before the
+- A value prop named `children`, such as `children: Prop<SharedString>`, receives the JSX child as a typed value.
+  The compiler supplies it as `props.children`, and the JS face reads it in the ordinary prop effect, including
+  when a signal read by its getter changes. The generated TypeScript declaration for `Prop<SharedString>` is
+  `children: string`. Read `props.children.get()` in a Rust binding or computation to track the value.
+- For a `Children` slot, JS inserts a component's children into the host; the core places them where the view's `Children` is, before the
   node that follows it (or keeps them out of the tree while the view has none: a `Children` in a region that is not
   shown). The core sets the `Prop<Children>` when JS adds the first child or removes the last, so
   `props.children.get().is_empty()` in a binding follows it. With `children_each`, the children are an `Each` keyed by the child's node over a signal of the host's JS
@@ -1228,7 +1245,8 @@ is for, never by replacing one popup with another everywhere:
 **The system's menu.** `MenuButton` (`menu_button.rs`) is no popup of the core's: its items are data and the system
 draws the menu. On iOS the app's content is covered by the native component `nsh/menu-button`
 (`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
-is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
+is its primary action, so the tap is answered natively; the menu grows out of the app's trigger (the element, as the
+menu's preview), which UIKit hides while the menu is up; the button sets itself as the element's only accessibility
 element, and an action emits `select` with the app's id. On Android the same component is
 `MenuButtonComponent.java`: a transparent button whose tap shows a system popup window (`SystemMenus.java`) with rows
 laid out as Material 3's menus, alike under every vendor's theme. On a
@@ -1237,11 +1255,8 @@ desktop OS a press shows the same items with `popup_menu`; on the web the conten
 `ContextMenuComponent.java`) shows the system's menu from `MenuButton`'s item data, and `menu.rs` reports it with the
 drawn menu's events. Android has no context menu a held finger opens by itself, so `menu.rs` keeps the drawn menu's
 hold there and asks the component with `open` (and `at`, the held point); elsewhere, and without items, the menu is
-the drawn one. `nsh/mobile`'s `SegmentedControl` is the same kind of native
-component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is; so is its `Switch`,
-`nsh/switch` (`system_switch.rs` on iOS, `SwitchComponent.java` on Android), and its `DateTimePicker`,
-`nsh/date-time-picker` (iOS `system_date_time_picker.rs`, Android `DateTimePickerComponent.java`): values cross to the
-platforms as their fields, never as strings to parse, and come back the same way.
+the drawn one. System-styled form controls (a segmented control, a switch, a date and time picker) are not native
+components of NSH's: they live in an nshm (`nsh-system-controls`), which registers its own native components.
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
 pointer is followed by Rust listeners, `onMouseEnter` / `onMouseLeave` on the `trigger` slot (the app's element) and on
@@ -1298,7 +1313,10 @@ with every prop of `Calendar` passed on (`calendar::Config`); opening it on the 
 days (`Grid::focus_days`). A complete date is the value and closes it with `"select"`; with a time the popup stays
 open on the desktops, each edit reported, until the selected day is pressed again (`gpui-component`'s double click),
 while in a sheet (touch screens, the `sheet` the content is made for) a tap on a day picks it at its time and closes,
-as a single date does: a touch has no double click (`api-naming.md`). The trigger's keys are bound while it has the
+as a single date does: a touch has no double click (`api-naming.md`). Each pick is reported before its `"select"`,
+so an app that controls `open` and does not follow a `"select"` keeps the popup open and closes it itself (a pending
+value committed from its `footer`). The app's `header` and `footer` slots are the popup's first and last children,
+around the content, so their Tab stops come before and after the calendar's. The trigger's keys are bound while it has the
 focus: Return opens and closes (`gpui-base`'s `Confirm`), Delete and Backspace clear while it is closed. The value
 crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the precision of `timePrecision`
 (`PickedDate`).
@@ -1314,10 +1332,15 @@ years to pick) share it equally (`flex: 1`; a short last row of years is padded)
 spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own. The
 app's `renderItem` gets a `CalendarEntry`, what an item is (its kind, value, date, month, `today`, `outside`), and the
 states are the item's (`selected` for screen readers and `selected:`, every day of a complete range as React Aria's;
-`disabled`; the real focus; `project_data` for `data-range-start` / `-end` / `-middle`, `data-today`,
-`data-outside`): a day's content is rendered under its month and date, so the keys, a pick and the focus render
-nothing, a turn renders the days it brings once each, and with several months those still shown keep theirs (their
-holders move to the cells that now show them). `TimeField`'s `renderSegment` likewise gets a
+`disabled`; the real focus; `project_data` for `data-range-start` / `-end` / `-middle`, `data-range-preview-start`
+/ `-end` / `-middle`, `data-today`, `data-outside`): a day's content is rendered under its month and date, so the
+keys, the mouse, a pick and the focus render nothing, a turn renders the days it brings once each, and with several
+months those still shown keep theirs (their holders move to the cells that now show them). The preview reaches to
+`Grid::reach`, the enabled day the mouse moved over last (a day's `onMouseMove`, so a cell whose date changed under
+a still mouse is read again on the next move) or the keyboard's `cursor` once it moves, whichever came last. It stays
+when the mouse leaves the days, as React Aria's highlighted range does: a desktop date picker opens with the keyboard
+on today, which the user did not aim at. A day's marks read it only while the range is half picked, so the mouse
+changes no state otherwise. `TimeField`'s `renderSegment` likewise gets a
 `TimeFieldSegmentEntry` (`segment`, `value`, `label`), its selection `focus:` (`project_focused`).
 `TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
 transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the field gains or loses goes to the

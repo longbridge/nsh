@@ -16,6 +16,11 @@ mod access;
 mod app_directory;
 mod cache;
 mod error;
+#[cfg_attr(not(feature = "shader"), path = "gpu_off.rs")]
+pub mod gpu;
+// Where shader frames go: read back, or on surfaces the backend shows.
+#[cfg(feature = "shader")]
+mod frames;
 mod host_channel;
 mod local_storage;
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,7 +93,9 @@ pub use storage::{FileStorage, resolve_data_dir, support_dir};
 pub use crate::{
     cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
-    host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
+    host_channel::{
+        HostCall, HostChannel, HostReply, HostSender, HostSenderClosed, OpenUrlRequest,
+    },
 };
 use crate::{
     host_channel::HostRefusal,
@@ -119,6 +126,19 @@ const IDLE_GC_QUIET: Duration = Duration::from_millis(300);
 
 /// The longest time between idle collections, quiet or not.
 const IDLE_GC_LONGEST: Duration = Duration::from_secs(5);
+
+/// The longest time between idle collections while display frames come
+/// one after another (an animation, a frame callback every frame): a
+/// collection there costs frames, one per [frame budget] it takes, so it
+/// waits for the frames to stop (then [`IDLE_GC_QUIET`]) up to this long.
+/// Detached subtrees keep their views until then.
+///
+/// [frame budget]: nsh_core::time::FRAME
+const IDLE_GC_LONGEST_ANIMATING: Duration = Duration::from_secs(30);
+
+/// How long after a display frame frames still count as continuous: a few
+/// frames at 60 Hz, so a frame skipped under load does not end it.
+const ANIMATING_GAP: Duration = Duration::from_millis(100);
 
 /// The shortest time between two deliveries of mouse motion: a frame at
 /// 120 Hz. Mice report moves far more often (up to 1000 Hz), and a handler
@@ -829,6 +849,14 @@ pub trait MountSink: Send + 'static {
     /// show it in the frame the window takes the size, stops waiting here.
     fn resized(&self, _size: Size<Points>) {}
 
+    /// The engine laid root `id` out at `size`
+    /// ([`EngineControl::set_root_size`]: a window of the app's own, a
+    /// modal): called as [`MountSink::resized`] is, after the commit of the
+    /// turn that applied the size, once per turn and root, with its latest
+    /// size. A platform that waits for the layout of a window at its new
+    /// size stops waiting here.
+    fn root_resized(&self, _id: NodeId, _size: Size<Points>) {}
+
     /// The engine has handled the first `events` events sent with
     /// [`EngineControl::dispatch_event`]. Called after the commit of the
     /// turn that handled them (what they changed came before), once per
@@ -955,6 +983,9 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         from: u64,
         sink: nsh_core::runtime::UpdaterSink<'_>,
     ) -> Result<(), String> {
+        if let Some(get) = nsh_core::runtime::updater_transport() {
+            return get(url, from, sink);
+        }
         const MAX_REDIRECTS: usize = 20;
         let mut current = url.to_owned();
         for hops in 0..=MAX_REDIRECTS {
@@ -971,7 +1002,8 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
             }
             // Follow redirects here so `Range` and `Accept-Encoding` survive
             // cross-origin redirects (e.g. GitHub Releases -> asset CDN) on
-            // every platform stack and every hop stays HTTPS (or loopback).
+            // every platform stack and every hop stays HTTPS (or loopback), or
+            // on the origin of a plain-HTTP feed (`updater_redirect_allowed`).
             request.follow_redirects = false;
             let task = self.network.fetch(request, events);
 
@@ -983,7 +1015,19 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
             let mut total: Option<u64> = None;
 
             let outcome = loop {
-                match rx.recv() {
+                // Platform stacks only time out connecting and waiting for
+                // headers; a body that stops arriving would hang forever.
+                let event = match rx.recv_timeout(UPDATER_STALL_TIMEOUT) {
+                    Ok(event) => Ok(event),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        break Err(format!(
+                            "download stalled (no data for {}s)",
+                            UPDATER_STALL_TIMEOUT.as_secs()
+                        ));
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(()),
+                };
+                match event {
                     Ok(FetchEvent::Head(head)) => {
                         if matches!(head.status, 301 | 302 | 303 | 307 | 308)
                             && let Some(location) = updater_header(&head.headers, "location")
@@ -997,8 +1041,11 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
                                 head.url.as_str()
                             };
                             let next = nsh_core::access::resolve_reference(base, location.trim());
-                            if !is_updater_url(&next) {
-                                break Err(format!("redirect to non-HTTPS URL {next:?}"));
+                            if !updater_redirect_allowed(base, &next) {
+                                break Err(format!(
+                                    "redirect to non-HTTPS URL {next:?} (plain HTTP stays on \
+                                     the feed's origin)"
+                                ));
                             }
                             redirect_to = Some(next);
                             break Ok(());
@@ -1067,6 +1114,14 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
     }
 }
 
+/// How long an update download may go without any network event before
+/// it fails as stalled (and is retried from the bytes already on disk).
+const UPDATER_STALL_TIMEOUT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(200)
+} else {
+    std::time::Duration::from_secs(60)
+};
+
 /// First value of header `target` (ASCII case-insensitive).
 fn updater_header<'a>(headers: &'a [(String, String)], target: &str) -> Option<&'a str> {
     headers
@@ -1124,6 +1179,23 @@ fn is_updater_url(url: &str) -> bool {
                 parts.host.as_str(),
                 "127.0.0.1" | "localhost" | "::1" | "[::1]"
             ))
+}
+
+/// Whether a response from `from` may redirect to `to`: HTTPS (or loopback)
+/// always; plain HTTP only from plain HTTP on the same origin. `nsh-updater`
+/// lets a request start on plain HTTP only for a feed the app opted in to
+/// (`packages.allowHttp`), and keeps what the feed names on its origin; this
+/// keeps its redirects there too, and never downgrades an HTTPS request.
+fn updater_redirect_allowed(from: &str, to: &str) -> bool {
+    if is_updater_url(to) {
+        return true;
+    }
+    let origin = |url| {
+        nsh_core::access::parse_url(url)
+            .filter(|parts| parts.scheme == "http")
+            .map(|parts| (parts.host, parts.port.unwrap_or(80)))
+    };
+    origin(from).is_some_and(|from| origin(to) == Some(from))
 }
 
 /// The platform's HTTP stack, used by JS `fetch`.
@@ -1565,6 +1637,9 @@ enum Message {
     /// The embedding app's event (`nsh/host`'s `host.on`): its name and
     /// data.
     HostEvent(String, nsh_core::JsonValue),
+    /// An event of one of this app's calls ([`HostSender`]): delivered as
+    /// [`Message::HostEvent`], but never kept for the next app.
+    CallerEvent(String, nsh_core::JsonValue),
     /// The embedding app's answer to call `.0` (`host.call`).
     HostReply(u64, Result<nsh_core::JsonValue, String>),
     /// The embedding app's answer to call `.0` the core made
@@ -1741,8 +1816,9 @@ impl EngineControl {
         let _ = self.tx.send(Message::Displays(displays.into()));
     }
 
-    /// The platform presents root `id` (a modal) at `size`, with `insets`
-    /// of it covered by system UI.
+    /// The platform presents root `id` (a modal, a window of the app's
+    /// own) at `size`, with `insets` of it covered by system UI. Reported
+    /// back after its layout ([`MountSink::root_resized`]).
     pub fn set_root_size(&self, id: NodeId, size: Size<Points>, insets: EdgeInsets) {
         let _ = self.tx.send(Message::RootSize(id, size, insets));
     }
@@ -2383,6 +2459,9 @@ struct Driver<M: TextEngine + 'static> {
     /// When a message or a due timer last gave the engine work
     /// ([`IDLE_GC_QUIET`]).
     last_active: Instant,
+    /// When the platform's last display frame ran on the engine
+    /// ([`IDLE_GC_LONGEST_ANIMATING`]).
+    last_display_frame: Option<Instant>,
     /// The queue of the JS calls Rust posts: its notify wakes the engine,
     /// as the core's task notify does ([`LocalEngine::set_wake`]).
     posts: nsh_core::element::Posts,
@@ -2432,16 +2511,19 @@ impl<M: TextEngine + 'static> Driver<M> {
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(app_access(&config.app));
         let mut core = Core::new(text_engine.clone(), config.viewport);
-        // nsh.json's `application.quitMode`, else the default
-        // `"platform"`: Windows and Linux quit when the last window
-        // closes; macOS stays in the Dock. The app can change it at run
-        // time with `Application.setQuitMode`.
-        let mode = config
+        // Explicit `<Window>` scenes default to `"platform"` (Windows and
+        // Linux quit when the last window closes; macOS stays in the Dock),
+        // while a plain root's implicit main window quits on close unless the
+        // app explicitly sets `application.quitMode` or calls
+        // `Application.setQuitMode`.
+        core.__set_default_quit_mode(nsh_core::desktop::QuitMode::Platform);
+        if let Some(mode) = config
             .app
             .application()
-            .map(|options| options.quit_mode)
-            .unwrap_or_default();
-        core.set_quit_mode(mode);
+            .and_then(|options| options.__explicit_quit_mode())
+        {
+            core.set_quit_mode(mode);
+        }
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());
@@ -2542,11 +2624,15 @@ impl<M: TextEngine + 'static> Driver<M> {
                 }
             }
         }
-        // The fonts the UI sets' crates ship, before anything is measured.
+        // The fonts the UI sets' crates ship for this target, before
+        // anything is measured.
+        let os = config.environment.os;
         let fonts = config
             .ui_sets
             .iter()
-            .flat_map(nsh_core::element::Registry::asset_files)
+            .flat_map(nsh_core::element::Registry::scoped_asset_files)
+            .filter(|(targets, _)| targets.is_empty() || targets.contains(&os))
+            .map(|(_, file)| file)
             .filter(|file| file.kind == nsh_core::element::AssetKind::Font);
         for font in fonts {
             let result = match config.assets.as_deref() {
@@ -2624,6 +2710,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             key_path: Vec::new(),
             sets_seen: FxHashMap::default(),
             resized: None,
+            roots_resized: Vec::new(),
             resize_burst_ends: None,
             window_state: WindowStateReport {
                 shown: config.environment.window_state,
@@ -2664,6 +2751,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             stopped: false,
             last_gc: Instant::now(),
             last_active: Instant::now(),
+            last_display_frame: None,
             posts: posts.clone(),
             clock: config.clock.clone(),
             context: config.context.clone(),
@@ -2775,6 +2863,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(size) = state.resized.take() {
             sink.resized(size);
         }
+        for (id, size) in state.roots_resized.drain(..) {
+            sink.root_resized(id, size);
+        }
         state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
@@ -2849,6 +2940,9 @@ impl<M: TextEngine + 'static> Driver<M> {
     /// Handles one message; false on shutdown.
     fn handle(&mut self, message: Message, rx: &Receiver<Message>) -> bool {
         self.last_active = Instant::now();
+        if matches!(message, Message::Frame) {
+            self.last_display_frame = Some(self.last_active);
+        }
         match message {
             Message::Advance(by, done) => {
                 let running = self.advance(by, rx, self.clock.moves_with_frames());
@@ -2954,11 +3048,13 @@ impl<M: TextEngine + 'static> Driver<M> {
 
     /// Whether nothing is left to run: no message queued, nothing due at
     /// the clock's time (a timer that keeps scheduling another at once
-    /// outlasts a flush's rounds) and no request in flight.
+    /// outlasts a flush's rounds), no request in flight and no `async fn`
+    /// call into Rust waiting for its answer.
     fn idle(&self, rx: &Receiver<Message>) -> bool {
         let now = self.clock.now();
         rx.is_empty()
             && self.state.net.idle()
+            && !self.state.core.async_calls_pending()
             && [self.due(), self.clock.next_alarm()]
                 .into_iter()
                 .flatten()
@@ -3058,6 +3154,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(size) = state.resized.take() {
             sink.resized(size);
         }
+        for (id, size) in state.roots_resized.drain(..) {
+            sink.root_resized(id, size);
+        }
         state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
@@ -3117,9 +3216,18 @@ impl<M: TextEngine + 'static> Driver<M> {
 
     /// When the next idle collection may run: a second after the last, once
     /// the engine has been quiet for [`IDLE_GC_QUIET`] (or at the latest
-    /// [`IDLE_GC_LONGEST`] after the last).
+    /// [`IDLE_GC_LONGEST`] after the last, [`IDLE_GC_LONGEST_ANIMATING`]
+    /// while display frames come one after another).
     fn next_gc(&self) -> Instant {
-        let quiet = (self.last_active + IDLE_GC_QUIET).min(self.last_gc + IDLE_GC_LONGEST);
+        let animating = self
+            .last_display_frame
+            .is_some_and(|at| at.elapsed() < ANIMATING_GAP);
+        let longest = if animating {
+            IDLE_GC_LONGEST_ANIMATING
+        } else {
+            IDLE_GC_LONGEST
+        };
+        let quiet = (self.last_active + IDLE_GC_QUIET).min(self.last_gc + longest);
         (self.last_gc + IDLE_GC_INTERVAL).max(quiet)
     }
 
@@ -3130,10 +3238,16 @@ impl<M: TextEngine + 'static> Driver<M> {
             && self.state.committed_since_gc
             && Instant::now() >= self.next_gc()
         {
-            let start = self.state.trace.then(Instant::now);
+            let start = (self.state.trace || self.state.perf.is_some()).then(Instant::now);
             script.collect_garbage();
             if let Some(start) = start {
-                log::info!(target: "nsh::perf", "gc: {}µs", start.elapsed().as_micros());
+                let pause = start.elapsed();
+                if self.state.trace {
+                    log::info!(target: "nsh::perf", "gc: {}µs", pause.as_micros());
+                }
+                if let Some(monitor) = &self.state.perf {
+                    monitor.record_gc(pause);
+                }
             }
             // What the app holds, for the performance monitor: read here,
             // when the heap was just walked and nothing waits.
@@ -3247,6 +3361,9 @@ struct State<M: TextEngine> {
     sets_seen: FxHashMap<(u8, NodeId, u32), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
+    /// The roots [`EngineControl::set_root_size`] sized this turn, each
+    /// with its latest size ([`MountSink::root_resized`]).
+    roots_resized: Vec<(NodeId, Size<Points>)>,
     /// A resize before this time continues a burst of them
     /// ([`RESIZE_BURST_GAP`]).
     resize_burst_ends: Option<Instant>,
@@ -3655,6 +3772,19 @@ impl<M: TextEngine> State<M> {
         let mut commit = std::mem::take(&mut self.perf_commit);
         if commit.ops > 0 || commit.items > 0 {
             commit.js = busy.saturating_sub(commit.layout);
+            // Each record as the monitor takes it. Its percentiles span the
+            // last few seconds (`perf::COMMIT_WINDOW`): with this a trace
+            // can give them for a stretch of its own.
+            if self.trace {
+                log::info!(
+                    target: "nsh::perf",
+                    "record: js {}µs, layout {}µs, {} ops, {} items",
+                    commit.js.as_micros(),
+                    commit.layout.as_micros(),
+                    commit.ops,
+                    commit.items,
+                );
+            }
             monitor.record_commit(commit);
         }
     }
@@ -4086,6 +4216,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         horizontal_size_class: env.horizontal_size_class,
         vertical_size_class: env.vertical_size_class,
         safe_area: insets(env),
+        reserved_regions: env.reserved_regions,
         title_bar: env.title_bar,
         window_state: env.window_state,
         keyboard_height: env.keyboard_height,
@@ -4112,9 +4243,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         screen_color: env.screen_color,
         clipboard_write_result: env.clipboard_write_result,
         canvas_render: env.canvas_render,
-        share: env.share,
         app_settings: env.app_settings,
-        auth_session: env.auth_session,
         scheme_links: env.scheme_links(),
         file_requests: env.file_requests,
         notifications: env.notifications,
@@ -4324,8 +4453,16 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if event == EventKind::CaretMove {
                 state.core.locate_caret(id, &mut payload);
             }
+            // The core knows the list rows the selection's ends are in,
+            // the runtime the keys of its lists' items; rows of other
+            // lists go by their index.
             if event == EventKind::SelectionChange {
                 state.core.locate_selection(id, &mut payload);
+                state.core.name_selection_ends(&mut payload, |list, index| {
+                    script.map_or(nsh_core::selection::ListItemKey::NotMine, |s| {
+                        s.list_item_key(list, index)
+                    })
+                });
             }
             if event == EventKind::Paste {
                 payload = payload.into_paste();
@@ -4458,7 +4595,13 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 script.set_displays(&displays);
             }
         }
-        Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
+        Message::RootSize(id, size, insets) => {
+            state.core.set_root_size(id, size, insets);
+            match state.roots_resized.iter_mut().find(|(i, _)| *i == id) {
+                Some((_, latest)) => *latest = size,
+                None => state.roots_resized.push((id, size)),
+            }
+        }
         Message::OverlayArea(area) => state.core.set_overlay_area(area),
         Message::PressBeyondRoot(page) => {
             let pressed = state.core.presses_beyond_root(page);
@@ -4545,7 +4688,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         // The components' listeners hear it, then JS's.
-        Message::HostEvent(name, data) => {
+        Message::HostEvent(name, data) | Message::CallerEvent(name, data) => {
             state.core.host_event(&name, &data);
             if let Some(script) = script {
                 script.host_event(&name, data);
@@ -5067,6 +5210,37 @@ mod updater_range_tests {
         assert!(!is_updater_url("file:///etc/passwd"));
     }
 
+    #[test]
+    fn plain_http_redirects_stay_on_the_feed_origin() {
+        let feed = "http://10.0.0.2:8080/updates/latest.json";
+        assert!(updater_redirect_allowed(
+            feed,
+            "http://10.0.0.2:8080/other/latest.json"
+        ));
+        assert!(updater_redirect_allowed(
+            feed,
+            "https://cdn.example/latest.json"
+        ));
+        assert!(updater_redirect_allowed(
+            "http://10.0.0.2/a",
+            "http://10.0.0.2:80/b"
+        ));
+        assert!(!updater_redirect_allowed(
+            feed,
+            "http://10.0.0.2/latest.json"
+        ));
+        assert!(!updater_redirect_allowed(
+            feed,
+            "http://10.0.0.3:8080/latest.json"
+        ));
+        assert!(!updater_redirect_allowed(feed, "file:///etc/passwd"));
+        // Never from HTTPS down to plain HTTP, even on the same host.
+        assert!(!updater_redirect_allowed(
+            "https://10.0.0.2/latest.json",
+            "http://10.0.0.2/latest.json"
+        ));
+    }
+
     struct NoopTask;
     impl FetchTask for NoopTask {
         fn send(&mut self, _: Vec<u8>) {}
@@ -5132,6 +5306,39 @@ mod updater_range_tests {
             events.push("unsatisfiable".into());
         }
         Ok((events, body))
+    }
+
+    #[test]
+    fn updater_over_network_fails_a_stalled_body() {
+        /// Sends headers and a first piece, then keeps the stream open silently.
+        struct Silent(Mutex<Vec<FetchEvents>>);
+        impl Network for Silent {
+            fn fetch(&self, _: HttpRequest, mut events: FetchEvents) -> Box<dyn FetchTask> {
+                events(FetchEvent::Head(HttpHead {
+                    status: 200,
+                    headers: vec![("Content-Length".into(), "10".into())],
+                    ..Default::default()
+                }));
+                events(FetchEvent::Data(b"0123".to_vec()));
+                self.0.lock().unwrap().push(events);
+                Box::new(NoopTask)
+            }
+        }
+        let host = UpdaterOverNetwork {
+            network: Arc::new(Silent(Mutex::new(Vec::new()))),
+            assets: None,
+            config: None,
+            running: None,
+        };
+        let mut body = Vec::new();
+        let err = host
+            .get("https://x.dev/a.tar.gz", 0, &mut |_, bytes, _| {
+                body.extend_from_slice(bytes);
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(err.starts_with("download stalled"), "{err}");
+        assert_eq!(body, b"0123");
     }
 
     #[test]

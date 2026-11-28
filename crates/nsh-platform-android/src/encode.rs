@@ -345,6 +345,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                 e.int(id as i32);
                 canvas(&mut e, &drawing);
             }
+            // GPU views draw nothing on this backend yet
+            // (`docs/dev/gpu-views.md`).
+            MountItem::GpuView { .. } => {}
             MountItem::Shader { id, layer } => {
                 // Java learns what the view shows (whether a shader, its
                 // role, how far it overflows, which pictures it reads); the
@@ -568,6 +571,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     Command::Focus => e.int(0),
                     Command::Blur => e.int(1),
                     Command::ClearSelection => e.int(62),
+                    Command::SelectAll => e.int(69),
                     Command::ScrollTo { x, y, animated } => {
                         e.int(2);
                         e.float(x.0);
@@ -781,42 +785,26 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(63);
                         e.int(id as i32);
                     }
-                    // `Share.java`: the request, the title and the text
-                    // (the text and the URL on lines of their own), each
-                    // after whether it is there, then the files. Android's
-                    // sheet is no popover: the anchor is not sent.
-                    Command::Share { id, sheet } => {
-                        e.int(58);
+                    // `ClipboardReads.java`: the clip's first image
+                    // (`content:` URI) as a `data:` URI and its size, read
+                    // off the main thread.
+                    Command::ReadClipboardImage { id, has_only } => {
+                        e.int(67);
                         e.int(id as i32);
-                        e.bool(sheet.title.is_some());
-                        e.string(sheet.title.clone().unwrap_or_default());
-                        let text = sheet.combined_text();
-                        e.bool(text.is_some());
-                        e.string(text.unwrap_or_default());
-                        e.int(sheet.files.len() as i32);
-                        for file in sheet.files {
-                            e.string(file);
-                        }
+                        e.bool(has_only);
                     }
-                    // `AuthSession.java`: the request, the page, the callback
-                    // scheme and whether it is ephemeral.
-                    Command::AuthSession { id, page } => {
-                        e.int(59);
-                        e.int(id as i32);
-                        e.string(page.url);
-                        e.string(page.callback_scheme);
-                        e.bool(page.ephemeral);
-                    }
-                    // `AuthSession.java`: the request the app closed.
-                    Command::CloseAuthSession(id) => {
-                        e.int(61);
+                    // `ClipboardReads.java`: the clip's `content:` URIs,
+                    // copied into the app's cache, as `file:` URLs.
+                    Command::ReadClipboardFiles { id } => {
+                        e.int(66);
                         e.int(id as i32);
                     }
-                    // Answered by the sink (`host::answer_clipboard_reads`);
-                    // images are not written to Android's clipboard.
-                    Command::ReadClipboardImage { .. }
-                    | Command::ReadClipboardFiles { .. }
-                    | Command::SetClipboardImage(_) => e.int(-1),
+                    // `ClipboardReads.writeImage`: the image, saved to the
+                    // cache, as a `content:` URI the app's FilesProvider serves.
+                    Command::SetClipboardImage(uri) => {
+                        e.int(68);
+                        e.string(uri);
+                    }
                     // `Picker.java`: the request, the limit, the longest
                     // side (0: any), the quality (-1: none), the format.
                     Command::PickImages { id, request } => {
@@ -862,11 +850,12 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
-                    // Not carried out on Android yet: the app's paste is
-                    // lost, so say so.
-                    Command::InsertText(_) => {
-                        log::warn!("insertText is not supported on Android yet; nothing inserted");
-                        e.int(-1);
+                    // `InputBox.insertText`: the text, in place of the
+                    // selection as the user's edit (the input's line rules,
+                    // `maxLength` and undo history apply there).
+                    Command::InsertText(text) => {
+                        e.int(65);
+                        e.string(text);
                     }
                     // `SystemUi.openPath`: the file at the path, a `content:`
                     // URI the app's FilesProvider serves, to the system's
@@ -1434,10 +1423,18 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             e.bool(w.scrollable);
             e.bool(w.javascript_enabled);
             e.bool(w.incognito);
+            e.bool(w.zoomable);
+            // Its one written form, which `Native.allowsWebview` reads back.
+            let origin = w.allow_origin.as_ref().map(ToString::to_string);
+            e.opt_string(origin.as_deref());
+            // One pattern per line, which `Native.allowsWebview` reads back.
+            let hosts = w.allow_navigation.as_ref().map(ToString::to_string);
+            e.opt_string(hosts.as_deref());
         }
         NativeProps::Video(v) => {
             e.int(4);
             e.opt_string(v.source.as_deref());
+            e.opt_string(v.poster.as_deref());
             e.bool(v.paused);
             e.bool(v.muted);
             e.float(v.volume);
@@ -1484,6 +1481,7 @@ fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
         HeaderTitleAlign::Left => 0,
         HeaderTitleAlign::Center => 1,
     });
+    e.bool(c.hides_bottom_bar_when_pushed);
 }
 
 fn view_props(e: &mut Encoded, p: &ViewProps) {
@@ -1699,6 +1697,7 @@ fn role_index(role: AccessibilityRole) -> i32 {
         Dialog => 43,
         AlertDialog => 44,
         Textbox => 45,
+        TabPanel => 46,
     }
 }
 

@@ -8,7 +8,7 @@ resolver = "3"
 members = ["nsh-platform-gpui", "nsh-gpui-host"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.2"
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://nsh.dev"
@@ -27,15 +27,15 @@ private_interfaces = "deny"
 
 [workspace.dependencies]
 # nsh's crates, from the main workspace.
-nsh-core = { version = "0.6.0", path = "../nsh-core" }
-nsh-dev = { version = "0.6.0", path = "../nsh-dev" }
-nsh-testing = { version = "0.6.0", path = "../nsh-testing", default-features = false }
-nsh-engine = { version = "0.6.0", path = "../nsh-engine", default-features = false }
-nsh-base = { version = "0.6.0", path = "../nsh-base", default-features = false }
+nsh-core = { version = "0.7.2", path = "../nsh-core" }
+nsh-dev = { version = "0.7.2", path = "../nsh-dev" }
+nsh-testing = { version = "0.7.2", path = "../nsh-testing", default-features = false }
+nsh-engine = { version = "0.7.2", path = "../nsh-engine", default-features = false }
+nsh-base = { version = "0.7.2", path = "../nsh-base", default-features = false }
 # The JSX compiler alone (tests compile their apps).
-nsh-bundler = { version = "0.6.0", path = "../nsh-bundler", default-features = false }
+nsh-bundler = { version = "0.7.2", path = "../nsh-bundler", default-features = false }
 # Shader views' renderer (wgpu, the version GPUI draws with).
-nsh-platform-gpui = { version = "0.6.0", path = "nsh-platform-gpui", default-features = false }
+nsh-platform-gpui = { version = "0.7.2", path = "nsh-platform-gpui", default-features = false }
 
 # The same versions as the main workspace's.
 anyhow = "1"
@@ -46,23 +46,27 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 rustc-hash = "2.1"
 serde_json = "1"
+# A dev server in the dev-log forwarding test (in the tree through nsh-dev).
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 ttf-parser = "0.25"
 
 futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # GPUI Fast (Zed's GPUI with retained rendering), the renderer; the published
 # crates under GPUI's library names, as GPUI Kit apps use them.
-gpui = { package = "gpui-fast", version = "0.1.16", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_platform = { package = "gpui-fast-platform", version = "0.1.16", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui = { package = "gpui-fast", version = "0.1.19", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.19", default-features = false, features = ["font-kit", "wayland", "x11"] }
 # Tests check the accessibility tree as the platforms' adapters do (the
 # version GPUI's adapters use).
 accesskit_consumer = "0.38"
 # Script shots on Linux: the redirected window pixmap read from the X server.
 raw-window-handle = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSView", "NSWindow", "NSResponder", "NSAppearance", "NSApplication", "NSButton", "NSControl", "NSGraphics", "NSScreen"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSGeometry", "NSString", "NSValue", "objc2-core-foundation"] }
-x11rb = { version = "0.13", default-features = false, features = ["composite", "dri3", "present"] }
+# Blocks for AppKit's event monitors (already in GPUI's tree).
+block2 = "0.6.2"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSEvent", "NSView", "NSWindow", "NSResponder", "NSAppearance", "NSApplication", "NSButton", "NSControl", "NSGraphics", "NSScreen"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSArray", "NSDictionary", "NSGeometry", "NSNotification", "NSObject", "NSOperation", "NSString", "NSValue", "objc2-core-foundation"] }
+x11rb = { version = "0.13", default-features = false, features = ["composite", "dri3", "present", "shape"] }
 # The canvas rasterizer (already in GPUI's tree through resvg).
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 # Font files found by family for canvas text outlines (already in GPUI's tree
@@ -94,6 +98,16 @@ codegen-units = 1
 [profile.dev.package.quickjs-jit-sys]
 opt-level = 3
 [profile.dev.package.taffy]
+opt-level = 3
+# Text shaping: an Input reshapes its whole line after each edit, and
+# unoptimized, a line of 10,000 characters takes milliseconds each time.
+[profile.dev.package.cosmic-text]
+opt-level = 3
+[profile.dev.package.harfrust]
+opt-level = 3
+[profile.dev.package.read-fonts]
+opt-level = 3
+[profile.dev.package.font-types]
 opt-level = 3
 # SVG images are drawn when they load: unoptimized, a large one takes seconds.
 [profile.dev.package.tiny-skia]

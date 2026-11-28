@@ -15,6 +15,11 @@
 //! app's own waiting to show for 100 ms, 2 s at most. [`Native`]'s calls
 //! come from that thread; implementations do their work on the main thread
 //! and return when it is done.
+//!
+//! `nsh test --attach` takes the same steps on the app of a development
+//! session that runs already (`nsh run`, `nsh dev`): a host that takes them
+//! keeps its model in every such session ([`Tester::with_attach`]), so the
+//! steps find the views the app shows however long it ran.
 
 use std::{
     sync::{Arc, Condvar, Mutex, MutexGuard},
@@ -26,7 +31,7 @@ use std::{
 use nsh_core::time::Instant;
 use nsh_core::{
     MountBatch, NodeId,
-    geometry::{Bounds, Point, Points, Size, point},
+    geometry::{Bounds, Point, Points, Size, point, px},
 };
 use nsh_dev::protocol::{
     AccessibilityNode, PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep, ViewLayout,
@@ -153,9 +158,14 @@ struct State {
     batches: u64,
     /// When the last one was.
     last: Option<Instant>,
-    /// What the app threw since the last step looked.
+    /// What the app threw since the last step looked: the latest
+    /// [`KEPT_ERRORS`], as a development session's app may run long
+    /// without a step looking.
     errors: Vec<String>,
 }
+
+/// How many of the app's errors a [`Model`] keeps for the next step.
+const KEPT_ERRORS: usize = 64;
 
 impl Model {
     /// Takes in a batch the host applied (on its main thread, after
@@ -183,7 +193,12 @@ impl Model {
     /// The app threw `message` (an exception that escaped a callback, a
     /// bundle that did not load): the step taken meanwhile fails with it.
     pub fn error(&self, message: impl Into<String>) {
-        self.lock().errors.push(message.into());
+        let mut state = self.lock();
+        if state.errors.len() == KEPT_ERRORS {
+            state.errors.remove(0);
+        }
+        state.errors.push(message.into());
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -333,10 +348,19 @@ impl Model {
     /// The engine [`Model::set_up_engine`] set up started: the test moves
     /// its clock through it.
     pub fn engine_started(&self, engine: nsh_engine::EngineControl) {
-        // Steps reach every view of a page, below its fold too, as the
-        // headless driver's do.
-        engine.set_content_culling(false);
+        // The views of the app it replaced are gone: an app reloaded in a
+        // development session starts on a fresh screen, in the same window.
+        {
+            let mut state = self.lock();
+            if state.batches > 0 {
+                state.screen = state.screen.restarted();
+            }
+        }
         if let Some(setup) = &mut *self.setup.lock().unwrap_or_else(|e| e.into_inner()) {
+            // A test's steps reach every view of a page, below its fold
+            // too, as the headless driver's do; an attached session leaves
+            // the app as it runs.
+            engine.set_content_culling(false);
             setup.engine = Some(engine);
         }
     }
@@ -681,6 +705,9 @@ impl Scene for Model {
         span.background = style.background.map(|b| b.color.0);
         span.font_size = style.font_size.0;
         span.font_weight = style.font_weight;
+        span.line_height = style.line_height.0;
+        span.letter_spacing = style.letter_spacing.0;
+        span.font_family = style.font_family.map(|f| f.name().to_string());
         span.italic = style.italic;
         span.underline = style.decoration.underline;
         span.line_through = style.decoration.line_through;
@@ -1292,7 +1319,7 @@ pub trait Native: Send + Sync {
         let _ = content;
         Err(
             "pasting in tests is not supported on this platform yet: run the test headless, \
-             or on macOS, iOS or the web"
+             on a desktop platform, iOS or the web"
                 .into(),
         )
     }
@@ -1351,18 +1378,18 @@ pub trait Native: Send + Sync {
         options: DragOptions,
     ) -> Result<(), String> {
         let _ = (from, to, options);
-        Err("`dragAndHold` runs headless, on Linux and on iOS for now".into())
+        Err("`dragAndHold` runs headless, on Linux, Windows and iOS for now".into())
     }
     /// Drops local files (`file:` URLs) at `at`, as a file manager's drag
     /// does.
     fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
         let _ = (at, uris);
-        Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
+        Err("`dropFiles` runs headless, on Linux, macOS and Windows for now".into())
     }
     /// Lets go of the button [`Native::drag_and_hold`] holds, at `at`.
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
         let _ = at;
-        Err("`drop` runs headless, on Linux and on iOS for now".into())
+        Err("`drop` runs headless, on Linux, Windows and iOS for now".into())
     }
     /// Holds modifier keys down (`down`) or lets go of them: the presses,
     /// drags and hovers until then carry them. One that cannot refuses it.
@@ -1370,7 +1397,7 @@ pub trait Native: Send + Sync {
         let _ = keys;
         Err(crate::failure::unsupported_here(
             if down { "keyboard.down" } else { "keyboard.up" },
-            "holding keys runs headless and on Linux for now",
+            "holding keys runs headless, on Linux and Windows for now",
         ))
     }
     /// Types `text` into the focused input, key by key.
@@ -1410,6 +1437,16 @@ pub trait Native: Send + Sync {
     /// for an animation ([`Native::animating`]).
     fn opening(&self) -> bool {
         false
+    }
+    /// Whether a call since the last time this was asked got no answer
+    /// because the platform's thread that answers it stayed busy past the
+    /// agent's wait, rather than finding nothing: what such a call returned
+    /// ([`Native::bounds`]'s `None`, an empty [`Native::viewport`]) is not
+    /// the app's state. Described for a failure (`"the window did not
+    /// answer in 10 s"`); asking resets it. The agent asks before and after
+    /// each step ([`Agent::take`]). `None` where every call is answered.
+    fn take_unanswered(&self) -> Option<String> {
+        None
     }
     /// A picture of the window: PNG bytes, or UTF-8 Cell JSON on the terminal target.
     fn screenshot(&self) -> Result<Vec<u8>, String>;
@@ -1476,6 +1513,11 @@ impl Worker {
     }
 }
 
+/// What attaches a [`Model`] to the host's surface and makes the platform's
+/// [`Native`] ([`Tester`]).
+#[cfg(not(target_arch = "wasm32"))]
+type KeepModel = dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync;
+
 #[cfg(not(target_arch = "wasm32"))]
 /// A dev host's test session: when the server says it runs one
 /// ([`nsh_dev::DevEvent::Testing`]), it makes the app's [`Model`] and the
@@ -1483,8 +1525,13 @@ impl Worker {
 /// before the first bundle comes) and takes the steps that follow on a
 /// [`Worker`], answering each through the dev client.
 pub struct Tester {
-    start: Box<dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync>,
-    client: std::sync::OnceLock<std::sync::Weak<nsh_dev::DevClient>>,
+    start: Box<KeepModel>,
+    /// What attaches the model to the surface in a development session
+    /// `nsh test --attach` may drive ([`Tester::with_attach`]).
+    attach: Option<Box<KeepModel>>,
+    /// Shared with the closures that answer: the dev client's thread makes
+    /// them, maybe before the thread that started it sets the client.
+    client: Arc<std::sync::OnceLock<std::sync::Weak<nsh_dev::DevClient>>>,
     worker: Mutex<Option<Worker>>,
     /// The model of the session's app, once it started.
     model: Mutex<Option<std::sync::Arc<Model>>>,
@@ -1498,13 +1545,36 @@ impl Tester {
     ) -> std::sync::Arc<Tester> {
         std::sync::Arc::new(Tester {
             start: Box::new(start),
-            client: std::sync::OnceLock::new(),
+            attach: None,
+            client: Arc::default(),
             worker: Mutex::new(None),
             model: Mutex::new(None),
         })
     }
 
-    /// The client that answers the steps (once it exists).
+    /// A host's tester that takes the steps of `nsh test --attach` in a
+    /// development session too ([`nsh_dev::DevEvent::Attachable`]): there
+    /// `attach` (on the dev client's thread) attaches the model to the
+    /// surface before the first bundle comes, as `start` does in a test
+    /// session, but leaves the app as it runs: no test drives it, so the
+    /// user's own input and the platform's settings stay as they are. The
+    /// host says it takes them ([`nsh_dev::HostInfo::attach`]).
+    pub fn with_attach(
+        start: impl Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync + 'static,
+        attach: impl Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync + 'static,
+    ) -> std::sync::Arc<Tester> {
+        std::sync::Arc::new(Tester {
+            start: Box::new(start),
+            attach: Some(Box::new(attach)),
+            client: Arc::default(),
+            worker: Mutex::new(None),
+            model: Mutex::new(None),
+        })
+    }
+
+    /// The client that answers the steps. Set it as soon as it started: what
+    /// the test is to hear until then (the outcomes of steps, the app's
+    /// requests, a traced app's batches) waits for it.
     pub fn set_client(&self, client: &std::sync::Arc<nsh_dev::DevClient>) {
         let _ = self.client.set(std::sync::Arc::downgrade(client));
     }
@@ -1513,7 +1583,11 @@ impl Tester {
     /// back the others.
     pub fn event(&self, event: nsh_dev::DevEvent) -> Option<nsh_dev::DevEvent> {
         match event {
-            nsh_dev::DevEvent::Testing => self.start(),
+            nsh_dev::DevEvent::Testing => self.start(&*self.start),
+            nsh_dev::DevEvent::Attachable => match &self.attach {
+                Some(attach) => self.start(&**attach),
+                None => log::warn!("the dev server offers attached steps this host does not take"),
+            },
             nsh_dev::DevEvent::Step { id, step } => self.take(id, step),
             nsh_dev::DevEvent::TestSetup {
                 storage,
@@ -1527,8 +1601,7 @@ impl Tester {
                         trace,
                         environment,
                         Arc::new(move |message| {
-                            let Some(client) = client.get().and_then(std::sync::Weak::upgrade)
-                            else {
+                            let Some(client) = client.wait().upgrade() else {
                                 return;
                             };
                             match message {
@@ -1554,17 +1627,19 @@ impl Tester {
         self.model.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn start(&self) {
+    /// Makes the app's model and the worker taking its steps, once:
+    /// `start` attaches the model to the surface.
+    fn start(&self, start: &KeepModel) {
         let mut worker = self.worker.lock().unwrap_or_else(|e| e.into_inner());
         if worker.is_some() {
             return;
         }
         let model = std::sync::Arc::new(Model::default());
         *self.model.lock().unwrap_or_else(|e| e.into_inner()) = Some(model.clone());
-        let native = (self.start)(model.clone());
+        let native = start(model.clone());
         let client = self.client.clone();
         let started = Worker::spawn(Agent::new(model, native), move |id, outcome| {
-            if let Some(client) = client.get().and_then(std::sync::Weak::upgrade) {
+            if let Some(client) = client.wait().upgrade() {
                 client.step_done(id, outcome);
             }
         });
@@ -1581,7 +1656,7 @@ impl Tester {
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .is_some_and(|w| w.take(id, step));
-        if !taken && let Some(client) = self.client.get().and_then(std::sync::Weak::upgrade) {
+        if !taken && let Some(client) = self.client.wait().upgrade() {
             client.step_done(
                 id,
                 StepOutcome::Failed {
@@ -1721,10 +1796,25 @@ impl Agent {
     }
 
     /// Takes `step`; blocks until it is done and the app is quiet.
+    ///
+    /// A call to the platform that went unanswered during the step
+    /// ([`Native::take_unanswered`]) is named in its failure, so a window
+    /// that was only busy is told from one that is gone or a view that is
+    /// not there. A question about the scene fails with it: its answer is
+    /// what the unanswered call returned. Other steps that succeed keep
+    /// their success: a later try got through.
     pub fn take(&self, step: TestStep) -> StepOutcome {
-        match self.run(step) {
-            Ok(value) => StepOutcome::Done { value },
-            Err(message) => StepOutcome::Failed { message },
+        // What an earlier step left unanswered is not this one's.
+        let _ = self.native.take_unanswered();
+        let question = matches!(step, TestStep::Scene { .. });
+        let result = self.run(step);
+        match (result, self.native.take_unanswered()) {
+            (Ok(_), Some(why)) if question => StepOutcome::Failed { message: why },
+            (Ok(value), _) => StepOutcome::Done { value },
+            (Err(message), Some(why)) if !message.contains(&why) => StepOutcome::Failed {
+                message: format!("{message} ({why})"),
+            },
+            (Err(message), _) => StepOutcome::Failed { message },
         }
     }
 
@@ -1738,7 +1828,10 @@ impl Agent {
         }
         match step {
             TestStep::Ready { timeout_ms } => done(self.ready(Duration::from_millis(timeout_ms))),
-            TestStep::Press { selector } => done(self.press(&selector)),
+            TestStep::Press { selector } => done(self.press(&selector, None)),
+            TestStep::PressAt { selector, x, y } => {
+                done(self.press(&selector, Some(point(px(x), px(y)))))
+            }
             TestStep::LongPress { selector } => done(self.long_press(&selector)),
             TestStep::Type { selector, text } => done(self.type_text(&selector, &text)),
             TestStep::Submit { selector } => done(self.submit(&selector)),
@@ -1847,7 +1940,7 @@ impl Agent {
                 serde_json::to_value(self.scene.view_style(&selector)?).map_err(|e| e.to_string())
             }
             TestStep::Layout { selector } => {
-                serde_json::to_value(self.scene.layout(&selector)?).map_err(|e| e.to_string())
+                serde_json::to_value(self.layout(&selector)?).map_err(|e| e.to_string())
             }
             TestStep::Accessibility { selector } => {
                 serde_json::to_value(self.scene.accessibility(selector.as_deref())?)
@@ -2067,6 +2160,53 @@ impl Agent {
         what: &str,
         target: PickTarget,
     ) -> Result<(NodeId, Point<Points>), String> {
+        self.find_at(selector, what, target, None)
+    }
+
+    /// Where the view `selector` names is ([`Scene::layout`]), placed
+    /// where the platform shows it when it is inside a scroll view. The
+    /// scene knows only the scrolls the core asked for; one the native
+    /// scroll view made itself (a wheel, a finger, [`Native::scroll`], the
+    /// content kept in place as rows above it go) moves the view on screen
+    /// alone, so its place and whether its scroll views cut it come from
+    /// the platform's views.
+    fn layout(&self, selector: &str) -> Result<Option<ViewLayout>, String> {
+        let Some(mut layout) = self.scene.layout(selector)? else {
+            return Ok(None);
+        };
+        let Pick::One(id) = self.scene.pick(selector, PickTarget::View)? else {
+            return Ok(Some(layout));
+        };
+        let scrollers = self.scene.scroll_ancestors(id)?;
+        if scrollers.is_empty() {
+            return Ok(Some(layout));
+        }
+        let Some(bounds) = self.native.bounds(id) else {
+            return Ok(Some(layout));
+        };
+        let bounds = Bounds::new(
+            bounds.origin,
+            Size::new(Points(layout.width), Points(layout.height)),
+        );
+        layout.x = bounds.origin.x.0;
+        layout.y = bounds.origin.y.0;
+        layout.clipped = scrollers.iter().any(|&(scroller, _)| {
+            self.native
+                .bounds(scroller)
+                .is_some_and(|b| b.intersect(&bounds) != bounds)
+        });
+        Ok(Some(layout))
+    }
+
+    /// [`Agent::find`] for a press at `position` in the view `selector`
+    /// names (its top left corner), else where a tap lands.
+    fn find_at(
+        &self,
+        selector: &str,
+        what: &str,
+        target: PickTarget,
+        position: Option<Point<Points>>,
+    ) -> Result<(NodeId, Point<Points>), String> {
         Selector::parse(selector)?;
         self.settled_unless_still()?;
         let picked = self.scene.pick(selector, target)?;
@@ -2074,6 +2214,42 @@ impl Agent {
         // The pointer acts in the window the view is in.
         self.native.target_window(self.scene.window_of(id)?)?;
         let (view, at) = self.locate(id, selector, target)?;
+        let at = match position {
+            None => at,
+            Some(position) => {
+                // The point is in the view the selector names, as the
+                // headless driver places it; a span of a text is placed in
+                // its text view, as the platform draws it.
+                let named = match target {
+                    PickTarget::View => id,
+                    _ => match self.scene.pick(selector, PickTarget::View)? {
+                        Pick::One(named) => named,
+                        _ => id,
+                    },
+                };
+                let origin = self
+                    .native
+                    .bounds(named)
+                    .map(|b| b.origin)
+                    .or_else(|| {
+                        self.scene
+                            .layout(selector)
+                            .ok()
+                            .flatten()
+                            .map(|l| point(px(l.x), px(l.y)))
+                    })
+                    .or_else(|| self.native.bounds(view).map(|b| b.origin))
+                    .ok_or_else(|| {
+                        format!(
+                            "`{selector}` has no bounds to place a press at {}, {}; {}",
+                            position.x.0,
+                            position.y.0,
+                            self.on_screen()
+                        )
+                    })?;
+                origin + position
+            }
+        };
         // What the system draws over the app (a header it scrolls under)
         // would take the press: the step fails rather than pressing it.
         if let Some(cover) = self.native.covered(view, at) {
@@ -2401,21 +2577,27 @@ impl Agent {
         Ok(clear_spot(start, extent, along, &covered).unwrap_or(along))
     }
 
-    fn press(&self, selector: &str) -> Result<(), String> {
-        let at = match self.find(selector, "pressable view", PickTarget::Pressable) {
+    fn press(&self, selector: &str, position: Option<Point<Points>>) -> Result<(), String> {
+        let at = match self.find_at(selector, "pressable view", PickTarget::Pressable, position) {
             Ok((_, at)) => at,
             // Not one of the app's views on screen: a control the system
             // draws for it (a header button) may carry the name.
-            Err(error) => self.system_control(selector).ok_or(error)?,
+            Err(error) => self
+                .system_control(selector)
+                .map(|bounds| match position {
+                    Some(position) => bounds.origin + position,
+                    None => bounds.center(),
+                })
+                .ok_or(error)?,
         };
         self.native.press(at);
         self.settled()
     }
 
-    /// The middle of the control the system draws for the app that
+    /// The bounds of the control the system draws for the app that
     /// `selector` names alone (`id:<key>`, `label:<label>` or a bare name,
     /// as a test id, else a label), when the platform shows one.
-    fn system_control(&self, selector: &str) -> Option<Point<Points>> {
+    fn system_control(&self, selector: &str) -> Option<Bounds<Points>> {
         use crate::selector::{Matcher, TextMatch};
         let parsed = Selector::parse(selector).ok()?;
         let [part] = parsed.parts.as_slice() else {
@@ -2435,7 +2617,7 @@ impl Agent {
                 .or_else(|| self.native.system_control(SystemName::Label(name))),
             _ => None,
         }?;
-        Some(bounds.center())
+        Some(bounds)
     }
 
     fn long_press(&self, selector: &str) -> Result<(), String> {
@@ -2816,12 +2998,19 @@ impl Agent {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
 
     use nsh_core::{
         EventKind, EventPayload,
         geometry::{Size, point},
         prelude::*,
+    };
+    use nsh_dev::{
+        ClientEvent, DevClient, DevEvent, DevServer, HostInfo,
+        protocol::{HostPlatform, WS_PATH},
     };
     use nsh_engine::{EngineConfig, EngineControl};
 
@@ -3222,6 +3411,43 @@ mod tests {
     }
 
     #[test]
+    fn layout_places_a_view_where_its_natively_scrolled_scroll_view_shows_it() {
+        use nsh_core::{MountItem, ViewProps};
+        // The scroll view was scrolled down 200 points natively (a wheel, a
+        // finger): the scene still has it at its top.
+        let layout = |target: f32| {
+            let model = page_model();
+            let props = ViewProps {
+                test_id: Some("row".into()),
+                ..ViewProps::default()
+            };
+            let frame = Bounds::new(point(px(0.0), px(target)), size(px(320.0), px(40.0)));
+            model.apply(&MountBatch {
+                items: vec![
+                    MountItem::ViewProps {
+                        id: 4,
+                        props: Box::new(props),
+                    },
+                    MountItem::Frame { id: 4, frame },
+                ],
+            });
+            let page = Page {
+                offset: Mutex::new(200.0),
+                target,
+                ..Page::default()
+            };
+            let agent = Agent::new(model, Box::new(page));
+            let layout = agent.layout("id:row").unwrap().unwrap();
+            (layout.y, layout.clipped)
+        };
+        // 600 points down its content, it shows 400 points down the window,
+        // inside the scroll view.
+        assert_eq!(layout(600.0), (400.0, false));
+        // Scrolled past, it is cut.
+        assert_eq!(layout(100.0), (-100.0, true));
+    }
+
+    #[test]
     fn a_view_left_under_a_header_fails_the_step_instead_of_pressing_the_header() {
         let ok = StepOutcome::Done {
             value: serde_json::Value::Null,
@@ -3287,6 +3513,49 @@ mod tests {
         });
         assert_eq!(outcome, ok);
         assert_eq!(pressed, [323.0]);
+    }
+
+    #[test]
+    fn a_press_at_a_position_lands_there_and_fails_when_that_point_is_covered() {
+        let press = |page: Page, position: Point<Points>| {
+            let pressed = page.pressed.clone();
+            let agent = Agent::new(page_model(), Box::new(page));
+            let outcome = agent.take(TestStep::PressAt {
+                selector: "view:4".into(),
+                x: position.x.0,
+                y: position.y.0,
+            });
+            (outcome, pressed.lock().unwrap().clone())
+        };
+        let (outcome, pressed) = press(
+            Page {
+                target: 200.0,
+                ..Page::default()
+            },
+            point(px(10.0), px(5.0)),
+        );
+        assert_eq!(
+            outcome,
+            StepOutcome::Done {
+                value: serde_json::Value::Null
+            }
+        );
+        assert_eq!(pressed, [205.0]);
+        // What draws over that point takes the press: the step fails
+        // instead of pressing the view.
+        let (outcome, pressed) = press(
+            Page {
+                target: 50.0,
+                bar: 103.0,
+                ..Page::default()
+            },
+            point(px(10.0), px(5.0)),
+        );
+        assert!(
+            matches!(&outcome, StepOutcome::Failed { message } if message.starts_with("`view:4` is covered: a press there reaches a navigation bar")),
+            "{outcome:?}"
+        );
+        assert!(pressed.is_empty());
     }
 
     #[test]
@@ -4211,6 +4480,216 @@ mod tests {
         assert!(scene.take_waits() > 0);
         assert!(!agent.native.opening());
 
+        drop(engine);
+    }
+
+    /// [`Fake`] whose window's thread stays busy past the agent's wait
+    /// while `busy` is set: its views' bounds come back empty, and `back`
+    /// fails as a platform's error built from that wait does.
+    struct Busy {
+        fake: Fake,
+        busy: Arc<AtomicBool>,
+        missed: Arc<AtomicBool>,
+    }
+
+    const BUSY: &str = "the window did not answer in 10 s";
+
+    impl Busy {
+        fn wait(&self) -> bool {
+            let busy = self.busy.load(Ordering::Relaxed);
+            if busy {
+                self.missed.store(true, Ordering::Relaxed);
+            }
+            !busy
+        }
+    }
+
+    impl Native for Busy {
+        fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+            self.wait().then(|| self.fake.bounds(id)).flatten()
+        }
+        fn viewport(&self) -> Size<Points> {
+            if self.wait() {
+                self.fake.viewport()
+            } else {
+                Size::default()
+            }
+        }
+        fn press(&self, at: Point<Points>) {
+            if self.wait() {
+                self.fake.press(at);
+            }
+        }
+        fn long_press(&self, _: Point<Points>, _: Duration) {}
+        fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>, _: DragOptions) -> Result<(), String> {
+            Ok(())
+        }
+        fn type_text(&self, _: &str) {}
+        fn key(&self, _: Key) {}
+        fn input_text(&self, _: NodeId) -> Option<String> {
+            None
+        }
+        fn back(&self) -> Result<(), String> {
+            if self.wait() {
+                Err("no back here".into())
+            } else {
+                Err(BUSY.into())
+            }
+        }
+        fn answer_dialog(&self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn animating(&self) -> bool {
+            false
+        }
+        fn take_unanswered(&self) -> Option<String> {
+            self.missed
+                .swap(false, Ordering::Relaxed)
+                .then(|| BUSY.to_owned())
+        }
+        fn screenshot(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+        fn resize(&self, _: Points, _: Points) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_dark(&self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn quit(&self) {}
+    }
+
+    #[test]
+    fn a_step_names_the_calls_a_busy_window_left_unanswered() {
+        let (engine, batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
+        let model = Arc::new(Model::default());
+        let feeding = model.clone();
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                feeding.apply(&batch);
+            }
+        });
+        let (busy, missed) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let agent = Agent::new(
+            model.clone(),
+            Box::new(Busy {
+                fake: Fake(engine.control(), Arc::default(), Some(model.clone())),
+                busy: busy.clone(),
+                missed: missed.clone(),
+            }),
+        );
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        let failed = |message: &str| StepOutcome::Failed {
+            message: message.into(),
+        };
+        assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+        let (add, _) = agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+
+        // A question answered from a call that went unanswered fails with
+        // why, instead of answering that the view is not on screen.
+        busy.store(true, Ordering::Relaxed);
+        assert_eq!(
+            agent.take(TestStep::Scene {
+                query: SceneQuery::Bounds { id: add }
+            }),
+            failed(BUSY)
+        );
+        // A failure gets why; one that already says it is left as it is.
+        busy.store(false, Ordering::Relaxed);
+        missed.store(true, Ordering::Relaxed);
+        assert_eq!(
+            agent.take(TestStep::Back),
+            failed("no back here"),
+            "an earlier step's"
+        );
+        busy.store(true, Ordering::Relaxed);
+        assert_eq!(agent.take(TestStep::Back), failed(BUSY));
+        busy.store(false, Ordering::Relaxed);
+
+        // Answered again: the same question gets the view's bounds.
+        assert!(matches!(
+            agent.take(TestStep::Scene {
+                query: SceneQuery::Bounds { id: add }
+            }),
+            StepOutcome::Done { value } if value.is_array()
+        ));
+        drop(engine);
+    }
+
+    /// The server's hello and its test's setup may come on the dev client's
+    /// thread before the thread that started the client sets it.
+    #[test]
+    fn a_session_that_starts_before_its_client_is_set_answers_the_test() {
+        let (engine, batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
+        let control = engine.control();
+        let tester =
+            Tester::new(move |model| Box::new(Fake(control.clone(), Arc::default(), Some(model))));
+        let traced = Arc::new(Mutex::new(Vec::new()));
+        let heard = traced.clone();
+        let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc", None, move |event| {
+            if let ClientEvent::Trace { items } = event {
+                heard.lock().unwrap().extend(items);
+            }
+        })
+        .unwrap();
+        server.test_session();
+        server.set_test_trace(true);
+        let (tests, (set_up, is_set_up)) = (tester.clone(), std::sync::mpsc::channel());
+        let client = DevClient::start(
+            format!("ws://{}{WS_PATH}", server.local_addr()),
+            {
+                let mut host = HostInfo::new(HostPlatform::MacOs);
+                host.device = "tester".into();
+                host.bytecode_version = "bc".into();
+                host.tests = true;
+                host
+            },
+            move |event| {
+                let setup = matches!(event, DevEvent::TestSetup { .. });
+                tests.event(event);
+                if setup {
+                    let _ = set_up.send(());
+                }
+            },
+        )
+        .unwrap();
+        // The session started and no client is set.
+        is_set_up.recv_timeout(Duration::from_secs(10)).unwrap();
+        let model = tester.model().expect("the session's model");
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                model.apply(&batch);
+            }
+        });
+        let client = Arc::new(client);
+        let (late, setting) = (tester.clone(), client.clone());
+        let setting = std::thread::spawn(move || {
+            // Past the app's first batch and the step's arrival.
+            std::thread::sleep(Duration::from_millis(100));
+            late.set_client(&setting);
+        });
+        assert_eq!(
+            server.step(
+                TestStep::Ready { timeout_ms: 5000 },
+                Duration::from_secs(10)
+            ),
+            Ok(serde_json::Value::Null)
+        );
+        assert!(
+            !traced.lock().unwrap().is_empty(),
+            "the first batch's trace"
+        );
+        setting.join().unwrap();
         drop(engine);
     }
 }

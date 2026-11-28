@@ -20,16 +20,18 @@
 //! taking them all. An idle surface applies a batch as soon as it lands.
 //!
 //! The one exception to "the main thread never waits for JS": when the
-//! window resizes the root ([`Surface::resized`]), the main thread waits
-//! for the engine's layout at the new size, at most [`RESIZE_WAIT`], and
-//! applies it before AppKit draws the window at that size. Without it the
-//! content shows a frame late during a live resize, and not at all during
-//! AppKit's animated resizes (zoom, full screen): those run the run loop
-//! in a private mode (`_NSMoveTimerRunLoopMode`) where the main queue
-//! does not drain, so the window grew around stale content and showed its
-//! background in the new area until the animation ended. An engine that
-//! misses the deadline (JS busy) is not waited for again until it catches
-//! up, so a slow app resizes as before, a frame or more behind.
+//! window resizes the root ([`Surface::resized`]) or a window of the
+//! app's own resizes its root ([`crate::window::resized`]), the main
+//! thread waits for the engine's layout at the new size, at most
+//! [`RESIZE_WAIT`], and applies it before AppKit draws the window at that
+//! size. Without it the content shows a frame late during a live resize,
+//! and not at all during AppKit's animated resizes (zoom, full screen):
+//! those run the run loop in a private mode (`_NSMoveTimerRunLoopMode`)
+//! where the main queue does not drain, so the window grew around stale
+//! content and showed its background in the new area until the animation
+//! ended. An engine that misses the deadline (JS busy) is not waited for
+//! again until it catches up, so a slow app resizes as before, a frame or
+//! more behind.
 
 use std::{
     cell::{Cell, RefCell},
@@ -37,7 +39,7 @@ use std::{
     path::PathBuf,
     rc::{Rc, Weak},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Instant,
@@ -68,8 +70,10 @@ enum Message {
     Error(String),
     Frame,
     HotUpdateFailed,
-    /// The engine laid the app out at this size ([`MountSink::resized`]).
-    Resized(Size<Points>),
+    /// The engine laid root `id` out at this size: the app's root
+    /// ([`ROOT_ID`], [`MountSink::resized`]) or a window of the app's own
+    /// ([`MountSink::root_resized`]).
+    Resized(NodeId, Size<Points>),
     /// The app imports chunk `id` (`import()` of a split bundle), which its
     /// bundle does not hold ([`MountSink::load_chunk`]).
     LoadChunk(String),
@@ -122,6 +126,9 @@ struct Sink {
     /// The backing scale of the surface's window (`f64` bits), which its
     /// texts are painted at ([`Surface::raster_scale`]).
     raster_scale: Arc<AtomicU64>,
+    /// Live node sizes and layouts remembered across batches so updated
+    /// texts without a new frame still paint off the main thread.
+    raster_state: Mutex<crate::text::RasterState>,
 }
 
 impl Sink {
@@ -143,7 +150,13 @@ impl MountSink for Sink {
         // The texts are painted here, off the main thread, which then only
         // shows them: Core Animation would draw each in its commit.
         let scale = f64::from_bits(self.raster_scale.load(Ordering::Relaxed));
-        let rasters = crate::text::prerender(&batch, scale);
+        let rasters = {
+            let mut state = self
+                .raster_state
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            crate::text::prerender(&batch, scale, &mut state)
+        };
         let sent = self.perf.load(Ordering::Relaxed).then(Instant::now);
         self.send(Message::Batch(batch, sent, rasters));
     }
@@ -165,7 +178,11 @@ impl MountSink for Sink {
     }
 
     fn resized(&self, size: Size<Points>) {
-        self.send(Message::Resized(size));
+        self.send(Message::Resized(ROOT_ID, size));
+    }
+
+    fn root_resized(&self, id: NodeId, size: Size<Points>) {
+        self.send(Message::Resized(id, size));
     }
 
     fn load_chunk(&self, id: &str) -> bool {
@@ -228,9 +245,6 @@ pub(crate) struct Surface {
     /// The app's own windows (`Window.open`), by the dialog root each
     /// shows ([`crate::window`]).
     pub(crate) windows: RefCell<rustc_hash::FxHashMap<NodeId, crate::window::AppWindow>>,
-    /// The share menu showing and the share it started
-    /// ([`crate::share`]).
-    pub(crate) share: crate::share::Showing,
     /// Pointer input state ([`crate::input`]).
     pub(crate) input: crate::input::Input,
     /// The text selection ([`crate::text::Selected`]).
@@ -279,12 +293,16 @@ pub(crate) struct Surface {
     ticking: Cell<usize>,
     /// How many of the frame callbacks have only cosmetic work left (a
     /// scroll indicator fading out, keyframes repeating forever): what
-    /// [`Surface::animating`] does not count.
-    #[cfg(feature = "dev")]
+    /// [`Surface::moving`] and [`Surface::animating`] do not count.
     cosmetic_frames: Cell<usize>,
-    /// The model of a test session's app (`nsh test --target`).
+    /// The model of the app the agent's steps see: a test session's (`nsh
+    /// test --target`), or a development session's (`nsh test --attach`).
     #[cfg(feature = "dev")]
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
+    /// Whether a test drives the app (`nsh test --target`), not only an
+    /// attached session's steps ([`Surface::testing`]).
+    #[cfg(feature = "dev")]
+    testing: Cell<bool>,
     /// The display link, once something wanted frames, and the root it
     /// was made from (it is made again from another window's:
     /// [`Surface::follow_windows`]).
@@ -315,6 +333,15 @@ pub(crate) struct Surface {
     pub(crate) perf_mode: RefCell<Option<PerfMode>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
+    /// A batch is being applied ([`Surface::apply`]). An item can run a
+    /// nested run loop (AppKit animates the `zoom:` a window's
+    /// `SetMode(Maximized)` asks for, #3175), in which the display link,
+    /// deadline timers and the engine's wake-ups fire again: they must
+    /// not apply another batch in the middle of this one.
+    applying: Cell<bool>,
+    /// The engine's wake-up came while a batch was being applied: its
+    /// messages are drained once the batch is done ([`Surface::drain`]).
+    drain_after_apply: Cell<bool>,
     /// The deadline the timer scheduled waits for
     /// ([`Surface::keep_deadline`]).
     keeper: Cell<Option<f64>>,
@@ -362,6 +389,8 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     /// The GPU device and the shader views rendering ([`crate::shader`]).
     pub(crate) shaders: crate::shader::Shaders,
+    /// The GPU views ([`crate::gpu_view`]).
+    pub(crate) gpu: RefCell<crate::gpu_view::SurfaceGpu>,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -403,7 +432,6 @@ impl Surface {
             anim: RefCell::new(UiAnimation::default()),
             nav: RefCell::default(),
             windows: RefCell::default(),
-            share: Default::default(),
             input: Default::default(),
             selection: Default::default(),
             engine: RefCell::new(None),
@@ -422,10 +450,11 @@ impl Surface {
             frame_callbacks: RefCell::default(),
             background_frames: Cell::new(0),
             ticking: Cell::new(0),
-            #[cfg(feature = "dev")]
             cosmetic_frames: Cell::new(0),
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
+            #[cfg(feature = "dev")]
+            testing: Cell::new(false),
             link: RefCell::new(None),
             link_rate: Cell::new(None),
             link_screen_max: Cell::new(0.0),
@@ -436,6 +465,8 @@ impl Surface {
             perf_toggle: RefCell::new(None),
             perf_mode: RefCell::new(None),
             last_tick: Cell::new(0.0),
+            applying: Cell::new(false),
+            drain_after_apply: Cell::new(false),
             keeper: Cell::new(None),
             resize_late: Cell::new(false),
             revisited: Cell::new(0),
@@ -457,6 +488,7 @@ impl Surface {
             main_window: Default::default(),
             window: Default::default(),
             shaders: Default::default(),
+            gpu: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         // CoreText's first use loads fonts and caches (tens of
@@ -501,6 +533,7 @@ impl Surface {
             perf: self.perf_on.clone(),
             chunks: self.chunks.borrow().clone(),
             raster_scale: self.raster_scale.clone(),
+            raster_state: Mutex::default(),
         };
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
@@ -560,6 +593,7 @@ impl Surface {
         self.mounter.borrow_mut().clear();
         self.native.clear();
         crate::system::clear(self);
+        crate::panels::close(self);
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
         crate::window::close_all(self);
@@ -575,9 +609,9 @@ impl Surface {
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
         self.background_frames.set(0);
-        #[cfg(feature = "dev")]
         self.cosmetic_frames.set(0);
         crate::shader::clear(self);
+        crate::gpu_view::clear(self);
     }
 
     /// Calls `f` with the engine's control, if an app runs.
@@ -679,13 +713,19 @@ impl Surface {
         crate::navigation::surface_resized(self, width, height);
         // Full screen and the window's size change the title bar's area.
         crate::chrome::update_area(self);
-        self.await_layout(Size::new(Points(width), Points(height)));
+        self.await_layout(ROOT_ID, Size::new(Points(width), Points(height)));
     }
 
-    /// Waits for the engine's layout at `size` and applies what it sent
-    /// meanwhile ([`Surface::resized`]).
-    fn await_layout(self: &Rc<Self>, size: Size<Points>) {
-        if self.resize_late.get() || self.mounter.try_borrow_mut().is_err() {
+    /// Waits for the engine's layout of root `id` at `size` and applies
+    /// what it sent meanwhile: the app's root ([`Surface::resized`]) or a
+    /// window of the app's own ([`crate::window::resized`]). Not while
+    /// batches are being applied or the windows are borrowed: a resize
+    /// from there would apply batches inside them.
+    pub(crate) fn await_layout(self: &Rc<Self>, id: NodeId, size: Size<Points>) {
+        if self.resize_late.get()
+            || self.mounter.try_borrow_mut().is_err()
+            || self.windows.try_borrow_mut().is_err()
+        {
             return;
         }
         let Some(rx) = self.rx.borrow().clone() else {
@@ -710,7 +750,7 @@ impl Surface {
                         self.resize_late.set(true);
                         break;
                     };
-                    let done = matches!(message, Message::Resized(s) if s == size);
+                    let done = matches!(message, Message::Resized(i, s) if i == id && s == size);
                     applied |= self.handle(message, monitor.as_deref());
                     if done {
                         break;
@@ -754,6 +794,12 @@ impl Surface {
     /// Handles what the engine sent. While animations run (see the module
     /// doc), batches wait for the next frame ([`Surface::apply_queued`]).
     fn drain(self: &Rc<Self>) {
+        // Woken in a nested run loop while a batch is applied: what the
+        // engine sent stays in the channel, in order, until it is done.
+        if self.applying.get() {
+            self.drain_after_apply.set(true);
+            return;
+        }
         let monitor = self.perf.borrow().clone();
         let start = monitor.as_ref().map(|_| Instant::now());
         self.pending.borrow().store(false, Ordering::Release);
@@ -825,8 +871,13 @@ impl Surface {
                     f();
                 }
             }
-            Message::Resized(_) => self.resize_late.set(false),
-            Message::Run(task) => task.run(),
+            Message::Resized(id, size) => {
+                self.resize_late.set(false);
+                crate::window::laid_out(self, id, size);
+            }
+            // A module's main-thread function: this surface is current
+            // while it runs (`crate::native_view`, `crate::presenting_view`).
+            Message::Run(task) => crate::presenting::run_for(Rc::downgrade(self), || task.run()),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`
                 // (nsh-js) restricted it to a plain `<stem>.js`, so this
@@ -865,6 +916,22 @@ impl Surface {
     }
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
+        self.applying.set(true);
+        self.apply_batch(batch);
+        self.applying.set(false);
+        // Messages that arrived during a nested run loop: on the main
+        // queue's next turn, after the rest of what applied this batch.
+        if self.drain_after_apply.take() {
+            let key = self.key;
+            DispatchQueue::main().exec_async(move || {
+                if let Some(surface) = find(key) {
+                    surface.drain();
+                }
+            });
+        }
+    }
+
+    fn apply_batch(self: &Rc<Self>, batch: &MountBatch) {
         // A batch may change what a running frame callback has left (a
         // transition retargeted, a scroll view told to scroll) without
         // adding one: their deadlines are of before it, so each runs again
@@ -900,18 +967,20 @@ impl Surface {
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
-        let (finished, moved) = {
+        let (finished, mut moved) = {
             let mut anim = self.anim.borrow_mut();
             anim.write(&self.mounter.borrow());
             let mut moved = Vec::new();
             anim.write_components(
-                |id| crate::native::has_component(self, id),
+                |id| crate::native::has_component(self, id) || crate::gpu_view::has(self, id),
                 |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
             );
             (std::mem::take(&mut anim.finished), moved)
         };
         // Shaders whose animated uniforms moved render from the next frame.
         crate::shader::wake(self);
+        // GPU views' renderers take theirs on the render thread.
+        crate::gpu_view::animated(self, &mut moved);
         // No surface state borrowed while the app's components run.
         crate::native::component_animated(self, moved);
         crate::scroll::pin_animated_sticky(self);
@@ -951,17 +1020,22 @@ impl Surface {
         });
     }
 
-    /// Whether something on the surface moves or is about to: batches
-    /// waiting, a frame JS asked for, the animation graph, the platform's
-    /// own animations (transitions, navigation, scroll glides, keyframes),
-    /// or a mouse button held (a drag, a gesture). Costly one-time work
-    /// waits for none of it ([`when_idle`]).
+    /// Whether something on the surface moves and will stop, or is about
+    /// to: batches waiting, a frame JS asked for, the animation graph's
+    /// animations that end, the platform's own animations (transitions,
+    /// navigation, scroll glides, keyframes that end), or a mouse button
+    /// held (a drag, a gesture). Costly one-time work waits for it
+    /// ([`when_idle`]). What repeats forever (a spinner's keyframes, a
+    /// looping animated value) or only fades (a scroll indicator) is not
+    /// counted: it never stops, so waiting for it would only delay the
+    /// work (a web view's first load by [`crate::native`]'s `LOAD_WAIT`
+    /// each time, a warm-up for good).
     pub(crate) fn moving(&self) -> bool {
         !self.queued.borrow().is_empty()
             || self.js_frame.get()
-            || self.anim.borrow().animating()
+            || self.anim.borrow().finishing()
             || self.frame_callbacks.borrow().len() + self.ticking.get()
-                > self.background_frames.get()
+                > self.background_frames.get() + self.cosmetic_frames.get()
             || objc2_app_kit::NSEvent::pressedMouseButtons() != 0
     }
 
@@ -980,14 +1054,9 @@ impl Surface {
     /// repeating forever, a spinner, which never end) or no longer is; it
     /// ends with `on` false.
     pub(crate) fn cosmetic_frame(&self, on: bool) {
-        #[cfg(feature = "dev")]
-        {
-            let n = self.cosmetic_frames.get();
-            self.cosmetic_frames
-                .set(if on { n + 1 } else { n.saturating_sub(1) });
-        }
-        #[cfg(not(feature = "dev"))]
-        let _ = on;
+        let n = self.cosmetic_frames.get();
+        self.cosmetic_frames
+            .set(if on { n + 1 } else { n.saturating_sub(1) });
     }
 
     /// Whether a native animation runs: the graph's (not one looping
@@ -1002,11 +1071,18 @@ impl Surface {
             || !self.queued.borrow().is_empty()
     }
 
-    /// Keeps the model `nsh test --target` steps see of the app
+    /// Keeps the model the agent's steps see of the app
     /// ([`nsh_testing::agent::Model`]): every batch applied and every error
-    /// go to it from now on.
+    /// go to it from now on. `testing`: a test drives the app (`nsh test
+    /// --target`, [`Surface::testing`]); otherwise `nsh test --attach` may
+    /// drive it as it runs.
     #[cfg(feature = "dev")]
-    pub(crate) fn set_test_model(&self, model: Option<std::sync::Arc<nsh_testing::agent::Model>>) {
+    pub(crate) fn set_test_model(
+        &self,
+        model: Option<std::sync::Arc<nsh_testing::agent::Model>>,
+        testing: bool,
+    ) {
+        self.testing.set(testing && model.is_some());
         *self.test_model.borrow_mut() = model;
     }
 
@@ -1266,7 +1342,8 @@ impl Surface {
         self.keeper.set(Some(at));
         let key = self.key;
         let late = if testing { TEST_FRAME } else { LATE };
-        let ms = ((at + late - now).max(0.0) * 1000.0).ceil() as u64;
+        let scheduled = self.last_tick.get();
+        let ms = keeper_wait(at, scheduled, now, late);
         after(ms, move || {
             let Some(surface) = find(key) else { return };
             // An earlier deadline took its place and schedules on.
@@ -1274,7 +1351,7 @@ impl Surface {
                 return;
             }
             surface.keeper.set(None);
-            if surface.last_tick.get() < at {
+            if keeper_runs_frame(at, scheduled, surface.last_tick.get()) {
                 let now = objc2_quartz_core::CACurrentMediaTime();
                 let period = now - surface.last_tick.get();
                 surface.frame(now, period, false);
@@ -1286,7 +1363,7 @@ impl Surface {
     /// Whether `nsh test --target` drives the app ([`Surface::set_test_model`]).
     pub(crate) fn testing(&self) -> bool {
         #[cfg(feature = "dev")]
-        return self.test_model.borrow().is_some();
+        return self.testing.get();
         #[cfg(not(feature = "dev"))]
         false
     }
@@ -1321,6 +1398,13 @@ impl Surface {
     /// One display frame at `now`, `period` seconds after the previous one
     /// (the display link's, `drawn`, or one a deadline ran without a frame).
     fn frame(self: &Rc<Self>, now: f64, period: f64, drawn: bool) {
+        // A frame in a nested run loop while a batch is applied (#3175):
+        // skipped, the batch is not whole yet. The next one runs after it
+        // (the display link fires again; `last_tick` is left as it was, so
+        // a deadline still runs one).
+        if self.applying.get() {
+            return;
+        }
         self.last_tick.set(objc2_quartz_core::CACurrentMediaTime());
         let Some(monitor) = self.perf.borrow().clone() else {
             return quiet(|| self.tick(now, drawn));
@@ -1448,11 +1532,12 @@ impl Drop for Surface {
         }
         crate::tray::release(key);
         crate::global_shortcut::release(key);
-        // A surface dropped without stopping takes its alerts with it: a
-        // sheet left on an embedding app's window, or an alert shown on
-        // its own (an app-modal loop), would wait for an answer no one
-        // hears.
+        // A surface dropped without stopping takes its alerts and panels
+        // with it: a sheet left on an embedding app's window, or an alert
+        // shown on its own (an app-modal loop), would wait for an answer no
+        // one hears.
         crate::system::clear(self);
+        crate::panels::close(self);
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
 }
@@ -1516,9 +1601,48 @@ pub(crate) fn quiet<R>(f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// How many milliseconds the timer that keeps deadline `at` waits
+/// ([`Surface::keep_deadline`]): until `late` after it. A deadline the last
+/// frame (at `last_tick`) did not move past is due already, and the frame
+/// that ran then did not end it: the timer waits `late` after that frame,
+/// not 0 ms, so a deadline left in the past (its window closed, nothing
+/// steps it) cannot reschedule itself in a busy loop (#3392).
+fn keeper_wait(at: f64, last_tick: f64, now: f64, late: f64) -> u64 {
+    let due = at.max(last_tick);
+    ((due + late - now).max(0.0) * 1000.0).ceil() as u64
+}
+
+/// Whether the timer that kept deadline `at`, scheduled when the last frame
+/// had run at `scheduled`, runs a frame when it fires and the last frame ran
+/// at `last_tick`: when no frame ran since the deadline came due, or none
+/// ran since it was scheduled. A deadline already past when it was
+/// scheduled still gets a frame, which steps what set it, instead of the
+/// timer skipping and rescheduling it forever while no window draws
+/// (#3392).
+fn keeper_runs_frame(at: f64, scheduled: f64, last_tick: f64) -> bool {
+    last_tick < at || last_tick <= scheduled
+}
+
 #[cfg(test)]
 mod tests {
-    use super::frame_rate_range;
+    use super::{frame_rate_range, keeper_runs_frame, keeper_wait};
+
+    #[test]
+    fn a_deadline_left_in_the_past_does_not_spin_its_timer() {
+        // A deadline ahead: wait until `late` after it.
+        assert!((550..=551).contains(&keeper_wait(10.0, 9.0, 9.5, 0.05)));
+        assert!(keeper_runs_frame(10.0, 9.0, 9.0));
+        // The display link drew a frame after the deadline came due: the
+        // timer leaves it to that frame.
+        assert!(!keeper_runs_frame(10.0, 9.0, 10.01));
+        // A deadline long past that the last frame did not end (#3392):
+        // the timer waits `late` after that frame instead of 0 ms...
+        assert!((49..=50).contains(&keeper_wait(5.0, 10.0, 10.001, 0.05)));
+        // ...and runs a frame when it fires, if none ran since.
+        assert!(keeper_runs_frame(5.0, 10.0, 10.0));
+        // Each round then waits again: never a 0 ms loop.
+        assert!(keeper_wait(5.0, 10.05, 10.051, 0.05) > 0);
+    }
 
     fn range(rate: Option<f32>, max: f32) -> [f32; 3] {
         let r = frame_rate_range(rate, max);

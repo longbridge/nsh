@@ -1,6 +1,6 @@
 ---
 title: Windows
-description: Run Rust and TSX NSH apps on Windows in Win32 windows drawn with Direct2D, package them, embed them in a Win32 app with AppView, and what differs on Windows.
+description: Run TSX and Rust NSH apps on Windows in Win32 windows drawn with Direct2D, package them, embed them in a Win32 app with AppView, and what differs on Windows.
 order: 14
 group: platforms
 ---
@@ -60,7 +60,8 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 `AppOptions { fps: true, .. }` in a Rust app's `run_app`, the environment variable `NSH_FPS=1`, or the app's own
 `setFpsEnabled(true)`) logs the performance monitor's readings once a second
 (target `nsh::fps`): frames shown over the display's rate, the main thread's time per frame and its phases (`tick`,
-`drain`, `paint`, `present`, `canvas`), the engine's commits, CPU and memory, in the shape the other desktops log
+`drain`, `paint`, `present`, `canvas`), the engine's commits, CPU and memory, and how much of the window the frames
+redrew (`drawn`: the mean share of its pixels per frame; `whole`: frames that redrew all of it), in the shape the other desktops log
 (milliseconds as mean/p50/p95/max). `nsh test --fps -v` shows them and `examples/gallery/tools/perf.py` reads them
 ([Performance report](./performance-report.md#windows-win32-direct2d)). Measure release builds; the monitor costs
 nothing while it is off.
@@ -97,6 +98,11 @@ it uninstalls. The icon from `nsh.json` is embedded in the executable (Explorer 
 without any extra tools; packaging on another system keeps the default icon. The app id groups the app's windows in
 the taskbar. `--run` launches the app after packaging it. The executable is not signed: sign it with your own
 certificate (`signtool`) to distribute it.
+
+A TSX app's executable has only the parts of `nsh/base` the app imports. On x86_64, `nsh package` links nsh's release
+runner again from its prebuilt objects (`runtime\windows\nsh-windows-app.link\`) and leaves out the other parts. This
+needs neither Rust nor Visual Studio: the linker is the `windows-linker` [component](./installation.md#components),
+which the first package downloads. If the link fails, the app gets the prebuilt runner, with every part.
 
 ## Embedding in a Win32 app
 
@@ -175,6 +181,17 @@ Native components are registered with `AppView::register_component`; see
 engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
 makes), so the TSX a view loads imports your Rust components and modules too.
 
+## Presenting from Rust
+
+Rust code that shows system UI (a menu, a dialog, a share flyout) shows it from the surface whose code asked. In a
+main-thread task (`run_on_main_thread`), `nsh_platform_windows::presenting_window()` is the top-level window to own
+UI that no element anchors: the surface's visible window the user is in; `None` when the surface shows in no visible
+window. NSH draws its elements itself, so an element has no window of its own: `element_bounds(node)` gives the window
+an element of that surface shows in (the node of its `ref`, a `NodeRef` argument of a module function; `ROOT_ID` for
+the surface's root), its bounds in that window's client area in points, and the window's scale factor, for a menu
+that opens at the element. Read both while the task runs. They are for anchoring and presenting system UI only: a
+module never changes, re-parents, restyles or destroys a window NSH owns, nor draws into it.
+
 ## What differs on Windows
 
 The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop
@@ -219,7 +236,7 @@ Different, or not supported:
 - **`WebView`**: a page inside a view with a 3D transform (perspective) is not shown, and a `backdropFilter` over a
   page does not blur it. `baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
   stays above everything NSH draws.
-- **Video**: the formats the installed codecs decode; no poster; the control bar always shows with `controls`.
+- **Video**: the formats the installed codecs decode; the control bar always shows with `controls`.
 - **`mixBlendMode` and `backdropFilter`** are drawn, but not inside a view that has a `filter` or a 3D transform;
   `borderCurve: "continuous"` draws circular corners.
 - **Text**: head and middle ellipses on a single line only (more lines get a tail ellipsis); color emoji from COLR
@@ -232,6 +249,7 @@ Different, or not supported:
 
 ## See also
 
+- [Sign and distribute](./packaging.md#sign-and-distribute)
 - [CLI](./cli.md): `nsh run --target windows`, `nsh package --target windows`
 - [Packaging](./packaging.md)
 - [Platform-specific code](./platform-specific.md)

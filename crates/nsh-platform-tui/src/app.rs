@@ -1807,16 +1807,27 @@ impl AppView {
             };
             self.selection.draw(scene, buffer);
             let changes = self.selection.changes(&self.tree, &self.geometry);
+            let kept = self.selection.kept_rows();
             if let Some(engine) = &self.surface.engine {
                 let control = engine.control();
-                for (id, text, start) in changes {
+                // Scrolled away, the ends' rows stay rendered: recycled,
+                // their texts would show other items.
+                if let Some(nodes) = kept {
+                    control.keep_rendered(nodes);
+                }
+                for (id, text, start, ends) in changes {
+                    let mut fields = vec![
+                        ("text", nsh_core::PayloadValue::Str(text)),
+                        ("start", nsh_core::PayloadValue::Number(f64::from(start))),
+                    ];
+                    // The core places them in list items.
+                    if let Some(ends) = ends {
+                        fields.extend(nsh_core::selection::end_fields(ends));
+                    }
                     control.dispatch_event(
                         id,
                         nsh_core::EventKind::SelectionChange,
-                        nsh_core::EventPayload::Map(vec![
-                            ("text", nsh_core::PayloadValue::Str(text)),
-                            ("start", nsh_core::PayloadValue::Number(f64::from(start))),
-                        ]),
+                        nsh_core::EventPayload::Map(fields),
                     );
                 }
             }
@@ -1843,6 +1854,10 @@ impl AppView {
             }
             for id in std::mem::take(&mut self.tree.clear_selection_requests) {
                 self.selection.clear_in(&self.tree, id);
+                self.surface.wake.notify();
+            }
+            for id in std::mem::take(&mut self.tree.select_all_requests) {
+                self.selection.select_in(&self.tree, &self.geometry, id);
                 self.surface.wake.notify();
             }
             if let Some(engine) = &self.surface.engine {
@@ -1882,6 +1897,8 @@ impl AppView {
         self.diagnostics.draw(area, buffer);
         if self.options.capabilities.colors == ColorDepth::Monochrome {
             crate::palette::strip_colors(buffer, area);
+        } else if self.options.capabilities.colors == ColorDepth::TrueColor {
+            crate::palette::brand_accent(buffer, area, self.environment.color_scheme);
         }
         if let (Some(drawing), Some(perf)) = (drawing, &mut self.perf) {
             perf.pending.draw = drawing.elapsed();

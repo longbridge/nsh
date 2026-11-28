@@ -24,6 +24,26 @@
 
 #[cfg(feature = "highlight")]
 pub(super) use self::syntect_highlighter::built_in;
+#[cfg(all(feature = "highlight", feature = "rich-editor"))]
+pub(crate) use self::syntect_highlighter::{tokens_later, tokens_now};
+
+/// Tokens of a block's code: byte ranges in order, not overlapping, on
+/// character boundaries, adjacent equal tokens merged.
+#[cfg_attr(not(feature = "highlight"), allow(dead_code))]
+pub(crate) type Tokens = Vec<(std::ops::Range<usize>, crate::syntax::Token)>;
+
+/// Without the feature code is plain: no tokens.
+#[cfg(all(not(feature = "highlight"), feature = "rich-editor"))]
+pub(crate) fn tokens_now(_: &str, _: &str) -> Option<Result<Tokens, Tokens>> {
+    crate::syntax::warn_no_highlight();
+    None
+}
+
+/// Without the feature code is plain: no tokens.
+#[cfg(all(not(feature = "highlight"), feature = "rich-editor"))]
+pub(crate) async fn tokens_later(_: String, _: String) -> Option<Tokens> {
+    None
+}
 
 /// No built-in highlighter without the feature: code blocks are plain.
 #[cfg(not(feature = "highlight"))]
@@ -46,7 +66,7 @@ mod syntect_highlighter {
     };
 
     use crate::{
-        syntax::{Parse, Token, find_syntax, loaded, plain, scope_token, syntaxes},
+        syntax::{Parse, find_syntax, loaded, plain, scope_token, syntaxes},
         text_view::CodeBlock,
     };
 
@@ -147,10 +167,43 @@ mod syntect_highlighter {
         out
     }
 
-    /// Tokens of a block's code: byte ranges in order, not overlapping,
-    /// on character boundaries (syntect's operations are), adjacent equal
-    /// tokens merged.
-    pub(super) type Tokens = Vec<(Range<usize>, Token)>;
+    pub(super) use super::Tokens;
+
+    /// The tokens of `code` in `language` for a view that colors code of
+    /// its own (`RichEditor`'s code blocks), on the same terms as
+    /// `TextView`'s: `Ok` when they cost little to get here, else `Err`
+    /// with the tokens known so far ([`tokens_later`] gets the rest);
+    /// `None` for code left plain (no language, or one syntect does not
+    /// know).
+    #[cfg(feature = "rich-editor")]
+    pub(crate) fn tokens_now(language: &str, code: &str) -> Option<Result<Tokens, Tokens>> {
+        let language = language.trim();
+        if language.is_empty() || plain(language) {
+            return None;
+        }
+        if !loaded() {
+            return Some(Err(Tokens::new()));
+        }
+        Some(now(find_syntax(language)?, code))
+    }
+
+    /// The tokens of `code` in `language` off the engine thread (on the
+    /// web once the page's syntaxes have come; `None` without them).
+    #[cfg(all(feature = "rich-editor", not(target_arch = "wasm32")))]
+    pub(crate) async fn tokens_later(language: String, code: String) -> Option<Tokens> {
+        blocking(move || tokens(&language, &code)).await.ok()
+    }
+
+    /// The tokens of `code` in `language` after the frame that shows it
+    /// plain, once the page's syntaxes have come; `None` without them.
+    #[cfg(all(feature = "rich-editor", target_arch = "wasm32"))]
+    pub(crate) async fn tokens_later(language: String, code: String) -> Option<Tokens> {
+        if crate::syntax::load_async().await {
+            Some(tokens(&language, &code))
+        } else {
+            None
+        }
+    }
 
     /// The tokens of `code` in `language`, however long they take; none for
     /// a language syntect does not know.
@@ -348,6 +401,7 @@ mod syntect_highlighter {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::syntax::Token;
 
         fn check(language: &str, code: &str) -> Tokens {
             let tokens = tokens(language, code);
@@ -414,6 +468,64 @@ mod syntect_highlighter {
                 "Rust",
             ] {
                 assert!(find_syntax(language).is_some(), "{language}");
+            }
+        }
+
+        #[test]
+        fn highlight_js_names_find_their_syntaxes() {
+            for (language, syntax) in [
+                ("objectivec", "Objective-C"),
+                ("obj-c", "Objective-C"),
+                ("obj-c++", "Objective-C++"),
+                ("plist", "XML"),
+                ("xsl", "XML"),
+                ("atom", "XML"),
+                ("shellsession", "Bourne Again Shell (bash)"),
+                ("fsharp", "F#"),
+                ("f#", "F#"),
+                ("mkd", "Markdown"),
+                ("ipython", "Python"),
+                ("php-template", "PHP"),
+                ("nginxconf", "nginx"),
+                ("apacheconf", "Apache Conf"),
+                ("fortran", "Fortran (Modern)"),
+                ("scheme", "Lisp"),
+                ("delphi", "Pascal"),
+                ("x86asm", "Assembly (x86_64)"),
+                ("dos", "Batch File"),
+                ("osascript", "AppleScript"),
+                ("django", "Jinja2"),
+            ] {
+                assert_eq!(
+                    find_syntax(language).map(|s| s.name.as_str()),
+                    Some(syntax),
+                    "{language}"
+                );
+            }
+            // Names without a syntax here stay plain.
+            for language in ["vbnet", "wasm", "powershell"] {
+                assert!(find_syntax(language).is_none(), "{language}");
+            }
+        }
+
+        #[test]
+        fn an_info_string_names_its_language_by_its_first_word() {
+            for (language, syntax) in [
+                ("ts title=\"a.ts\"", "TypeScript"),
+                ("rust,ignore", "Rust"),
+                ("rust, no_run", "Rust"),
+                ("objectivec {1-3}", "Objective-C"),
+                // A whole name with spaces comes first.
+                ("Git Commit", "Git Commit"),
+            ] {
+                assert_eq!(
+                    find_syntax(language).map(|s| s.name.as_str()),
+                    Some(syntax),
+                    "{language}"
+                );
+            }
+            for language in ["text title=\"a.txt\"", "no-such-language rust", ","] {
+                assert!(find_syntax(language).is_none(), "{language}");
             }
         }
 

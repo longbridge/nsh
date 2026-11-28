@@ -53,6 +53,8 @@ final class InputBox extends FrameLayout implements Node {
     /** The text as last reported or set. */
     private String known = "";
     private boolean multiline;
+    /** Not `readOnly`: the user (and `insertText`) can edit it. */
+    private boolean editable = true;
     /** What return does (`submitBehavior`, resolved by the core; encode.rs's codes). */
     private static final int SUBMIT_AND_BLUR = 1, NEWLINE = 2;
     private int submit = SUBMIT_AND_BLUR;
@@ -78,6 +80,8 @@ final class InputBox extends FrameLayout implements Node {
     boolean pasteInserts = true;
     /** `pasteMaxSize`: the largest pasted file read, in bytes (-1: any the heap holds). */
     int pasteMaxSize = -1;
+    /** The EditText's own floating text toolbar (its selection or insertion action mode), while it is open. */
+    private android.view.ActionMode textActions;
     /** Whether the EditText shows a vertical scroll bar of its own by default. */
     private final boolean defaultVerticalBar;
     /** Platform hint colors before any explicit `placeholderTextColor` override. */
@@ -92,6 +96,16 @@ final class InputBox extends FrameLayout implements Node {
     /** `pointerEvents` (`Box`'s codes): `none` and `box-none` let touches through to the views below. */
     int pointerEvents;
 
+    /** Press handling, once the input listens to presses. */
+    Pressable press;
+
+    /**
+     * A touch that went down on the padding: how far its events move to land in the field, the same for each of
+     * them until it lifts, so the field sees the whole touch where it went down (a finger's small moves stay in it).
+     */
+    private boolean padTouch;
+    private float padDx, padDy;
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
         // No target (an editor's hidden input at its caret, over the
@@ -100,7 +114,37 @@ final class InputBox extends FrameLayout implements Node {
         if (pointerEvents == 1 || pointerEvents == 2) return false;
         // Where its clip path cuts it away, the touch goes to the views below.
         if (e.getActionMasked() == MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) return false;
-        return super.dispatchTouchEvent(e);
+        int action = e.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            // A touch on the padding is the field's, at the nearest point
+            // in it, as on the other platforms: the field takes the focus
+            // and the caret, and no view around hears a press.
+            padTouch = !onField(e.getX(), e.getY());
+            padDx = clamp(e.getX(), edit.getLeft(), edit.getRight() - 1) - e.getX();
+            padDy = clamp(e.getY(), edit.getTop(), edit.getBottom() - 1) - e.getY();
+        }
+        boolean handled;
+        if (padTouch) {
+            MotionEvent inside = MotionEvent.obtain(e);
+            inside.offsetLocation(padDx, padDy);
+            handled = super.dispatchTouchEvent(inside);
+            inside.recycle();
+        } else {
+            handled = super.dispatchTouchEvent(e);
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) padTouch = false;
+        // After the field: its press comes after the focus a tap gives it.
+        if (press != null) press.onTouchEvent(e);
+        return handled;
+    }
+
+    /** Whether ({@code x}, {@code y}) is on the field, not on the padding around it. */
+    private boolean onField(float x, float y) {
+        return x >= edit.getLeft() && x < edit.getRight() && y >= edit.getTop() && y < edit.getBottom();
+    }
+
+    private static float clamp(float v, float min, float max) {
+        return Math.max(min, Math.min(max, v));
     }
 
     InputBox(Context context, Mounter mounter, int id) {
@@ -175,16 +219,26 @@ final class InputBox extends FrameLayout implements Node {
 
             @Override
             public boolean onTextContextMenuItem(int item) {
+                if (item != android.R.id.paste && item != android.R.id.pasteAsPlainText) {
+                    return super.onTextContextMenuItem(item);
+                }
                 // Before Android 12 a paste comes here (the menu, Ctrl+V);
                 // from then on `receiveContent` hears it.
-                if (Build.VERSION.SDK_INT < 31
-                        && (item == android.R.id.paste || item == android.R.id.pasteAsPlainText)) {
+                boolean done = false;
+                if (Build.VERSION.SDK_INT < 31) {
                     android.content.ClipboardManager board = (android.content.ClipboardManager)
                             getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                     android.content.ClipData clip = board == null ? null : board.getPrimaryClip();
-                    if (clip != null && pasted(clip) && !pasteInserts) return true;
+                    done = clip != null && pasted(clip) && !pasteInserts;
                 }
-                return super.onTextContextMenuItem(item);
+                if (!done) done = super.onTextContextMenuItem(item);
+                // TextView ends its toolbar when an edit changes the text, so
+                // a paste of text closes it; one whose content was taken
+                // without inserting anything (an image `onPaste` received,
+                // `pasteBehavior="report"`) leaves the text, and the toolbar
+                // with Paste on it, as they were. A paste ends it either way.
+                finishTextActions();
+                return done;
             }
 
             @Override
@@ -278,6 +332,8 @@ final class InputBox extends FrameLayout implements Node {
                 edit.clearComposingText();
                 syncComposition();
             }
+            // Moving to the activity made again: the field keeps the focus for the app.
+            if (mounter != null && mounter.moving) return;
             mounter.inputFocused(this, focused);
             mounter.reportState(id, Mounter.STATE_FOCUSED, focused);
             if (mounter.wants(id, focused ? Native.FOCUS : Native.BLUR)) {
@@ -285,6 +341,32 @@ final class InputBox extends FrameLayout implements Node {
             }
         });
         addView(edit, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        // Keeps the EditText's toolbar at hand for a paste to end
+        // (`finishTextActions`); its items and their handling stay TextView's.
+        android.view.ActionMode.Callback textActionsTracker = new android.view.ActionMode.Callback() {
+            @Override
+            public boolean onCreateActionMode(android.view.ActionMode m, android.view.Menu menu) {
+                textActions = m;
+                return true;
+            }
+
+            @Override
+            public boolean onPrepareActionMode(android.view.ActionMode m, android.view.Menu menu) {
+                return true;
+            }
+
+            @Override
+            public boolean onActionItemClicked(android.view.ActionMode m, android.view.MenuItem item) {
+                return false;
+            }
+
+            @Override
+            public void onDestroyActionMode(android.view.ActionMode m) {
+                if (textActions == m) textActions = null;
+            }
+        };
+        edit.setCustomSelectionActionModeCallback(textActionsTracker);
+        edit.setCustomInsertionActionModeCallback(textActionsTracker);
         if (Build.VERSION.SDK_INT >= 31) {
             InputContent.install(edit, this);
         }
@@ -353,6 +435,7 @@ final class InputBox extends FrameLayout implements Node {
                    int submit, boolean rtl, int fontVariant) {
         boolean restart = this.submit != submit && multiline && configured;
         this.multiline = multiline;
+        this.editable = editable;
         this.submit = submit;
         edit.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizeDp * mounter.density);
         edit.setTextColor(color);
@@ -777,6 +860,52 @@ final class InputBox extends FrameLayout implements Node {
         android.view.ActionMode m = editMenu;
         editMenu = null;
         if (m != null) m.finish();
+    }
+
+    /** Ends the EditText's own toolbar, if it is open. */
+    private void finishTextActions() {
+        android.view.ActionMode m = textActions;
+        textActions = null;
+        if (m != null) m.finish();
+    }
+
+    /**
+     * `insertText`: {@code text} in place of the selection, as the user's edit. The change goes through the
+     * EditText's filters, so `maxLength` clips it and TextView's undo history records it as a step of its own (an
+     * edit from outside the keyboard is never merged into the typing before it); the text watcher reports it
+     * (`onChangeText`) and no key is reported. A composition in progress is committed first, as the text the
+     * keyboard composed stays. A single-line input gets the line breaks as spaces, as a paste does there.
+     */
+    void insertText(String text) {
+        if (!editable) {
+            android.util.Log.w("nsh", "insertText: the input is read-only");
+            return;
+        }
+        Editable content = edit.getText();
+        if (content == null) return;
+        if (BaseInputConnection.getComposingSpanStart(content) >= 0) {
+            BaseInputConnection.removeComposingSpans(content);
+            syncComposition();
+            // The keyboard drops the word it was composing rather than editing it on.
+            InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.restartInput(edit);
+        }
+        text = text.replace("\r\n", "\n").replace('\r', '\n');
+        if (!multiline) {
+            int end = text.length();
+            while (end > 0 && text.charAt(end - 1) == '\n') end--;
+            text = text.substring(0, end).replace('\n', ' ');
+        }
+        int a = Math.max(0, edit.getSelectionStart()), b = Math.max(0, edit.getSelectionEnd());
+        int start = Math.min(a, b), end = Math.max(a, b), before = content.length();
+        content.replace(start, end, text);
+        // The caret after what went in (as much as `maxLength` let in), as a paste leaves it: replacing a selection
+        // that starts at the replaced range would otherwise leave the new text selected, and the next insert would
+        // replace it.
+        int caret = Math.max(start, Math.min(content.length(), end + content.length() - before));
+        edit.setSelection(caret);
+        // An edit ends the EditText's toolbar, as its own paste does.
+        finishTextActions();
     }
 
     /** Selects {@code start..end} (clamped to the text). */

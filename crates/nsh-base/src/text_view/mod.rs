@@ -6,7 +6,7 @@ mod common;
 pub mod document;
 mod extension;
 mod formula;
-mod highlight;
+pub(crate) mod highlight;
 mod html;
 mod markdown;
 #[cfg(feature = "math")]
@@ -15,6 +15,8 @@ mod parts;
 mod selection;
 mod tex_text;
 mod view;
+
+pub(crate) use self::parts::merge_styles;
 
 /// Makes formulas typeset in a web runtime: the gate of its side module
 /// (`nsh_feature_math`), which holds what this reaches and nothing else does.
@@ -27,14 +29,15 @@ pub use self::{
         Inline, ListItem, Table, TableCell,
     },
     extension::{
-        MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins, ParseContext, Parser,
-        mdast,
+        ConversionId, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
+        ParseContext, Parser, mdast,
     },
     parts::{PartStyle, TextViewClasses, TextViewPart, TextViewParts, TextViewStyles},
     selection::{TextSelectionFormat, TextSelectionOptions},
     view::{
         CodeHighlighter, TextView, TextViewApi, TextViewCodeAction, TextViewCodeActionEvent,
-        TextViewElement, TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath,
-        TextViewProps, TextViewSelectionEvent, TextViewTaskPressEvent, text_view,
+        TextViewElement, TextViewEvent, TextViewImageContext, TextViewImageLink,
+        TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewProps, TextViewSelectionEvent,
+        TextViewTaskPressEvent, text_view,
     },
 };

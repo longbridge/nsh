@@ -1,6 +1,6 @@
 ---
 title: 平台概览
-description: "NSH 在哪些平台上运行：iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web，每个平台都有自己的后端；在各平台上如何运行、打包和嵌入 Rust 或 TSX 应用，以及各自需要什么。"
+description: "NSH 在哪些平台上运行：iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web，每个平台都有自己的后端；在各平台上如何运行、打包和嵌入 TSX 或 Rust 应用，以及各自需要什么。"
 order: 10
 group: platforms
 ---
@@ -113,6 +113,24 @@ extern "system" fn Java_com_example_app_RuntimeBridge_configure(
 
 应用的组件用 NSH 的基础元素绘制，所以在桌面上和在手机上一样运行，样子也相同。桌面布局用基础元素（`view`、`text`、`scroll`、`virtual_list` 等；TSX 里是 `View`、`Text`、`Scroll`、`List` 等）加上对桌面的判断搭建，示例应用 gallery 的桌面布局就是这样做的：
 
+```tsx tabs
+import { View } from "nsh";
+import { platform } from "nsh";
+
+export function Shell() {
+  // macOS、Windows、Linux 和桌面浏览器用侧边栏；手机用标签页。
+  return <View class="flex-1">{platform.desktop ? <SidebarLayout /> : <TabLayout />}</View>;
+}
+
+function SidebarLayout() {
+  return <View class="flex-1 flex-row" />;
+}
+
+function TabLayout() {
+  return <View class="flex-1 flex-col" />;
+}
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -133,25 +151,22 @@ fn tab_layout() -> AnyElement {
 }
 ```
 
-```tsx tabs
-import { View } from "nsh";
-import { platform } from "nsh";
-
-export function Shell() {
-  // macOS、Windows、Linux 和桌面浏览器用侧边栏；手机用标签页。
-  return <View class="flex-1">{platform.desktop ? <SidebarLayout /> : <TabLayout />}</View>;
-}
-
-function SidebarLayout() {
-  return <View class="flex-1 flex-row" />;
-}
-
-function TabLayout() {
-  return <View class="flex-1 flex-col" />;
-}
-```
-
 每个后端都列出了它以自己的方式处理的内容：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、[Linux](./linux.md#linux-上的差异)、[GPUI](./gpui.md#差异)、[TUI](./tui.md)。
+
+## 平台不支持的调用
+
+有几个调用在桌面端或浏览器里还没有对应实现。在这些平台上调用不会生效，应用会为每类调用打一次警告，例如 `linux: Share is not supported on this platform and is ignored`，开发时就能发现缺口，而不是悄悄没有反应。
+
+| 调用 | macOS | Windows | Linux | GPUI | Web |
+|---|---|---|---|---|---|
+| 分享面板 | 支持 | 不支持 | 不支持 | 不支持 | 支持 |
+| WebView `evaluate` | 支持 | 不支持 | 不支持 | 不支持 | 不支持 |
+| 从屏幕取色 | 支持 | 不支持 | 不支持 | 不支持 | 支持 |
+| 认证会话（系统登录面板） | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
+| 打开应用的系统设置 | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
+| 触感反馈、方向锁定、编辑菜单 | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
+
+表里只列桌面端和 Web；最后三行是只在 [iOS](./ios.md) 和 [Android](./android.md) 上提供的调用。提供某个功能前，先检查 `platform.os`（TSX）或 `os()`（Rust），例如在 Linux 上隐藏分享按钮。
 
 ## 另请参阅
 

@@ -667,6 +667,40 @@ pub(crate) fn surface(fill: nsh_core::Color, ground: Ground) -> Surface {
     }
 }
 
+/// The least CIE L* distance a translucent wash keeps from the surface
+/// it is drawn on. A box tinted a few percent over a near-black page (a
+/// treemap's tiles) is a shade a terminal cell can't tell from its ground;
+/// this keeps it a visible band.
+pub(crate) const WASH_CONTRAST: f32 = 4.0;
+
+/// `color` over `base`, moved toward `toward` (the wash's own hue) until
+/// its lightness is at least [`WASH_CONTRAST`] from `base`'s; when even
+/// `toward` is too close, away from `base` (lighter on a dark surface).
+pub(crate) fn apart(color: Rgb, base: Rgb, toward: Rgb) -> Rgb {
+    let l = |c: Rgb| lightness(f32::from(c[0]), f32::from(c[1]), f32::from(c[2]));
+    let under = l(base);
+    let enough = |c: Rgb| (l(c) - under).abs() >= WASH_CONTRAST;
+    if enough(color) {
+        return color;
+    }
+    let target = if enough(toward) && (l(toward) - under).abs() > (l(color) - under).abs() {
+        toward
+    } else if under < 50.0 {
+        [255; 3]
+    } else {
+        [0; 3]
+    };
+    let mut share: f32 = 0.0;
+    while share < 1.0 {
+        share += 0.02;
+        let next = mix(color, target, share.min(1.0));
+        if enough(next) {
+            return next;
+        }
+    }
+    target
+}
+
 /// Whether `color` is a pale tint: a fill of some hue (its channels at
 /// least [`PALE_CHROMA`] apart) too faint to read as an accent
 /// ([`SATURATED_CHROMA`]), such as Tailwind's `red-100`.
@@ -1085,6 +1119,43 @@ pub(crate) fn strip_colors(buffer: &mut Buffer, area: Rect) {
     }
 }
 
+/// The accent of a terminal that shows any color: an indigo apart from
+/// the hues that mean something (green done, red destructive, yellow
+/// warning), the same in every terminal theme, lighter on a dark page.
+/// Contrast with the page: 6.5:1 on `#1e1e2e`, 6.3:1 on white.
+pub(crate) const BRAND_ACCENT: [Rgb; 2] = [[0x8f, 0x9b, 0xff], [0x4f, 0x46, 0xe5]];
+
+/// Paints the platform's accent ([`crate::render::ACCENT`], ANSI blue, the
+/// fallback of 16 and 256 colors) in [`BRAND_ACCENT`] for a terminal of
+/// true color, where only the platform draws ANSI blue (an app's colors
+/// are RGB there). Text on an accent fill (a menu's open title, a chip)
+/// turns dark on the light indigo and white on the deep one, as the page's
+/// own text would read poorly on either.
+pub(crate) fn brand_accent(buffer: &mut Buffer, area: Rect, scheme: ColorScheme) {
+    let [r, g, b] = BRAND_ACCENT[usize::from(scheme == ColorScheme::Light)];
+    let brand = Color::Rgb(r, g, b);
+    let on = match scheme {
+        ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
+        _ => Color::Rgb(0x11, 0x11, 0x1b),
+    };
+    let accent = crate::render::ACCENT;
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            let cell = &mut buffer[(x, y)];
+            if cell.fg == accent {
+                cell.fg = brand;
+            }
+            if cell.bg == accent {
+                cell.bg = brand;
+                cell.fg = on;
+            }
+            if cell.underline_color == accent {
+                cell.underline_color = brand;
+            }
+        }
+    }
+}
+
 /// The terminal color closest to `rgb` that `depth` can show.
 pub(crate) fn convert(rgb: Rgb, depth: ColorDepth) -> Color {
     match depth {
@@ -1163,6 +1234,56 @@ fn distance(a: Rgb, b: Rgb) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    #[test]
+    fn a_faint_wash_keeps_apart_from_its_surface() {
+        let l = |c: Rgb| lightness(f32::from(c[0]), f32::from(c[1]), f32::from(c[2]));
+        let base = [26, 27, 38];
+        // A 9 % red tint over the surface: almost the surface itself.
+        let faint = [31, 25, 35];
+        let lifted = apart(faint, base, [229, 72, 77]);
+        assert!((l(lifted) - l(base)).abs() >= WASH_CONTRAST);
+        // It keeps the tint's hue: red stays its strongest channel.
+        assert!(lifted[0] > lifted[1] && lifted[0] > lifted[2]);
+        // A wash darker than the surface that its hue can't lift is moved
+        // away from the surface instead of vanishing into it.
+        let dark = apart([22, 22, 30], base, [24, 24, 32]);
+        assert!((l(dark) - l(base)).abs() >= WASH_CONTRAST);
+        // One that already reads stays as it is.
+        assert_eq!(apart([90, 30, 30], base, [229, 72, 77]), [90, 30, 30]);
+    }
+
+    #[test]
+    fn true_color_paints_the_accent_in_the_brand_indigo_and_its_text_to_read() {
+        for (scheme, brand, on) in [
+            (
+                ColorScheme::Dark,
+                Color::Rgb(0x8f, 0x9b, 0xff),
+                Color::Rgb(0x11, 0x11, 0x1b),
+            ),
+            (
+                ColorScheme::Light,
+                Color::Rgb(0x4f, 0x46, 0xe5),
+                Color::Rgb(0xff, 0xff, 0xff),
+            ),
+        ] {
+            let area = super::Rect::new(0, 0, 3, 1);
+            let mut buffer = super::Buffer::empty(area);
+            buffer[(0, 0)].fg = crate::render::ACCENT;
+            buffer[(1, 0)].bg = crate::render::ACCENT;
+            buffer[(1, 0)].fg = Color::White;
+            buffer[(2, 0)].fg = Color::Red;
+            super::brand_accent(&mut buffer, area, scheme);
+            assert_eq!(buffer[(0, 0)].fg, brand, "a line or text in the accent");
+            assert_eq!(
+                (buffer[(1, 0)].bg, buffer[(1, 0)].fg),
+                (brand, on),
+                "a fill"
+            );
+            assert_eq!(buffer[(2, 0)].fg, Color::Red, "other colors stay");
+        }
+    }
+
     use nsh_core::{Color as Rgba, platform::ColorScheme};
     use ratatui_core::style::{Color, Modifier};
 

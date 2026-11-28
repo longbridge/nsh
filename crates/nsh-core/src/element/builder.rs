@@ -234,6 +234,9 @@ pub(crate) struct RareAttrs {
     pub(crate) selectable_view: bool,
     /// The text continues the one before it ([`Element::continues_text`]).
     pub(crate) continues_text: bool,
+    /// Its children take its position among its siblings
+    /// (`Element::__pass_position`).
+    pub(crate) pass_position: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
     pub(crate) projected_states: u16,
@@ -269,6 +272,7 @@ impl RareAttrs {
             && self.bound.is_empty()
             && !self.selectable_view
             && !self.continues_text
+            && !self.pass_position
             && self.projected_states == 0
             && self.projected_data.is_empty()
             && self.projected_active.is_none()
@@ -441,6 +445,9 @@ impl Attrs {
             if sr.continues_text != or.continues_text {
                 out.push(Prop::ContinuesText(sr.continues_text));
             }
+            if sr.pass_position != or.pass_position {
+                out.push(Prop::PassPosition(sr.pass_position));
+            }
             if sr.projected_states != or.projected_states {
                 out.push(Prop::ProjectedStates(sr.projected_states));
             }
@@ -500,6 +507,10 @@ pub(crate) struct ComponentEl {
     pub(crate) props: Box<dyn AnyProps>,
     /// The handlers of its events in the view that has it, in order.
     pub(crate) on_event: Vec<Listener<dyn Any>>,
+    /// Made by its registered type, not by `make` and `spec`
+    /// ([`ComponentElement::by_name`]): the code of the component is only
+    /// what registers it (a web runtime's side module).
+    pub(crate) by_name: Option<std::any::TypeId>,
 }
 
 impl Clone for ComponentEl {
@@ -510,6 +521,7 @@ impl Clone for ComponentEl {
             spec: self.spec,
             props: self.props.clone_box(),
             on_event: self.on_event.clone(),
+            by_name: self.by_name,
         }
     }
 }
@@ -618,6 +630,7 @@ pub struct ListConfig {
     pub(crate) scrollbar_visible: Option<bool>,
     pub(crate) content: Option<ListContentStyle>,
     pub(crate) follow_end: Option<f32>,
+    pub(crate) follow_end_animated: Option<bool>,
     pub(crate) alignment: Option<crate::ListAlignment>,
     pub(crate) viewport: Option<crate::ListViewport>,
 }
@@ -647,8 +660,12 @@ impl ListConfig {
         if self.content != old.content {
             out.push(Prop::ListContent(self.content.unwrap_or_default()));
         }
-        if self.follow_end != old.follow_end {
-            out.push(Prop::FollowEnd(self.follow_end.map(Points)));
+        if self.follow_end != old.follow_end || self.follow_end_animated != old.follow_end_animated
+        {
+            out.push(Prop::FollowEnd(
+                self.follow_end.map(Points),
+                self.follow_end_animated.unwrap_or(false),
+            ));
         }
         if self.alignment != old.alignment {
             out.push(Prop::ListAlignment(self.alignment.unwrap_or_default()));
@@ -1148,6 +1165,23 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// Hands the view's position among its siblings to its children: their
+    /// `first:`, `last:`, `odd:`, `even:` and `only:` classes read the
+    /// view's place, not theirs among its children. For a view that only
+    /// wraps its content, as the root an [`each`](super::each) row needs
+    /// around a [`dynamic`](super::dynamic): the content then styles as
+    /// though it were the row. Off by default. Internal: only the base
+    /// components (`TextView`) use it; not part of the public API.
+    #[doc(hidden)]
+    fn __pass_position(mut self, pass: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(pass, |a, pass| {
+            if pass || a.rare.is_some() {
+                a.rare_mut().pass_position = pass;
+            }
+        });
+        self
+    }
+
     /// What a copy of the text around the view gives in its place, when
     /// the view is inside a text (`copyText`): an inline formula's source
     /// (`$x^2$`), an emoji image's character. Selecting across the view
@@ -1166,6 +1200,16 @@ pub trait Element: IntoElement + Sized {
         super::host::bind_prop(self.node(), text, |text: SharedString| {
             Prop::CopyText(Some(text.to_arc()))
         });
+        self
+    }
+
+    /// Internal (components): the view already stands clear of the
+    /// software keyboard (a bottom sheet the keyboard lifts), so
+    /// `env(keyboard-inset-height)` reads 0 in it and in its subtree, and
+    /// content padded by it is not lifted a second time.
+    #[doc(hidden)]
+    fn clears_keyboard(mut self, clears: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(self.node(), clears, Prop::ClearsKeyboard);
         self
     }
 
@@ -1274,9 +1318,46 @@ impl Style {
             .filter(|c| *c != crate::element::AdaptiveColor::from(crate::Color::TRANSPARENT))
     }
 
+    /// Internal (components): this style with its `maxHeight` at most
+    /// `cap`. A length or a percentage of `basis` (the height its view's
+    /// percentages are of) taller than `cap`, or none, gives way to `cap`;
+    /// a shorter one stays. A bottom sheet the keyboard lifts keeps its
+    /// top below the status bar so, whatever height the app gives it.
+    #[doc(hidden)]
+    pub fn max_height_at_most(&self, cap: Points, basis: Points) -> Self {
+        use taffy::CompactLength;
+        let declared = self.decls().iter().rev().find_map(|decl| match decl {
+            crate::StyleDecl::Set(crate::StyleKey::MaxHeight, crate::PropertyValue::Lpa(v)) => {
+                let raw = v.into_raw();
+                Some(match raw.tag() {
+                    CompactLength::LENGTH_TAG => Some(raw.value()),
+                    CompactLength::PERCENT_TAG => Some(basis.0 * raw.value()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        });
+        if declared.flatten().is_some_and(|height| height <= cap.0) {
+            return self.clone();
+        }
+        self.clone().with(
+            crate::StyleKey::MaxHeight,
+            crate::PropertyValue::Lpa(taffy::LengthPercentageAuto::length(cap.0.max(0.0))),
+        )
+    }
+
     /// Its declarations, in order (not its typed styles').
     pub fn decls(&self) -> &[crate::StyleDecl] {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
+    }
+
+    /// Whether it has typed styles (Rust's [`StyleRefinement`], static or
+    /// bound): a style JS gives has none. A component that applies a style
+    /// it is given after its own bound styles reads it to bind only the
+    /// styles that need it ([`Element::inline_style`] of a closure binds
+    /// the typed styles after the element's own).
+    pub fn is_typed(&self) -> bool {
+        !self.1.is_empty()
     }
 
     /// Applies it to `node` in `variant`: the declarations with `attr`, the
@@ -1962,9 +2043,10 @@ pub trait Interactive: Element {
     /// The selection across the texts of a selectable view
     /// ([`Self::selectable`]) changed: the selected text, as a copy gives
     /// it, empty once nothing is selected, where it starts in the view's
-    /// whole text, and the box around it in the view and in its root view
-    /// (TSX `onSelectionChange` of a `<View selectable>`, `{ text, start,
-    /// bounds, pageBounds }`). Only the outermost selectable view of an area
+    /// whole text, the box around it in the view and in its root view, and
+    /// the list items its ends are in (TSX `onSelectionChange` of a
+    /// `<View selectable>`, `{ text, start, bounds, pageBounds, anchor,
+    /// focus }`). Only the outermost selectable view of an area
     /// reports it; an [`Input`](super::Input)'s own selection is its
     /// `on_selection_change`.
     fn on_text_selection_change<M>(
@@ -2280,8 +2362,8 @@ pub trait Interactive: Element {
     }
 
     /// Where the view goes as a link, carried to the platform as data
-    /// ([`Prop::Href`]). `nsh-base`'s `Link` sets it from its `href`;
-    /// apps use `Link`.
+    /// ([`Prop::Href`]). `nsh-base`'s `Link` sets it from its `href`, and
+    /// `TextView` on the span of each of its links; apps use those.
     #[doc(hidden)]
     fn __link_href(mut self, href: impl IntoReactive<Option<SharedString>>) -> Self {
         super::host::bind_prop(self.node(), href, |href: Option<SharedString>| {
@@ -3099,6 +3181,39 @@ impl<C: Component> ComponentElement<C> {
             spec: ComponentSpec::of::<C>,
             props: Box::new(props),
             on_event: Vec::new(),
+            by_name: None,
+        });
+        Self {
+            node,
+            _component: PhantomData,
+        }
+    }
+
+    /// The element of `C` given `props`, made by the component its UI set
+    /// registered, as a TSX app's `<RichEditor>`: this code does not name
+    /// `C`'s own code, so a web runtime keeps it in the side module of the
+    /// part that registers it and loads that module when the element is
+    /// first mounted. Until the part is registered it shows nothing; it
+    /// then becomes the component, with the props and handlers set here.
+    /// Off WebAssembly, where nothing is loaded later, it is made by type,
+    /// as [`Self::__new`] makes it.
+    pub fn by_name(props: C::Props) -> Self {
+        if cfg!(not(target_arch = "wasm32")) {
+            return Self::new(props);
+        }
+        Self::named(props)
+    }
+
+    /// [`Self::by_name`] on every target (its tests).
+    pub(crate) fn named(props: C::Props) -> Self {
+        let mut node = ElNode::new(Tag::View);
+        node.kind = ElKind::Component(ComponentEl {
+            name: super::component::name_of::<C>(),
+            make: super::component::missing_instance,
+            spec: super::component::missing_spec,
+            props: Box::new(props),
+            on_event: Vec::new(),
+            by_name: Some(std::any::TypeId::of::<C>()),
         });
         Self {
             node,
@@ -3506,5 +3621,39 @@ mod file_listener_tests {
             listener.1.call(&payload);
         }
         assert_eq!(calls.get(), 4);
+    }
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+    use crate::{PropertyValue, StyleKey, prelude::*};
+
+    fn red() -> PropertyValue {
+        PropertyValue::Color(Some(rgb(0xff0000).into()))
+    }
+
+    #[test]
+    fn a_style_is_typed_only_with_typed_styles() {
+        let declared = Style::default().with(StyleKey::Color, red());
+        let typed = Style::from(StyleRefinement::default().text_color(rgb(0xff0000)));
+        let bound = Style::from(StyleRefinement::default().text_color(move || rgb(0xff0000)));
+        assert!(!Style::default().is_typed());
+        assert!(!Style::from(StyleRefinement::default()).is_typed());
+        assert!(!Style::from_decls([]).is_typed());
+        assert!(!declared.is_typed());
+        assert!(typed.is_typed());
+        // Bound values alone, no static ones.
+        assert!(bound.is_typed());
+        // Kept by `with` and by `then` on either side.
+        assert!(
+            typed
+                .clone()
+                .with(StyleKey::Opacity, PropertyValue::Number(0.5.into()))
+                .is_typed()
+        );
+        assert!(declared.then(&typed).is_typed());
+        assert!(typed.then(&declared).is_typed());
+        assert!(!declared.then(&declared).is_typed());
     }
 }

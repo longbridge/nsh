@@ -42,6 +42,30 @@ const STYLE_CACHE: usize = 4096;
 /// Rounds of polls and updates per run of the tasks, at most.
 const MAX_TASK_ROUNDS: u32 = 64;
 
+/// A component made by name whose part is not registered yet.
+struct ByName {
+    id: std::any::TypeId,
+    props: Box<dyn crate::element::builder::AnyProps>,
+    /// Where it was made: its context comes from there.
+    owner: crate::element::Owner,
+}
+
+thread_local! {
+    /// What asks the platform for the part that registers a component
+    /// made by name ([`set_part_requester`]).
+    static PART_REQUESTER: std::cell::Cell<Option<fn(&str)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Sets what asks the platform for the code of a component made by name
+/// that no UI set registers yet (a web runtime loads the side module of
+/// its part, then calls its gate): it gets the component's registered
+/// name. Without one, such a component shows nothing until a set
+/// registers it.
+#[doc(hidden)]
+pub fn set_part_requester(request: fn(&str)) {
+    PART_REQUESTER.with(|r| r.set(Some(request)));
+}
+
 /// What renders on a host node.
 enum Inner {
     /// Nothing is registered under the name: renders nothing.
@@ -219,6 +243,9 @@ pub(super) struct Instance {
     /// style and animated values.
     pub(super) app_style: Option<crate::StylePatch>,
     dirty: bool,
+    /// Its view is made again, in place of the one it showed (a component
+    /// made by name, made when its part is registered).
+    remake: bool,
     /// The nodes of its view with bindings: what was applied last. Boxed:
     /// a record is large, and a map's free slots are as large as its
     /// entries.
@@ -374,6 +401,7 @@ impl Instance {
             responders: Vec::new(),
             app_style,
             dirty: false,
+            remake: false,
             bound: FxHashMap::default(),
             js_kids: None,
             cell_owner: None,
@@ -479,6 +507,68 @@ pub(super) enum NewChild {
     /// The old element of this key stays as it is: of an `Each` row that
     /// was there before.
     Kept(SharedString),
+}
+
+/// The keyed old elements of a parent by key ([`Core::match_children`]),
+/// indexed the first time one is looked up: a few elements are searched in
+/// order, many once, so a long keyed list moved or reversed is matched in
+/// linear time. Old elements are only ever taken (`None`) while matching,
+/// so the index stays valid.
+#[derive(Default)]
+pub(super) struct OldKeys {
+    /// The first old element of each key.
+    first: FxHashMap<SharedString, usize>,
+    /// The next old element of the same key after each one (`usize::MAX`
+    /// for none).
+    next: Vec<usize>,
+    indexed: bool,
+}
+
+impl OldKeys {
+    /// Up to this many old elements are searched rather than indexed.
+    const SEARCHED: usize = 16;
+
+    /// The first old element of key `key` left in `old` that is `ok`.
+    fn find(
+        &mut self,
+        old: &[Option<Expanded>],
+        key: &SharedString,
+        ok: impl Fn(&Expanded) -> bool,
+    ) -> Option<usize> {
+        let is = |o: &Option<Expanded>| {
+            o.as_ref()
+                .is_some_and(|o| o.key.as_ref() == Some(key) && ok(o))
+        };
+        if old.len() <= Self::SEARCHED {
+            return old.iter().position(is);
+        }
+        if !self.indexed {
+            self.indexed = true;
+            self.next = vec![usize::MAX; old.len()];
+            // From the end, so each key's first is the earliest.
+            for (at, o) in old.iter().enumerate().rev() {
+                if let Some(k) = o.as_ref().and_then(|o| o.key.as_ref())
+                    && let Some(next) = self.first.insert(k.clone(), at)
+                {
+                    self.next[at] = next;
+                }
+            }
+        }
+        // Those taken go from the front (duplicate keys taken in order are
+        // not walked again).
+        let first = self.first.get_mut(key)?;
+        while *first != usize::MAX && old[*first].is_none() {
+            *first = self.next[*first];
+        }
+        let mut at = *first;
+        while at != usize::MAX {
+            if is(&old[at]) {
+                return Some(at);
+            }
+            at = self.next[at];
+        }
+        None
+    }
 }
 
 /// Whether a slot's place only places it: no styles, props, listeners or
@@ -595,10 +685,26 @@ struct Notifications {
 struct UrlScheme {
     /// The links the app claims: its schemes and web links.
     links: crate::url_scheme::AppLinks,
-    /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
-    pending: std::collections::VecDeque<String>,
-    /// The listener waiting for a link.
-    next: Option<AnswerSlot<String>>,
+    /// The links some listener has yet to hear, by number, at most
+    /// [`crate::url_scheme::MAX_PENDING`]: those no listener took yet (from
+    /// [`Self::unheard`] on), and those a listener missed between two calls.
+    recent: std::collections::VecDeque<(u64, String)>,
+    /// The number of the next link.
+    next_number: u64,
+    /// The first link that came while nothing listened and no listener
+    /// took yet, which the next new listener gets.
+    unheard: u64,
+    /// The tasks that listen, each with the number of the next link it is
+    /// to hear: a task awaiting links in a loop is not waiting between two
+    /// calls, and hears the links that came meanwhile at its next call.
+    listeners: Vec<(u64, u64)>,
+    /// The calls waiting for a link, with their task: each gets the next
+    /// one.
+    next: Vec<(Option<u64>, AnswerSlot<String>)>,
+    /// The waits for a link of one scheme (lowered), in the order they
+    /// came: the first takes the next link of its scheme, which no other
+    /// listener gets ([`crate::element::next_url_scheme_open_for`]).
+    next_of_scheme: Vec<(String, AnswerSlot<String>)>,
     /// Address moves no listener took yet
     /// ([`crate::url_scheme::AppUrlChange`]), kept once something listened
     /// ([`Self::hears_changes`]), at most [`crate::url_scheme::MAX_PENDING`].
@@ -614,21 +720,109 @@ struct UrlScheme {
     address: crate::url_scheme::AppUrlCell,
 }
 
-/// The answer of a web sign-in session ([`crate::auth_session`]).
-type AuthSessionAnswer = AnswerSlot<
-    Result<crate::auth_session::AuthSessionOutcome, crate::auth_session::AuthSessionError>,
->;
+impl UrlScheme {
+    /// Hands `url`, a link for the app's listeners, to those waiting, and
+    /// keeps it for those that are not (and for the next new listener when
+    /// none was waiting).
+    fn open(&mut self, url: String, alive: impl Fn(u64) -> bool) {
+        let number = self.next_number;
+        self.next_number += 1;
+        self.listeners.retain(|&(task, _)| alive(task));
+        if self.recent.len() == crate::url_scheme::MAX_PENDING
+            && let Some((dropped, _)) = self.recent.pop_front()
+            && dropped >= self.unheard
+        {
+            log::warn!(
+                "link dropped: {} came while nothing listened",
+                crate::url_scheme::MAX_PENDING
+            );
+            self.unheard = dropped + 1;
+        }
+        self.recent.push_back((number, url.clone()));
+        // A listener whose answer went (its task ended, or it lost a
+        // `select!`) leaves the link to the others.
+        self.next
+            .retain(|(_, answer)| crate::element::task::awaited(answer));
+        // Came while something listened: the listeners between two calls
+        // hear it at their next, and a listener that starts later does not
+        // (only links that came while nothing listened wait for one).
+        if !self.next.is_empty() || !self.listeners.is_empty() {
+            self.unheard = number + 1;
+        }
+        if !self.next.is_empty() {
+            for (task, answer) in std::mem::take(&mut self.next) {
+                if let Some(task) = task {
+                    self.heard(task, number);
+                }
+                answer.borrow_mut().deliver(url.clone());
+            }
+        }
+        self.trim();
+    }
 
-/// The web sign-in session waiting for its end ([`crate::auth_session`]).
-struct AuthSession {
-    /// The request, as the platform's answers name it.
-    id: u32,
-    /// The callback scheme (lower case): a link of it ends the session.
-    scheme: String,
-    answer: AuthSessionAnswer,
-    /// The URL request that opens the page in the system browser, where
-    /// the platform shows no session: the browser not opening fails it.
-    opening: Option<u32>,
+    /// Answers a call of `task` (none: outside a task) waiting for a link:
+    /// with the first link the task has not heard, a new listener's being
+    /// the first no listener took; else with the next one to come.
+    fn listen(
+        &mut self,
+        task: Option<u64>,
+        answer: AnswerSlot<String>,
+        alive: impl Fn(u64) -> bool,
+    ) {
+        self.listeners.retain(|&(task, _)| alive(task));
+        let known = task.and_then(|task| {
+            self.listeners
+                .iter()
+                .find(|&&(listener, _)| listener == task)
+                .map(|&(_, next)| next)
+        });
+        let from = known.unwrap_or(self.unheard);
+        if let Some((number, url)) = self.recent.iter().find(|(n, _)| *n >= from).cloned() {
+            self.unheard = self.unheard.max(number + 1);
+            if let Some(task) = task {
+                self.heard(task, number);
+            }
+            answer.borrow_mut().deliver(url);
+        } else {
+            if let Some(task) = task
+                && known.is_none()
+            {
+                self.listeners.push((task, self.next_number));
+            }
+            self.next
+                .retain(|(_, answer)| crate::element::task::awaited(answer));
+            self.next.push((task, answer));
+        }
+        self.trim();
+    }
+
+    /// `task` heard link `number`.
+    fn heard(&mut self, task: u64, number: u64) {
+        match self
+            .listeners
+            .iter_mut()
+            .find(|(listener, _)| *listener == task)
+        {
+            Some((_, next)) => *next = number + 1,
+            None => self.listeners.push((task, number + 1)),
+        }
+    }
+
+    /// Lets go of the links every listener heard.
+    fn trim(&mut self) {
+        let keep = self
+            .listeners
+            .iter()
+            .map(|&(_, next)| next)
+            .fold(self.unheard, u64::min);
+        while self
+            .recent
+            .front()
+            .is_some_and(|&(number, _)| number < keep)
+        {
+            self.recent.pop_front();
+        }
+    }
 }
 
 /// Files the system opened the app with ([`crate::file_type`]).
@@ -669,6 +863,9 @@ pub(super) struct Components {
     /// Boxed: making a view (or applying its patches) takes its instance
     /// out of the map and back.
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
+    /// Hosts of components made by name whose part is not registered yet
+    /// ([`crate::element::ComponentElement::by_name`]): made when it is.
+    by_name: FxHashMap<NodeId, ByName>,
     /// Expanded node -> the host of the component whose view made it.
     pub(super) owners: FxHashMap<NodeId, NodeId>,
     /// Changes when reconciliation releases an expanded element or raw
@@ -716,7 +913,7 @@ pub(super) struct Components {
     styles: FxHashMap<StyleRefinement, std::rc::Rc<ClassList>>,
     /// The styles a component on another's host gets from each above it,
     /// merged (by the lists', which the entry keeps).
-    merges: FxHashMap<(usize, usize), [std::rc::Rc<ClassList>; 3]>,
+    pub(super) merges: FxHashMap<(usize, usize), [std::rc::Rc<ClassList>; 3]>,
     /// While a view's slot content is matched: the nested component's host
     /// and the slot (its regions are the slot's).
     pub(super) filling: Option<(NodeId, &'static str)>,
@@ -814,12 +1011,6 @@ pub(super) struct Components {
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
     next_screen_color: u32,
-    /// The shares waiting for the platform's answer
-    /// ([`crate::EventKind::Share`]), by request.
-    shares:
-        FxHashMap<u32, AnswerSlot<Result<crate::share::ShareOutcome, crate::share::ShareError>>>,
-    /// The web sign-in session waiting for its callback, if any.
-    auth_session: Option<AuthSession>,
     /// Requests on local paths (`pick_paths`, `open_path`, ...), by
     /// request id: their answers.
     file_requests: FxHashMap<u32, FileAnswer>,
@@ -922,6 +1113,7 @@ impl Default for Components {
             app_tokens: Arc::new(Tokens::default()),
             host_tokens: None,
             instances: FxHashMap::default(),
+            by_name: FxHashMap::default(),
             owners: FxHashMap::default(),
             release_generation: 0,
             released_hosts: FxHashSet::default(),
@@ -969,8 +1161,6 @@ impl Default for Components {
             next_app_settings_open: 1,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
-            shares: FxHashMap::default(),
-            auth_session: None,
             file_requests: FxHashMap::default(),
             next_file_request: 1,
             next_clipboard_read: 1,
@@ -1110,6 +1300,13 @@ fn same(a: &Option<std::rc::Rc<ClassList>>, b: &Option<std::rc::Rc<ClassList>>) 
     }
 }
 
+impl Components {
+    /// The GPU renderer the sets registered as `name`.
+    pub(super) fn gpu_renderer(&self, name: &str) -> Option<crate::gpu::GpuSource> {
+        self.registry.registered_gpu_renderer(name).cloned()
+    }
+}
+
 impl<M: TextEngine> Core<M> {
     /// The components this core can render (from `nsh-base` and the
     /// like), and the design tokens their sets bring
@@ -1137,6 +1334,87 @@ impl<M: TextEngine> Core<M> {
             registry.run_setups_not_in(&self.components.registry);
         }
         self.components.registry = registry;
+        self.make_by_name();
+    }
+
+    /// Makes the components made by name whose part is registered now.
+    fn make_by_name(&mut self) {
+        if self.components.by_name.is_empty() {
+            return;
+        }
+        let _entered = self.components.runtime.enter();
+        let hosts: Vec<NodeId> = self.components.by_name.keys().copied().collect();
+        for host in hosts {
+            let Some(waiting) = self.components.by_name.get(&host) else {
+                continue;
+            };
+            let still = self
+                .components
+                .instances
+                .get(&host)
+                .is_some_and(|i| matches!(i.inner, Inner::Missing));
+            if !still {
+                self.components.by_name.remove(&host);
+                continue;
+            }
+            let Some((spec, mut inner)) = self.components.registry.make_type(waiting.id) else {
+                continue;
+            };
+            let waiting = self.components.by_name.remove(&host).expect("waiting");
+            inner.place(host, waiting.owner);
+            inner.set_props(waiting.props.as_any());
+            // Its view is made in place of the empty one it showed.
+            if let Some(inst) = self.components.instances.get_mut(&host) {
+                inst.inner = Inner::Component(inner);
+                inst.spec = Some(spec);
+                inst.remake = true;
+            }
+            self.components.mark(host);
+        }
+    }
+
+    /// Makes `host` the host of component element `c`: by its type, or
+    /// by its registered name ([`crate::element::ComponentElement::by_name`]).
+    fn create_instance_for(&mut self, host: NodeId, c: &crate::element::builder::ComponentEl) {
+        let Some(id) = c.by_name else {
+            self.create_instance_of(host, c.name, c.make, c.spec);
+            return;
+        };
+        if self.is_host(host) {
+            return;
+        }
+        match self.components.registry.make_type(id) {
+            Some((spec, inner)) => self.insert_instance(host, Some(spec), Inner::Component(inner)),
+            None => {
+                self.insert_instance(host, None, Inner::Missing);
+                self.components.by_name.insert(
+                    host,
+                    ByName {
+                        id,
+                        props: c.props.clone_box(),
+                        owner: crate::element::Owner::current(),
+                    },
+                );
+                let name = crate::element::component::export_name(c.name);
+                match PART_REQUESTER.with(|r| r.get()) {
+                    Some(request) => request(name),
+                    None => log::debug!("`{name}` waits for the part that registers it"),
+                }
+            }
+        }
+    }
+
+    /// Sets the props of `host`'s component from its element.
+    fn set_element_props(&mut self, host: NodeId, props: &dyn crate::element::builder::AnyProps) {
+        if let Some(waiting) = self.components.by_name.get_mut(&host) {
+            waiting.props = props.clone_box();
+            return;
+        }
+        if let Some(inst) = self.components.instances.get_mut(&host)
+            && let Inner::Component(inner) = &mut inst.inner
+        {
+            inner.set_props(props.as_any());
+        }
     }
 
     /// `uiTheme` on the root: the app's theme file (`nsh.json`, `setTheme`),
@@ -1379,12 +1657,8 @@ impl<M: TextEngine> Core<M> {
         let id = self.components.alloc();
         let _ = self.apply_op(Op::Create { id, tag: el.tag });
         made(self, id);
-        self.create_instance_of(id, c.name, c.make, c.spec);
-        if let Some(inst) = self.components.instances.get_mut(&id)
-            && let Inner::Component(inner) = &mut inst.inner
-        {
-            inner.set_props(c.props.as_any());
-        }
+        self.create_instance_for(id, &c);
+        self.set_element_props(id, c.props.as_ref());
         Some(id)
     }
 
@@ -1441,7 +1715,13 @@ impl<M: TextEngine> Core<M> {
             self.needs_layout = true;
         }
         let ratio = self.components.environment.pixel_ratio;
+        let window = self.components.environment.window;
         self.components.environment = environment;
+        // Width and orientation variants follow the window `windowSize()`
+        // reports (`Core::class_window`).
+        if window != environment.window {
+            self.restyle_where(crate::tailwind::deps::WIDTH | crate::tailwind::deps::HEIGHT);
+        }
         if ratio != environment.pixel_ratio {
             self.repick_images(ratio, environment.pixel_ratio);
         }
@@ -1633,6 +1913,13 @@ impl<M: TextEngine> Core<M> {
     /// Whether the work quit listeners started is still running.
     pub fn quit_pending(&self) -> bool {
         self.components.executor.quitting.get() > 0
+    }
+
+    /// Whether a JS call of an `async fn` into Rust (a native module's, a
+    /// class's) has not answered yet: its answer comes from elsewhere (a
+    /// request made in Rust, another thread), which nothing else counts.
+    pub fn async_calls_pending(&self) -> bool {
+        self.components.executor.calls.get() > 0
     }
 
     /// Runs the closures that waited for the app's answer to the events
@@ -1849,6 +2136,10 @@ impl<M: TextEngine> Core<M> {
                 child,
                 before,
             } if self.is_host(parent) => {
+                // A raw text run (`<Button>Open</Button>`) has no node
+                // until a use needs one: the view places it, so it does.
+                let run = self.runs.contains_key(&child);
+                self.materialize_run(child)?;
                 self.key(child)?;
                 let inst = self.components.instances.get_mut(&parent).expect("host");
                 let was_empty = inst.js_children.is_empty();
@@ -1874,7 +2165,18 @@ impl<M: TextEngine> Core<M> {
                             parent: p,
                             child,
                             before: at.and(before).or(anchor),
-                        })?
+                        })?;
+                        if run
+                            && self
+                                .key(p)
+                                .is_ok_and(|k| self.nodes[k as usize].kind != Kind::Text)
+                        {
+                            let text = self.key(child).map_or("", |k| &self.nodes[k as usize].text);
+                            log::warn!(
+                                target: "js",
+                                "text in a component's children is not shown: text shows in a <Text> (`<Text>{text}</Text>`)"
+                            );
+                        }
                     }
                     Placement::Nested(nested, anchor) => {
                         let anchor = self.anchor_node(anchor);
@@ -2193,12 +2495,15 @@ impl<M: TextEngine> Core<M> {
             RustCall::Task(start) => match caught(start) {
                 Ok(future) => {
                     let executor = Rc::downgrade(&self.components.executor);
+                    let pending =
+                        crate::element::quit::Pending::new(&self.components.executor.calls);
                     // A task of the root: it never goes away.
                     crate::element::task::spawn_raw(
                         &self.components.executor,
                         ROOT_ID,
                         Box::pin(async move {
                             let result = crate::element::module::catching(future).await;
+                            drop(pending);
                             match executor.upgrade() {
                                 Some(executor) if call != 0 => {
                                     executor.act(Action::Return(call, result));
@@ -2406,12 +2711,28 @@ impl<M: TextEngine> Core<M> {
             let failed = self.report_failures();
             let woke = self.wake_waiting();
             let called = self.run_parked_methods();
-            if !changed && !rendered && !failed && !woke && !called {
+            if !changed && !rendered && !failed && !woke && !called && !self.run_after_render() {
                 break;
             }
         }
         self.flush_renders();
         self.end_retags();
+    }
+
+    /// Runs what waited for the commit's views ([`crate::element::after_render`]);
+    /// whether there was any (what it asked for and changed renders in this
+    /// round too).
+    fn run_after_render(&mut self) -> bool {
+        let rendered = self.components.executor.take_rendered();
+        if rendered.is_empty() {
+            return false;
+        }
+        for crate::element::AfterAnswer { f, .. } in rendered {
+            if let Err(message) = caught(f) {
+                log::error!(target: "js", "a closure after the views rendered failed: {message}");
+            }
+        }
+        true
     }
 
     /// Node `id` goes: what the views' renders and the app's classes knew
@@ -2792,7 +3113,7 @@ impl<M: TextEngine> Core<M> {
                 inner.set_children(!inst.js_children.is_empty());
                 // Its view is made: its props now reach what read them, and
                 // the app's (or its parent's) styles may have changed.
-                if inst.root.is_some() {
+                if inst.root.is_some() && !std::mem::take(&mut inst.remake) {
                     self.restyle_view(host, inst);
                     return None;
                 }
@@ -3041,6 +3362,11 @@ impl<M: TextEngine> Core<M> {
         }
         // Bound parts are bound first: what they read now is applied with
         // the static parts.
+        let applied_layout = if matches!(el.kind, ElKind::VirtualList(_)) {
+            self.components.list_layouts.remove(&host)
+        } else {
+            None
+        };
         let bound = super::views::Bound::take(&mut el).map(|bound| {
             self.bind_parts(host, host, bound, &mut el);
         });
@@ -3144,6 +3470,7 @@ impl<M: TextEngine> Core<M> {
         let (list, part) = match std::mem::replace(&mut el.kind, ElKind::Plain) {
             ElKind::VirtualList(list) => {
                 let config = list.config;
+                let old_list = applied_layout.unwrap_or(old_list);
                 self.update_virtual_list(self.native_id(host), host, *list, &old_list);
                 (Some(Box::new(config)), Part::VirtualList)
             }
@@ -3191,7 +3518,7 @@ impl<M: TextEngine> Core<M> {
                     return;
                 }
                 self.components.owners.insert(id, host);
-                self.create_instance_of(id, c.name, c.make, c.spec);
+                self.create_instance_for(id, c);
                 if let Some(rooted) = self.components.instances.get_mut(&id) {
                     // The app's style is the top host's.
                     rooted.app_style = None;
@@ -3530,12 +3857,7 @@ impl<M: TextEngine> Core<M> {
             Some(self.components.lowered(style))
         };
         if !same(&own, &old.0) || !same(&user, &old.1) {
-            let list = match (&own, &user) {
-                (Some(a), Some(b)) => Some(std::rc::Rc::new(a.merged(b))),
-                (Some(a), None) => Some(a.clone()),
-                (None, Some(b)) => Some(b.clone()),
-                (None, None) => None,
-            };
+            let list = self.merge_user(own.clone(), user.clone());
             if let Ok(key) = self.key(id) {
                 self.set_class_list(key, list);
             }
@@ -3854,6 +4176,9 @@ impl<M: TextEngine> Core<M> {
         // follow each other as they did, and are then found without a
         // search of all the old ones for each.
         let mut after_kept = 0;
+        // The keyed old elements by key, for the rows and elements not
+        // where they were (a reversed list: each would search them all).
+        let mut keys = OldKeys::default();
         for child in new {
             let (owner, el) = match child {
                 NewChild::Made(owner, el) => (owner, el),
@@ -3866,7 +4191,7 @@ impl<M: TextEngine> Core<M> {
                     let at = if old.get(after_kept).is_some_and(is) {
                         Some(after_kept)
                     } else {
-                        old.iter().position(is)
+                        keys.find(&old, &key, |_| true)
                     };
                     match at.and_then(|at| {
                         after_kept = at + 1;
@@ -3888,6 +4213,7 @@ impl<M: TextEngine> Core<M> {
                     &mut out,
                     &mut placeholder,
                     &mut cursor,
+                    &mut keys,
                 );
             };
             match owner {
@@ -3931,6 +4257,7 @@ impl<M: TextEngine> Core<M> {
         out: &mut Vec<Expanded>,
         placeholder: &mut Option<usize>,
         cursor: &mut usize,
+        keys: &mut OldKeys,
     ) {
         // A slot a view fills: placed as it is (`Filled`), or in a node of
         // this view's own when the view gives it anything, which lays its
@@ -4041,9 +4368,11 @@ impl<M: TextEngine> Core<M> {
                         .is_some_and(|o| o.part == Part::Slot && o.id == node)
                 });
                 let prev = at.and_then(|j| old[j].take());
-                let old_config = prev
-                    .as_ref()
-                    .and_then(|p| p.list.as_deref().copied())
+                let old_config = self
+                    .components
+                    .list_layouts
+                    .remove(&node)
+                    .or_else(|| prev.as_ref().and_then(|p| p.list.as_deref().copied()))
                     .unwrap_or_default();
                 // Its bound layout is a binding.
                 let parts = std::mem::take(&mut el.bound_list);
@@ -4094,10 +4423,7 @@ impl<M: TextEngine> Core<M> {
                 let component = matches!(part, Part::Component(_));
                 let matches = |o: &Expanded| !component && o.tag == el.tag && o.part == part;
                 let at = match &el.key {
-                    Some(k) => old.iter().position(|o| {
-                        o.as_ref()
-                            .is_some_and(|o| o.key.as_ref() == Some(k) && matches(o))
-                    }),
+                    Some(k) => keys.find(old, k, matches),
                     None => {
                         let at = old[(*cursor).min(old.len())..]
                             .iter()
@@ -4818,7 +5144,7 @@ impl<M: TextEngine> Core<M> {
                 let _ = self.apply_op(Op::Create { id, tag: el.tag });
                 self.components.owners.insert(id, host);
                 if let ElKind::Component(c) = &el.kind {
-                    self.create_instance_of(id, c.name, c.make, c.spec);
+                    self.create_instance_for(id, c);
                 }
                 (
                     id,
@@ -4831,6 +5157,12 @@ impl<M: TextEngine> Core<M> {
                 )
             }
         };
+        // The element snapshot predates any applied layout binding patches.
+        let old_list = if matches!(el.kind, ElKind::VirtualList(_)) {
+            self.components.list_layouts.remove(&id).unwrap_or(old_list)
+        } else {
+            old_list
+        };
         let bound = bound.map(|bound| self.bind_parts(host, id, bound, &mut el));
         let (component, virtual_list) = match std::mem::replace(&mut el.kind, ElKind::Plain) {
             ElKind::Component(c) => (Some(c), None),
@@ -4840,11 +5172,7 @@ impl<M: TextEngine> Core<M> {
         if let Some(c) = component {
             // A nested component: its props, and the styles as the app's
             // classes of its host.
-            if let Some(nested) = self.components.instances.get_mut(&id)
-                && let Inner::Component(inner) = &mut nested.inner
-            {
-                inner.set_props(c.props.as_any());
-            }
+            self.set_element_props(id, c.props.as_ref());
             if self.is_host(id) {
                 if let Some(style) = nested_style {
                     el.style = self.bind_nested_style(id, style);
@@ -5113,6 +5441,7 @@ impl<M: TextEngine> Core<M> {
                     count_signal.set(count as usize);
                     patches.borrow_mut().push(super::views::Patch::Rows {
                         list: id,
+                        binding: crate::element::Owner::current(),
                         count,
                         keys,
                     });
@@ -5144,16 +5473,7 @@ impl<M: TextEngine> Core<M> {
         state.moves = moves;
         state.separator = list.separator;
         state.min_view = list.min_view_time;
-        let marked: Vec<NodeId> = state
-            .cells
-            .iter()
-            .chain(&state.contents)
-            .copied()
-            .filter(|&c| c != 0)
-            .collect();
-        for cell in marked {
-            self.components.mark(cell);
-        }
+        self.sync_virtual_cells(id, true);
     }
 
     /// Sends list `id` its rows' changes from `before` (none: a new list):
@@ -5194,30 +5514,32 @@ impl<M: TextEngine> Core<M> {
         let state = self.components.virtual_lists.get_mut(&id).expect("list");
         state.count = count;
         state.keys = keys;
-        let parts: Vec<NodeId> = state
-            .cells
-            .iter()
-            .chain(&state.contents)
-            .copied()
-            .filter(|&c| c != 0)
-            .collect();
-        for part in parts {
-            let Some(inst) = self.components.instances.get_mut(&part) else {
-                continue;
-            };
-            let Some(signal) = inst.row_index else {
-                continue;
-            };
-            let live = inst.cell_owner.is_some_and(|o| o.is_live());
-            if let Inner::VirtualRow { index, .. } | Inner::Row { index, .. } = &mut inst.inner {
-                *index = if live {
-                    signal.get_untracked()
-                } else {
-                    usize::MAX
+        self.sync_virtual_cells(id, false);
+    }
+
+    fn sync_virtual_cells(&mut self, id: NodeId, rebuild: bool) {
+        let key = self.key(id).expect("virtual list node");
+        let slots = &self.nodes[key as usize].list.as_ref().expect("list").slots;
+        let state = &self.components.virtual_lists[&id];
+        for (slot, (&cell, &content)) in state.cells.iter().zip(&state.contents).enumerate() {
+            for part in [cell, content].into_iter().filter(|&part| part != 0) {
+                let Some(inst) = self.components.instances.get_mut(&part) else {
+                    continue;
                 };
-            }
-            if !live {
-                self.components.mark(part);
+                let remake = rebuild || !inst.cell_owner.is_some_and(|o| o.is_live());
+                if let Inner::VirtualRow { index, .. } | Inner::Row { index, .. } = &mut inst.inner
+                {
+                    if remake {
+                        // The content owner can die while the slot still has a row.
+                        *index = slots[slot].requested.map_or(usize::MAX, |i| i as usize);
+                    } else if let Some(position) = inst.row_index {
+                        *index = position.get_untracked();
+                    }
+                }
+                if remake && !inst.dirty {
+                    inst.dirty = true;
+                    self.components.dirty.push(part);
+                }
             }
         }
     }
@@ -6204,28 +6526,29 @@ impl<M: TextEngine> Core<M> {
             log::warn!("link dropped: {dropped}");
             return;
         }
-        // The callback of the waiting sign-in session ends it: it is the
-        // session's answer, never a link the app navigates by (nor its
-        // address, which would keep the credentials it carries).
-        if !page
-            && change.is_none()
-            && self
-                .components
-                .auth_session
-                .as_ref()
-                .is_some_and(|s| crate::auth_session::is_callback(&url, &s.scheme))
-        {
-            self.end_auth_session(
-                None,
-                Ok(crate::auth_session::AuthSessionOutcome::Completed(url)),
-            );
-            return;
+        let links = &mut self.components.url_schemes;
+        // A link a wait for its scheme takes is that wait's alone (a sign-in
+        // session's callback): no listener of the app's hears it, and it
+        // does not become the app's address.
+        if !quiet && change.is_none() {
+            let scheme = url.split_once(':').map_or("", |(scheme, _)| scheme);
+            links
+                .next_of_scheme
+                .retain(|(_, answer)| crate::element::task::awaited(answer));
+            if let Some(at) = links
+                .next_of_scheme
+                .iter()
+                .position(|(waited, _)| waited.eq_ignore_ascii_case(scheme))
+            {
+                let (_, answer) = links.next_of_scheme.remove(at);
+                answer.borrow_mut().deliver(url);
+                return;
+            }
         }
-        self.components.url_schemes.address.set(url.clone());
+        links.address.set(url.clone());
         if quiet {
             return;
         }
-        let links = &mut self.components.url_schemes;
         if let Some(reason) = change {
             if !links.hears_changes {
                 return;
@@ -6241,18 +6564,8 @@ impl<M: TextEngine> Core<M> {
             links.changes.push_back(change);
             return;
         }
-        if let Some(answer) = links.next.take() {
-            answer.borrow_mut().deliver(url);
-            return;
-        }
-        if links.pending.len() == crate::url_scheme::MAX_PENDING {
-            log::warn!(
-                "link dropped: {} came while nothing listened",
-                crate::url_scheme::MAX_PENDING
-            );
-            links.pending.pop_front();
-        }
-        links.pending.push_back(url);
+        let executor = &self.components.executor;
+        links.open(url, |task| executor.has_task(task));
     }
 
     /// The schemes the app claims (`nsh.json` `schemes`,
@@ -6703,12 +7016,25 @@ impl<M: TextEngine> Core<M> {
             Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
             Action::LoginItem(enabled, answer) => self.login_item_action(enabled, answer),
-            Action::NextUrlSchemeOpen(answer) => {
+            Action::NextUrlSchemeOpen(task, answer) => {
+                let executor = &self.components.executor;
+                self.components
+                    .url_schemes
+                    .listen(task, answer, |task| executor.has_task(task));
+            }
+            Action::NextUrlSchemeOpenFor(scheme, answer) => {
                 let links = &mut self.components.url_schemes;
-                match links.pending.pop_front() {
-                    Some(url) => answer.borrow_mut().deliver(url),
-                    None => links.next = Some(answer),
+                let claimed = links.links.schemes().contains(&scheme)
+                    || (scheme == "https" && !links.links.web().is_empty());
+                if !claimed {
+                    log::warn!(
+                        "next_url_scheme_open_for: the app does not claim `{scheme}` (nsh.json `schemes`), so no link of it comes"
+                    );
                 }
+                links
+                    .next_of_scheme
+                    .retain(|(_, answer)| crate::element::task::awaited(answer));
+                links.next_of_scheme.push((scheme, answer));
             }
             Action::NextOpenFiles(answer) => {
                 let files = &mut self.components.open_files;
@@ -6805,13 +7131,6 @@ impl<M: TextEngine> Core<M> {
                     command: Command::PickScreenColor { id },
                 });
             }
-            Action::Share(request, answer) => self.start_share(request, answer),
-            Action::ShareAvailable(answer) => {
-                let available = self.components.environment.share && self.access.allows_share();
-                answer.borrow_mut().deliver(available);
-            }
-            Action::AuthSession(request, answer) => self.start_auth_session(request, answer),
-            Action::CloseAuthSession => self.close_auth_session(),
             Action::RenderCanvas(request, answer) => self.start_canvas_render(*request, answer),
             Action::FileRequest(request, answer) => {
                 use crate::file_dialog::FileRequest;
@@ -6843,191 +7162,6 @@ impl<M: TextEngine> Core<M> {
                     },
                 });
             }
-        }
-    }
-
-    /// Checks `request` and sends it to the platform's share sheet
-    /// ([`crate::share`]); `answer` gets how it ended. Request ids are
-    /// unique in the process, as offscreen renders' are: a sheet still
-    /// open when a hot reload replaced the core must not answer the new
-    /// core's request of the same number.
-    fn start_share(
-        &mut self,
-        request: crate::share::ShareRequest,
-        answer: AnswerSlot<Result<crate::share::ShareOutcome, crate::share::ShareError>>,
-    ) {
-        use crate::share::{ShareError, ShareOutcome};
-        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let refused = if !self.components.environment.share {
-            Some(ShareError::unavailable("this platform has no share sheet"))
-        } else if !self.access.allows_share() {
-            Some(ShareError {
-                code: Some(crate::element::codes::ACCESS_DENIED.into()),
-                message: crate::share::NOT_GRANTED.into(),
-            })
-        } else {
-            request.check().err().map(ShareError::failed)
-        };
-        if let Some(error) = refused {
-            answer.borrow_mut().deliver(Err(error));
-            return;
-        }
-        // One sheet at a time: the one still showing ends as dismissed and
-        // the platform replaces it, so a sheet the platform never answered
-        // cannot hold every later share back.
-        for (_, earlier) in self.components.shares.drain() {
-            earlier.borrow_mut().deliver(Ok(ShareOutcome::dismissed()));
-        }
-        // The anchor goes to the platform as a view it shows, which it
-        // places the sheet at wherever that view is (a modal, a window).
-        let anchor = request.anchor.filter(|&node| {
-            self.key(node).is_ok_and(|key| {
-                self.nodes[key as usize].created && (key == self.root || self.in_tree(key))
-            })
-        });
-        let id = loop {
-            let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if id != 0 {
-                break id;
-            }
-        };
-        self.components.shares.insert(id, answer);
-        let _ = self.apply_op(Op::Command {
-            id: crate::ROOT_ID,
-            command: Command::Share {
-                id,
-                sheet: Box::new(crate::share::ShareSheet::new(request, anchor)),
-            },
-        });
-    }
-
-    /// Checks `request` and starts its sign-in session
-    /// ([`crate::auth_session`]): sent to the platform where it shows
-    /// sessions, opened in the system browser elsewhere; `answer` gets how
-    /// it ended. Request ids are unique in the process, as shares' are.
-    fn start_auth_session(
-        &mut self,
-        request: crate::auth_session::AuthSessionRequest,
-        answer: AuthSessionAnswer,
-    ) {
-        use crate::auth_session::{AuthSessionError, AuthSessionOutcome, AuthSessionPage};
-        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let in_app = self.components.environment.auth_session;
-        let scheme = request.scheme();
-        let refused = if let Err(wrong) = request.check() {
-            Some(AuthSessionError::failed(wrong))
-        } else if !self.access.allows_open_url(&request.url) {
-            let denied = crate::open_url::not_granted(&request.url);
-            self.deny(denied.message().to_owned());
-            Some(AuthSessionError {
-                code: Some(crate::element::codes::ACCESS_DENIED.into()),
-                message: denied.message().to_owned(),
-            })
-        } else if !in_app && !self.components.environment.scheme_links {
-            // This platform hands the app no links of its schemes (the web,
-            // the GPUI and terminal backends): the callback could never come
-            // back.
-            Some(AuthSessionError::unavailable(format!(
-                "openAuthSession: no in-app sign-in here, and no link of `{scheme}:` can reach the app on this platform"
-            )))
-        } else if !in_app
-            && !self
-                .components
-                .url_schemes
-                .links
-                .schemes()
-                .contains(&scheme)
-        {
-            // Only a link of a scheme the app claims brings the callback
-            // back to it here; without one the session could never end.
-            Some(AuthSessionError::unavailable(format!(
-                "openAuthSession: no in-app sign-in here, and `{scheme}:` is not a scheme the app claims (nsh.json `schemes`)"
-            )))
-        } else {
-            None
-        };
-        if let Some(error) = refused {
-            answer.borrow_mut().deliver(Err(error));
-            return;
-        }
-        // One session at a time: the one still waiting ends as cancelled
-        // (the platform closes it where it can), so a session whose
-        // callback never came cannot hold every later one back.
-        if let Some(earlier) = self.components.auth_session.take() {
-            earlier
-                .answer
-                .borrow_mut()
-                .deliver(Ok(AuthSessionOutcome::Cancelled));
-        }
-        let id = loop {
-            let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if id != 0 {
-                break id;
-            }
-        };
-        let page = AuthSessionPage::new(&request);
-        let opening = if in_app {
-            let _ = self.apply_op(Op::Command {
-                id: crate::ROOT_ID,
-                command: Command::AuthSession {
-                    id,
-                    page: Box::new(page),
-                },
-            });
-            None
-        } else {
-            // As `open_url`: the engine asks the embedding app, then the
-            // platform; whether it opened comes back to `answer_open_url`.
-            let open = self.components.next_url_open;
-            self.components.next_url_open = open.wrapping_add(1);
-            let (_, opened) = crate::element::Answer::<bool>::new();
-            self.components.url_opens.insert(open, opened);
-            self.components.url_requests.push((open, page.url));
-            Some(open)
-        };
-        self.components.auth_session = Some(AuthSession {
-            id,
-            scheme,
-            answer,
-            opening,
-        });
-    }
-
-    /// Closes the app's waiting sign-in session, if any: answers it as
-    /// cancelled and, where the platform shows it, has the platform close
-    /// it. A page in the system browser stays open: nothing closes it.
-    fn close_auth_session(&mut self) {
-        let Some(session) = self.components.auth_session.take() else {
-            return;
-        };
-        session
-            .answer
-            .borrow_mut()
-            .deliver(Ok(crate::auth_session::AuthSessionOutcome::Cancelled));
-        if session.opening.is_none() {
-            let _ = self.apply_op(Op::Command {
-                id: crate::ROOT_ID,
-                command: Command::CloseAuthSession(session.id),
-            });
-        }
-    }
-
-    /// Ends the waiting sign-in session `id` (any, `None`) with `result`.
-    fn end_auth_session(
-        &mut self,
-        id: Option<u32>,
-        result: Result<
-            crate::auth_session::AuthSessionOutcome,
-            crate::auth_session::AuthSessionError,
-        >,
-    ) {
-        let session = &mut self.components.auth_session;
-        if session
-            .as_ref()
-            .is_some_and(|s| id.is_none_or(|id| s.id == id))
-            && let Some(session) = session.take()
-        {
-            session.answer.borrow_mut().deliver(result);
         }
     }
 
@@ -7260,18 +7394,6 @@ impl<M: TextEngine> Core<M> {
     pub fn answer_open_url(&mut self, id: u32, opened: bool) {
         if let Some(answer) = self.components.url_opens.remove(&id) {
             answer.borrow_mut().deliver(opened);
-        }
-        if !opened
-            && let Some(session) = &self.components.auth_session
-            && session.opening == Some(id)
-        {
-            let session = session.id;
-            self.end_auth_session(
-                Some(session),
-                Err(crate::auth_session::AuthSessionError::failed(
-                    "openAuthSession: the browser did not open the sign-in page",
-                )),
-            );
         }
     }
 
@@ -7917,23 +8039,6 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
-            EventKind::Share if id == crate::ROOT_ID => {
-                let Some((request, result)) = crate::share::answer_from_payload(payload) else {
-                    return false;
-                };
-                if let Some(answer) = self.components.shares.remove(&request) {
-                    answer.borrow_mut().deliver(result);
-                }
-                true
-            }
-            EventKind::AuthSession if id == crate::ROOT_ID => {
-                let Some((request, result)) = crate::auth_session::answer_from_payload(payload)
-                else {
-                    return false;
-                };
-                self.end_auth_session(Some(request), result);
-                true
-            }
             EventKind::CanvasImage if id == crate::ROOT_ID => self.answer_canvas_render(payload),
             EventKind::FileRequest if id == crate::ROOT_ID => {
                 let EventPayload::FileRequest {
@@ -8160,15 +8265,15 @@ impl<M: TextEngine> Core<M> {
         drop(keys);
         // JS's first, then the views', where the newest that may fire wins:
         // a focused component's keys win over the app's. Bindings
-        // `over_focused` come after both, so they win over the components';
+        // `OverFocused::Always` come after both, so they win over the components';
         // the overlay's Escape (a popup closing) stays last.
         let js = self.components.js_keymap.bindings();
         let bindings = js
             .iter()
-            .filter(|b| !b.over_focused)
-            .chain(views.iter().filter(|b| !b.over_focused))
-            .chain(js.iter().filter(|b| b.over_focused))
-            .chain(views.iter().filter(|b| b.over_focused))
+            .filter(|b| !b.comes_after_views())
+            .chain(views.iter().filter(|b| !b.comes_after_views()))
+            .chain(js.iter().filter(|b| b.comes_after_views()))
+            .chain(views.iter().filter(|b| b.comes_after_views()))
             .copied()
             .chain(overlay)
             .collect();
@@ -8201,9 +8306,27 @@ impl<M: TextEngine> Core<M> {
         safe
     }
 
+    /// Whether `key` or a view around it already stands clear of the
+    /// software keyboard (`Prop::ClearsKeyboard`, a bottom sheet the
+    /// keyboard lifts): the keyboard takes nothing more from it.
+    fn clears_keyboard(&self, key: super::Key) -> bool {
+        let mut key = key;
+        loop {
+            let node = &self.nodes[key as usize];
+            if node.clears_keyboard {
+                return true;
+            }
+            if node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
+    }
+
     /// What `env` (a node's `env()` terms) comes to for `key` now: the
     /// insets of the root view it renders in ([`Self::insets_of`]) and the
-    /// software keyboard's height.
+    /// software keyboard's height, 0 where a view around it stands clear
+    /// of the keyboard already ([`Self::clears_keyboard`]).
     pub(super) fn env_insets(
         &self,
         key: super::Key,
@@ -8216,6 +8339,9 @@ impl<M: TextEngine> Core<M> {
                 return Points::ZERO;
             };
             if var == EnvVar::KeyboardInsetHeight {
+                if self.clears_keyboard(key) {
+                    return Points::ZERO;
+                }
                 return self
                     .components
                     .environment

@@ -49,6 +49,8 @@ pub(crate) struct Attrs {
     pub(crate) frame: WindowFrameStyle,
     pub(crate) min_size: Option<Size<Points>>,
     pub(crate) max_size: Option<Size<Points>>,
+    /// Content width / height the user's resizes keep (`aspectRatio`).
+    pub(crate) aspect_ratio: Option<f32>,
     pub(crate) resizable: bool,
     pub(crate) movable: bool,
     pub(crate) minimizable: bool,
@@ -63,6 +65,8 @@ pub(crate) struct Attrs {
     pub(crate) taskbar: bool,
     /// `pointerEvents: "none"`.
     pub(crate) click_through: bool,
+    /// `pointerEvents: "box-none"` ([`crate::box_none`]).
+    pub(crate) box_none: bool,
     pub(crate) transparent: bool,
     pub(crate) backdrop: Backdrop,
     pub(crate) shadow: bool,
@@ -77,6 +81,7 @@ impl Default for Attrs {
             frame: WindowFrameStyle::Default,
             min_size: None,
             max_size: None,
+            aspect_ratio: None,
             resizable: true,
             movable: true,
             minimizable: true,
@@ -90,6 +95,7 @@ impl Default for Attrs {
             level: WindowLevel::Normal,
             taskbar: true,
             click_through: false,
+            box_none: false,
             transparent: false,
             backdrop: Backdrop::None,
             shadow: true,
@@ -122,6 +128,7 @@ impl Attrs {
             frame,
             min_size,
             max_size,
+            aspect_ratio,
             resizable,
             movable,
             minimizable,
@@ -141,6 +148,7 @@ impl Attrs {
         );
         if let Some(pointer) = diff.pointer_events {
             self.click_through = pointer == WindowPointerEvents::None;
+            self.box_none = pointer == WindowPointerEvents::BoxNone;
         }
     }
 
@@ -236,6 +244,10 @@ pub(crate) fn styles(kind: WindowKind, attrs: &Attrs, owned: bool) -> (u32, u32)
         // Clicks go to the windows below, of any process: only a layered
         // window's `WS_EX_TRANSPARENT` passes them on.
         ex |= WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0;
+    } else if attrs.box_none {
+        // Layered, so that `WS_EX_TRANSPARENT` passes presses on where it
+        // has no views ([`crate::box_none`] sets it).
+        ex |= WS_EX_LAYERED.0;
     }
     if attrs.taskbar && (owned || ex & WS_EX_TOOLWINDOW.0 != 0) {
         // In the taskbar although owned, or a tool window.
@@ -390,6 +402,72 @@ pub(crate) fn track_sizes(attrs: &Attrs, scale: f32, extra: (i32, i32)) -> Track
         )
     };
     (attrs.min_size.map(outer), attrs.max_size.map(outer))
+}
+
+/// The outer rect `(left, top, right, bottom)` a `WM_SIZING` drag by
+/// `edge` (`WMSZ_*`) gets so the content (the rect less `extra` pixels of
+/// frame) keeps `ratio` (width / height), within the track sizes
+/// `(min, max)`: a side edge sets the height from the width, the top or
+/// bottom edge the width from the height, a corner the height from the
+/// width. The edge the user holds stays where they put it; the
+/// opposite side gives.
+pub(crate) fn aspect_sizing(
+    rect: (i32, i32, i32, i32),
+    edge: u32,
+    ratio: f32,
+    extra: (i32, i32),
+    (min, max): TrackSizes,
+) -> (i32, i32, i32, i32) {
+    let (mut l, mut t, mut r, mut b) = rect;
+    if !(ratio.is_finite() && ratio > 0.0) {
+        return rect;
+    }
+    let ratio = f64::from(ratio);
+    // The content's limits, in pixels, from the outer track sizes.
+    let lo = min.map_or((1, 1), |(w, h)| {
+        ((w - extra.0).max(1), (h - extra.1).max(1))
+    });
+    let hi = max.map_or((i32::MAX, i32::MAX), |(w, h)| {
+        ((w - extra.0).max(1), (h - extra.1).max(1))
+    });
+    let by_height = matches!(edge, WMSZ_TOP | WMSZ_BOTTOM);
+    if by_height {
+        // The height the drag gives, within what both limits allow.
+        let h_lo = f64::from(lo.1).max((f64::from(lo.0) / ratio).ceil());
+        let h_hi = f64::from(hi.1).min((f64::from(hi.0) / ratio).floor());
+        let mut h = f64::from((b - t - extra.1).max(1));
+        if h_lo <= h_hi {
+            h = h.clamp(h_lo, h_hi);
+        }
+        let h = h as i32;
+        let w = (f64::from(h) * ratio).round() as i32;
+        if edge == WMSZ_TOP {
+            t = b - h - extra.1;
+        } else {
+            b = t + h + extra.1;
+        }
+        r = l + w + extra.0;
+    } else {
+        let w_lo = f64::from(lo.0).max((f64::from(lo.1) * ratio).ceil());
+        let w_hi = f64::from(hi.0).min((f64::from(hi.1) * ratio).floor());
+        let mut w = f64::from((r - l - extra.0).max(1));
+        if w_lo <= w_hi {
+            w = w.clamp(w_lo, w_hi);
+        }
+        let w = w as i32;
+        let h = (f64::from(w) / ratio).round() as i32;
+        if matches!(edge, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT) {
+            l = r - w - extra.0;
+        } else {
+            r = l + w + extra.0;
+        }
+        if matches!(edge, WMSZ_TOPLEFT | WMSZ_TOPRIGHT) {
+            t = b - h - extra.1;
+        } else {
+            b = t + h + extra.1;
+        }
+    }
+    (l, t, r, b)
 }
 
 /// How the user asked to close a window, from what came before its
@@ -590,6 +668,12 @@ pub(crate) fn sync(surface: &Surface, hwnd: HWND, before: Option<Attrs>, after: 
             || b.maximizable != after.maximizable
     });
     restyle(hwnd, shell, &after);
+    if changed(&|b| b.box_none != after.box_none)
+        && let Some(id) = crate::window::root_id(hwnd)
+        && let Some(surface) = crate::window::surface_of(hwnd)
+    {
+        crate::box_none::set(&surface, id, hwnd, after.box_none);
+    }
     if frame {
         crate::chrome::frame_changed(surface, hwnd);
     }
@@ -644,11 +728,15 @@ fn restyle(hwnd: HWND, shell: &Shell, attrs: &Attrs) {
     // SAFETY: plain queries and calls on a live window of this thread.
     unsafe {
         let owned = GetWindow(hwnd, GW_OWNER).is_ok_and(|o| !o.is_invalid());
-        let next = styles(shell.kind.get(), attrs, owned);
+        let mut next = styles(shell.kind.get(), attrs, owned);
         let current = (
             GetWindowLongPtrW(hwnd, GWL_STYLE) as u32,
             GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32,
         );
+        if attrs.box_none {
+            // Where the cursor is decides it ([`crate::box_none`]).
+            next.1 |= current.1 & WS_EX_TRANSPARENT.0;
+        }
         let (mut style, ex) = restyled(current, next);
         if crate::window::is_full_screen(hwnd) {
             crate::window::set_windowed_style(hwnd, (style & STYLE_MASK) as isize);
@@ -790,14 +878,11 @@ fn bare_when_zoomed(attrs: &Attrs) -> bool {
 /// before), the shadow of a frameless window and its corners.
 fn set_material(hwnd: HWND, attrs: &Attrs) {
     let frameless = attrs.frameless();
-    let backdrop = attrs.backdrop != Backdrop::None;
     // SAFETY: a plain query on a live window.
     let zoomed = bare_when_zoomed(attrs) && unsafe { IsZoomed(hwnd) }.as_bool();
     // A frameless window's shadow is the frame's, extended by a pixel;
     // a backdrop shows through the whole client area.
-    let margin = if backdrop {
-        -1
-    } else if frameless && attrs.shadow && !attrs.transparent && !zoomed {
+    let margin = if frameless && attrs.shadow && !attrs.transparent && !zoomed {
         1
     } else {
         0
@@ -1100,6 +1185,26 @@ mod tests {
     }
 
     #[test]
+    fn a_box_none_window_is_layered_and_passes_where_the_cursor_says() {
+        let mut attrs = Attrs::of_kind(WindowKind::Popup);
+        let mut diff = WindowAttributes::default();
+        diff.pointer_events = Some(WindowPointerEvents::BoxNone);
+        attrs.merge(&diff);
+        assert!(attrs.box_none && !attrs.click_through);
+        let (_, ex) = styles(WindowKind::Popup, &attrs, false);
+        // Layered, and passing presses on only when the cursor is over no
+        // view of its (`box_none`), not by its styles.
+        assert_ne!(ex & WS_EX_LAYERED.0, 0);
+        assert_eq!(ex & WS_EX_TRANSPARENT.0, 0);
+        // `auto` again: neither.
+        diff.pointer_events = Some(WindowPointerEvents::Auto);
+        attrs.merge(&diff);
+        assert!(!attrs.box_none);
+        let (_, ex) = styles(WindowKind::Popup, &attrs, false);
+        assert_eq!(ex & (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0), 0);
+    }
+
+    #[test]
     fn restyling_keeps_the_windows_own_bits() {
         let current = (
             WS_OVERLAPPEDWINDOW.0 | WS_VISIBLE.0 | WS_MAXIMIZE.0 | WS_DISABLED.0,
@@ -1225,6 +1330,35 @@ mod tests {
     }
 
     #[test]
+    fn aspect_ratio_drags_keep_the_content_at_the_ratio() {
+        let extra = (16, 39);
+        let none = (None, None);
+        let content = |(l, t, r, b): (i32, i32, i32, i32)| (r - l - extra.0, b - t - extra.1);
+        // The right edge: the width stays, the bottom follows.
+        let rect = aspect_sizing((100, 100, 916, 500), WMSZ_RIGHT, 2.0, extra, none);
+        assert_eq!(content(rect), (800, 400));
+        assert_eq!((rect.0, rect.1, rect.2), (100, 100, 916));
+        // The bottom edge: the height stays, the right side follows.
+        let rect = aspect_sizing((100, 100, 300, 539), WMSZ_BOTTOM, 2.0, extra, none);
+        assert_eq!(content(rect), (800, 400));
+        assert_eq!((rect.0, rect.1, rect.3), (100, 100, 539));
+        // The top edge: the bottom stays put.
+        let rect = aspect_sizing((100, 100, 300, 539), WMSZ_TOP, 2.0, extra, none);
+        assert_eq!((rect.3, content(rect)), (539, (800, 400)));
+        // The top left corner: the bottom right corner stays put.
+        let rect = aspect_sizing((100, 100, 916, 900), WMSZ_TOPLEFT, 2.0, extra, none);
+        assert_eq!((rect.2, rect.3, content(rect)), (916, 900, (800, 400)));
+        // The limits hold with the ratio: a height of at least 300 needs a
+        // width of 600.
+        let min = Some((300 + extra.0, 300 + extra.1));
+        let rect = aspect_sizing((0, 0, 216, 239), WMSZ_RIGHT, 2.0, extra, (min, None));
+        assert_eq!(content(rect), (600, 300));
+        // A ratio out of range leaves the drag alone.
+        let rect = (0, 0, 216, 239);
+        assert_eq!(aspect_sizing(rect, WMSZ_RIGHT, f32::NAN, extra, none), rect);
+    }
+
+    #[test]
     fn close_reasons_follow_what_came_first() {
         assert_eq!(close_reason(false, None, true), CloseReason::CloseButton);
         assert_eq!(
@@ -1257,6 +1391,7 @@ mod tests {
         assert!(before.close_on_blur);
         assert!(!shell.attrs().close_on_blur);
         assert!(shell.attrs().click_through);
+        assert!(!shell.attrs().box_none);
         assert!(shell.attrs().custom_caption(), "a popup has no frame");
         assert_eq!(caption_buttons(&shell.attrs()), vec![HTCLOSE]);
         assert_eq!(

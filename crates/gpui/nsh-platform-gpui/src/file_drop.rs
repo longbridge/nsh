@@ -23,6 +23,9 @@ pub(crate) struct State {
     target: RefCell<Option<NshView>>,
     /// A [`clear`] is scheduled for a drag that ended ([`take_needs_clear`]).
     clearing: Cell<bool>,
+    /// The files of the drag in progress, from its last move ([`update`]);
+    /// the drop layer drops them ([`take_paths`]).
+    paths: RefCell<Vec<std::path::PathBuf>>,
 }
 
 fn set_target(surface: &Surface, target: Option<NshView>, paths: &[std::path::PathBuf]) {
@@ -65,6 +68,11 @@ pub(crate) fn take_needs_clear(surface: &Surface) -> bool {
 
 /// The drag moved to `(x, y)` (root points).
 pub(crate) fn update(surface: &Surface, x: f32, y: f32, paths: &[std::path::PathBuf]) {
+    let mut held = surface.file_drop.paths.borrow_mut();
+    if *held != paths {
+        *held = paths.to_vec();
+    }
+    drop(held);
     set_target(
         surface,
         crate::input::file_drop_target(surface, x, y),
@@ -76,6 +84,25 @@ pub(crate) fn update(surface: &Surface, x: f32, y: f32, paths: &[std::path::Path
 pub(crate) fn clear(surface: &Surface) {
     surface.file_drop.clearing.set(false);
     set_target(surface, None, &[]);
+}
+
+/// The files of the drag in progress, which the drop takes; none once no
+/// file drag moved over the surface.
+pub(crate) fn take_paths(surface: &Surface) -> Vec<std::path::PathBuf> {
+    std::mem::take(&mut surface.file_drop.paths.borrow_mut())
+}
+
+/// Whether a file drag moved over the surface since the last drop.
+pub(crate) fn holds_paths(surface: &Surface) -> bool {
+    !surface.file_drop.paths.borrow().is_empty()
+}
+
+/// No drag is active: the last one's files go.
+pub(crate) fn forget_paths(surface: &Surface) {
+    let mut held = surface.file_drop.paths.borrow_mut();
+    if !held.is_empty() {
+        held.clear();
+    }
 }
 
 /// The view `id` was removed or stopped listening to drops.

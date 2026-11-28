@@ -106,7 +106,8 @@ pub enum Workspaces {
     All,
 }
 
-/// Whether a window takes the pointer (CSS's `pointer-events` names).
+/// Whether a window takes the pointer (the names of a view's
+/// `pointerEvents`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PropEnum)]
 pub enum WindowPointerEvents {
     /// It takes the pointer.
@@ -115,6 +116,18 @@ pub enum WindowPointerEvents {
     /// Presses and the pointer go through it to what is below. Needs the
     /// `windows` capability's `overlay`.
     None,
+    /// Its root view is `box-none`: the window takes the pointer where it
+    /// is over a view in the root that takes it under the views' own
+    /// rules (`hidden`, `pointerEvents`, `hitSlop`, `overflow`), and lets
+    /// it through to what is below everywhere else, as if the window were
+    /// not there. Like a view's `box-none`, a view that fills the root
+    /// still takes the pointer unless it is `box-none` (or `none`) itself;
+    /// a background does not decide it. Needs the `windows` capability's
+    /// `overlay`. Every desktop lets the pointer through this way; on
+    /// Linux a rotated or skewed view and a rounded `clipPath` count by the
+    /// box around them.
+    #[prop(rename = "box-none")]
+    BoxNone,
 }
 
 /// The system material behind a window's content, named for what it is
@@ -457,6 +470,9 @@ attributes! {
     min_size: Option<Size<Points>> = "minSize", nullable;
     /// The largest size the user may give it (content size, points).
     max_size: Option<Size<Points>> = "maxSize", nullable;
+    /// The ratio of width to height the user's resizes keep its content
+    /// at (`16 / 9`); the app's own `setBounds` is not limited.
+    aspect_ratio: Option<f32> = "aspectRatio", nullable;
     /// The window follows its content's laid-out size.
     size_to_content: SizeToContent = "sizeToContent", plain;
     /// The user may resize it.
@@ -511,6 +527,7 @@ impl WindowAttributes {
             frame: Some(super::WindowFrameStyle::Default),
             min_size: Some(None),
             max_size: Some(None),
+            aspect_ratio: Some(None),
             size_to_content: Some(SizeToContent::Off),
             resizable: Some(true),
             movable: Some(true),
@@ -589,14 +606,17 @@ impl WindowAttributes {
     }
 
     /// Whether these make the window an overlay's: click-through
-    /// (`pointerEvents: "none"`), which the `windows` capability's
-    /// `overlay` grants.
+    /// (`pointerEvents: "none"`, or `"box-none"` where nothing in it takes
+    /// the pointer), which the `windows` capability's `overlay` grants.
     pub fn passes_pointer(&self) -> bool {
-        self.pointer_events == Some(WindowPointerEvents::None)
+        matches!(
+            self.pointer_events,
+            Some(WindowPointerEvents::None | WindowPointerEvents::BoxNone)
+        )
     }
 
-    /// Keeps the values in their ranges: a size not finite and positive and
-    /// a progress out of 0 to 1 are left out (with `false`), the title bar's height capped as
+    /// Keeps the values in their ranges: a size or an aspect ratio not
+    /// finite and positive and a progress out of 0 to 1 are left out (with `false`), the title bar's height capped as
     /// [`super::title_bar_height`] does.
     pub fn sanitize(&mut self) -> bool {
         let mut fine = true;
@@ -610,6 +630,12 @@ impl WindowAttributes {
                 *size = None;
                 fine = false;
             }
+        }
+        if let Some(Some(r)) = self.aspect_ratio
+            && !(r.is_finite() && r > 0.0)
+        {
+            self.aspect_ratio = None;
+            fine = false;
         }
         if let Some(Some(p)) = &mut self.progress
             && let Some(v) = p.value
@@ -1089,16 +1115,24 @@ pub(crate) struct WindowRecord {
     /// The size it opened at, its content's until the platform reports
     /// it (`Core::set_root_size`).
     pub(crate) size: Option<Size<Points>>,
+    /// Whether this window is the implicit first window created by `mount`
+    /// for a plain root that declared no `<Window>` scenes.
+    pub(crate) implicit: bool,
 }
 
 impl WindowRecord {
     /// A window the platform opened with `attributes`, at `size`.
-    pub(crate) fn opened(attributes: WindowAttributes, size: Option<Size<Points>>) -> WindowRecord {
+    pub(crate) fn opened(
+        attributes: WindowAttributes,
+        size: Option<Size<Points>>,
+        implicit: bool,
+    ) -> WindowRecord {
         WindowRecord {
             sent: attributes,
             pending: WindowAttributes::default(),
             fitted: None,
             size,
+            implicit,
         }
     }
 
@@ -1161,6 +1195,19 @@ mod tests {
         assert!(overlay.passes_pointer());
         assert_eq!(overlay.focusable, Some(false));
         assert!(!WindowAttributes::for_kind(WindowKind::Normal).passes_pointer());
+    }
+
+    #[test]
+    fn a_box_none_window_passes_the_pointer() {
+        let json = serde_json::json!({ "pointerEvents": "box-none" });
+        let a = crate::element::from_json::<WindowAttributes>(&json).unwrap();
+        assert_eq!(a.pointer_events, Some(WindowPointerEvents::BoxNone));
+        // It lets the pointer through where nothing takes it: the
+        // `overlay` grant, as `none`.
+        assert!(a.passes_pointer());
+        // The view's spelling only.
+        let json = serde_json::json!({ "pointerEvents": "boxNone" });
+        assert!(crate::element::from_json::<WindowAttributes>(&json).is_err());
     }
 
     #[test]
@@ -1247,6 +1294,7 @@ mod tests {
         let mut record = WindowRecord::opened(
             WindowAttributes::resolve(WindowKind::Normal, &Default::default()),
             None,
+            false,
         );
         // Setting what it has sends nothing.
         record.pending.title = Some(String::new());
@@ -1285,6 +1333,7 @@ mod tests {
     fn values_out_of_range_are_left_out() {
         let mut a = WindowAttributes {
             min_size: Some(Some(size(px(-1.0), px(10.0)))),
+            aspect_ratio: Some(Some(0.0)),
             progress: Some(Some(WindowProgress {
                 value: Some(Percentage(2.0)),
                 state: ProgressState::Normal,
@@ -1293,6 +1342,24 @@ mod tests {
         };
         assert!(!a.sanitize());
         assert_eq!(a.min_size, None);
+        assert_eq!(a.aspect_ratio, None);
         assert_eq!(a.progress.unwrap().unwrap().value, Some(Percentage(1.0)));
+        for bad in [f32::NAN, f32::INFINITY, -1.5] {
+            let mut a = WindowAttributes {
+                aspect_ratio: Some(Some(bad)),
+                ..Default::default()
+            };
+            assert!(!a.sanitize());
+            assert_eq!(a.aspect_ratio, None);
+        }
+        // A ratio given and `null` (cleared) are both kept.
+        for fine in [Some(16.0 / 9.0), None] {
+            let mut a = WindowAttributes {
+                aspect_ratio: Some(fine),
+                ..Default::default()
+            };
+            assert!(a.sanitize());
+            assert_eq!(a.aspect_ratio, Some(fine));
+        }
     }
 }

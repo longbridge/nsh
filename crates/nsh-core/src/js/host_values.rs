@@ -18,7 +18,7 @@ use crate::{
     props::{AccessibilityActionDef, AccessibilityValue, Checked, PanActivation, Ripple},
 };
 
-/// `"none"`, `"all"`, or the canonical keystrokes a view captures
+/// `"none"`, `"all"`, `"text"`, or the canonical keystrokes a view captures
 /// (`"mod+k"`, `"shift+tab"`): parsed once here with the shortcut rules
 /// and this platform's `mod`, which the engine's environment names
 /// ([`crate::element::try_apple_keys`]); a JS host decoding outside that
@@ -33,7 +33,7 @@ impl HostValue for crate::KeyCapture {
     }
 
     fn ts_type(_: &mut TsTypes) -> String {
-        "\"none\" | \"all\" | readonly string[]".into()
+        "\"none\" | \"all\" | \"text\" | readonly string[]".into()
     }
 }
 
@@ -970,10 +970,14 @@ pub(crate) fn deceleration<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Sc
     }))
 }
 
-/// `maintainVisibleContentPosition`: `{ autoscrollToBottomThreshold }`.
+/// `maintainVisibleContentPosition`: `{ autoscrollToBottomThreshold, animated }`.
 pub(crate) fn visible_content<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::FollowEnd(
         points(input, "autoscrollToBottomThreshold").map(|t| t.max(Points::ZERO)),
+        input
+            .field("animated")
+            .and_then(|a| a.as_bool())
+            .unwrap_or(false),
     ))
 }
 

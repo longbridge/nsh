@@ -24,6 +24,10 @@ pub(crate) fn slot_id(id: u64) -> u64 {
     id | (1 << 62)
 }
 
+/// The side of the run an input method's composition is drawn as: after
+/// every widget at the caret's position.
+pub(crate) const COMPOSITION_SIDE: i32 = i32::MAX;
+
 /// A stretch of a textblock's content and of its rendered text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Run {
@@ -73,6 +77,15 @@ impl InlineMap {
             break;
         }
         t
+    }
+
+    /// The text offset just past the input method's composition drawn at
+    /// content offset `d`, if one is.
+    pub(crate) fn past_composition(&self, d: usize) -> Option<u32> {
+        self.runs
+            .iter()
+            .find(|run| run.doc == d && run.doc_len == 0 && run.side == COMPOSITION_SIDE)
+            .map(|run| run.text + run.text_len)
     }
 
     /// The content offset of text offset `t`.
@@ -126,6 +139,9 @@ pub(crate) struct Geometry {
     /// holder that is not the block's own origin (a task item's content,
     /// after its checkbox): their frames are in the holder, not the block.
     pub(crate) insets: HashMap<u64, Point<Points>>,
+    /// Horizontal scroll offset and visible width of each independently scrolling grid.
+    pub(crate) table_scroll: HashMap<u64, (Points, Points)>,
+    pub(crate) table_scroll_handles: HashMap<u64, ElementRef>,
     /// The textblocks, by block id.
     pub(crate) texts: HashMap<u64, TextGeo>,
     /// Textblock ids ordered by `TextGeo::start`.
@@ -163,6 +179,16 @@ pub(crate) enum Hit {
 }
 
 impl Geometry {
+    pub(crate) fn table_viewport(&self, id: u64) -> Option<Bounds<Points>> {
+        let (offset, width) = self.table_scroll.get(&id)?;
+        let original = self.origin(id)?;
+        let (_, grid) = self.frames.get(&id)?;
+        Some(Bounds::new(
+            Point::new(original.x + *offset, original.y),
+            Size::new(*width, grid.size.height),
+        ))
+    }
+
     /// Whether the content point `at` is in a block's box before where its
     /// children start: on a task item's checkbox, or under it.
     pub(crate) fn before_holder(&self, at: Point<Points>) -> bool {
@@ -274,13 +300,12 @@ impl Geometry {
     pub(crate) fn caret_rect(&self, pos: usize, affinity: Affinity) -> Option<Bounds<Points>> {
         let id = self.text_at(pos)?;
         let (origin, geo) = self.text_box(id)?;
-        let t = Self::text_offset(geo, pos);
-        let local = geo
-            .geometry
-            .as_ref()
-            .and_then(|g| g.caret_rect(TextPosition::new(t, to_text_affinity(affinity))))
-            .unwrap_or_else(|| fallback_caret_rect(geo, t, affinity));
-        Some(Bounds::new(origin + local.origin, local.size))
+        Some(text_caret_rect(
+            origin,
+            geo,
+            Self::text_offset(geo, pos),
+            affinity,
+        ))
     }
 
     /// The box of the inline leaf at `pos` (content box): from the text
@@ -294,16 +319,20 @@ impl Geometry {
     /// The drawn caret at `pos`: about the font's em tall (the ascender
     /// and descender less their own gap, as gpui-kit's input draws 0.85 of
     /// a normal line), centred in the line, rather than the whole line box
-    /// [`Self::caret_rect`] gives.
+    /// [`Self::caret_rect`] gives. While an input method composes at
+    /// `pos`, after the composed text, as a native text view draws it.
     pub(crate) fn caret_glyph_rect(
         &self,
         pos: usize,
         affinity: Affinity,
     ) -> Option<Bounds<Points>> {
-        let b = self.caret_rect(pos, affinity)?;
         let id = self.text_at(pos)?;
-        let (_, geo) = self.text_box(id)?;
-        let t = Self::text_offset(geo, pos);
+        let (origin, geo) = self.text_box(id)?;
+        let t = geo
+            .map
+            .past_composition(pos - geo.start)
+            .unwrap_or_else(|| Self::text_offset(geo, pos));
+        let b = text_caret_rect(origin, geo, t, affinity);
         let Some(line) = line_of(&geo.lines, t, affinity).map(|i| &geo.lines[i]) else {
             return Some(b);
         };
@@ -503,6 +532,22 @@ impl Geometry {
         };
         Some(geo.start + geo.map.to_doc(edge))
     }
+}
+
+/// The caret's box at text offset `t` of `geo`, whose text box is at
+/// `origin` in the content box.
+fn text_caret_rect(
+    origin: Point<Points>,
+    geo: &TextGeo,
+    t: u32,
+    affinity: Affinity,
+) -> Bounds<Points> {
+    let local = geo
+        .geometry
+        .as_ref()
+        .and_then(|g| g.caret_rect(TextPosition::new(t, to_text_affinity(affinity))))
+        .unwrap_or_else(|| fallback_caret_rect(geo, t, affinity));
+    Bounds::new(origin + local.origin, local.size)
 }
 
 /// Linear fallback caret box when a textblock has lines but no `TextGeometry`.

@@ -127,6 +127,10 @@ pub(super) struct Shared {
     /// The core asked this view to hold downloads (`defer_downloads`);
     /// an app listener asks for the same.
     defer_downloads: Cell<bool>,
+    /// The web view's `allowOrigin`, from its latest props.
+    allow_origin: RefCell<Option<nsh_core::access::WebOrigin>>,
+    /// The web view's `allowNavigation`, from its latest props.
+    allow_navigation: RefCell<Option<nsh_core::access::WebHosts>>,
     /// Downloads WebKit started for this page, by their id.
     downloads: RefCell<HashMap<String, Rc<DownloadState>>>,
     /// The id the next download is reported with.
@@ -275,6 +279,8 @@ impl WebHost {
             access: surface.native.access.borrow().clone(),
             failed: Cell::new(false),
             defer_downloads: Cell::new(p.defer_downloads),
+            allow_origin: RefCell::new(p.allow_origin.clone()),
+            allow_navigation: RefCell::new(p.allow_navigation.clone()),
             downloads: RefCell::default(),
             next_download: Cell::new(0),
         });
@@ -382,6 +388,9 @@ impl WebHost {
     pub(super) fn set(&mut self, view: &NshView, p: &WebProps) {
         let web = &self.web;
         self.shared.defer_downloads.set(p.defer_downloads);
+        // Before the source loads: it applies to that navigation.
+        *self.shared.allow_origin.borrow_mut() = p.allow_origin.clone();
+        *self.shared.allow_navigation.borrow_mut() = p.allow_navigation.clone();
         let old = self.props.take();
         let first = old.is_none();
         let old = old.unwrap_or_default();
@@ -546,7 +555,12 @@ fn decide_policy(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
                 .and_then(|r| r.uri())
                 .map(|u| u.to_string())
                 .unwrap_or_default();
-            if allows(shared.access.as_deref(), &url) {
+            if allows(
+                shared.access.as_deref(),
+                shared.allow_origin.borrow().as_ref(),
+                shared.allow_navigation.borrow().as_ref(),
+                &url,
+            ) {
                 // WebKit's own handling: it loads (a new window opens
                 // nothing, as there is no `create` handler).
                 return false;
@@ -639,14 +653,23 @@ fn permission_request(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandler
 }
 
 /// Whether the app may show `url` in a web view (`access`: its
-/// capabilities, `None` when unknown).
-fn allows(access: Option<&Access>, url: &str) -> bool {
+/// capabilities, `None` when unknown; `origin`: the web view's
+/// `allowOrigin`; `hosts`: its `allowNavigation`, which only narrows).
+fn allows(
+    access: Option<&Access>,
+    origin: Option<&nsh_core::access::WebOrigin>,
+    hosts: Option<&nsh_core::access::WebHosts>,
+    url: &str,
+) -> bool {
+    if hosts.is_some_and(|h| !h.allows(url)) {
+        return false;
+    }
     let Some(access) = access else { return true };
     match url {
         "" => true,
         // A frame's inline document (`srcdoc`): the page's own content.
         "about:srcdoc" => access.allows_webviews(),
-        _ => access.allows_webview(url),
+        _ => access.allows_webview_with(url, origin),
     }
 }
 
@@ -1332,18 +1355,34 @@ mod tests {
             declared: caps(r#"{ "webview": { "hosts": ["example.com"] } }"#),
             granted: None,
         };
-        assert!(allows(None, "https://anything.test/"));
-        assert!(allows(Some(&access), "https://example.com/a"));
-        assert!(!allows(Some(&access), "https://other.test/"));
-        assert!(allows(Some(&access), "about:blank"));
-        assert!(allows(Some(&access), "about:srcdoc"));
-        assert!(allows(Some(&access), ""));
+        assert!(allows(None, None, None, "https://anything.test/"));
+        assert!(allows(Some(&access), None, None, "https://example.com/a"));
+        assert!(!allows(Some(&access), None, None, "https://other.test/"));
+        assert!(allows(Some(&access), None, None, "about:blank"));
+        assert!(allows(Some(&access), None, None, "about:srcdoc"));
+        assert!(allows(Some(&access), None, None, ""));
+        // `allowNavigation` only narrows, even with no capabilities known.
+        let hosts = nsh_core::access::WebHosts::parse(&["127.0.0.1"]).unwrap();
+        assert!(allows(None, None, Some(&hosts), "http://127.0.0.1:8001/"));
+        assert!(!allows(
+            None,
+            None,
+            Some(&hosts),
+            "http://127.0.0.1.evil.test/"
+        ));
+        assert!(!allows(
+            Some(&access),
+            None,
+            Some(&hosts),
+            "https://example.com/a"
+        ));
+        assert!(allows(Some(&access), None, Some(&hosts), "about:blank"));
         let none = Access {
             declared: caps("{}"),
             granted: None,
         };
-        assert!(!allows(Some(&none), "about:blank"));
-        assert!(!allows(Some(&none), "about:srcdoc"));
+        assert!(!allows(Some(&none), None, None, "about:blank"));
+        assert!(!allows(Some(&none), None, None, "about:srcdoc"));
     }
 
     #[test]

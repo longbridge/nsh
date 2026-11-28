@@ -1,6 +1,6 @@
 ---
 title: Linux
-description: Run Rust and TSX NSH apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
+description: Run TSX and Rust NSH apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
 order: 15
 group: platforms
 ---
@@ -23,14 +23,14 @@ from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#deskto
   Arch, `webkitgtk6.0-devel` on Fedora to build the runtime. The development host and the release runner use it by
   default, so packaged apps need WebKitGTK 6.0 where they run (`libwebkitgtk-6.0-4` on Debian and Ubuntu; GNOME
   desktops have it). `cargo xtask dist` on a machine without its development files builds a runtime whose web views
-  are placeholders, and whose apps need only GTK.
-- **GStreamer** 1.14 or later, which GTK plays video through and NSH plays sound with: to build the runtime its
-  development packages, `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian and Ubuntu, `gstreamer
-  gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora. Where apps run, GStreamer and
-  its base plug-ins (desktops have them), and the plug-ins for the video and audio formats your app plays. The
-  development packages are for `Sound`, the runtime's Cargo feature `sound`: a Rust app that plays no sounds builds
-  without them by leaving that feature out (`default-features = false` on `nsh-platform-linux`), and video and
-  `AudioPlayer` still play through GTK.
+  are placeholders, and whose apps need only GTK. An app with its own Rust crates builds its development host and
+  runner with WebKitGTK only when it makes a `WebView`, so `nsh run` of an app without one compiles none of it.
+- **GStreamer** 1.14 or later, which GTK plays video through and NSH plays sound with. Nothing of it is needed to
+  build: NSH loads GStreamer when an app first plays a sound. Where apps run, GStreamer and its base plug-ins
+  (desktops have them), and the plug-ins for the video and audio formats your app plays. Without GStreamer an app
+  still starts; loading a sound then fails with an error naming the missing library. `nsh package` leaves sounds (the
+  runtime's Cargo feature `sound`) out of a TSX app's runner when the app imports no `Sound`; video and `AudioPlayer`
+  play through GTK either way.
 
 ## Running an app
 
@@ -79,7 +79,8 @@ Writes a directory and the same as an archive:
   nsh/assets/…           the assets it imports (a Rust crate's `assets!()` too)
   nsh/app.json           the window title, the application id and nsh.json's window options
   <id>.desktop           a desktop entry (StartupWMClass is the id)
-  <id>.png               the icon, when nsh.json names one
+  <id>.png               the icon at 256×256, when nsh.json names one
+  <id>.metainfo.xml      AppStream metainfo: what software centres and Flathub list
 .nsh/out/<Name>.tar.gz
 ```
 
@@ -87,6 +88,8 @@ The executable finds `nsh/` next to itself (a symbolic link to it, in `~/.local/
 WebKitGTK 6.0 must be installed where the app runs. To show the app in a desktop's launcher, put the executable (or a link) on the
 `PATH`, the `.desktop` file in `~/.local/share/applications` and the icon in an icon theme directory. `--run` launches
 the app after packaging it.
+
+AppImage and Flatpak packages are in [Packaging](./packaging.md#appimage-and-flatpak); releases on Flathub in [Publishing](./publish.md#publish-to-flathub).
 
 ## Embedding in a GTK app
 
@@ -196,6 +199,17 @@ Native components are registered with `AppView::register_component`; see [Native
 (`my_app::registry()`, which `#[native_module]` makes), so the TSX a view loads imports your Rust components and
 modules too.
 
+## Presenting from Rust
+
+Rust code that shows system UI (a popover, a dialog, a file chooser) shows it from the surface whose code asked. In a
+main-thread task (`run_on_main_thread`), `nsh_platform_linux::presenting_window()` is the window to make a dialog
+transient for: the surface's visible window the user is in; `None` when the surface shows in no visible window.
+`native_view(node)` is the GTK widget of an element of that surface (the node of its `ref`, a `NodeRef` argument of a
+module function; `ROOT_ID` for the surface's root widget), in whatever window of the surface it is: the parent of a
+popover that belongs to the element (unparent the popover once it closes, as NSH's own menus do). Take both while the
+task runs. They are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or
+removes a widget NSH owns.
+
 ## What differs on Linux
 
 The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop
@@ -241,6 +255,7 @@ Not supported:
 
 ## See also
 
+- [Distribute a Linux app](./packaging.md#distribute)
 - [CLI](./cli.md): `nsh run --target linux`, `nsh package --target linux`
 - [Packaging](./packaging.md)
 - [Platform-specific code](./platform-specific.md)

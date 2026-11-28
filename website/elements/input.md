@@ -11,6 +11,25 @@ demo: el-input
 EditText on Android. Typing, the caret, selection, autocorrection and autofill are the platform's own. Rust makes one
 with `nsh_base::input()`, TSX with `<Input>` from `nsh/base`.
 
+```tsx tabs
+import { signal } from "nsh";
+import { Input } from "nsh/base";
+
+function NameField() {
+  const name = signal("");
+  return (
+    <Input
+      value={name()}
+      onChange={({ value }) => name.set(value)}
+      placeholder="Your name"
+      autoCapitalize="words"
+      returnKeyType="done"
+      style={{ fontSize: 16, padding: 12, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 8 }}
+    />
+  );
+}
+```
+
 ```rust tabs
 use nsh_base::input;
 use nsh_core::prelude::*;
@@ -28,25 +47,6 @@ fn name_field() -> impl IntoElement {
         .border_1()
         .border_color(rgb(0xd0d7de))
         .rounded(px(8.0))
-}
-```
-
-```tsx tabs
-import { signal } from "nsh";
-import { Input } from "nsh/base";
-
-function NameField() {
-  const name = signal("");
-  return (
-    <Input
-      value={name()}
-      onChange={({ value }) => name.set(value)}
-      placeholder="Your name"
-      autoCapitalize="words"
-      returnKeyType="done"
-      style={{ fontSize: 16, padding: 12, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 8 }}
-    />
-  );
 }
 ```
 
@@ -120,6 +120,11 @@ methods in Rust (UIKit tints the caret and the selection with one color, the car
 | `caretColor` | `.caret_color(..)` | `caret-*` | The caret's color. |
 | `selectionColor` | `.selection_color(..)` | `selection:text-*` | The selection highlight's color. |
 
+```tsx tabs
+<Input placeholder="Search" class="text-zinc-900 placeholder:text-zinc-400 selection:text-blue-600" />
+<Input placeholder="Search" style={{ placeholderColor: "#9ca3af", caretColor: "#2563eb", selectionColor: "#93c5fd" }} />
+```
+
 ```rust tabs
 input()
     .placeholder("Search")
@@ -127,11 +132,6 @@ input()
     .placeholder_color(rgb(0x9ca3af))
     .caret_color(rgb(0x2563eb))
     .selection_color(rgb(0x93c5fd))
-```
-
-```tsx tabs
-<Input placeholder="Search" class="text-zinc-900 placeholder:text-zinc-400 selection:text-blue-600" />
-<Input placeholder="Search" style={{ placeholderColor: "#9ca3af", caretColor: "#2563eb", selectionColor: "#93c5fd" }} />
 ```
 
 ### iOS
@@ -142,14 +142,14 @@ input()
 | `inputAccessoryViewID` | `.input_accessory(id)` | `string` | The `nativeID` of an `InputAccessoryView` ([`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview)) shown over the keyboard while the input has focus. |
 | `keyboardAppearance` | `.keyboard_appearance(KeyboardAppearance::Dark)` | `"default" \| "light" \| "dark"` | The keyboard's look; `"default"` follows the system's appearance. Android's keyboards follow the system's theme. |
 
+```tsx tabs
+<Input autoComplete="one-time-code" keyboardType="number-pad" ios={{ textContentType: "oneTimeCode" }} />
+```
+
 ```rust tabs
 use nsh_core::element::AutoFill;
 
 input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
-```
-
-```tsx tabs
-<Input autoComplete="one-time-code" keyboardType="number-pad" ios={{ textContentType: "oneTimeCode" }} />
 ```
 
 ## Events
@@ -159,6 +159,7 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 | `onChange` | `.on_change(\|text: &str\| ..)` | `{ value }` | The user changed the text: `value` is the text now. |
 | `onSubmit` | `.on_submit(\|text: &str\| ..)` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | none | The input gained / lost focus. |
+| `onPress` | `.on_press` | `PressEvent` (none in Rust) | A click or a tap on the input (its text or the padding around it), after the focus it gives: a list that opens and closes on a press on its input. The views around the input hear no press from it. |
 | `onSelectionChange` | `.on_selection_change(\|s: &Selection\| ..)` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
 | `onPaste` | `.on_paste(\|e: &PasteEvent\| ..)` | `{ text, html, files, tooLarge, uris }` | The user pasted: the text, its formatting as HTML (Linux, web), images (a screenshot) as `File`s, files larger than `pasteMaxSize` by name, type and size (`tooLarge`), local files' `file:` URLs. Before the `onChange` of the text it inserts ([forms and keyboard](../docs/forms-and-keyboard.md#pasting-images-and-files)). |
 | `onCaretMove` | `.on_caret_move(\|e: &CaretEvent\| ..)` | `{ bounds, pageBounds }` | The caret moved, with the selection or as the text scrolled or wrapped: `bounds` is where it is in the input, `pageBounds` in the window, an `Overlay`'s `anchor` ([forms and keyboard](../docs/forms-and-keyboard.md#the-caret)). |
@@ -167,6 +168,15 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 | `onCompositionChange` | `.on_composition_change(\|e: &Composition\| ..)` | `{ composing, text }` | An input method's composition started, changed or ended: `text` is what is being composed (pinyin before a character is chosen, kana before conversion), `""` once it ends. The committed text reaches `onChange` before the end. |
 
 A multiline input that grows with its text:
+
+```tsx tabs
+const height = signal(40);
+<Input
+  multiline
+  onContentSizeChange={({ size }) => height.set(Math.min(120, Math.max(40, size.height + 16)))}
+  style={{ height: height(), paddingHorizontal: 12, paddingVertical: 8 }}
+/>;
+```
 
 ```rust tabs
 let height = signal(px(40.0));
@@ -181,15 +191,6 @@ input()
     .py_2()
 ```
 
-```tsx tabs
-const height = signal(40);
-<Input
-  multiline
-  onContentSizeChange={({ size }) => height.set(Math.min(120, Math.max(40, size.height + 16)))}
-  style={{ height: height(), paddingHorizontal: 12, paddingVertical: 8 }}
-/>;
-```
-
 ## Ref methods
 
 | Method | Rust | Description |
@@ -201,6 +202,14 @@ const height = signal(40);
 
 Moving focus to the next field on return:
 
+```tsx tabs
+let password!: InputRef;
+<>
+  <Input returnKeyType="next" onSubmit={() => password.focus()} />
+  <Input ref={password} masked autoComplete="current-password" />
+</>;
+```
+
 ```rust tabs
 use nsh_core::element::AutoFill;
 
@@ -209,14 +218,6 @@ let password = element_ref();
 view()
     .child(input().return_key_type(ReturnKeyType::Next).on_submit(move |_: &str| password.focus()))
     .child(input().element_ref(&password).masked(true).auto_fill(AutoFill::Password))
-```
-
-```tsx tabs
-let password!: InputRef;
-<>
-  <Input returnKeyType="next" onSubmit={() => password.focus()} />
-  <Input ref={password} masked autoComplete="current-password" />
-</>;
 ```
 
 `Keyboard.dismiss()` from `nsh` (`dismiss_keyboard()` in Rust) hides the keyboard whichever input has it.

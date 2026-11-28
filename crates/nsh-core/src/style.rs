@@ -722,8 +722,9 @@ pub struct ViewStyle {
     pub transform: Transform,
     /// `tintColor`: recolors an image's opaque pixels.
     pub tint_color: Option<Color>,
-    /// `accentColor`: the color a system control shows its state in (a
-    /// switch's track when on); the control's own when `None`.
+    /// `accentColor`: the color a system control shows its state in, which
+    /// a native component gets as its `accentColor` prop (a system switch's
+    /// track when on, for example); the control's own when `None`.
     pub accent_color: Option<Color>,
     /// Android's material shadow: the node's `android={{ elevation }}` prop,
     /// not a style.
@@ -1856,7 +1857,7 @@ style_keys! {
     BackgroundImage = "backgroundImage": View "string" "CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas.",
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
-    MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included, whose blur then draws without the system material's tint. Not drawn on Windows and GPUI.",
+    MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included, whose blur then draws without the system material's tint. It transitions (`transitionProperty: \"mask-image\"`, or `all`) between gradients of the same kind and number of stops, each stop's color and position on its own, so a fade can grow in from an edge; any other change, and to or from `none`, applies at once, as in CSS. Not drawn on Windows and GPUI.",
     ClipPath = "clipPath": View "string" "CSS's `clip-path` with an `inset()` shape: `\"inset(8px 0 0 50% round 12px)\"` moves each edge in (one to four lengths or percentages of the width or height, as `margin`) and rounds the corners (`round`, one to four radii in points), or `\"none\"`. Everything the view draws, the views in it included, shows only inside the shape, and only there does a press reach the view or the views in it. It transitions (`transitionProperty: \"clip-path\"`, or `all`), each edge and radius on its own, so a panel can open out of a corner; to or from `none` it changes at once, as in CSS.",
     GlassEffect = "glassEffect": View "\"none\" | \"regular\" | \"clear\"" "A glass material behind the view's content (Apple's Liquid Glass). Drawn on iOS 26 and macOS 26 and later; elsewhere the view's `backdropFilter` is drawn as before, so give a glass view a blur to fall back to.",
     GlassTintColor = "glassTintColor": View "ColorValue" "A tint of the glass material (`glassEffect`; iOS 26 and macOS 26 and later): the color the native glass takes on, or `null` for the system default. A transparent color is an explicit tint, not a reset. Has no effect without glass; the blur fallback on earlier systems stays unchanged.",
@@ -1867,7 +1868,7 @@ style_keys! {
     OutlineOffset = "outlineOffset": View "number" "Distance from the border edge (negative: inside).",
     Visibility = "visibility": View "\"visible\" | \"hidden\" | \"collapse\"" "Hidden views keep their space. On a nested text (a span), its characters keep their place, are not drawn, and are left out of copies and screen readers.",
     Cursor = "cursor": View "\"auto\" | \"default\" | \"context-menu\" | \"alias\" | \"copy\" | \"cell\" | \"pointer\" | \"text\" | \"vertical-text\" | \"wait\" | \"progress\" | \"help\" | \"crosshair\" | \"move\" | \"all-scroll\" | \"grab\" | \"grabbing\" | \"not-allowed\" | \"no-drop\" | \"zoom-in\" | \"zoom-out\" | \"col-resize\" | \"e-resize\" | \"w-resize\" | \"ew-resize\" | \"row-resize\" | \"n-resize\" | \"s-resize\" | \"ns-resize\" | \"ne-resize\" | \"nw-resize\" | \"se-resize\" | \"sw-resize\" | \"nesw-resize\" | \"nwse-resize\" | \"none\"" "The pointer over the view (pointers and desktops).",
-    TransitionProperty = "transitionProperty": View "string" "The properties that animate when they change (`\"opacity, transform\"`, `\"all\"`, `\"colors\"`).",
+    TransitionProperty = "transitionProperty": View "string" "The properties that animate when they change (`\"opacity, transform\"`, `\"all\"`, `\"colors\"`, `\"clip-path\"`, `\"mask-image\"`).",
     TransitionDuration = "transitionDuration": View "number | `${number}ms` | `${number}s`" "Milliseconds as a number, or `\"150ms\"` / `\"0.2s\"`.",
     TransitionDelay = "transitionDelay": View "number | `${number}ms` | `${number}s`",
     TransitionTimingFunction = "transitionTimingFunction": View "\"linear\" | \"ease\" | \"ease-in\" | \"ease-out\" | \"ease-in-out\" | `cubic-bezier(${string})` | `spring(${string})`" "CSS's keywords and `cubic-bezier(x1, y1, x2, y2)` (a `y` outside 0..1 overshoots), or NSH's `spring(stiffness, damping)` / `spring(stiffness, damping, mass)`: a spring's physics (a mass of 1 by default) that times itself, lasting until it settles, so `transitionDuration` is not used.",
@@ -1922,7 +1923,7 @@ style_keys! {
     BorderStyle = "borderStyle": View "\"solid\" | \"dashed\" | \"dotted\" | \"none\" | \"hidden\"" "`none` and `hidden`: no border whatever the widths (they take no space).",
     BorderCurve = "borderCurve": View "\"circular\" | \"continuous\"" "`continuous`: corners whose curvature eases into the edges (iOS app icons).",
     TintColor = "tintColor": Image "ColorValue" "Recolors a template image.",
-    AccentColor = "accentColor": View "ColorValue" "CSS's `accent-color`: the color a system control shows its state in (`accent-*`), a switch's track when on; the control's own color when unset. Set on the control itself (not inherited).",
+    AccentColor = "accentColor": View "ColorValue" "CSS's `accent-color`: the color a system control shows its state in (`accent-*`), which a native component gets as its `accentColor` prop, such as a system switch's track when on; the control's own color when unset. Set on the control itself (not inherited).",
     ObjectFit = "objectFit": View "\"fill\" | \"contain\" | \"cover\" | \"none\" | \"scale-down\"" "CSS's `object-fit`: how an image or a video fits its box. Images cover it by default, videos are contained in it.",
     ObjectPosition = "objectPosition": Image "string" "Where the image sits in its box once `objectFit` has sized it, as CSS's `object-position`: keywords, percentages and lengths (`\"top\"`, `\"left bottom\"`, `\"25% 75%\"`, `\"right 10px bottom 20%\"`). A covering image is cropped around it. Default the center.",
     BackfaceVisibility = "backfaceVisibility": View "\"visible\" | \"hidden\"" "`\"hidden\"`: invisible while turned away (3D rotations).",
@@ -2894,6 +2895,7 @@ fn transition_properties(s: &str) -> Option<TransitionProps> {
                 TransitionProps::SHAPE
             }
             "clip-path" | "clipPath" => TransitionProps::CLIP_PATH,
+            "mask-image" | "maskImage" | "-webkit-mask-image" | "mask" => TransitionProps::MASK,
             // Properties that do not animate natively.
             "filter" | "backdrop-filter" | "display" | "visibility" | "content-visibility"
             | "overlay" | "pointer-events" => 0,
@@ -5499,7 +5501,7 @@ mod tests {
     }
 
     #[test]
-    fn clip_path_transitions_as_its_own_property() {
+    fn clip_path_and_mask_transition_as_their_own_properties() {
         let props = |v: &str| {
             let mut s = Style::default();
             s.set("transitionProperty", StyleValue::Str(v)).unwrap();
@@ -5509,6 +5511,10 @@ mod tests {
         assert_eq!(props("clipPath").0, TransitionProps::CLIP_PATH);
         assert!(props("all").has(TransitionProps::CLIP_PATH));
         assert!(!props("border-radius").has(TransitionProps::CLIP_PATH));
+        assert_eq!(props("mask-image").0, TransitionProps::MASK);
+        assert_eq!(props("maskImage").0, TransitionProps::MASK);
+        assert!(props("all").has(TransitionProps::MASK));
+        assert!(!props("clip-path").has(TransitionProps::MASK));
     }
 
     #[test]

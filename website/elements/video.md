@@ -12,6 +12,33 @@ A video view plays a video file or stream with the platform's player: AVPlayer o
 Android. Playback is controlled with props (`paused`, `muted`, `rate`, …), so the player follows your state like any
 other view. Rust makes one with `video(url)`, TSX with `<Video>` from `nsh`.
 
+```tsx tabs
+import { signal, Text, Video, type VideoRef, View } from "nsh";
+
+function Player() {
+  const paused = signal(true);
+  const time = signal("");
+  let video!: VideoRef;
+  return (
+    <View style={{ gap: 12 }}>
+      <Video
+        ref={video}
+        src="https://example.com/clip.mp4"
+        paused={paused()}
+        repeat
+        style={{ height: 220, backgroundColor: "#000000" }}
+        onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
+      />
+      <View style={{ flexDirection: "row", gap: 16 }}>
+        <Text onPress={() => paused.set(!paused())}>{paused() ? "Play" : "Pause"}</Text>
+        <Text onPress={() => video.seek(0)}>Restart</Text>
+        <Text>{time()}</Text>
+      </View>
+    </View>
+  );
+}
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -47,33 +74,6 @@ fn player() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { signal, Text, Video, type VideoRef, View } from "nsh";
-
-function Player() {
-  const paused = signal(true);
-  const time = signal("");
-  let video!: VideoRef;
-  return (
-    <View style={{ gap: 12 }}>
-      <Video
-        ref={video}
-        src="https://example.com/clip.mp4"
-        paused={paused()}
-        repeat
-        style={{ height: 220, backgroundColor: "#000000" }}
-        onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
-      />
-      <View style={{ flexDirection: "row", gap: 16 }}>
-        <Text onPress={() => paused.set(!paused())}>{paused() ? "Play" : "Pause"}</Text>
-        <Text onPress={() => video.seek(0)}>Restart</Text>
-        <Text>{time()}</Text>
-      </View>
-    </View>
-  );
-}
-```
-
 In TSX `src` is required (see the [Video API](../modules/nsh-video.md)). See the
 [web view and video guide](../docs/web-view-and-video.md).
 
@@ -84,6 +84,7 @@ A video takes the props of a [view](./view.md) (it has no children) plus:
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `src` | `video(url)` | `string` | | The video's URL (in Rust, an asset's `uri` too: `video(CLIP.uri)`). |
+| `poster` | `.poster(url)` | `string` | | An image shown while the video loads, until its first frame is ready. |
 | `paused` | `.paused(..)` | `boolean` | `false` | Playback is paused. |
 | `muted` | `.muted(..)` | `boolean` | `false` | No sound. |
 | `volume` | `.volume(..)` | `number` | `1` | 0..1. |
@@ -107,6 +108,11 @@ an aspect ratio when you want the video's own proportions.
 | `onEnd` | `.on_end` | none | Playback reached the end (with `repeat`, at the end of each loop). |
 | `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading or playback failed; `code` is `"ERR_ACCESS_DENIED"` for a source the app's capabilities do not grant. |
 
+```tsx tabs
+const ratio = signal(16 / 9);
+<Video src={url} style={{ width: "100%", aspectRatio: ratio() }} onLoad={(e) => ratio.set(e.size.width / e.size.height)} />;
+```
+
 ```rust tabs
 let ratio = signal(16.0_f32 / 9.0);
 
@@ -116,11 +122,6 @@ video(url)
     .on_load(move |info: &VideoInfo| {
         ratio.set(info.size.width.0 as f32 / info.size.height.0 as f32)
     })
-```
-
-```tsx tabs
-const ratio = signal(16 / 9);
-<Video src={url} style={{ width: "100%", aspectRatio: ratio() }} onLoad={(e) => ratio.set(e.size.width / e.size.height)} />;
 ```
 
 ## Ref methods

@@ -1,6 +1,6 @@
 ---
 title: OtpInput
-description: "The OtpInput component: a fixed-length numeric one-time code typed, pasted or autofilled into one native field, shown in cells, groups and a caret the app styles."
+description: "The OtpInput component: a fixed-length one-time code (digits, or letters and digits) typed, pasted or autofilled into one native field, shown in cells, groups and a caret the app styles."
 group: base
 demo: el-otp-input
 ---
@@ -14,6 +14,37 @@ Android's SMS suggestions) are the platform's own, and screen readers find one t
 `length`; Backspace removes the last one, and `onComplete` tells when the code is full. The look is the app's: an
 `OtpInput` has no colors, sizes, borders or label of its own. Its parts are the cells, the groups they are split into
 and a caret, and the app styles each.
+
+```tsx tabs
+import { mount, signal } from "nsh";
+import { OtpInput } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+function App() {
+  const code = signal("");
+  const verify = (value: string) => console.log(`checking ${value}`);
+  return (
+    <OtpInput
+      length={6}
+      groups={2}
+      value={code()}
+      onChange={({ value }) => code.set(value)}
+      onComplete={({ value }) => verify(value)}
+      accessibilityLabel="Verification code, 6 digits"
+      class="flex-row gap-3"
+      groupClass="flex-row gap-2"
+      cellClass="w-10 h-12 items-center justify-center rounded-lg border border-input text-xl focus:border-ring data-filled:bg-muted"
+      caretClass="w-0.5 h-6 bg-foreground"
+    />
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
 
 ```rust tabs
 use nsh_base::{OtpInputCompleteEvent, otp_input, theme};
@@ -48,37 +79,6 @@ fn verification(verify: impl Fn(&str) + 'static) -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { mount, signal } from "nsh";
-import { OtpInput } from "nsh/base";
-import { Window } from "nsh/desktop";
-
-function App() {
-  const code = signal("");
-  const verify = (value: string) => console.log(`checking ${value}`);
-  return (
-    <OtpInput
-      length={6}
-      groups={2}
-      value={code()}
-      onChange={({ value }) => code.set(value)}
-      onComplete={({ value }) => verify(value)}
-      accessibilityLabel="Verification code, 6 digits"
-      class="flex-row gap-3"
-      groupClass="flex-row gap-2"
-      cellClass="w-10 h-12 items-center justify-center rounded-lg border border-input text-xl focus:border-ring data-filled:bg-muted"
-      caretClass="w-0.5 h-6 bg-foreground"
-    />
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
-```
-
 `OtpInput` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `otp_input()`
 makes one with a setter per prop (`.length(..)`, `.cell_style(..)`), a listener method per event (`.on_complete(..)`)
 and the typed style methods for the input itself.
@@ -97,6 +97,7 @@ What the user does is read from the field, with the caret always at its end:
 | Types a full-width digit (`０`–`９`, an East Asian input method's) | The ASCII digit is added. |
 | Types anything else | Nothing changes; the field drops it. |
 | Presses Backspace | The last digit is removed. |
+| With `validationType="alphanumeric"`: types a letter, in either case | It is added upper-cased (`a` as `A`), as a digit is; full-width letters (`ａ`, `Ｂ`) as ASCII ones. |
 | Pastes, or the system autofills a code | Its digits are added the same way; text with `length` digits or more (`123-456`, a message's code) replaces the code with its first `length` digits. |
 
 `onChange` reports each change with the new code, and `onComplete` follows it when the change filled the last cell,
@@ -107,6 +108,7 @@ so the app verifies the code there.
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `length` | `.length(..)` | `number` | required | How many digits the code has: one cell each. |
+| `validationType` | `.validation_type(..)` | `"numeric" \| "alphanumeric"` | `"numeric"` | Which characters the code takes. `"numeric"`: digits, on the number pad. `"alphanumeric"`: ASCII letters and digits, on the full keyboard; letters are upper-cased, so the cells show and `onChange` reports `AB12CD34` for `ab12cd34`, and the app compares codes without case. |
 | `value` | `.value(..)` | `string` | none | The code, controlled by the app (shown as it is). Without it the input keeps its own. |
 | `defaultValue` | `.default_value(..)` | `string` | none | The code at first, while `value` is not set. |
 | `masked` | `.masked(..)` | `boolean` | `false` | Filled cells show a bullet instead of their digit, and the field is a secure one: screen readers do not read the code, and the system keeps it out of its suggestions. |
@@ -171,3 +173,5 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
   the number keyboard comes up.
 - macOS, Windows, Linux and the web: typing and paste go to the field (in the browser, with `inputmode="numeric"`
   for a phone's number keyboard), and the I-beam pointer shows over the cells.
+- With `validationType="alphanumeric"` the full keyboard comes up instead of the number pad (`inputmode="text"` in
+  the browser), with capitals on where the platform offers it (`autoCapitalize="characters"`).

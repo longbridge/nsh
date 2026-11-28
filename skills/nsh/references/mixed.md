@@ -1,7 +1,7 @@
-# Rust + TSX
+# TSX with Rust
 
-One app, two languages: a Rust crate owns the core and exports typed components,
-modules and classes; TSX screens import them by a specifier. Everything is checked
+One app, two languages: TSX screens import typed components, modules and classes by a
+specifier from Rust nshm crates, the app's own in `ext/` or published ones. Everything is checked
 against declarations generated from the Rust signatures.
 
 Rust UI: [rust.md](rust.md). TSX: [tsx.md](tsx.md). Commands: [tooling.md](tooling.md). This page covers the join.
@@ -10,21 +10,21 @@ Every Rust and TSX block here is verbatim from `examples/rust-exports`, which CI
 
 ## When to pick it
 
-Start from what must ship after the binary does:
+Start from what the app needs from Rust:
 
 | Situation | Mode |
 | --- | --- |
-| All logic and UI ship in the binary; no JS VM wanted | Rust |
-| Rust core, plus screens that change often, experiments, or screens delivered as signed packages | Rust + TSX |
-| The app needs a crate (parser, crypto, storage engine, a native view) under TSX screens | Rust + TSX |
-| UI delivered at run time, no Rust code of your own, no Rust toolchain | TSX |
+| Screens and logic fit TypeScript, or the UI is delivered at run time; no Rust toolchain | TSX |
+| The app needs a crate (parser, crypto, storage engine, heavy computation, a native view) under TSX screens | TSX with Rust |
+| A Rust core, plus screens that change often, experiments, or screens delivered as signed packages | TSX with Rust |
+| The app's core is heavy computation or system work; all logic and UI ship in the binary; no JS VM wanted | Rust |
 
 Costs of this mode over the other two:
 
-- It carries QuickJS, which a Rust app does not (in the browser, TSX runs on the browser's JavaScript engine).
 - It needs the Rust toolchain, and `rustup target add ...` per target. A TSX app needs neither.
 - It builds hosts for the app. The first `nsh check` or `nsh test` compiles the crate and NSH's core, a minute or more the first time; later runs reuse it.
 - Rust edits restart the app. TSX edits are hot.
+- It carries QuickJS, which a Rust app does not (in the browser, TSX runs on the browser's JavaScript engine).
 
 A Rust app can gain TSX later: it already has a `#[native_module]`; add an entry and name it (`nsh run App.tsx`).
 
@@ -137,6 +137,11 @@ A native component (`#[native_components(linux)]`, a platform view; `native/src/
 view of the OS. TSX declares it with `nativeComponent`, and props cross as JSON. Where nothing registers it, it is an
 empty view. See `website/docs/native-components.md`.
 
+A GPU view is a box the crate draws with wgpu: implement `nsh_gpu::GpuRenderer`, register it with
+`registry.gpu_renderer("app/scene", Scene::new)` in the `#[native_module]` function, and declare it in TSX with
+`gpuView("app/scene", { props, events })` from `nsh`. It renders on a thread of its own, so 2D drawings of many
+primitives and 3D scenes keep the display's rate. See `gpuView` in `website/modules/nsh.md`.
+
 ### A component
 
 `native/src/gauge.rs`:
@@ -176,6 +181,11 @@ TSX gets `value: number`, `max?: number`, `step?: number`, `label?: string | nul
 - Read props in a closure (`move || props.value.get()`). Read in the body, a prop is read once, as in TSX.
 - A prop of the wrong type at run time is a warning, not a throw: the prop keeps its value and the rest render.
 - A Rust component's own state stays private. TSX passes props and hears events; to call into it, add `#[methods]` ref methods (`docs/dev/components.md`).
+
+For a component that reads the string between its JSX tags, declare `pub children: Prop<SharedString>`. TSX gets
+`children: string`, and `<TextChild>**bold**</TextChild>` supplies the original string, including the asterisks.
+`<TextChild>{source()}</TextChild>` supplies the current value of a signal. Read `props.children.get()` in a
+reactive binding or computation to follow changes. Use `Prop<Children>` to place JSX nodes, as `Gauge` does.
 
 Two more prop kinds have no example in `rust-exports`:
 

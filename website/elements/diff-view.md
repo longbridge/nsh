@@ -21,18 +21,6 @@ words in a stronger tint, a bar at the gutter's edge of each changed line, and s
 the app's styles over these defaults (`classes` and `styles`). Rust makes one with `nsh_base::diff_view()`, TSX with
 `<DiffView>` from `nsh/base`.
 
-```rust tabs
-use nsh_base::diff_view;
-use nsh_core::prelude::*;
-
-const OLD: &str = "fn total(prices: &[u32]) -> u32 {\n    prices.iter().sum()\n}\n";
-const NEW: &str = "fn total(prices: &[u64]) -> u64 {\n    prices.iter().copied().sum()\n}\n";
-
-fn review() -> impl IntoElement {
-    diff_view().old_value(OLD).new_value(NEW).language("rust").flex_1()
-}
-```
-
 ```tsx tabs
 import { mount } from "nsh";
 import { DiffView } from "nsh/base";
@@ -58,9 +46,24 @@ mount(() => (
 ));
 ```
 
+```rust tabs
+use nsh_base::diff_view;
+use nsh_core::prelude::*;
+
+const OLD: &str = "fn total(prices: &[u32]) -> u32 {\n    prices.iter().sum()\n}\n";
+const NEW: &str = "fn total(prices: &[u64]) -> u64 {\n    prices.iter().copied().sum()\n}\n";
+
+fn review() -> impl IntoElement {
+    diff_view().old_value(OLD).new_value(NEW).language("rust").flex_1()
+}
+```
+
 The view fills the box the app gives it (`flex-1`, a height) and scrolls inside: vertically through the rows, and
 sideways to the longest line, the two sides of a split view together. With `softWrap` long lines wrap at the side's
-width instead, and a split row is as tall as its taller side, so the sides stay aligned.
+width instead, and a split row is as tall as its taller side, so the sides stay aligned. Lines break where the
+[`Editor`](./editor.md)'s rows do: code and Latin text at spaces, Chinese, Japanese and Korean text where Unicode's line
+breaking rules allow, between characters but never before closing punctuation such as `，` or after opening
+punctuation such as `「`.
 
 ## Two texts or a patch
 
@@ -312,6 +315,53 @@ and `setScrollOffset({ x, y })` scrolls the rows to `y` at once, so a dragged th
 Together they make an overview ruler beside the view, as code editors have: a mark for each change, a thumb over the
 rows in view, and a press or a drag that scrolls there. Here the ruler is as tall as the view:
 
+```tsx tabs
+import { Each, signal, View, type ViewRef } from "nsh";
+import { DiffView, type DiffHunkBounds, type DiffViewRef } from "nsh/base";
+
+let diff!: DiffViewRef;
+let ruler!: ViewRef;
+let rulerTop = 0;
+const rows = signal({ y: 0, height: 0, view: 0 });
+const marks = signal<DiffHunkBounds[]>([]);
+// Points of the rows per point of the ruler.
+const scale = () => Math.max(rows().height, 1) / Math.max(rows().view, 1);
+// The thumb's middle at the pointer.
+const follow = (pageY: number) => diff.setScrollOffset({ x: 0, y: (pageY - rulerTop) * scale() - rows().view / 2 });
+
+<View class="flex-1 flex-row">
+  <DiffView
+    ref={diff}
+    oldValue={before()}
+    newValue={after()}
+    onScroll={({ offset, contentSize, size }) => rows.set({ y: offset.y, height: contentSize.height, view: size.height })}
+    onHunkBoundsChange={({ hunkBounds }) => marks.set(hunkBounds)}
+    class="flex-1"
+  />
+  <View
+    ref={ruler}
+    class="w-3 bg-muted"
+    onStartShouldSetResponder={() => true}
+    onResponderGrant={async (e) => {
+      const y = e.pageY;
+      rulerTop = (await ruler.measure())?.pagePosition.y ?? 0;
+      follow(y);
+    }}
+    onResponderMove={(e) => follow(e.pageY)}
+  >
+    <Each of={marks()}>
+      {(mark) => (
+        <View
+          class="absolute inset-x-0 bg-amber-500"
+          style={{ top: mark().bounds.origin.y / scale(), height: Math.max(mark().bounds.size.height / scale(), 2) }}
+        />
+      )}
+    </Each>
+    <View class="absolute inset-x-0 bg-foreground/20" style={{ top: rows().y / scale(), height: rows().view / scale() }} />
+  </View>
+</View>
+```
+
 ```rust tabs
 use nsh_base::{DiffHunkBounds, DiffView, DiffViewApi, DiffViewEvent, diff_view, theme};
 use nsh_core::prelude::*;
@@ -390,53 +440,6 @@ fn review(old: SharedString, new: SharedString) -> impl IntoElement {
                 ),
         )
 }
-```
-
-```tsx tabs
-import { Each, signal, View, type ViewRef } from "nsh";
-import { DiffView, type DiffHunkBounds, type DiffViewRef } from "nsh/base";
-
-let diff!: DiffViewRef;
-let ruler!: ViewRef;
-let rulerTop = 0;
-const rows = signal({ y: 0, height: 0, view: 0 });
-const marks = signal<DiffHunkBounds[]>([]);
-// Points of the rows per point of the ruler.
-const scale = () => Math.max(rows().height, 1) / Math.max(rows().view, 1);
-// The thumb's middle at the pointer.
-const follow = (pageY: number) => diff.setScrollOffset({ x: 0, y: (pageY - rulerTop) * scale() - rows().view / 2 });
-
-<View class="flex-1 flex-row">
-  <DiffView
-    ref={diff}
-    oldValue={before()}
-    newValue={after()}
-    onScroll={({ offset, contentSize, size }) => rows.set({ y: offset.y, height: contentSize.height, view: size.height })}
-    onHunkBoundsChange={({ hunkBounds }) => marks.set(hunkBounds)}
-    class="flex-1"
-  />
-  <View
-    ref={ruler}
-    class="w-3 bg-muted"
-    onStartShouldSetResponder={() => true}
-    onResponderGrant={async (e) => {
-      const y = e.pageY;
-      rulerTop = (await ruler.measure())?.pagePosition.y ?? 0;
-      follow(y);
-    }}
-    onResponderMove={(e) => follow(e.pageY)}
-  >
-    <Each of={marks()}>
-      {(mark) => (
-        <View
-          class="absolute inset-x-0 bg-amber-500"
-          style={{ top: mark().bounds.origin.y / scale(), height: Math.max(mark().bounds.size.height / scale(), 2) }}
-        />
-      )}
-    </Each>
-    <View class="absolute inset-x-0 bg-foreground/20" style={{ top: rows().y / scale(), height: rows().view / scale() }} />
-  </View>
-</View>
 ```
 
 A mark's `index` is the change's in `hunks()`, whose `oldLines` and `newLines` tell an added change (no old lines)

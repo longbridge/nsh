@@ -1,6 +1,6 @@
 ---
 title: Web
-description: 用 Rust 或 TSX 和 Native Shell 组件构建 HTML 和 CSS 界面，在浏览器里开发 Web 应用，并发布到任意静态托管服务或 CDN。
+description: 用 TSX 或 Rust 和 Native Shell 组件构建 HTML 和 CSS 界面，在浏览器里开发 Web 应用，并发布到任意静态托管服务或 CDN。
 order: 16
 group: platforms
 demo: counter
@@ -201,6 +201,18 @@ polyfill，现代浏览器因此不必多下载任何内容。
 |---|---|---|---|---|
 | `examples/counter` | 基础组件 | 3.96 MB | 1.32 MB | 0.97 MB |
 | `examples/gallery` | 全部组件、`zlib` 和着色器 | 4.13 MB | 1.36 MB | 1.01 MB |
+
+#### 多个应用共用一个运行时
+
+同一个站点上的多个应用可以共用一个运行时。打包每个应用时都加上 `--shared-runtime`（仅限 web，其他目标会忽略它）：
+
+```sh
+nsh package --target web --shared-runtime --asset-url https://cdn.example.com/nsh/
+```
+
+这时 `nsh.<digest>.wasm` 只包含引擎，每个 `nsh/base` 部分、标准模块和着色器各自是一个副模块（`nsh-<part>.<digest>.wasm`）。用同一版本 NSH 打包的应用，这些文件都相同，与在哪里打包、按什么顺序打包无关，所以每个应用可以在各自的 CI 任务里构建。从同一个位置提供它们（`--asset-url`），浏览器在整个站点只下载一次。
+
+不加这个参数时，每个应用都有自己的运行时，只包含用到的部分，站点只有一个应用时更小。应用带有自己的 Rust 组件时使用自己的运行时，`--shared-runtime` 会对它报错。
 
 ### 部署
 
@@ -518,6 +530,7 @@ fn show_title(title: &str) {
 
 ## 另请参阅
 
+- [托管站点](./packaging.md#host-the-site)
 - [打包](./packaging.md)：`nsh package` 的其他目标。
 - [架构](./architecture.md)：Web 版复用的引擎、核心和挂载批次。
 - [测试](./testing-and-trace.md)：`nsh test` 以近似的文本引擎无界面地运行同一个引擎。

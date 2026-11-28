@@ -24,7 +24,7 @@ nsh-core = { workspace = true, features = ["declarations", "websocket", "updater
 # A Rust app's translations (`locales/`), compiled into its runners.
 nsh-i18n = { workspace = true, features = ["build"] }
 nsh-engine = { workspace = true, features = ["js"] }
-nsh-dev = { workspace = true, features = ["server"] }
+nsh-dev = { workspace = true, features = ["server", "client"] }
 nsh-js = { workspace = true, features = ["zlib", "crypto"] }
 nsh-base = { workspace = true, features = ["editor", "emoji-picker", "highlight", "plot", "rich-editor", "term"] }
 nsh-package.workspace = true
@@ -50,6 +50,7 @@ brotli.workspace = true
 flate2.workspace = true
 tar.workspace = true
 sha2.workspace = true
+md-5.workspace = true
 base64.workspace = true
 image.workspace = true
 wasmparser.workspace = true

@@ -10,7 +10,8 @@ import { desktop, Log, Panel, Segmented, size, Split, ui, wide, sectionSurface, 
 // calendar, the value or a muted placeholder, and `datePickerLook` for the
 // rest: the popup at the trigger (a sheet on a touch screen), the items
 // (`CalendarItem`: the month and year, two-letter weekdays, today on a quiet
-// fill, the selected days on `primary`, a range's band), the presets, and
+// fill, the selected days on `primary`, a range's band, previewed up to the
+// day under the pointer while the stay's end is chosen), the presets, and
 // the time's row, segments and well.
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -63,9 +64,11 @@ function App() {
     { label: "Tomorrow", value: iso(addDays(today, 1)) },
     { label: "Next Monday", value: iso(monday) },
   ];
+  // Each with the dates it stands for under its label.
+  const span = (label: string, start: Date, end: Date): DateRangePreset => ({ label, value: [iso(start), iso(end)], description: `${monthDay(iso(start))} – ${monthDay(iso(end))}` });
   const stays: DateRangePreset[] = [
-    { label: "This week", value: [iso(today), iso(addDays(today, (7 - today.getDay()) % 7))] },
-    { label: "Next 7 nights", value: [iso(today), iso(addDays(today, 7))] },
+    span("This week", today, addDays(today, (7 - today.getDay()) % 7)),
+    span("Next 7 nights", today, addDays(today, 7)),
   ];
   const stayTitle = () => {
     const r = stay();

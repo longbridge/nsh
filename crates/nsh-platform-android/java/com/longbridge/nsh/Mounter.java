@@ -81,13 +81,17 @@ final class Mounter {
     final int[] dialogColors = new int[10];
     /**
      * The language the app's text shows in ({@code encode.rs} {@code Command::TextLocale}), which
-     * the state words services read ({@link A11y}) and the date and time pickers' values and
-     * dialogs ({@link DateTimePickerComponent}) follow; null until the core names one (English state
-     * words, the system's language for the pickers).
+     * the state words services read ({@link A11y}) follow; null until the core names one (English
+     * state words).
      */
     java.util.Locale textLocale;
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
     final SparseArray<android.app.AlertDialog> dialogs = new SparseArray<>();
+    /**
+     * By dialog id, what takes each of {@link #dialogs} off the activity going for a configuration change, unanswered,
+     * and gives what shows it again in the next one ({@link #leaveWindows}).
+     */
+    final SparseArray<java.util.function.Supplier<Runnable>> dialogMoves = new SparseArray<>();
     /**
      * The status bar the app asked for last (style, hidden; -1: never), applied again when the app's or the system's
      * appearance changes.
@@ -129,6 +133,7 @@ final class Mounter {
         float headerHeight;
         /** `headerTitleAlign` "center". */
         boolean centerTitle;
+        boolean hidesBottomBar;
     }
 
     /** Properties that animations can override, as last set by a style. */
@@ -190,11 +195,16 @@ final class Mounter {
     /** A portaled view's logical keyboard parent (`ViewProps::key_parent`); absent: ordinary. */
     private final android.util.SparseIntArray keyParents = new android.util.SparseIntArray();
     /**
+     * While the views move to the activity made again ({@link NshView#leaveActivity}): the focus they lose and take
+     * back on the way is no change for the app, and its listeners do not hear it.
+     */
+    boolean moving;
+    /**
      * A managed view took or lost the focus: the core styles it (`FOCUSED`),
      * and its `onFocus` / `onBlur` listeners hear it as an input's do.
      */
     private final View.OnFocusChangeListener focusChange = (view, focused) -> {
-        if (!(view instanceof Node)) return;
+        if (!(view instanceof Node) || moving) return;
         int id = ((Node) view).nodeId();
         // The focus went somewhere (the user's Tab or tap, or the view a
         // pending `focus()` waits for): that request is over.
@@ -247,17 +257,63 @@ final class Mounter {
     TextBox selectedText;
     /** The selectable view with a selection (one per surface, a text's or an area's). */
     SelectableView selectedArea;
+
+    /** Whether a text or a selectable view holds a selection (back ends it first). */
+    boolean hasSelection() {
+        return selectedText != null || selectedArea != null;
+    }
+
+    /** Ends the selection there is; false when there is none. */
+    private boolean endSelection() {
+        if (selectedArea != null) {
+            selectedArea.clear();
+            return true;
+        }
+        if (selectedText != null) {
+            selectedText.clearSelection();
+            return true;
+        }
+        return false;
+    }
     /** Selectable views (`ViewProps.selectable_view`), by view. */
     private final SparseArray<SelectableView> selectableViews = new SparseArray<>();
 
-    /** A finger went down at the screen point: a selection elsewhere ends. */
+    /**
+     * A finger went down off the selection's handles while something is selected: if it lifts without
+     * moving past the touch slop (a tap), the selection ends; a drag (a scroll) keeps it, as TextView's.
+     */
+    private boolean tapEndsSelection;
+    private float tapX, tapY;
+
+    /** A finger went down at the screen point: a tap away from the selection will end it ({@link #touchUp}). */
     void touchDown(float rawX, float rawY) {
-        if (selectedText != null && !selectedText.selectionContains(rawX, rawY)) selectedText.clearSelection();
-        if (selectedArea != null && !selectedArea.selectionContains(rawX, rawY)) selectedArea.clear();
+        tapEndsSelection = (selectedText != null && !selectedText.selectionContains(rawX, rawY))
+                || (selectedArea != null && !selectedArea.selectionContains(rawX, rawY));
+        tapX = rawX;
+        tapY = rawY;
     }
 
-    /** The outermost selectable view {@code text} is in (an area inside another is part of it), or null. */
-    SelectableView selectableViewOf(TextBox text) {
+    /** The finger moved: past the slop it is no tap, and the selection stays. */
+    void touchMoved(float rawX, float rawY, float slop) {
+        if (tapEndsSelection && Math.hypot(rawX - tapX, rawY - tapY) > slop) tapEndsSelection = false;
+    }
+
+    /** The gesture ended ({@code tap}: lifted, not cancelled): a tap ends the selection. */
+    void touchUp(boolean tap) {
+        if (!tapEndsSelection) return;
+        tapEndsSelection = false;
+        if (!tap) return;
+        if (selectedText != null) selectedText.clearSelection();
+        if (selectedArea != null) selectedArea.clear();
+    }
+
+    /** A long press made a new selection: the gesture that made it does not end it. */
+    void keepSelection() {
+        tapEndsSelection = false;
+    }
+
+    /** The outermost selectable view {@code text} is or is in (an area inside another is part of it), or null. */
+    SelectableView selectableViewOf(View text) {
         if (selectableViews.size() == 0) return null;
         SelectableView outer = null;
         for (Object v = text; v instanceof View; v = ((View) v).getParent()) {
@@ -306,6 +362,9 @@ final class Mounter {
     private final java.util.ArrayList<StackBox> stacks = new java.util.ArrayList<>();
     private final java.util.ArrayList<ModalHost> shownModals = new java.util.ArrayList<>();
 
+    /** Re-syncs the tab bars when stacks, screens, or their visibility changed in a batch. */
+    private boolean bottomBarDirty;
+
     /** The surface root (node 1). */
     final Box root;
 
@@ -315,9 +374,6 @@ final class Mounter {
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
-        components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
-        components.put(DateTimePickerComponent.NAME,
-                c -> new DateTimePickerComponent(context, c, this::night, () -> textLocale));
         components.put(MenuButtonComponent.NAME, c -> new MenuButtonComponent(context, c, this::night));
         components.put(ContextMenuComponent.NAME, c -> new ContextMenuComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
@@ -342,9 +398,13 @@ final class Mounter {
         views.put(1, root);
     }
 
-    /** Whether the running app's web views may navigate to {@code url} (its capabilities). */
-    boolean allowsWebview(String url) {
-        return Native.allowsWebview(handle(), url);
+    /**
+     * Whether a web view whose {@code allowOrigin} is {@code origin} (null:
+     * none) may navigate to {@code url} (the app's capabilities). The origin
+     * is compared in Rust.
+     */
+    boolean allowsWebview(String url, String origin, String hosts) {
+        return Native.allowsWebview(handle(), url, origin, hosts);
     }
 
     /** Whether the running app's web pages may capture {@code kind} (its {@code webview.media}). */
@@ -461,6 +521,9 @@ final class Mounter {
                     if (v instanceof ImageBox && presses && ((ImageBox) v).press == null) {
                         ((ImageBox) v).press = new Pressable(v, this, id);
                     }
+                    if (v instanceof InputBox && presses && ((InputBox) v).press == null) {
+                        ((InputBox) v).press = new Pressable(v, this, id, false, true);
+                    }
                     if (v instanceof TextBox || v instanceof ImageBox) {
                         v.setClickable(presses || (v instanceof TextBox && ((TextBox) v).hasLinks()));
                     }
@@ -528,12 +591,6 @@ final class Mounter {
                         View v = views.valueAt(i);
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
-                        }
-                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof SwitchComponent) {
-                            ((SwitchComponent) ((ComponentBox) v).component).appearanceChanged();
-                        }
-                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
-                            ((DateTimePickerComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
                         if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
@@ -972,6 +1029,7 @@ final class Mounter {
             return;
         }
         ((ComponentBox) v).attach(factory.create(new NshComponentContext(host, id)));
+        if (((ComponentBox) v).component instanceof TabBarComponent) bottomBarDirty = true;
     }
 
     private static ViewGroup container(View parent) {
@@ -1154,6 +1212,7 @@ final class Mounter {
         keyParents.delete(id);
         slops.remove(id);
         a11y.remove(id);
+        held.remove(id);
         if (accessibilityClicked == v) accessibilityClicked = null;
     }
 
@@ -1183,6 +1242,7 @@ final class Mounter {
             return;
         }
         Box.Frame f = Box.frame(v);
+        boolean wasEmpty = f.right <= f.left || f.bottom <= f.top;
         Transition t = layoutAnimation != null ? layoutAnimation[1] : null;
         // A view never placed has no frame to move from; one placed zero
         // high (a collapsed reveal) or zero wide grows from it, as on iOS.
@@ -1214,6 +1274,7 @@ final class Mounter {
             f.bottom = to[3];
             Box.place(v);
         }
+        if (!stacks.isEmpty() && wasEmpty != (to[2] <= to[0] || to[3] <= to[1])) bottomBarDirty = true;
         if (v instanceof ImageBox) loadImage((ImageBox) v);
     }
 
@@ -1285,6 +1346,7 @@ final class Mounter {
             decor.originYFraction = originYFraction;
             decor.backfaceHidden = backfaceHidden;
             decor.clipPath = hasClip ? clip : null;
+            if (!stacks.isEmpty() && decor.hidden != fx.hidden) bottomBarDirty = true;
             decor.hidden = fx.hidden;
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
@@ -1941,7 +2003,8 @@ final class Mounter {
     void outputs(float[] out) {
         if (out == null || out.length == 0) return;
         for (int i = 1; i + 2 < out.length; i += 3) {
-            View v = views.get(Float.floatToRawIntBits(out[i]));
+            int id = Float.floatToRawIntBits(out[i]);
+            View v = views.get(id);
             if (v == null) continue;
             float value = out[i + 2];
             int prop = (int) out[i + 1];
@@ -1956,57 +2019,141 @@ final class Mounter {
                 if (v instanceof CanvasBox) ((CanvasBox) v).setSlot(prop - CANVAS_ARG, value);
                 continue;
             }
-            switch (prop) {
-                case 0: v.setAlpha(Math.max(0, Math.min(1, value))); break;
-                case 1: v.setTranslationX((mirror(v) == 2 ? -1 : 1) * value * density); break;
-                case 2: v.setTranslationY(value * density); break;
-                case 3: v.setScaleX(mirror(v) != 0 ? -value : value); v.setScaleY(value); break;
-                case 4: v.setScaleX(mirror(v) != 0 ? -value : value); break;
-                case 5: v.setScaleY(value); break;
-                case 6: v.setRotation((mirror(v) == 2 ? -1 : 1) * value); break;
-                case 8:
-                case 9: {
-                    if ((int) out[i + 1] == 8) v.setRotationX(value);
-                    else v.setRotationY((mirror(v) == 2 ? -1 : 1) * value);
-                    Decor decor = decor(v);
-                    if (decor != null) decor.applyBackface(v);
-                    break;
+            if (prop <= LAST_LOOK) {
+                Held h = held.get(id);
+                if (!inSight(v)) {
+                    if (h == null) held.put(id, h = new Held());
+                    h.put(prop, value);
+                    listenForHeld();
+                    continue;
                 }
-                case 10: setPerspective(v, value); break;
-                case 7: {
-                    Decor decor = decor(v);
-                    int color = Float.floatToRawIntBits(value);
-                    if (decor != null && decor.fill != color) {
-                        decor.fill = color;
-                        v.invalidate();
-                    }
-                    break;
-                }
-                case 11: {
-                    Decor decor = decor(v);
-                    int color = Float.floatToRawIntBits(value);
-                    if (decor != null && (decor.borderColors[0] != color || decor.borderColors[1] != color
-                            || decor.borderColors[2] != color || decor.borderColors[3] != color)) {
-                        java.util.Arrays.fill(decor.borderColors, color);
-                        v.invalidate();
-                    }
-                    break;
-                }
-                case 12:
-                    if (v instanceof TextBox) ((TextBox) v).setColor(true, Float.floatToRawIntBits(value));
-                    break;
-                case 15: {
-                    // A sticky cell sticks further in: its scroll view pins it again.
-                    int id = Float.floatToRawIntBits(out[i]);
-                    Float old = stickyOffsets.put(id, value * density);
-                    ScrollBox s = stickyHosts.get(id);
-                    if (s != null && (old == null || old != value * density)) s.pinSticky();
-                    break;
-                }
-                default: break;
+                if (h != null) h.mask &= ~(1 << prop);
+            }
+            animated(v, id, prop, value);
+        }
+        if (held.size() > 0) showHeld();
+        if (out[0] != 0) host.requestFrames();
+    }
+
+
+    /** The last property code of a view's look (alpha through a text's color, `animation.rs`). */
+    private static final int LAST_LOOK = 12;
+
+    /** A view's latest animated look properties while out of sight. */
+    private static final class Held {
+        /** Which properties hold a value (bit per code). */
+        int mask;
+        final float[] values = new float[LAST_LOOK + 1];
+
+        void put(int prop, float value) {
+            // A uniform scale (3) sets both axes: drop the single axes held before it.
+            if (prop == 3) mask &= ~((1 << 4) | (1 << 5));
+            values[prop] = value;
+            mask |= 1 << prop;
+        }
+    }
+
+    /**
+     * The latest animated look of the views out of sight, set once they come
+     * into sight. A view's look changing out of sight (a loop on a card
+     * scrolled away) would make the window draw a frame for nothing on every
+     * tick: HWUI redraws the window for any view that changes, seen or not.
+     */
+    private final SparseArray<Held> held = new SparseArray<>();
+    private final android.graphics.Rect sight = new android.graphics.Rect();
+    /** Sets the held values of the views come into sight before a frame draws (a scroll, a pop). */
+    private android.view.ViewTreeObserver.OnPreDrawListener heldListener;
+
+    /**
+     * Whether `v` may show: its parent is shown and partly on screen. The
+     * parent, not the view: a view moved out by its own transform would
+     * otherwise never move back in.
+     */
+    private boolean inSight(View v) {
+        if (!(v.getParent() instanceof View)) return true;
+        View parent = (View) v.getParent();
+        return parent.isShown() && parent.getGlobalVisibleRect(sight);
+    }
+
+    private void listenForHeld() {
+        if (heldListener != null) return;
+        heldListener = () -> {
+            showHeld();
+            return true;
+        };
+        host.getViewTreeObserver().addOnPreDrawListener(heldListener);
+    }
+
+    /** Sets the held values of the views now in sight. */
+    private void showHeld() {
+        for (int i = held.size() - 1; i >= 0; i--) {
+            Held h = held.valueAt(i);
+            int id = held.keyAt(i);
+            View v = views.get(id);
+            if (h.mask != 0 && v != null && !inSight(v)) continue;
+            held.removeAt(i);
+            if (v == null) continue;
+            for (int prop = 0; prop <= LAST_LOOK; prop++) {
+                if ((h.mask & (1 << prop)) != 0) animated(v, id, prop, h.values[prop]);
             }
         }
-        if (out[0] != 0) host.requestFrames();
+        if (held.size() == 0 && heldListener != null) {
+            android.view.ViewTreeObserver observer = host.getViewTreeObserver();
+            if (observer.isAlive()) observer.removeOnPreDrawListener(heldListener);
+            heldListener = null;
+        }
+    }
+
+    /** Sets animated property `prop` of view `id`. */
+    private void animated(View v, int id, int prop, float value) {
+        switch (prop) {
+            case 0: v.setAlpha(Math.max(0, Math.min(1, value))); break;
+            case 1: v.setTranslationX((mirror(v) == 2 ? -1 : 1) * value * density); break;
+            case 2: v.setTranslationY(value * density); break;
+            case 3: v.setScaleX(mirror(v) != 0 ? -value : value); v.setScaleY(value); break;
+            case 4: v.setScaleX(mirror(v) != 0 ? -value : value); break;
+            case 5: v.setScaleY(value); break;
+            case 6: v.setRotation((mirror(v) == 2 ? -1 : 1) * value); break;
+            case 8:
+            case 9: {
+                if (prop == 8) v.setRotationX(value);
+                else v.setRotationY((mirror(v) == 2 ? -1 : 1) * value);
+                Decor decor = decor(v);
+                if (decor != null) decor.applyBackface(v);
+                break;
+            }
+            case 10: setPerspective(v, value); break;
+            case 7: {
+                Decor decor = decor(v);
+                int color = Float.floatToRawIntBits(value);
+                if (decor != null && decor.fill != color) {
+                    decor.fill = color;
+                    v.invalidate();
+                }
+                break;
+            }
+            case 11: {
+                Decor decor = decor(v);
+                int color = Float.floatToRawIntBits(value);
+                if (decor != null && (decor.borderColors[0] != color || decor.borderColors[1] != color
+                        || decor.borderColors[2] != color || decor.borderColors[3] != color)) {
+                    java.util.Arrays.fill(decor.borderColors, color);
+                    v.invalidate();
+                }
+                break;
+            }
+            case 12:
+                if (v instanceof TextBox) ((TextBox) v).setColor(true, Float.floatToRawIntBits(value));
+                break;
+            case 15: {
+                // A sticky cell sticks further in: its scroll view pins it again.
+                Float old = stickyOffsets.put(id, value * density);
+                ScrollBox s = stickyHosts.get(id);
+                if (s != null && (old == null || old != value * density)) s.pinSticky();
+                break;
+            }
+            default: break;
+        }
     }
 
     // --- Navigation ----------------------------------------------------------
@@ -2080,10 +2227,12 @@ final class Mounter {
         o.headerHeight = b.getFloat();
         o.backTitle = string(objects, b.getInt());
         o.centerTitle = b.getInt() == 1;
+        o.hidesBottomBar = b.getInt() != 0;
         screenOptions.put(id, o);
         dirtyScreens.add(id);
         int stack = hosts.get(id, -1);
         if (stack >= 0) dirtyStacks.add(stack);
+        bottomBarDirty = true;
     }
 
     private static int skip(ByteBuffer b) {
@@ -2099,14 +2248,18 @@ final class Mounter {
                 StackBox stack = (StackBox) v;
                 for (int s : stack.screens) {
                     dirtyScreens.add(s);
-                    // The transition reads each screen's animation: a screen
-                    // mounted in this batch is configured only below, so give
-                    // it its option before the stack animates it in.
+                    // The transition reads each screen's animation and hidesBottomBar:
+                    // a screen mounted in this batch is configured only below, so give
+                    // it its options before the stack reconciles and animates it in.
                     View sv = views.get(s);
                     ScreenOptions so = screenOptions.get(s);
-                    if (sv instanceof StackBox.ScreenBox && so != null) ((StackBox.ScreenBox) sv).animation = so.animation;
+                    if (sv instanceof StackBox.ScreenBox && so != null) {
+                        ((StackBox.ScreenBox) sv).animation = so.animation;
+                        ((StackBox.ScreenBox) sv).hidesBottomBar = so.hidesBottomBar;
+                    }
                 }
                 stack.reconcile();
+                bottomBarDirty = true;
             }
         }
         dirtyStacks.clear();
@@ -2121,7 +2274,7 @@ final class Mounter {
             ScreenOptions below = canGoBack ? screenOptions.get(((StackBox) stack).screens.get(index - 1)) : null;
             ((StackBox.ScreenBox) v).configure(this, o.title, o.shown, o.transparent, o.tint, o.background,
                     o.titleColor, o.backVisible, o.gesture, o.preventBack, o.animation, o.left, o.right, o.titleView,
-                    o.headerHeight, o.centerTitle, canGoBack, below != null ? below.backTitle : null);
+                    o.headerHeight, o.centerTitle, o.hidesBottomBar, canGoBack, below != null ? below.backTitle : null);
             reportScreenInsets(id, o);
         }
         dirtyScreens.clear();
@@ -2139,6 +2292,10 @@ final class Mounter {
             }
         }
         dirtyModals.clear();
+        if (bottomBarDirty) {
+            bottomBarDirty = false;
+            for (StackBox s : stacks) s.syncBottomBar(false);
+        }
         updateBack();
     }
 
@@ -2176,7 +2333,7 @@ final class Mounter {
      * by asking JS: the system asks synchronously.
      */
     boolean wantsBack() {
-        if (!shownModals.isEmpty()) return true;
+        if (!shownModals.isEmpty() || hasSelection()) return true;
         return backStack() != null || wants(1, Native.BACK_PRESS);
     }
 
@@ -2251,6 +2408,62 @@ final class Mounter {
         updateBack();
     }
 
+    // --- Moving to the activity made again ------------------------------------------
+
+    /** The view focused in the host's window as it left the activity. */
+    private View movedFocus;
+    /** The text field the software keyboard was up for as it left the activity. */
+    private View movedKeyboard;
+    /** What shows the alerts taken off the activity that went again, in the new one. */
+    private final java.util.ArrayList<Runnable> movedDialogs = new java.util.ArrayList<>();
+
+    /**
+     * The activity goes, to be made again for a configuration change ({@link NshView#leaveActivity}): what the app
+     * shows in windows of the activity's own goes off it now, or the activity would leak with them. Dialogs and
+     * alerts come back in {@link #enterWindows}; menus close, as when the user leaves them.
+     */
+    void leaveWindows() {
+        moving = true;
+        movedKeyboard = fieldWithKeyboard();
+        movedFocus = host.findFocus();
+        SystemMenus.dismissOf(context);
+        java.util.ArrayList<java.util.function.Supplier<Runnable>> alerts = new java.util.ArrayList<>();
+        for (int i = 0; i < dialogMoves.size(); i++) alerts.add(dialogMoves.valueAt(i));
+        for (java.util.function.Supplier<Runnable> alert : alerts) movedDialogs.add(alert.get());
+        // Those still going too: their dismissal ends now.
+        for (int i = 0; i < modals.size(); i++) modals.valueAt(i).leaveWindow();
+    }
+
+    /** Shows the dialogs and alerts {@link #leaveWindows} took in the activity made again, the focus as it was. */
+    void enterWindows() {
+        for (ModalHost m : shownModals) m.enterWindow();
+        for (Runnable show : movedDialogs) show.run();
+        movedDialogs.clear();
+        View focus = movedFocus;
+        movedFocus = null;
+        if (focus != null && focus.getRootView() == host.getRootView()) focus.requestFocus();
+        applySystemBars();
+        moving = false;
+        // The keyboard comes back up for its field once its window has the focus.
+        View field = movedKeyboard;
+        movedKeyboard = null;
+        for (View v = field; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+            if (v instanceof InputBox) {
+                ((InputBox) v).focus();
+                break;
+            }
+        }
+    }
+
+    /** The text field the software keyboard is up for: the focus of the topmost window, the host's or a dialog's. */
+    private View fieldWithKeyboard() {
+        View field = shownModals.isEmpty() ? host.findFocus() : shownModals.get(shownModals.size() - 1).focus();
+        if (field == null || !field.onCheckIsTextEditor()) return null;
+        if (Build.VERSION.SDK_INT < 30) return field;
+        android.view.WindowInsets insets = field.getRootWindowInsets();
+        return insets != null && insets.isVisible(android.view.WindowInsets.Type.ime()) ? field : null;
+    }
+
     /** Whether the app's back listeners hear the button before the stacks. */
     boolean listensToBack() {
         return wants(1, Native.BACK_PRESS);
@@ -2285,6 +2498,8 @@ final class Mounter {
      * listeners hear it (and send {@code Command::Back} when none takes it),
      * else the innermost stack pops. Returns false if nothing did. */
     boolean handleBack() {
+        // A selection goes first, as TextView's: back ends it and goes no further.
+        if (endSelection()) return true;
         if (!shownModals.isEmpty()) {
             shownModals.get(shownModals.size() - 1).backPressed();
             return true;
@@ -2792,6 +3007,12 @@ final class Mounter {
                 }
                 break;
             }
+            case 69: {
+                // ref.selectAll(): every text of the selectable view v is or is in.
+                SelectableView area = v != null ? selectableViewOf(v) : null;
+                if (area != null) area.selectAll();
+                break;
+            }
             case 21: {
                 String name = string(objects, b.getInt());
                 String json = string(objects, b.getInt());
@@ -2900,41 +3121,69 @@ final class Mounter {
                 audio().command(b, objects);
                 break;
             }
-            case 58: {
-                // `encode.rs` `Command::Share`: the request, the title and the
-                // text (each after whether it is there), then the files.
-                Share.Request request = new Share.Request();
-                request.id = b.getInt();
-                boolean hasTitle = b.getInt() != 0;
-                String title = (String) objects[b.getInt()];
-                boolean hasText = b.getInt() != 0;
-                String text = (String) objects[b.getInt()];
-                request.title = hasTitle ? title : null;
-                request.text = hasText ? text : null;
-                request.files = new String[b.getInt()];
-                for (int i = 0; i < request.files.length; i++) request.files[i] = (String) objects[b.getInt()];
-                request.mounter = this;
-                Share.show(context, request);
-                break;
-            }
-            case 59: {
-                // `encode.rs` `Command::AuthSession`: the request, the page, the callback scheme, ephemeral.
-                int request = b.getInt();
-                String url = (String) objects[b.getInt()];
-                String scheme = (String) objects[b.getInt()];
-                boolean ephemeral = b.getInt() != 0;
-                AuthSession.open(context, this, request, url, scheme, ephemeral);
-                break;
-            }
-            case 61:
-                // `encode.rs` `Command::CloseAuthSession`: the request the app closed.
-                AuthSession.close(b.getInt());
-                break;
             case 26: {
                 int request = b.getInt();
                 String url = (String) objects[b.getInt()];
                 boolean opened = SystemUi.openUrl(context, url);
                 eventMap(1, Native.OPEN_URL, new String[] {"id", "opened"}, new Object[] {(double) request, opened});
+                break;
+            }
+            case 67: {
+                // `encode.rs` `Command::ReadClipboardImage`: the request and
+                // whether only `has` is asked. Providers are read off the main
+                // thread; the answer comes back on it.
+                int request = b.getInt();
+                boolean hasOnly = b.getInt() != 0;
+                if (hasOnly) {
+                    eventMap(1, Native.CLIPBOARD, new String[] {"id", "has"},
+                            new Object[] {(double) request, ClipboardReads.hasImage(context)});
+                    break;
+                }
+                new Thread(() -> {
+                    Object[] image = ClipboardReads.readImage(context);
+                    String[] keys;
+                    Object[] values;
+                    if (image == null) {
+                        keys = new String[] {"id", "has"};
+                        values = new Object[] {(double) request, false};
+                    } else if (image[1] == null) {
+                        keys = new String[] {"id", "has", "tooLarge"};
+                        values = new Object[] {(double) request, true, (double) (Integer) image[2]};
+                    } else {
+                        String uri = "data:" + image[0] + ";base64,"
+                                + android.util.Base64.encodeToString((byte[]) image[1], android.util.Base64.NO_WRAP);
+                        keys = new String[] {"id", "has", "uri", "width", "height"};
+                        values = new Object[] {(double) request, true, uri,
+                                (double) (Integer) image[2], (double) (Integer) image[3]};
+                    }
+                    host.post(() -> eventMap(1, Native.CLIPBOARD, keys, values));
+                }, "nsh-clipboard").start();
+                break;
+            }
+            case 66: {
+                // `encode.rs` `Command::ReadClipboardFiles`: the request. The
+                // clip's content URIs are copied into the cache off the main
+                // thread; their `file:` URLs come back on it.
+                int request = b.getInt();
+                new Thread(() -> {
+                    java.util.List<String> paths = ClipboardReads.readFiles(context);
+                    StringBuilder files = new StringBuilder();
+                    for (String path : paths) {
+                        if (files.length() > 0) files.append('\n');
+                        files.append(android.net.Uri.fromFile(new java.io.File(path)));
+                    }
+                    String joined = files.toString();
+                    host.post(() -> eventMap(1, Native.CLIPBOARD, new String[] {"id", "has", "files"},
+                            new Object[] {(double) request, !paths.isEmpty(), joined}));
+                }, "nsh-clipboard").start();
+                break;
+            }
+            case 68: {
+                // `encode.rs` `Command::SetClipboardImage`: the `data:` URI.
+                String uri = (String) objects[b.getInt()];
+                if (!ClipboardReads.writeImage(context, uri)) {
+                    android.util.Log.w("nsh", "Clipboard.writeImage: not a base64 image data: URI; nothing written");
+                }
                 break;
             }
             case 63: {
@@ -2976,15 +3225,14 @@ final class Mounter {
                 (v != null ? v : host).announceForAccessibility(text);
                 break;
             }
+            case 65: {
+                // ref.insertText(text): in place of the input's selection.
+                String text = (String) objects[b.getInt()];
+                if (v instanceof InputBox) ((InputBox) v).insertText(text);
+                break;
+            }
             case 64: {
                 textLocale = java.util.Locale.forLanguageTag((String) objects[b.getInt()]);
-                // Date and time pickers show their values in it.
-                for (int i = 0; i < views.size(); i++) {
-                    View view = views.valueAt(i);
-                    if (view instanceof ComponentBox && ((ComponentBox) view).component instanceof DateTimePickerComponent) {
-                        ((DateTimePickerComponent) ((ComponentBox) view).component).textLocaleChanged();
-                    }
-                }
                 // Services keep copies of the nodes: those with state words read them again.
                 android.view.accessibility.AccessibilityManager manager = host.accessibility();
                 // Without a running service there is no copy to refresh.
@@ -3042,11 +3290,17 @@ final class Mounter {
                 }
                 String injected = optString(b, objects), before = optString(b, objects), ua = optString(b, objects);
                 boolean scroll = b.getInt() != 0, js = b.getInt() != 0, incognito = b.getInt() != 0;
-                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito);
+                boolean zoomable = b.getInt() != 0;
+                String allowOrigin = optString(b, objects), allowNavigation = optString(b, objects);
+                if (v instanceof WebBox) {
+                    ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito, zoomable, allowOrigin,
+                            allowNavigation);
+                }
                 break;
             }
             case 4: {
                 String source = optString(b, objects);
+                String poster = optString(b, objects);
                 boolean paused = b.getInt() != 0, muted = b.getInt() != 0;
                 float volume = b.getFloat(), rate = b.getFloat();
                 boolean repeat = b.getInt() != 0;
@@ -3055,8 +3309,8 @@ final class Mounter {
                 float interval = b.getFloat();
                 int audioSession = b.getInt();
                 if (v instanceof VideoBox) {
-                    ((VideoBox) v).configure(source, paused, muted, volume, rate, repeat, mode, controls, interval,
-                            audioSession);
+                    ((VideoBox) v).configure(source, poster, paused, muted, volume, rate, repeat, mode, controls,
+                            interval, audioSession);
                 }
                 break;
             }
@@ -3722,8 +3976,9 @@ final class Mounter {
     }
 
     /** See {@link Native#touch}. */
-    void touches(int phase, int[] ids, int[] targets, int[] pathLengths, int[] paths, float[] coords, boolean[] changed, long time, int activated) {
-        Native.touch(handle(), phase, ids, targets, pathLengths, paths, coords, changed, time, activated);
+    void touches(int phase, int[] ids, int[] targets, int[] pathLengths, int[] paths, float[] coords, double[] samples,
+            boolean[] changed, long time, int activated) {
+        Native.touch(handle(), phase, ids, targets, pathLengths, paths, coords, samples, changed, time, activated);
     }
 
     /**

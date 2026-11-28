@@ -69,6 +69,7 @@ use dispatch2::DispatchQueue;
 use nsh_core::{
     animation::AnimationValue,
     canvas::Damage,
+    geometry::{Points, Size},
     shader::{ShaderInput, ShaderLayer, ShaderRole},
 };
 use nsh_engine::shader::{Frame, PixelFormat, Renderer, ShaderView};
@@ -248,18 +249,10 @@ pub(crate) struct ShaderState {
 
 impl ShaderState {
     fn new(surface: Weak<Surface>) -> Self {
-        let layer = CALayer::new();
-        // Clipped to its rounded corners ([`crate::decor`] sets them).
-        layer.setMasksToBounds(true);
-        // SAFETY: an immutable Core Animation constant.
-        layer.setContentsGravity(unsafe { kCAGravityResize });
-        // Above the background, its gradients and inset shadows, below the
-        // borders behind the children and the children.
-        layer.setZPosition(crate::decor::BEHIND + 0.75);
         ShaderState {
             surface,
             view: surface_view(),
-            layer,
+            layer: fill_layer(),
             ticking: false,
             hidden: false,
             role: ShaderRole::Fill,
@@ -596,7 +589,7 @@ fn ui_changed_in(surface: &Rc<Surface>, view: &NshView, backdrops_only: bool) {
     if !backdrops_only {
         for mark in surface.shaders.overlays.borrow().iter() {
             if let Some(mark) = mark.upgrade()
-                && view.ns().isDescendantOf(&mark.host)
+                && view.is_within(&mark.host)
             {
                 mark.dirty.set(true);
             }
@@ -620,7 +613,7 @@ fn ui_changed_in(surface: &Rc<Surface>, view: &NshView, backdrops_only: bool) {
         // surface, for a screen's) again.
         let inside = !backdrops_only
             && shader.reads_children()
-            && (is_screen(shader.role) || view.ns().isDescendantOf(v.ns()));
+            && (is_screen(shader.role) || view.is_within(v.ns()));
         // A backdrop already due needs no look; one that is not is due
         // when the view draws under the reader where it reads (what draws
         // over it, it holds, or draws elsewhere is not in its picture).
@@ -1445,7 +1438,19 @@ pub(crate) fn deleted(surface: &Surface, view: &NshView) {
 
 /// Its size changed: a frame of the new size is rendered.
 pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
-    if view.state().shader.is_some() && tick(view) {
+    {
+        let mut state = view.state_mut();
+        let size = state.frame.size;
+        let Some(shader) = state.shader.as_mut() else {
+            return;
+        };
+        // Screen shaders take their size from the window root in show_frame.
+        if !is_screen(shader.role) {
+            let scale = crate::view::backing_scale_of(view.ns()) as f32;
+            shader.view.set_size(size, scale);
+        }
+    }
+    if tick(view) {
         start(surface);
     }
 }
@@ -1520,15 +1525,24 @@ fn tick_due(view: &NshView) -> bool {
     tick_if(view, true)
 }
 
+fn collapsed(size: Size<Points>) -> bool {
+    size.width.0 <= 0.0 || size.height.0 <= 0.0
+}
+
 fn tick_if(view: &NshView, pictures_due: bool) -> bool {
     let surface = {
         let mut state = view.state_mut();
+        let size = state.frame.size;
         let Some(shader) = state.shader.as_mut() else {
             return false;
         };
+        // A collapsed view can be out of sight and still have a frame to clear.
+        let clear = collapsed(size)
+            && !is_screen(shader.role)
+            && (shader.view.surface().is_some() || shader.view.frame().width != 0);
         let due =
             shader.view.wants_frame() || (pictures_due && (shader.stale || shader.backdrop_stale));
-        if shader.ticking || shader.hidden || !due {
+        if shader.ticking || (!clear && (shader.hidden || !due)) {
             return false;
         }
         let Some(surface) = shader.surface.upgrade() else {
@@ -1682,8 +1696,10 @@ fn frame(surface: &Rc<Surface>) {
         if !deleted && !hidden {
             take_pictures(surface, &view, renderer, now);
         }
-        let more = !deleted && !hidden && render_view(surface, &view, renderer, now);
-        if more {
+        let more = !deleted
+            && (!hidden || collapsed(view.state().frame.size))
+            && render_view(surface, &view, renderer, now);
+        if more && !hidden {
             kept.push(view);
             continue;
         }
@@ -1776,6 +1792,20 @@ fn show_frame(
     (more, showed)
 }
 
+/// A layer showing frames under a view's children, as a background
+/// ([`crate::decor`] shapes it: a shader's fill, a GPU view's).
+pub(crate) fn fill_layer() -> Retained<CALayer> {
+    let layer = CALayer::new();
+    // Clipped to its rounded corners ([`crate::decor`] sets them).
+    layer.setMasksToBounds(true);
+    // SAFETY: an immutable Core Animation constant.
+    layer.setContentsGravity(unsafe { kCAGravityResize });
+    // Above the background, its gradients and inset shadows, below the
+    // borders behind the children and the children.
+    layer.setZPosition(crate::decor::BEHIND + 0.75);
+    layer
+}
+
 /// A shader view whose frames go to IOSurfaces ([`display_frame`]).
 fn surface_view() -> ShaderView {
     let mut view = ShaderView::default();
@@ -1788,14 +1818,27 @@ fn surface_view() -> ShaderView {
 /// else (no Metal device) the pixels read back, as a CGImage, whose colours
 /// Core Animation matches on the main thread.
 fn display_frame(layer: &CALayer, view: &ShaderView) {
-    let contents = match view.surface() {
-        Some(surface) => Some(surface_object(surface)),
-        None => frame_image(view.frame())
-            .as_deref()
-            .map(crate::decor::image_object),
-    };
-    // SAFETY: an IOSurface and a CGImage are valid `contents` objects (none
-    // clears it).
+    match view.surface() {
+        Some(surface) => show_surface(layer, surface),
+        None => show_pixels(layer, view.frame()),
+    }
+}
+
+/// Shows an IOSurface in `layer` (the window server shows it as it is),
+/// without Core Animation's implicit animation.
+pub(crate) fn show_surface(layer: &CALayer, surface: &objc2_io_surface::IOSurfaceRef) {
+    let contents = surface_object(surface);
+    // SAFETY: an IOSurface is a valid `contents` object.
+    crate::surface::quiet(|| unsafe { layer.setContents(Some(&contents)) });
+}
+
+/// Shows a frame read back in `layer`, as a CGImage (an empty one clears
+/// it), without Core Animation's implicit animation.
+pub(crate) fn show_pixels(layer: &CALayer, frame: &Frame) {
+    let contents = frame_image(frame)
+        .as_deref()
+        .map(crate::decor::image_object);
+    // SAFETY: a CGImage is a valid `contents` object (none clears it).
     crate::surface::quiet(|| unsafe { layer.setContents(contents.as_deref()) });
 }
 

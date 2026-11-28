@@ -61,10 +61,11 @@ mount(() => (
 | `src` | `string` | | 要显示的页面的 URL。 |
 | `html` | `string` | | 内联 HTML，代替 `src` 显示。 |
 | `baseUrl` | `string` | | `html` 中相对链接的解析基准。它需要与该地址的页面相同的授权（`webview.hosts`）；未授权时 HTML 不带基准 URL 加载，`onError` 报告 `ERR_ACCESS_DENIED`。 |
+| `allowOrigin` | `string` | | 除 `webview.hosts` 之外，这个网页视图还可以显示和导航到的一个源，用于应用运行时才知道的源（例如用户填写的服务器）：`scheme://host[:port]`，`http` 或 `https`，精确匹配（相同的 scheme、主机和端口，不包括子域名）。需要在 [`capabilities.webview`](../docs/sandbox-and-capabilities.md#webview) 中声明 `"runtimeOrigin": true`；其他值会被拒绝并给出提示。与 `src` 在同一次渲染中设置时，对这个 `src` 生效；之后再改，从下一次导航开始生效。其他网页视图和页面打开的窗口都没有它。 |
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自身的脚本之前运行。 |
 | `userAgent` | `string` | 平台默认 | 用户代理字符串。 |
-| `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
+| `scrollable` | `boolean` | `true` | 用户可以滚动页面。关闭时页面仍会收到触摸，它自己的拖动处理（滑块、拖拽排序）照常工作，脚本也仍可滚动它。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
 | `incognito` | `boolean` | `false` | 页面的网站数据（cookie、存储、缓存）只与网页视图同存亡，与应用的数据分开；Android 上网页视图加载时不使用 HTTP 缓存、不保存表单数据（见[网站数据](../docs/web-view-and-video.md#网站数据)）。在网页视图创建时读取。 |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | 仅 iOS：从边缘轻扫以后退和前进。 |

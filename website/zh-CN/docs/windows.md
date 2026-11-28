@@ -1,6 +1,6 @@
 ---
 title: Windows
-description: 在 Windows 上用 Direct2D 绘制的 Win32 窗口运行 Rust 和 TSX 编写的 NSH 应用、打包应用、用 AppView 嵌入 Win32 应用，以及 Windows 上的差异。
+description: 在 Windows 上用 Direct2D 绘制的 Win32 窗口运行 TSX 和 Rust 编写的 NSH 应用、打包应用、用 AppView 嵌入 Win32 应用，以及 Windows 上的差异。
 order: 14
 group: platforms
 ---
@@ -53,7 +53,7 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 
 `--fps`（`nsh run App.tsx --target windows --fps`、`nsh test --target windows --fps`、宿主的 `--fps`、Rust 应用在
 `run_app` 中用 `AppOptions { fps: true, .. }`、环境变量 `NSH_FPS=1`，或应用自己调用 `setFpsEnabled(true)`）每秒输出一行性能监视器读数（target `nsh::fps`）：显示的帧数与显示器刷新率、
-主线程每帧的耗时及其各阶段（`tick`、`drain`、`paint`、`present`、`canvas`）、引擎的 commit、CPU 和内存，格式与其他桌面平台一致
+主线程每帧的耗时及其各阶段（`tick`、`drain`、`paint`、`present`、`canvas`）、引擎的 commit、CPU 和内存，以及每帧重绘了窗口的多少（`drawn`：每帧重绘像素占窗口的平均比例；`whole`：整窗重绘的帧数），格式与其他桌面平台一致
 （毫秒，依次为 mean/p50/p95/max）。`nsh test --fps -v` 会显示这些读数，`examples/gallery/tools/perf.py` 会读取它们
 （[性能报告](./performance-report.md#windowswin32direct2d)）。请测量 release 构建；监视器关闭时没有任何开销。
 
@@ -85,6 +85,10 @@ JRSoftware.InnoSetup`）会把它编译成 `.nsh\out\<Name>-setup.exe`。安装�
 应用的[登录项](../modules/nsh-desktop.md#登录时打开)，前提是它启动的正是被卸载的这个副本。`nsh.json`
 中的图标会直接嵌入可执行文件（资源管理器和任务栏都会显示它），不需要额外的工具；在其他系统上打包则保留默认图标。应用 id
 用于在任务栏中归组应用的窗口。`--run` 会在打包后启动应用。可执行文件没有签名：要分发，请用你自己的证书签名（`signtool`）。
+
+TSX 应用的可执行文件只包含应用导入的 `nsh/base` 部件。在 x86_64 上，`nsh package` 用 nsh 发布版运行器预先编好的目标文件
+（`runtime\windows\nsh-windows-app.link\`）重新链接，去掉其余部件。这一步不需要 Rust，也不需要 Visual Studio：链接器是
+`windows-linker` [组件](./installation.md#组件)，第一次打包时下载。链接失败时，应用使用预编译的运行器，包含所有部件。
 
 ## 嵌入 Win32 应用
 
@@ -149,6 +153,14 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 `set_ui_sets(sets)` 设置每个引擎提供的 UI 集合：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，
 由 `#[native_module]` 生成），这样视图加载的 TSX 也能导入你的 Rust 组件和模块。
 
+## 在 Rust 中显示系统界面
+
+需要显示系统界面（菜单、对话框、分享浮出控件）的 Rust 代码，从发起调用的那个 surface 显示它。在主线程任务（`run_on_main_thread`）里，
+`nsh_platform_windows::presenting_window()` 是拥有没有元素作为锚点的界面的顶层窗口：surface 中用户所在的可见窗口；surface 不在任何可见窗口里时为
+`None`。NSH 自己绘制元素，元素没有自己的窗口：`element_bounds(node)` 给出这个 surface 中某个元素（元素 `ref` 的节点，即模块函数的
+`NodeRef` 参数；`ROOT_ID` 是 surface 的根）所在的窗口、它在该窗口客户区中的边界（单位为点），以及窗口的缩放比例，供在元素处弹出的菜单使用。
+两者都要在任务运行时读取。它们只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或销毁 NSH 拥有的窗口，也不在其中绘制。
+
 ## Windows 上的差异
 
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 `"10.0"`
@@ -187,7 +199,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 
 - **`WebView`**：位于 3D 变换（透视）视图内的网页不显示；网页上方的 `backdropFilter` 不会模糊网页。`baseUrl`
   只接受 `http(s)` 地址。自带窗口的原生组件始终位于 NSH 绘制的所有内容之上。
-- **视频**：只能播放已安装解码器支持的格式；没有封面图（poster）；开启 `controls` 时控制栏始终显示。
+- **视频**：只能播放已安装解码器支持的格式；开启 `controls` 时控制栏始终显示。
 - **`mixBlendMode` 和 `backdropFilter`** 会绘制，但在带 `filter` 或 3D 变换的视图内部不生效；`borderCurve: "continuous"`
   绘制为圆形圆角。
 - **文本**：头部和中间省略号只用于单行（多行时改为尾部省略号）；彩色 emoji 只支持 COLR 字体；小型大写字母只在字体提供时可用。
@@ -198,6 +210,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 
 ## 另见
 
+- [签名与分发](./packaging.md#sign-and-distribute)
 - [CLI](./cli.md)：`nsh run --target windows`、`nsh package --target windows`
 - [打包](./packaging.md)
 - [平台特定代码](./platform-specific.md)

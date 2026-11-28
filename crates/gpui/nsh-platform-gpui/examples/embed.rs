@@ -15,6 +15,11 @@
 //! (cd crates/gpui && cargo run -p nsh-platform-gpui --features dev --example embed -- ws://127.0.0.1:8790/ws)
 //! ```
 //!
+//! It installs a `log` logger of its own, as an embedding app does; with
+//! feature `dev` that logger also hands each line to `dev::forward`, so the
+//! app's `console.*`, its uncaught errors and this app's warnings reach the
+//! `nsh dev` terminal.
+//!
 //! The badge is laid out by nsh (sized to its text with
 //! `ComponentContext::set_size`), takes its own clicks (GPUI's), emits
 //! `tap` with the count and flashes on JS's `pulse` command. It takes the
@@ -36,6 +41,36 @@ fn main() {
         },
     };
     use serde_json::{Value, json};
+
+    /// This app's logger: prints to stderr and, with feature `dev`, also
+    /// forwards to the `nsh dev` terminal. Info, so `console.log` gets here.
+    struct Logger;
+
+    impl log::Log for Logger {
+        fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+            metadata.level() <= log::Level::Info
+        }
+
+        fn log(&self, record: &log::Record<'_>) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            eprintln!(
+                "{:>5} {} {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
+            #[cfg(feature = "dev")]
+            nsh_platform_gpui::dev::forward(record);
+        }
+
+        fn flush(&self) {}
+    }
+
+    static LOGGER: Logger = Logger;
+    log::set_logger(&LOGGER).expect("the first logger");
+    log::set_max_level(log::LevelFilter::Info);
 
     // The app's JS may import any part of `nsh/base`.
     nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry()]);

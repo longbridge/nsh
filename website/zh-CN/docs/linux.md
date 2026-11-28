@@ -1,6 +1,6 @@
 ---
 title: Linux
-description: 在 Linux 上用 GTK 4 窗口运行 Rust 和 TSX 编写的 NSH 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
+description: 在 Linux 上用 GTK 4 窗口运行 TSX 和 Rust 编写的 NSH 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
 order: 15
 group: platforms
 ---
@@ -21,13 +21,12 @@ NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用�
 - Web 视图及下载决策需要 **WebKitGTK 6.0**（2.42 及以上）：构建运行时需要 Debian 与 Ubuntu 上的 `libwebkitgtk-6.0-dev`、Arch 上的
   `webkitgtk-6.0`、Fedora 上的 `webkitgtk6.0-devel`。开发宿主和发布运行器默认使用它，因此打包后的应用运行的机器上需要装有
   WebKitGTK 6.0（Debian 与 Ubuntu 上为 `libwebkitgtk-6.0-4`；GNOME 桌面自带）。在没有它的开发包的机器上，`cargo xtask dist`
-  构建的运行时中 Web 视图为占位视图，其应用只需要 GTK。
-- **GStreamer** 1.14 及以上：GTK 通过它播放视频，NSH 用它播放声音。构建运行时需要它的开发包：Debian 与 Ubuntu 上为
-  `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev`，Arch 上为 `gstreamer gst-plugins-base`，Fedora 上为
-  `gstreamer1-devel gstreamer1-plugins-base-devel`。应用运行的机器上需要 GStreamer 及其 base 插件（桌面系统自带），以及应用要播放的
-  视频和音频格式对应的插件。开发包供 `Sound` 使用，即运行时的 Cargo feature `sound`：不播放音效的 Rust 应用在
-  `nsh-platform-linux` 上设置 `default-features = false` 并不启用这个 feature，就无需它们即可构建，视频和 `AudioPlayer`
-  仍通过 GTK 播放。
+  构建的运行时中 Web 视图为占位视图，其应用只需要 GTK。自带 Rust crate 的应用只在会创建 `WebView` 时才带 WebKitGTK
+  构建开发宿主和运行器，所以不用 Web 视图的应用 `nsh run` 时不编译它。
+- **GStreamer** 1.14 及以上：GTK 通过它播放视频，NSH 用它播放声音。构建时不需要它：应用第一次播放声音时 NSH
+  才加载 GStreamer。应用运行的机器上需要 GStreamer 及其 base 插件（桌面系统自带），以及应用要播放的视频和音频格式对应的插件。
+  没有 GStreamer 时应用照常启动，加载声音会失败，错误信息会写明缺少哪个库。应用没有导入 `Sound` 时，`nsh package` 构建的
+  TSX 应用 runner 不包含声音（运行时的 Cargo feature `sound`）；视频和 `AudioPlayer` 都通过 GTK 播放，不受影响。
 
 ## 运行应用
 
@@ -179,6 +178,14 @@ TSX 应用用 [`<Window>` 和 `Window.open`](../modules/nsh-desktop.md#windows) 
 `set_ui_sets(sets)` 设置每个引擎提供的 UI 集合：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，
 由 `#[native_module]` 生成），这样视图加载的 TSX 也能导入你的 Rust 组件和模块。
 
+## 在 Rust 中显示系统界面
+
+需要显示系统界面（popover、对话框、文件选择器）的 Rust 代码，从发起调用的那个 surface 显示它。在主线程任务（`run_on_main_thread`）里，
+`nsh_platform_linux::presenting_window()` 是对话框应当相对其成为临时窗口（transient）的窗口：surface 中用户所在的可见窗口；surface
+不在任何可见窗口里时为 `None`。`native_view(node)` 是这个 surface 中某个元素的 GTK 控件（元素 `ref` 的节点，即模块函数的 `NodeRef`
+参数；`ROOT_ID` 是 surface 的根控件），无论它在 surface 的哪个窗口里：属于这个元素的 popover 以它为父控件（popover 关闭后取消挂载，
+与 NSH 自己的菜单一样）。两者都要在任务运行时取得。它们只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的控件。
+
 ## Linux 上的差异
 
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为内核的主、次版本号，
@@ -219,6 +226,7 @@ Web 视图是绘制在 NSH 视图之内的 WebKitGTK 页面：sheet、对话框�
 
 ## 另见
 
+- [分发 Linux 应用](./packaging.md#distribute)
 - [CLI](./cli.md)：`nsh run --target linux`、`nsh package --target linux`
 - [打包](./packaging.md)
 - [平台特定代码](./platform-specific.md)

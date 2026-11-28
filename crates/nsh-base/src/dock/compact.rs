@@ -88,6 +88,9 @@ pub(crate) fn compact_view(a: AreaCx) -> AnyElement {
     };
     a.register(refs.clone());
     let tab_refs = refs.tabs.clone();
+    // The tab panel the strip's tabs control. Not the group's `content`,
+    // which drops would split: here a drop only reorders.
+    let content = element_ref();
     view()
         .flex_1()
         .flex_col()
@@ -106,6 +109,7 @@ pub(crate) fn compact_view(a: AreaCx) -> AnyElement {
                         .element_ref(&refs.bar)
                         .app_class(a.props.tab_bar_class)
                         .inline_style(a.props.tab_bar_style)
+                        .child(super::tab_group::prefix(a, current))
                         .child(super::tab_group::tab_strip(each(
                             move || tabs.get(),
                             |panel: &PanelId| panel.clone(),
@@ -121,7 +125,7 @@ pub(crate) fn compact_view(a: AreaCx) -> AnyElement {
                                         })
                                     })
                                 };
-                                tab(a, id, None, value, tab_refs.clone())
+                                tab(a, id, None, value, content, tab_refs.clone())
                             },
                         )))
                         // The group shown: the bar's tabs are every group's.
@@ -129,10 +133,12 @@ pub(crate) fn compact_view(a: AreaCx) -> AnyElement {
                 )
                 .child(
                     view()
+                        .role(AccessibilityRole::TabPanel)
                         .relative()
                         .flex_1()
                         .min_h(px(0.0))
                         .overflow_hidden()
+                        .element_ref(&content)
                         .app_class(a.props.content_class)
                         .inline_style(a.props.content_style)
                         .child(each(

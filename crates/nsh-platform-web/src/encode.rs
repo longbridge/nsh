@@ -1224,6 +1224,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 if !run.after.is_empty() {
                     out.s.push(',');
                     push_str(&mut out.s, &run.after);
+                } else if run.line_height.is_some() {
+                    out.s.push_str(",null");
+                }
+                // Its line's height, when not its own.
+                if let Some(height) = run.line_height {
+                    let _ = write!(out.s, ",{height}");
                 }
                 out.s.push(']');
             }
@@ -1272,7 +1278,9 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 out.s.push(']');
             }
             if !text.links.is_empty() || copies_sent {
-                // Links, as runs name them: `[node, events]`.
+                // Links, as runs name them: `[node, events]`, and its
+                // `href` after them when the link goes somewhere (drawn as
+                // an `<a href>`).
                 out.s.push_str(",[");
                 for (i, link) in text.links.iter().enumerate() {
                     if i > 0 {
@@ -1280,6 +1288,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     }
                     let _ = write!(out.s, "[{},", link.node);
                     push_events(&mut out.s, link.events);
+                    if let Some(href) = text.link_href(i) {
+                        out.s.push(',');
+                        push_str(&mut out.s, href);
+                    }
                     out.s.push(']');
                 }
                 out.s.push(']');
@@ -1389,6 +1401,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             out.item("shi").num(*id).end();
         }
         MountItem::NavShader { id, shader } => {
+            #[cfg(feature = "rust-parts")]
+            crate::shader::note(item);
             let layer = shader.as_ref().map(|s| &*s.layer);
             let ms = shader
                 .as_ref()
@@ -1399,7 +1413,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .num(ms)
                 .end();
         }
+        // GPU views draw nothing on this backend yet
+        // (`docs/dev/gpu-views.md`).
+        MountItem::GpuView { .. } => {}
         MountItem::Shader { id, layer } => {
+            #[cfg(feature = "rust-parts")]
+            crate::shader::note(item);
             out.item("sh")
                 .num(*id)
                 .raw(&crate::shader::encode_layer(layer.as_deref()))
@@ -1495,6 +1514,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 out.item("video")
                     .num(*id)
                     .opt_str(v.source.as_deref())
+                    .opt_str(v.poster.as_deref())
                     .bool(v.paused)
                     .bool(v.muted)
                     .num(v.volume)
@@ -1527,6 +1547,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         Command::Focus => out.item("cmd").num(id).str("focus").end(),
         Command::Blur => out.item("cmd").num(id).str("blur").end(),
         Command::ClearSelection => out.item("cmd").num(id).str("clearSelection").end(),
+        Command::SelectAll => out.item("cmd").num(id).str("selectAll").end(),
         Command::ScrollTo { x, y, animated } => {
             out.item("cmd")
                 .num(id)
@@ -1691,18 +1712,6 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             .str("pickScreenColor")
             .num(*request)
             .end(),
-        // `navigator.share`; a page shares no local files, so a share with
-        // files says only that it has some (`nsh.js` refuses it).
-        Command::Share { id: request, sheet } => out
-            .item("cmd")
-            .num(id)
-            .str("share")
-            .num(*request)
-            .opt_str(sheet.title.as_deref())
-            .opt_str(sheet.text.as_deref())
-            .opt_str(sheet.url.as_deref())
-            .bool(!sheet.files.is_empty())
-            .end(),
         Command::ReadClipboard {
             id: request,
             has_only,
@@ -1855,9 +1864,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             (true, nsh_core::desktop::DesktopCommand::Quit) => {
                 out.item("cmd").num(id).str("quit").end();
             }
-            _ => log::debug!("web: command {desktop:?} is not supported"),
+            _ => nsh_core::platform::warn_unsupported("web", desktop),
         },
-        other => log::debug!("web: command {other:?} is not supported"),
+        other => nsh_core::platform::warn_unsupported("web", other),
     }
 }
 
@@ -2082,5 +2091,26 @@ mod tests {
         );
         // Restarting is the browser's (the user reloads).
         assert_eq!(commands(nsh_core::ROOT_ID, DesktopCommand::Restart), "[]");
+    }
+
+    #[test]
+    fn a_videos_poster_reaches_the_browser() {
+        let props = nsh_core::VideoProps {
+            source: Some("https://example.com/clip.mp4".into()),
+            poster: Some("https://example.com/poster.png".into()),
+            ..Default::default()
+        };
+        let mut out = Out::new();
+        encode(
+            &mut out,
+            &MountItem::NativeProps {
+                id: 7,
+                props: NativeProps::Video(Box::new(props)),
+            },
+        );
+        assert_eq!(
+            out.finish(),
+            r#"[["video",7,"https://example.com/clip.mp4","https://example.com/poster.png",false,false,1,1,false,"contain",false,250]]"#
+        );
     }
 }

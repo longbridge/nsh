@@ -3,18 +3,20 @@ use std::{
     net::TcpStream,
     sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
+use tungstenite::{Message, WebSocket, protocol::WebSocketConfig, stream::MaybeTlsStream};
 
 use crate::protocol::{
-    BundleFormat, ClientMessage, HostPlatform, LogLevel, PROTOCOL_VERSION, RunningBuild,
-    ServerMessage, StepOutcome, TestStep,
+    BundleFormat, ClientMessage, HostPlatform, LogLevel, MAX_MESSAGE_SIZE, PROTOCOL_VERSION,
+    RunningBuild, ServerMessage, StepOutcome, TestStep,
 };
 
-/// Something the dev server told the host.
+/// Something the dev server told the host. Hosts ignore events they do not
+/// know (`_ => {}`), so the server can add events for some hosts only.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DevEvent {
     /// Connected (or reconnected) to the server.
     Connected,
@@ -23,6 +25,11 @@ pub enum DevEvent {
     /// The server runs a test session: keep the model of the app test
     /// steps need, from the first bundle on. Comes before the bundle.
     Testing,
+    /// The server's development session takes steps from `nsh test
+    /// --attach`, and the host said it takes them ([`HostInfo::attach`]):
+    /// keep the model of the app those steps need, from the first bundle
+    /// on, without changing how the app runs. Comes before the bundle.
+    Attachable,
     /// A step of the test: answer it with [`DevClient::step_done`] and its
     /// id.
     Step {
@@ -97,6 +104,8 @@ pub enum DevEvent {
         /// The app's id (`nsh.json` `"id"`): give it to the bundle
         /// (`Bundle::with_app_id`), as it names where the app keeps its data.
         app_id: Option<String>,
+        /// Checked URL scheme claims; an empty vector revokes earlier claims.
+        url_schemes: Vec<String>,
         /// The main window's launch-time options (`nsh.json` `"window"`,
         /// JSON): give them to the bundle (`Bundle::with_main_window`).
         window: Option<String>,
@@ -110,8 +119,11 @@ pub enum DevEvent {
     },
 }
 
-/// What a host tells the dev server about itself.
+/// What a host tells the dev server about itself. Hosts in other crates
+/// start from [`HostInfo::new`] and assign the fields they know, so a field
+/// added later does not break them.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct HostInfo {
     /// Human-readable device name, shown in the developer's terminal.
     pub device: String,
@@ -124,6 +136,24 @@ pub struct HostInfo {
     pub ui_sets: Vec<String>,
     /// It takes test steps ([`DevEvent::Step`]).
     pub tests: bool,
+    /// It takes steps in a development session too, from `nsh test
+    /// --attach` ([`DevEvent::Attachable`]).
+    pub attach: bool,
+}
+
+impl HostInfo {
+    /// A host of `platform` with nothing else said: no device name, no
+    /// bytecode version, no UI sets, and it takes no steps.
+    pub fn new(platform: HostPlatform) -> Self {
+        HostInfo {
+            device: String::new(),
+            platform,
+            bytecode_version: String::new(),
+            ui_sets: Vec::new(),
+            tests: false,
+            attach: false,
+        }
+    }
 }
 
 /// Connects a dev host to a dev server, reconnecting until dropped, and
@@ -155,41 +185,74 @@ impl DevClient {
             platform: Some(host.platform),
             ui_sets: Some(host.ui_sets),
             tests: host.tests,
+            attach: host.attach,
             running: None,
         };
         // The build the app reached, across reconnects. Hosts check each
         // patch's base themselves, so a patch the app could not apply only
         // makes the server's catch-up patches fall through to the bundle.
         let mut running: Option<RunningBuild> = None;
+        let attach = host.attach;
         thread::Builder::new()
             .name("nsh-dev-client".into())
             .spawn(move || {
-                let mut backoff = Duration::from_millis(100);
+                let mut backoff = MIN_BACKOFF;
+                // The last connection error reported, so a persistent one
+                // (a frame over the size limit) is not repeated each retry.
+                let mut reported: Option<String> = None;
                 loop {
                     // Dropped while disconnected: stop retrying.
                     if let Err(TryRecvError::Disconnected) = log_rx.try_recv() {
                         return;
                     }
-                    match tungstenite::connect(url.as_str()) {
+                    // The server sends a message in one frame: take frames
+                    // as large as the messages it sends (a test's pasted
+                    // files), not tungstenite's smaller default frame.
+                    let config = WebSocketConfig::default()
+                        .max_message_size(Some(MAX_MESSAGE_SIZE))
+                        .max_frame_size(Some(MAX_MESSAGE_SIZE));
+                    match tungstenite::client::connect_with_config(url.as_str(), Some(config), 3) {
                         Ok((socket, _)) => {
-                            backoff = Duration::from_millis(100);
                             on_event(DevEvent::Connected);
                             if let ClientMessage::Hello { running: said, .. } = &mut hello {
                                 *said = running;
                             }
-                            if let Err(SessionEnd::Shutdown) = session(
+                            let started = Instant::now();
+                            let reached = running;
+                            let end = session(
                                 socket,
                                 &hello,
                                 &log_rx,
                                 &reply_rx,
                                 &mut running,
+                                attach,
                                 &mut on_event,
-                            ) {
-                                return;
-                            }
+                            );
+                            let error = match end {
+                                Err(SessionEnd::Shutdown) => return,
+                                Err(SessionEnd::Disconnected(error)) => error,
+                                Ok(()) => None,
+                            };
                             on_event(DevEvent::Disconnected);
+                            // Only a session that got somewhere (a build
+                            // arrived, or it lasted) resets the backoff: one
+                            // the server ends right away, as with a frame
+                            // over the size limit, must not retry at 10 Hz.
+                            let progressed = running != reached || started.elapsed() >= STABLE;
+                            if progressed {
+                                backoff = MIN_BACKOFF;
+                                reported = None;
+                            } else {
+                                backoff = next_backoff(backoff);
+                            }
+                            if let Some(error) = error
+                                && reported.as_deref() != Some(error.as_str())
+                            {
+                                log::warn!("dev server connection error: {error}");
+                                reported = Some(error);
+                            }
                         }
-                        Err(_) => backoff = (backoff * 2).min(Duration::from_secs(2)),
+                        Err(_) => backoff = next_backoff(backoff),
                     }
                     thread::sleep(backoff);
                 }
@@ -229,8 +292,20 @@ impl DevClient {
     }
 }
 
+/// The first delay before reconnecting.
+const MIN_BACKOFF: Duration = Duration::from_millis(100);
+/// The longest delay between reconnects.
+const MAX_BACKOFF: Duration = Duration::from_secs(2);
+/// How long a session must last to count as working when no build arrived.
+const STABLE: Duration = Duration::from_secs(5);
+
+fn next_backoff(backoff: Duration) -> Duration {
+    (backoff * 2).min(MAX_BACKOFF)
+}
+
 enum SessionEnd {
-    Disconnected,
+    /// The connection ended, with the error that ended it, if any.
+    Disconnected(Option<String>),
     /// The `DevClient` was dropped.
     Shutdown,
 }
@@ -241,6 +316,7 @@ fn session(
     logs: &Receiver<ClientMessage>,
     replies: &Receiver<ClientMessage>,
     running: &mut Option<RunningBuild>,
+    attach: bool,
     on_event: &mut impl FnMut(DevEvent),
 ) -> Result<(), SessionEnd> {
     if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
@@ -258,6 +334,7 @@ fn session(
         source_map: bool,
         capabilities: Option<String>,
         app_id: Option<String>,
+        url_schemes: Vec<String>,
         window: Option<String>,
         application: Option<String>,
         limits: Option<String>,
@@ -283,14 +360,21 @@ fn session(
             {
                 continue;
             }
-            Err(_) => return Err(SessionEnd::Disconnected),
+            Err(err) => return Err(SessionEnd::Disconnected(Some(err.to_string()))),
         };
         match msg {
             Message::Text(text) => match serde_json::from_str::<ServerMessage>(&text) {
-                Ok(ServerMessage::Hello { session, test, .. }) => {
+                Ok(ServerMessage::Hello {
+                    session,
+                    test,
+                    attach: attachable,
+                    ..
+                }) => {
                     server_session = session;
                     if test {
                         on_event(DevEvent::Testing);
+                    } else if attachable && attach {
+                        on_event(DevEvent::Attachable);
                     }
                 }
                 Ok(ServerMessage::Step { id, step }) => on_event(DevEvent::Step { id, step }),
@@ -321,6 +405,7 @@ fn session(
                     source_map,
                     capabilities,
                     app_id,
+                    url_schemes,
                     window,
                     application,
                     limits,
@@ -332,6 +417,7 @@ fn session(
                         source_map,
                         capabilities,
                         app_id,
+                        url_schemes,
                         window,
                         application,
                         limits,
@@ -350,6 +436,7 @@ fn session(
                         source_map,
                         capabilities: None,
                         app_id: None,
+                        url_schemes: Vec::new(),
                         window: None,
                         application: None,
                         limits: None,
@@ -408,6 +495,7 @@ fn session(
                             source_map,
                             capabilities: p.capabilities,
                             app_id: p.app_id,
+                            url_schemes: p.url_schemes,
                             window: p.window,
                             application: p.application,
                             limits: p.limits,
@@ -415,7 +503,7 @@ fn session(
                     }
                 }
             }
-            Message::Close(_) => return Err(SessionEnd::Disconnected),
+            Message::Close(_) => return Err(SessionEnd::Disconnected(None)),
             _ => {}
         }
     }
@@ -428,5 +516,5 @@ fn send(
     let text = serde_json::to_string(msg).expect("serializable");
     socket
         .send(Message::Text(text.into()))
-        .map_err(|_| SessionEnd::Disconnected)
+        .map_err(|err| SessionEnd::Disconnected(Some(err.to_string())))
 }

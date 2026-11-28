@@ -43,6 +43,12 @@ pub(crate) struct PackagesConfig {
     /// The roots (`nsh keygen`'s `root.pub`, base64) whose certified
     /// release keys sign the app's packages.
     pub(crate) roots: Vec<String>,
+    /// `"runtime"`: the app's code names the feed at each check
+    /// (`checkForPackage({ url })`).
+    pub(crate) source: Option<nsh_updater::PackageSource>,
+    /// Runtime feeds may be plain HTTP, on one origin each.
+    #[serde(default)]
+    pub(crate) allow_http: bool,
 }
 
 /// The app's version, as packages have it.
@@ -67,6 +73,8 @@ fn runtime_config(config: &AppConfig, id: &str) -> anyhow::Result<Option<Config>
     runtime.packages = updater.packages.as_ref().map(|packages| {
         let mut runtime = Packages::default();
         runtime.roots = packages.roots.iter().map(|r| r.trim().to_owned()).collect();
+        runtime.source = packages.source;
+        runtime.allow_http = packages.allow_http;
         runtime
     });
     runtime.validate().context("nsh.json")?;
@@ -90,6 +98,7 @@ pub(crate) fn add_config(
     built.assets.push(crate::build::Asset {
         path: CONFIG_ASSET.to_owned(),
         source,
+        targets: Vec::new(),
     });
     Ok(())
 }
@@ -354,14 +363,16 @@ fn notes(args: &[String]) -> anyhow::Result<Notes> {
                 {
                     bail!("--notes: {tag} given twice");
                 }
-                let text = fs::read_to_string(file).with_context(|| format!("read {file}"))?;
+                let text =
+                    fs::read_to_string(file).with_context(|| format!("--notes: read {file}"))?;
                 tagged.push((tag.to_owned(), text.into_bytes()));
             }
             None => {
                 if default.is_some() {
                     bail!("--notes: more than one file without a tag");
                 }
-                default = Some(fs::read_to_string(arg).with_context(|| format!("read {arg}"))?);
+                default =
+                    Some(fs::read_to_string(arg).with_context(|| format!("--notes: read {arg}"))?);
             }
         }
     }
@@ -373,7 +384,10 @@ fn notes(args: &[String]) -> anyhow::Result<Notes> {
 
 /// `nsh update-manifest`.
 pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
-    let entry = crate::entry::resolve(&dunce::canonicalize(options.entry)?)?;
+    let entry = crate::entry::resolve(&dunce::canonicalize(options.entry)?).with_context(|| {
+        "nsh update-manifest reads the app's nsh.json (its \"updater\", \"id\", \"version\"): \
+         run it in the app's directory, or pass the directory as ENTRY"
+    })?;
     let config = crate::package::read_config(&entry)?;
     let (name, id) = crate::package::release_name_and_id(&entry, &config)?;
     let Some(runtime) = runtime_config(&config, &id)? else {
@@ -689,6 +703,29 @@ mod tests {
             .unwrap();
         assert_eq!(result, tar);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_package_keeps_a_runtime_package_source() {
+        let key = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=";
+        let config = |packages: &str| -> serde_json::Result<AppConfig> {
+            serde_json::from_str(&format!(
+                r#"{{ "version": "1.2.0", "updater": {{ "publicKey": "{key}",
+                    "packages": {{ "roots": ["{key}"], {packages} }} }} }}"#
+            ))
+        };
+        let runtime = runtime_config(
+            &config(r#""source": "runtime", "allowHttp": true"#).unwrap(),
+            "dev.app",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(runtime.runtime_packages() && !runtime.has_source());
+        assert!(runtime.package_feed("http://10.0.0.2/latest.json").is_ok());
+        // HTTP without a runtime source, and sources it does not know.
+        let fixed = config(r#""allowHttp": true"#).unwrap();
+        assert!(runtime_config(&fixed, "dev.app").is_err());
+        assert!(config(r#""source": "anywhere""#).is_err());
     }
 
     #[test]

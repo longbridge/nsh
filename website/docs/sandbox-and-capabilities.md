@@ -7,12 +7,14 @@ group: delivery
 
 # Sandbox and Capabilities
 
-An app written in Rust is native code compiled into the app that ships it, as the rest of that app is, and runs with
-its trust; its calls into NSH's services (`fetch`, images, web views, the status bar) go through the same native
-checks as TSX's, under what a host grants. The TSX and JavaScript an app runs, its own or a [signed
-package](./signed-packages.md) it downloads, run in a QuickJS VM per view, and everything they can do outside that VM
-goes through NSH's native runtime. That makes it possible to run code you did not write, such as third-party mini apps
-or downloaded updates, under rules the host app controls:
+The sandbox lets a host app run code it did not write, such as third-party mini apps or downloaded updates, under
+rules the host controls.
+
+The TSX and JavaScript an app runs, its own or a [signed package](./signed-packages.md) it downloads, run in a QuickJS
+VM per view, and everything they can do outside that VM goes through NSH's native runtime. Rust code is different: it
+is native code compiled into the app and runs with the app's trust. Its calls into NSH's services (`fetch`, images,
+web views, the status bar) still go through the same native checks as TSX's, under what a host grants. The runtime
+applies three layers:
 
 - **Limits** bound the memory, time and native resources one app can use.
 - **Hardening** removes the ways to turn strings into code in release builds.
@@ -222,6 +224,7 @@ own path. An app without `capabilities` loads local files as before.
 | `hosts` | `string[]` | Hosts a [web view](./web-view-and-video.md) may show and navigate to (`http` and `https`). Without `webview`, the app may not show web pages at all. |
 | `input` | `boolean` | A web view's ref may give its page trusted input ([`sendInput`](./web-view-and-video.md#input-as-the-users-own)). Never granted unless declared, also for an app without `"capabilities"`. |
 | `media` | `string[]` | What web pages may capture with `getUserMedia`: `"microphone"`, `"camera"`. Never granted unless declared, also for an app without `"capabilities"`. |
+| `runtimeOrigin` | `boolean` | A web view's `allowOrigin` may add one origin, decided while the app runs, to the hosts that web view may show ([`allowOrigin`](../elements/web-view.md)). Never granted unless declared, also for an app without `"capabilities"`. |
 
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
@@ -274,7 +277,7 @@ capability is what decides which code reaches them.
 
 ### `share`
 
-`"share": true` lets the app show the system's share sheet ([`Share`](../modules/nsh.md#share)): the user chooses
+`"share": true` lets the app show the system's share sheet (`nsh-extra`'s [`Share`](./nshm.md#share)): the user chooses
 where the content goes. A shared file must also be readable under `fs.read`.
 
 ### `speech`
@@ -306,7 +309,8 @@ shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.resta
 ([`AppSettings.open()`](../modules/nsh-mobile.md#appsettings) of `nsh/mobile`; for an embedded view, the embedding
 app's page). Without it they do nothing, `Application.launchAtLogin()` and `AppSettings.available()` resolve `false`,
 and `setLaunchAtLogin` and `AppSettings.open()` reject with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
-granted by [`windows`](#windows), so neither needs it.
+granted by [`windows`](#windows), so neither needs it. nsh.json's [`window`](./project-structure.md) launch settings are
+the host's, applied before the app runs, so they need neither.
 
 ### `homeDir`
 
@@ -332,7 +336,7 @@ for every kind but overlays, or an object that narrows it:
 | `kinds` | `string[]` | The kinds it may open: `"normal"`, `"dialog"`, `"panel"`, `"popup"`, `"overlay"`. Missing: every kind but `"overlay"`. |
 | `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
 | `max` | `number` | How many windows of its own may be open at once, the first window included. Missing: any number. |
-| `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
+| `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"` or `"box-none"`). Never granted unless declared, also for an app without `"capabilities"`. |
 
 `overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
 Every window needs the grant, the first one included: no window is privileged.

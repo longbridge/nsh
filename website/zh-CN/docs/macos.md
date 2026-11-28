@@ -1,6 +1,6 @@
 ---
 title: macOS
-description: 在 macOS 上用 AppKit 窗口运行 Rust 和 TSX 编写的 NSH 应用、打包为 .app、用 AppView 嵌入 Mac 应用，以及 macOS 上的差异。
+description: 在 macOS 上用 AppKit 窗口运行 TSX 和 Rust 编写的 NSH 应用、打包为 .app、用 AppView 嵌入 Mac 应用，以及 macOS 上的差异。
 order: 13
 group: platforms
 ---
@@ -51,6 +51,22 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 `--window-size` 是窗口的初始尺寸（TSX 应用）；窗口可以调整大小。`--display <n>`（`nsh run` / `nsh test --target macos --display <n>`）让窗口在第 `n` 个显示器上居中打开：`1` 是主显示器，即带菜单栏的那个。
 
 `nsh test --target macos` 在 macOS 窗口中运行 TSX 应用的测试，有副显示器时窗口开在副显示器上（主屏留给你用；`--display <n>` 可以另选）：测试打开的每个应用都有自己的窗口，尺寸就是测试要求的尺寸，显示器比窗口矮时也一样；步骤用系统的输入在选择器指向的视图上点击、输入和滚动（[测试](./testing-and-trace.md#在真实平台上运行)）。应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里（`--foreground` 让它们成为当前活跃的应用），点击会像在活跃窗口中一样到达应用的视图，隐藏的标题栏下也是如此。
+
+### 为开发宿主签名
+
+`nsh run` 的 macOS 宿主默认是 ad hoc 签名，即 Rust 工具链产出时的样子。macOS 把应用的钥匙串项和它的签名绑定，而 ad hoc
+签名每次构建都会变：应用的 Rust 代码重新编译后，再读取之前保存的钥匙串项时，macOS 会先要求输入钥匙串密码。把你的签名身份
+（即 [`nsh package --sign`](./packaging.md#macos) 使用的那个）传给 `nsh run`，用它给宿主签名：
+
+```sh
+security find-identity -v -p codesigning           # 这台 Mac 上的签名身份
+nsh run --sign "Apple Development: Jane Doe (ABCDE12345)"
+```
+
+宿主随后以应用的 id 和你的证书签名，这个签名在每次构建之间保持不变，应用在重新编译后仍能访问它的钥匙串项。用同一身份签名的
+安装包具有相同的签名要求。`nsh run` 签名的是应用 `.nsh/` 目录里的一份宿主副本，只在宿主重新构建或身份变化时重新签名。
+`codesign` 第一次使用该身份的私钥时，macOS 可能会询问是否允许；选择**始终允许**，之后的重新编译就不会再询问。宿主签名时不启用
+Hardened Runtime，调试器可以附加到它上面；`nsh package --sign` 会为分发加上 Hardened Runtime 和安全时间戳。
 
 ### 性能监视器
 
@@ -237,6 +253,14 @@ view.load(Bundle::source(code).into());
 `AppOptions { transparent: true, ..Default::default() }` 为自定义 Rust 宿主的 `run_app` 窗口提供透明的初始默认值，让未绘制的区域显示窗口后面的内容。显式主窗口属性及后续窗口更新优先于这个默认值。标准宿主保持此选项为 `false`，但可以通过窗口配置请求透明；视图的 `behindWindow` 材质本身不会让窗口透明。
 嵌入的 `AppView` 不会改动它所在的窗口：需要同样效果时，请把自己的 `NSWindow` 设为 nonopaque，并给它透明的 `backgroundColor`。
 
+## 在 Rust 中显示系统界面
+
+需要显示系统界面（分享菜单、popover、sheet）的 Rust 代码，从发起调用的那个 surface 显示它。在主线程任务（`run_on_main_thread`）里，
+`nsh_platform_macos::presenting_view(mtm)` 是没有元素作为锚点时显示它的视图：surface 中用户所在的可见窗口的内容视图，被嵌入时是
+surface 自己的视图；surface 不在任何可见窗口里时为 `None`。`native_view(mtm, node)` 是这个 surface 中某个元素的 `NSView`（元素
+`ref` 的节点，即模块函数的 `NodeRef` 参数；`ROOT_ID` 是 surface 的根视图），无论它在 surface 的哪个窗口里：属于这个元素的菜单从它弹出。
+NSH 的视图是翻转坐标的（flipped）。两者都要在任务运行时取得。它们只用于锚定和显示系统界面：模块绝不修改、重新挂载、改变样式或移除 NSH 拥有的视图。
+
 ## 来自其他代码的通知
 
 远程通知以及其他原生代码安排的通知不会触发 `Notifications` 的 `press`，而是交给 Rust 代码用
@@ -248,7 +272,7 @@ view.load(Bundle::source(code).into());
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
-输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。触控板轻点产生的按下和抬起即使连续到达，也会短暂显示应用的 `active:` 反馈；按压回调仍在抬起时触发。开启减少动态效果时，视觉状态仍立即释放。可缩放的滚动视图用触控板捏合或 Control + 滚轮以指针为中心缩放，缩放后可以双向滚动。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
+输入是桌面输入：鼠标、触控板（带惯性的滚动，越过边缘时像 AppKit 的滚动视图一样拉伸并回弹；捏合和旋转）和键盘。触控板轻点产生的按下和抬起即使连续到达，也会短暂显示应用的 `active:` 反馈；按压回调仍在抬起时触发。开启减少动态效果时，视觉状态仍立即释放。可缩放的滚动视图用触控板捏合或 Control + 滚轮以指针为中心缩放，缩放后可以双向滚动。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
 Escape、Option+Left、Cmd+[ 和鼠标的后退键会关闭最新的对话框或在栈中返回（焦点在输入框或网页中时，Escape 只会离开它；
 网页先收到这些按键，它自己用掉的不会触发返回）；`Dialog` 是覆盖整个窗口的一层，显示应用的弹出层和背景。页面在顶部显示它的 `header`。
 点击 `Input` 的任意位置（包括内边距）都会把光标放到最近的位置。
@@ -275,6 +299,7 @@ VoiceOver 和 UI 自动化工具将 `Table` 和 `Grid` 读取为 `AXTable`，将
 | Option+Left、Cmd+[、鼠标后退键 | 返回（输入框有焦点时不会：此时 Option+Left 移动光标） |
 | Option / Cmd + 方向键（可加 Shift）；Option+Delete、Cmd+Delete；Ctrl+A / E / K | 在输入框中按词和按行移动、选择和删除，与所有 Mac 应用一致 |
 | Cmd+Z、Shift+Cmd+Z、Cmd+X / C / V / A | 撤销、重做、剪切、复制、粘贴、全选（`masked` 输入框拒绝剪切和复制）；Cmd+A / Cmd+C 选择并复制 可选择的文本 |
+| Shift + 方向键（可加 Option 或 Cmd）；Shift+Home / End | 扩展最后按下的可选择视图的选区：按字符或按行，按词或按段落（Option），到行或视图的开头 / 结尾（Cmd、Home / End）；外围的滚动视图随之滚动 |
 | 方向键；Page Up / Down、Space、Shift+Space、Option+Up / Down；Home / End、Cmd+Up / Down | 滚动有焦点的视图所在或鼠标下方的滚动视图：一行、一页、到开头 / 结尾（输入框有焦点时不滚动） |
 | Cmd+W、Cmd+M、Ctrl+Cmd+F、Cmd+H、Option+Cmd+H、Cmd+Q | 关闭、最小化、全屏、隐藏、隐藏其他、退出（`nsh package` 和 `nsh run` 应用的菜单） |
 | Cmd+R | 重新加载最新的构建（`nsh run`） |
@@ -306,6 +331,7 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 
 ## 另见
 
+- [签名、公证与分发](./packaging.md#sign-notarize-and-distribute)
 - [CLI](./cli.md)：`nsh run --target macos`、`nsh package --target macos`
 - [打包](./packaging.md)
 - [平台特定代码](./platform-specific.md)

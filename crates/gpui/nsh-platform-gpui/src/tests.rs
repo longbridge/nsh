@@ -160,6 +160,7 @@ fn ime(
 
 /// Runs the window (and waits for the engine's thread) until the focused
 /// field reads `text`.
+#[track_caller]
 fn wait_for(view: &Entity<AppView>, cx: &mut VisualTestContext, text: &str) {
     let start = Instant::now();
     loop {
@@ -298,6 +299,7 @@ fn windows(cx: &mut TestAppContext) {
     presses_carry_where_the_pointer_was(cx);
     a_click_that_focuses_a_field_selecting_on_focus_selects_its_text(cx);
     files_dropped_from_outside_reach_the_view_under_them(cx);
+    files_dropped_after_a_key_press_still_reach_the_view_under_them(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
     mouse_events_carry_the_position_button_and_modifiers(cx);
     a_view_removed_under_the_mouse_hears_no_leave(cx);
@@ -308,6 +310,7 @@ fn windows(cx: &mut TestAppContext) {
     js_and_rust_view_shortcuts_fire_together_in_either_order(cx);
     each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
     quit_and_close_requests_go_to_the_handler_instead_of_acting(cx);
+    the_quit_shortcut_asks_the_app_without_quitting(cx);
     an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx);
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
     the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx);
@@ -1225,6 +1228,61 @@ fn a_click_that_focuses_a_field_selecting_on_focus_selects_its_text(cx: &mut Tes
     wait_for(&view, cx, "xyz");
 }
 
+/// A key press turns GPUI's input modality to keyboard, under which no hitbox
+/// counts as hovered, and a file drag's events do not turn it back: the drop
+/// must still reach the view under the pointer (#3459).
+fn files_dropped_after_a_key_press_still_reach_the_view_under_them(cx: &mut TestAppContext) {
+    let source = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+const log = signal<string[]>([]);
+const add = (entry: string) => log.set([...log(), entry]);
+mount(() => <View style={{ flex: 1 }}>
+  <View
+    onFileDragEnter={() => add("enter")}
+    onFileDragLeave={() => add("leave")}
+    onFileDrop={(e) => add("drop " + e.uris.join(";"))}
+    style={{ height: 100 }}
+  />
+  <Input autoFocus readonly value={log().join(", ") || "none"} style={{ height: 30 }} />
+</View>);
+"#;
+    let code = nsh_bundler::compile_module("App.tsx", source, &[]).unwrap();
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "none");
+    let origin = view.read_with(cx, |view, _| view.surface().origin.get());
+    let at = gpui::point(gpui::px(origin.0 + 10.0), gpui::px(origin.1 + 50.0));
+    // The pointer rests over the destination, then a key is pressed.
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::default());
+    cx.simulate_keystrokes("right");
+    let send = |cx: &mut VisualTestContext, event: gpui::FileDropEvent| {
+        cx.update(|window, cx| {
+            window.dispatch_event(gpui::PlatformInput::FileDrop(event), cx);
+        });
+        cx.run_until_parked();
+    };
+    let paths = gpui::ExternalPaths(
+        vec![std::path::PathBuf::from(crate::file_drop::test_path(
+            "k.txt",
+        ))]
+        .into(),
+    );
+    send(
+        cx,
+        gpui::FileDropEvent::Entered {
+            position: at,
+            paths,
+        },
+    );
+    send(cx, gpui::FileDropEvent::Pending { position: at });
+    wait_for(&view, cx, "enter");
+    send(cx, gpui::FileDropEvent::Submit { position: at });
+    let dropped = crate::file_drop::test_url("k.txt");
+    wait_for(&view, cx, &format!("enter, drop {dropped}, leave"));
+}
+
 fn files_dropped_from_outside_reach_the_view_under_them(cx: &mut TestAppContext) {
     let source = r#"
 import { mount, signal, View } from "nsh";
@@ -1372,8 +1430,36 @@ fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
     wait_for(&view, cx, "at 10 12 in 18 20");
 }
 
+/// Runs the window until the engine has run everything sent to it so far
+/// and the window has applied the batches that made.
+#[track_caller]
+fn flush_engine(view: &Entity<AppView>, cx: &mut VisualTestContext) {
+    let (done, flushed) = std::sync::mpsc::channel();
+    view.read_with(cx, |view, _| {
+        view.surface().control(|control| {
+            control.flush(move |_| {
+                let _ = done.send(());
+            });
+        });
+    });
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        if flushed.try_recv().is_ok() {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the engine never flushed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    cx.run_until_parked();
+}
+
 /// Runs the window until the focused field's text satisfies `done`, and
 /// returns it.
+#[track_caller]
 fn wait_until(
     view: &Entity<AppView>,
     cx: &mut VisualTestContext,
@@ -1402,6 +1488,35 @@ impl gpui::Render for Framed {
         use gpui::ParentElement as _;
         div().size_full().child(self.0.clone())
     }
+}
+
+fn the_quit_shortcut_asks_the_app_without_quitting(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+import { mount, signal } from "nsh";
+import { Input } from "nsh/base";
+import { Application } from "nsh/desktop";
+
+function App() {
+    const status = signal("waiting");
+    Application.on("quitRequest", () => status.set("quit requested"));
+    return <Input autoFocus value={status()} style={{ height: 30 }} />;
+}
+mount(App);
+"#,
+        &[],
+    )
+    .unwrap();
+    let (view, cx) = owned_view(cx, inline_options(), code, |_| {});
+    wait_for(&view, cx, "waiting");
+    flush_engine(&view, cx);
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-q"
+    } else {
+        "ctrl-q"
+    });
+    wait_for(&view, cx, "quit requested");
 }
 
 /// Opens a window whose root holds an [`AppView`] that owns the window,
@@ -2284,6 +2399,9 @@ fn a_command_without_a_search_field_takes_the_keyboard_on_focus(cx: &mut TestApp
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+    // The command binds its keys once the engine hears of the focus: they
+    // reach the window's keymap in a later batch.
+    flush_engine(&view, cx);
     // Its keys reach it: Down moves to the next item, Return chooses it.
     cx.simulate_keystrokes("down");
     cx.run_until_parked();

@@ -72,6 +72,12 @@ pub(crate) struct Surfaces {
     shown: Option<usize>,
 }
 
+// SAFETY: IOSurfaces are kernel objects any thread may use (Core Video and
+// Metal hand them between threads); a view's surfaces move to the render
+// thread of its GPU views (`crate::gpu`) whole, behind a mutex, and are
+// used by one thread at a time.
+unsafe impl Send for Surfaces {}
+
 /// No surface can be made: the device is not Metal's, or IOSurface refused
 /// (the view reads its frames back then).
 #[derive(Debug)]
@@ -109,14 +115,13 @@ impl Surfaces {
         &self.slots[i].view
     }
 
-    /// The frame `serial` was submitted into slot `i`: ready once the GPU
-    /// did the work submitted so far (heard at a later device poll).
-    pub(crate) fn submitted(&mut self, i: usize, serial: u64, queue: &wgpu::Queue) {
+    /// The frame `serial` goes into slot `i`, rendering from now on; ready
+    /// once the GPU did the work submitted with it ([`Submitted`]).
+    pub(crate) fn submitting(&mut self, i: usize, serial: u64) -> Submitted {
         let slot = &mut self.slots[i];
         slot.serial = serial;
         slot.state.store(state::RENDERING, Ordering::Release);
-        let flag = slot.state.clone();
-        queue.on_submitted_work_done(move || flag.store(state::DONE, Ordering::Release));
+        Submitted(slot.state.clone())
     }
 
     /// Shows the newest frame done, if newer than the one shown; `true`
@@ -204,6 +209,24 @@ pub(crate) fn when_done(queue: &wgpu::Queue, f: impl FnOnce() + Send + 'static) 
     unsafe { buffer.addCompletedHandler(block2::RcBlock::as_ptr(&block)) };
     buffer.commit();
     true
+}
+
+/// Whether `queue` is Metal's ([`when_done`] can tell).
+pub(crate) fn is_metal(queue: &wgpu::Queue) -> bool {
+    // SAFETY: the raw queue is only looked at.
+    unsafe { queue.as_hal::<wgpu::hal::api::Metal>() }.is_some()
+}
+
+/// A slot's frame on its way to the GPU ([`Surfaces::submitting`]).
+pub(crate) struct Submitted(Arc<AtomicU8>);
+
+impl Submitted {
+    /// Its frame was submitted to `queue`: done once the GPU did the work
+    /// submitted so far (heard at a later device poll).
+    pub(crate) fn after_submit(self, queue: &wgpu::Queue) {
+        let flag = self.0;
+        queue.on_submitted_work_done(move || flag.store(state::DONE, Ordering::Release));
+    }
 }
 
 /// One surface and its texture on `device`.

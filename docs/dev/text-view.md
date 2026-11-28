@@ -37,7 +37,10 @@ colored with the theme's tokens; the app restyles each part over it.
   position, same kind) and only that row is made again. A block that changes kind mid-stream (a paragraph becoming a
   table once its delimiter row arrives) gets a new row. A row's item (`Row`) is its block (shared), its position,
   what comes before it (a heading's room above it) and whether it is the last (the caret's), so a row hears of a
-  change through its own item alone and an update runs no memo per row. Footnotes follow the blocks in one region of
+  change through its own item alone and an update runs no memo per row. A row's root is a view only because an `Each`
+  keeps rows by their root's key; it passes its position on (`Element::__pass_position`), as do the views `block` wraps
+  a block in (the caret's line, a terminal's blank row), so a part's `first:` / `last:` read the block's place among
+  the blocks, as they do inside a quote. Footnotes follow the blocks in one region of
   their own.
 - **Built on `Text`** (`text.md`): every paragraph, heading, table cell and code block is one native text
   block, so wrapping, font scale, selection, span backgrounds (inline code), pressable
@@ -156,7 +159,9 @@ regexes on the web (`regex-fancy`; no C there) and Oniguruma's on the native run
 compile about 20 times faster and match 3 to 4 times faster; syntect takes it when both are on), and two-face's syntaxes (bat's set: syntect's own
 plus TypeScript / TSX, TOML, Dockerfile, ...). A block's language is found by extension or name, case-insensitive
 (`ts`, `tsx`, `rs`, `py`, `sh`, `yml`, `md`, `Rust`, ...) plus the other names fences use (`jsx`, `shell`, `golang`,
-`c++`, `csharp`, `jsonc`, ...); no language, `text` or one syntect does not know leaves the block plain.
+`c++`, `csharp`, `jsonc`, ...), mostly highlight.js's; a whole info string that names none (`ts title="a.ts"`,
+`rust,ignore`, as a `RichEditor` block's `language` can hold) is read by its first word. No language, `text` or one
+syntect does not know leaves the block plain.
 
 Colors: Allsum's reading palette (its `--hl-*` tokens, light and dark). TextMate scopes map to its kinds of token in code
 (`token()`), not through syntect themes: one parse gives one range list whose colors are `AdaptiveColor`s, so both
@@ -227,26 +232,29 @@ build without syntect. Without the feature, code blocks the app does not highlig
   `:::`, as `remark-directive`).
 - **Rust plugins** (`MarkdownPlugin`) read mdast nodes themselves: `configure` turns on markdown-rs constructs,
   `block` / `inline` read a node (the first plugin returning `Some` wins; `ParseContext` reads children as the parser
-  does), `render` shows a custom node in Rust. A view provides them to every `TextView` below it with
+  does; `ParseContext::conversion_id` is the same in every callback of one conversion, a `Parser::markdown` call or a
+  text a view reads, and new for each), `render` shows a custom node in Rust. A view provides them to every `TextView` below it with
   `provide_context(MarkdownPlugins::new().with(..))`. A plugin's `render` comes before `renderCustom`, which comes
   before the node's content.
-- **`MarkdownOptions`**: `math`, `html`, `alerts` (default on), `frontmatter`, `mdx`, `streaming` (default off).
+- **`MarkdownOptions`**: `math`, `html`, `alerts`, `links`, `images` (default on), `frontmatter`, `mdx`, `streaming` (default off).
   With `mdx`, JSX elements are custom nodes named by their tag and `{expressions}` custom nodes `expression`; raw HTML
   is then text.
 
 ## Streaming
 
 With `options.streaming`, `markdown/streaming.rs` repairs the last block of the text before parsing (the blocks before
-it are complete; a text ending inside a fenced code or `$$` block needs nothing): emphasis, strong, strikethrough
-(`**`, `*`, `__`, `_`, `~~`), inline code and formulas left open are closed in the reverse order they opened, a marker
-with nothing after it yet is removed (so is half a formula closer, `\[1\` reads as `\[1\]`, which escaped brackets
-around a reference number keep as text); `[text` and `[text](partial` show as their text, `![alt` and `![alt](partial`
-are removed; an HTML tag being typed (`<di`, `<a href="x`) is removed; a table's header followed by the start of its
-delimiter row is completed to a table (and a lone `-` under it is no heading). A last line not yet ended whose meaning the next
-characters decide is held back: a list marker alone, digits that may become one, a line of `-` or `=` (an underline
-now, a rule, an item or text later), a fence's opening line and the start of its closer; a lone `*` inside a word
-(`a*b`) is never closed. So a reply never flashes literal `**`
-or `[` while the next chunk is on its way. The repair is a `Cow`: text with nothing open is parsed as it is.
+it are complete; a text ending inside a fenced code or `$$` block needs nothing): emphasis, strong, strikethrough (`**`,
+`*`, `__`, `_`, `~~`), inline code and formulas left open are closed in the reverse order they opened, a marker with
+nothing after it yet is removed (so is half a formula closer, `\[1\` reads as `\[1\]`, which escaped brackets around a
+reference number keep as text), and a closer typed in part (`**bold*`, `~~del~`, `` ``a`b` ``) is completed rather than
+followed by a whole one; `[text`, `[text]` at the end and `[text](partial` show as their text, `![alt`, `![alt]` and
+`![alt](partial` are removed (a footnote reference and an alert marker stay); an HTML tag being typed
+(`<di`, `<a href="x`) is removed; a table's header followed by the start of its delimiter row is completed to a table
+(and a lone `-` under it is no heading). A last line not yet ended whose meaning the next characters decide is held
+back: a list marker alone, digits that may become one, an item's task box alone (`- [x]`), a line of `-` or `=` (an
+underline now, a rule, an item or text later), a fence's opening line and the start of its closer; a lone `*` inside a
+word (`a*b`) is never closed. So a reply never flashes literal `**` or `[` while the next chunk is on its way. The
+repair is a `Cow`: text with nothing open is parsed as it is.
 
 ### Reading only what can change
 
@@ -339,7 +347,7 @@ only when its color is a CSS color (`selection.rs` `style_color`): a document of
 On the terminal backend (`is_terminal()`) the document takes the forms of a terminal reader, in `text_view/view.rs`
 next to the screen forms; the full list is `TextView`'s row in `docs/dev/components.md` "In a terminal". In short:
 blocks are one blank row apart and nothing trails the last (`shown_before` skips the blocks that show nothing: a
-rule, a paragraph of images without alt text); headings drop their `#` marks and take their level's color in bold,
+rule); headings drop their `#` marks and take their level's color in bold,
 with a `─` rule under h1 only (`terminal_heading`); a quote is `▎` in the accent before muted text; code blocks and
 formulas are bands as wide as their longest line plus a Cell each side (`terminal_band`), a code block under its
 language label; an alert is one band across the body text's width, its icon and text a Cell in, and keeps a `│` in its

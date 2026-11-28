@@ -151,11 +151,20 @@ Things that were found the hard way. Read the section of the area you change bef
   become the first responder and take typed text. Without it a hidden input (the `Editor`'s sink at its caret) takes
   the touches of whatever lies under it. A JS responder that blocks also cancels the `PressRecognizer`s of the views
   around it (`set_js_responder`): they keep tracking a finger a descendant took, and its lift was a press on them.
+- **UIKit repeats a held Delete only while the input has text** (`hasText`) before its caret: in an empty input the
+  keyboard deletes once. A sink (no caret and transparent text, `is_sink`: an editor's, which holds the text itself)
+  answers `hasText` YES whatever it holds, and the `RichEditor` keeps the text before its caret in its sink.
 
 - **Retained navigation tabs hide the stack's container or an ancestor, not the navigation controller's view**:
   check the entire ancestor chain before a stack updates a shared system tab bar, including from transition
   callbacks. Visibility changes synchronize the newly visible stack after the batch. `TabBar.hidden` and the
   visible stack's request are independent reasons: each updates its own state, and either keeps the bar hidden.
+
+- **A `TabBar`'s element takes no press of its own** (`pointerEvents: box-none`, `mobile.rs`): the bar's view fills it
+  while the bar shows, and the bar takes every press. An element left `auto` answers UIKit's hit test in the strip it
+  keeps while the bar is out of sight (`hidden`, or a pushed page's `hidesBottomBarWhenPushed` moving it below the
+  bottom), and swallows the presses of a control the app draws there (a floating action bar); turning the bar's
+  `userInteractionEnabled` off in `apply_bottom_hidden` does not help, the element still hit-tests to itself (#3043).
 
 - **A standalone `UITabBar` can establish its natural height before its native component host is sized** (verified on
   the iOS 27 simulator). Flexible-height autoresizing then adds the host's height to that initial height. In
@@ -169,6 +178,15 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **UIFont and CTFont are toll-free bridged**: the text engine gets system fonts with `UIFont::systemFontOfSize_weight` and uses them as
   CTFonts (verified by rendering). CoreText attributes must use CT keys (colors are CGColors), not UIKit's NSForegroundColor.
+- **CoreText synthesizes no italic** (macOS too; verified on macOS 26 and the iOS 26 simulator): a family without an italic face (PingFang,
+  Hiragino, a family shipped without its italic files) has no italic copy (`CTFontCreateCopyWithSymbolicTraits` returns
+  NULL), and the fonts an italic face falls back to stay upright (CJK in SF's italic). A shear in a font's matrix leans
+  it, and CoreText draws the fonts it falls back to from it with the same matrix; a matrix on a cascade list's
+  descriptors (`kCTFontMatrixAttribute`) is ignored. So such a family's italic is the font leaning
+  (`core_text::italic`), and `core_text::slant_fallbacks` typesets an italic span that has characters its font lacks
+  and sets each run in an upright fallback font to that font leaning. `CTLineDraw` draws each run in its font's matrix,
+  `CTRunDraw` in the context's text matrix alone: macOS, which draws run by run (`draw_glyphs`), sets each run's
+  (`CTRunGetTextMatrix`) first.
 - **Catalyst's Mac idiom does not support `UIRefreshControl`** (attaching one throws `_UICatalystUnsupportedMacIdiomBehavior`): in the Mac
   idiom the pull is detected in the scroll delegate and shown with a spinner + contentInset; iOS uses the native control unless the
   app draws its own indicator (`refreshIndicator`), which `UIRefreshControl` cannot give way to: then it takes the Mac idiom's way,
@@ -182,7 +200,11 @@ Things that were found the hard way. Read the section of the area you change bef
   changes. A stack laid out in the frame its first screen arrives leaves the bar at an inline title's height
   (`sizeThatFits` gives the large one). `fit_large_title` sizes the bar when a stack shows a screen whose content is
   at its top. A scroll view on screen that starts to adjust its insets (`contentInsetAdjustmentBehavior` automatic)
-  keeps its offset under the header. The mounter moves it to its top when it switches.
+  keeps its offset under the header. The mounter moves it to its top when it switches. Toggling `headerLargeTitle` in
+  place on the top screen also leaves `UINavigationBar.sizeThatFits` at inline height when enabling large titles, so
+  `follow_large_title` toggles `setNavigationBarHidden` off/on to expand the bar (`fit_large_title` afterwards) and
+  calls `sizeToFit` to shrink it when turning large titles off, while switching `contentInsetAdjustmentBehavior` between
+  `Automatic` and `Never`.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
@@ -223,6 +245,10 @@ Things that were found the hard way. Read the section of the area you change bef
   range the text never had (`NSMutableRLEArray` out of bounds). Inserting other text from the delegate during that
   paste crashes the same way. An input with `maxLength` therefore pastes by itself (`input::paste_text`): it clips the
   text, asks the delegate and calls `insertText:`, whose undo is right.
+- **An input method's marked range and caret are drawn in the input's tint whatever its colors**: an editor's sink
+  (transparent text, `caret={false}`, whose `caretRectForPosition:` is empty) showed UIKit's blue marked range and
+  caret at the editor's caret while composing pinyin. An input that draws no caret and no text is tinted clear
+  (`input.rs`, `is_sink`); an app's `caret={false}` input with visible text keeps its tint for the selection.
 - **UIKit passes nil where `UITextInput` declares a position or range nonnull** (a secondary click on selectable text
   with nothing selected moves a nil position): a method a class defines with `define_class!` takes these as `Option`,
   since a `&T` is a null reference then and objc2's debug-build nil check on messaging it aborts the app.
@@ -264,7 +290,13 @@ Things that were found the hard way. Read the section of the area you change bef
   safe area (the bottom of whatever bar UIKit shows) as their header (`Core::set_screen_header`), and the stack's bar gets
   the screen's appearance as well as its navigation item.
 - **Catalyst's Mac idiom presents page / form sheets as macOS sheets** at a default size wider than a 390pt window: they get
-  the window's size as `preferredContentSize`. Standalone apps have a white root view (UIKit windows are black).
+  the window's size as `preferredContentSize`.
+- **UIKit resizes the standalone window before the surface commits its new layout**: the window and root controller's
+  view keep the previous backdrop until that layout is ready, then use the first mounted child's opaque background
+  if it covers the surface without rounded corners, a clip path, or a mask. Animated color and coverage changes
+  follow the same rule; native keyframes and active opacity or transform animations do not supply a backdrop.
+  A finite native animation that blocks the current backdrop is rechecked on display frames until it settles.
+  The fallback is white in either appearance, since default text is black.
 - **iOS clamps shared corner radii itself** (`rounded-full` is 9999): Core Animation does not reliably clamp a `cornerRadius`
   over half the short side, so `decor.rs` clamps it and clamps again when the size changes.
 - **iOS, a side bar's safe area reaches past the bar**: a strip the device keeps along one side of the screen (a
@@ -279,6 +311,10 @@ Things that were found the hard way. Read the section of the area you change bef
   transforms around a view, and only on its own layout passes, so a pass while a container shows a stack scaled or
   moved aside leaves the stack the insets of that picture after the transform is gone. A stack's safe area follows
   where it is laid out: the navigation controller makes up what a transform takes away.
+- **iOS, a container's transform can move a stack's bar**: the same passes place the navigation bar for the
+  transformed picture, which puts a bar the device keeps along one side (the iPhone Duo's vertical bar) on the
+  wrong side, and nothing moves it back when the transform goes. A stack under a transform whose header changes,
+  and a stack whose surrounding transform returns to the identity, are laid out again for where the stack is.
 - **iPadOS 26, the window controls' corner**: `safeAreaInsets` leaves out the controls a windowed app has at its
   top-leading corner; the safe-area layout region with horizontal corner adaptation
   (`edgeInsetsForLayoutRegion:`) covers them, and also pads both sides alike for the display's rounded corners
@@ -364,6 +400,13 @@ Things that were found the hard way. Read the section of the area you change bef
   content rect within the view that started it: started from an editor's sink (a sliver at the caret) it sat on the
   caret whatever the rect said, over the selection's start handle, and took that handle's touches; it starts from the
   root view (`InputBox.openEditMenu`).
+- **Android, activities made again for a configuration change**: a change the manifest cannot declare (an overlay
+  changing resource paths: the navigation mode, the wallpaper's colors) destroys and recreates the activity in the
+  same process. `AppActivity` and `DevActivity` keep the running `NshView` across it
+  (`onRetainNonConfigurationInstance`): its views are made with a `MutableContextWrapper` of the activity, which moves
+  to the new one, so nothing keeps the old activity. Windows of the activity's own (modal dialogs, alerts, menus,
+  date pickers) must leave the old activity before it is destroyed, or they leak with it (`WindowLeaked`); code that
+  needs the `Activity` unwraps the context (`SystemUi.activity`), never tests `instanceof Activity`.
 - **Android, API levels and lint**: hosts that compile the Java runtime run Android Lint over it (NewApi,
   WrongConstant), while NSH's own build runs only javac. A class or helper reached only behind `SDK_INT >= N` carries
   `@TargetApi(N)`, as `Backdrop` does; a guard lint cannot see through (a helper that returns the check) is written at
@@ -426,6 +469,21 @@ Things that were found the hard way. Read the section of the area you change bef
   an inset shadow is left out: it lies more than twice the blur from where it casts. A shadow whose bitmaps would
   take more than a quarter of the 8 MiB cache (a spread of the screen's size) is drawn as a shadow layer, as
   before. The same boxes slide at 10 ms a frame.
+- **Android, clipping to continuous corners**: a continuous corner is a path of cubics, not a round rect, and Skia's
+  GPU backend has no analytic clip for such a path: it clips through a coverage mask made in software for each draw
+  inside it, at that draw's bounds, uploaded as a texture of its own and never reused (the clip is new each time the
+  display list plays). The gallery's index, whose banner of ~330 canvas dots and cards clip to continuous corners,
+  uploaded ~440 textures on every frame it drew (8 ms of a Pixel 10 Pro's RenderThread while scrolling, 64 ms in the
+  first frame of a slide that draws it into a layer, #519). Such a box neither clips by outline nor by `clipPath`:
+  `Box.drawInCorners` draws its children clipped to rectangles (the shape's box but its corners' squares, which
+  Skia clips exactly) and into a small layer per corner's square, where it erases what lies outside the corner, a
+  path that stays the same while the box does, so Skia keeps its coverage. Layers of the whole box would do too, a
+  little faster, but on the gallery's index they kept the GPU cache ~50 MB over its 125 MB budget on a Pixel 10 Pro,
+  where the corners' squares bring it under (performance). A box
+  too small for a middle between its corners' squares takes one layer; a software canvas still clips by path.
+  So does a box with a child drawn through a layer of its own (a `filter`, a blend mode: `Effects.layered`): hwui
+  filters a layer again for every clip it is drawn under, and the seven pieces made the gallery's Aurora card (four
+  blurred, drifting gradients) blur 28 times a frame, 75–85 % janky frames on a Pixel 10 Pro; 13–20 % in one layer.
 - **Android, backdrop blur**: `Backdrop` records what lies behind the view into a `RenderNode` before every frame,
   and hwui draws that whole node into a layer and blurs it every frame. The node is recorded at the size where the
   blur's deviation is 4 px (Skia's GPU blur scales its input down to that before blurring anyway) and stretched
@@ -434,13 +492,26 @@ Things that were found the hard way. Read the section of the area you change bef
   (`getGlobalVisibleRect`) records nothing. Four glass views of about the screen's size, without shadows, slid at
   34 ms a frame on an emulator, 12 ms after. Every blurred view still records and blurs its backdrop again on
   every frame, also when nothing behind it changed: a drawer sliding over blurred panes makes each of them blur
-  again (31 ms a frame on the emulator, 17 ms with the panes not blurred).
+  again (31 ms a frame on the emulator, 17 ms with the panes not blurred). A blurred view's display list holds its
+  backdrop node, so a backdrop that records it holds everything behind it a second time, and hwui's `prepareTree`
+  walks a node once for every display list that draws it: the five stacked layers of a progressive blur (the
+  gallery's Styles page) walked the window 31 times a frame, 37 ms of a Pixel 10 Pro's RenderThread while scrolling
+  and 808 ms in the first frame. A view that draws nothing but its blurred backdrop (`Backdrop.onlyBlurs`) is left
+  out of the backdrops behind it, which then blur what lies behind the whole stack: about 3 ms a frame.
 - **Android, hidden views lose their display lists**: HWUI drops the display list of a RenderNode no longer drawn,
   and `setVisibility` tells every view under the one that changes, whose background `Drawable.setVisible` calls
   `invalidateSelf`. A whole screen hidden and shown again therefore records all of its views again (22–36 ms for the
   gallery's index on a Pixel 10 Pro). `StackBox` keeps drawing the screen a pop reveals at alpha 0 while it is
   `INVISIBLE` (which still keeps it out of touches, accessibility and focus), and `Decor.setVisible` does not
   invalidate (#519).
+- **Android, animations out of sight**: HWUI draws the window again for any view whose properties change, seen or
+  not. Native loops keep running on cards scrolled away (the gallery's Animations page: the hero's orbits, Aurora's
+  drifting lights), and a still screen above them drew 120 frames a second on a Pixel 10 Pro (~4.5 ms of
+  RenderThread and 2 ms of UI thread each). `Mounter.outputs` holds the animated look (alpha, transform, colors) of a
+  view whose parent is not in sight (`isShown` and `getGlobalVisibleRect`; the parent, as a view moved out by its own
+  transform would never move back) and sets the latest values once it is, on the next animation tick or before
+  the next frame draws (a scroll, a pop). The graph still steps, so ends and promises keep their time; the same
+  screen draws no frame.
 - **Android, focusing a view that is not shown**: `requestFocus` fails on a view that is not shown, and a page's
   `focus()` (from a timer of the render, say) can arrive in the batch that pushes it, the engine merging a wake-up's
   commits into one batch, whose commands run before `finishNavigation` places the page (a transition shader also
@@ -747,6 +818,12 @@ Things that were found the hard way. Read the section of the area you change bef
   sinks, wraps a line per character and soon holds such text. `TextArea` answers its visible part instead
   (`text_input.rs`).
 
+- **`NSTextView::setDefaultParagraphStyle:` updates neither `typingAttributes` nor existing `textStorage` attributes**:
+  a multiline input sets all three so typing into an empty view or at index 0 keeps its line height. Undo and redo
+  restore attributed substrings: after a restyle, reapply the current paragraph style to the restored range before
+  layout. A font or color change can split the effective range even when the paragraph style is unchanged; compare
+  its `longestEffectiveRange` before writing (`text_input.rs`).
+
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
   (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.
@@ -1004,6 +1081,11 @@ Things that were found the hard way. Read the section of the area you change bef
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of
   22 emoji was laid out 88 px too wide. Emoji clusters are measured in the DOM (`text.rs`, `emoji_excess`).
+- **Canvas `measureText` hints a font at a pixel ratio of 1, the DOM at the screen's**: a hinted font rounds its
+  advances to device pixels, so at 1.25 or 1.5 the DOM draws it narrower or wider than canvas measures it. NSimSun,
+  Chrome's `monospace` and its fallback for Han on Chinese Windows, measures 7 px per character at 13px and draws 6.5
+  at DPR 1.5 (Chrome 158 on Windows, `--force-device-scale-factor`), so runs of code stood up to 9 px apart. Canvas measures at
+  the font size times the ratio and scales back (`measureWidth` in `nsh.js`), which gives the DOM's width.
 - **A field paints an input method's marks on its composing text whatever its colors**: an editor's sink (transparent
   text, no caret, 1 px wide) showed a bar at the caret while composing (Chrome 156, `Input.imeSetComposition`). A
   field that shows nothing is `opacity: 0` (`encode/input.rs`, `shows_nothing`); it keeps the focus and the input

@@ -1,15 +1,16 @@
 //! CoreText text engine: typesets on the engine thread, draws on the main
 //! thread from finished `CTLine`s, so every text is laid out once.
 
-use std::{cell::RefCell, ffi::c_void, ptr::NonNull, sync::Arc};
+use std::{cell::RefCell, ffi::c_void, ops::Range, ptr::NonNull, sync::Arc};
 
 use nsh_core::{
     Affinity, AttributedText, Color, EllipsizeMode, FamilyName, FontFamily, Point, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextPosition,
 };
 use nsh_platform_apple::core_text::{
-    background_key, decoration_key, ellipsis_key, paragraph_is_rtl, strikethrough_key,
-    truncated_line_x, underline_key,
+    background_key, decoration_key, ellipsis_key, italic, italic_face, paragraph_is_rtl,
+    reaches_past, slant_fallbacks, strikethrough_key, truncated_line_growth, truncated_line_x,
+    underline_key,
 };
 use objc2::rc::Retained;
 use objc2_core_foundation::{
@@ -18,15 +19,15 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGColor, CGPath};
 use objc2_core_text::{
-    CTFont, CTFontDescriptor, CTFontManagerRegisterFontsForURL, CTFontManagerScope,
-    CTFontSymbolicTraits, CTFrame, CTFramesetter, CTLine, CTLineTruncationType, CTParagraphStyle,
-    CTParagraphStyleSetting, CTParagraphStyleSpecifier, CTRun, CTRunDelegate,
-    CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter, CTWritingDirection,
-    kCTFontAttributeName, kCTFontCascadeListAttribute, kCTFontFamilyNameAttribute,
-    kCTFontFeatureSettingsAttribute, kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue,
-    kCTFontTraitsAttribute, kCTFontWeightTrait, kCTForegroundColorAttributeName,
-    kCTKernAttributeName, kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName,
-    kCTRunDelegateCurrentVersion, kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
+    CTFont, CTFontDescriptor, CTFontManagerRegisterFontsForURL, CTFontManagerScope, CTFrame,
+    CTFramesetter, CTLine, CTLineTruncationType, CTParagraphStyle, CTParagraphStyleSetting,
+    CTParagraphStyleSpecifier, CTRun, CTRunDelegate, CTRunDelegateCallbacks, CTRunStatus,
+    CTTextAlignment, CTTypesetter, CTWritingDirection, kCTFontAttributeName,
+    kCTFontCascadeListAttribute, kCTFontFamilyNameAttribute, kCTFontFeatureSettingsAttribute,
+    kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue, kCTFontTraitsAttribute,
+    kCTFontWeightTrait, kCTForegroundColorAttributeName, kCTKernAttributeName,
+    kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName, kCTRunDelegateCurrentVersion,
+    kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
 };
 use objc2_ui_kit::{
     UIFont, UIFontWeight, UIFontWeightBlack, UIFontWeightBold, UIFontWeightHeavy,
@@ -79,15 +80,17 @@ pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
         .font_family
         .and_then(|family| listed_fonts(&family.name(), size, style.font_weight))
         .unwrap_or_else(|| (system_font(size, style.font_weight), Vec::new()));
-    let font = if style.italic {
-        let italic = CTFontSymbolicTraits::TraitItalic;
-        // SAFETY: a valid font; size 0 keeps the size, null matrix keeps it.
-        unsafe { font.copy_with_symbolic_traits(0.0, std::ptr::null(), italic, italic) }
-            // No italic face (CJK fonts): keep the upright one, CoreText
-            // synthesizes no oblique (browsers do).
-            .unwrap_or(font)
+    let (font, fallbacks) = if style.italic {
+        // The listed families' italic faces. A family without one leans
+        // ([`italic`]); as a fallback it stays upright here, where CoreText
+        // would ignore the lean, and `slant_fallbacks` leans its runs.
+        let fallbacks = fallbacks
+            .into_iter()
+            .map(|f| italic_face(&f).unwrap_or(f))
+            .collect();
+        (italic(&font), fallbacks)
     } else {
-        font
+        (font, fallbacks)
     };
     with_cascade(with_features(font, style.font_variant), &fallbacks)
 }
@@ -307,6 +310,11 @@ pub struct Prepared {
     rtl: bool,
     writing_direction: Option<bool>,
     text: Arc<str>,
+    /// How far the root strut's baseline is below its line's top with a
+    /// fixed `lineHeight` (`None`: no fixed line height).
+    strut_up: Option<CGFloat>,
+    /// The root strut font's size.
+    strut_size: CGFloat,
     /// Attachments: placeholder offset (UTF-16) and how far its top is
     /// above the baseline (`TextAttachment::ascent`).
     attachments: Vec<(CFIndex, CGFloat)>,
@@ -319,6 +327,9 @@ pub struct Prepared {
 pub(crate) struct LaidLine {
     pub(crate) line: CFRetained<CTLine>,
     pub(crate) origin: CGPoint,
+    /// The ascent the root strut reserves when the line was moved down to
+    /// its baseline (`None`: CoreText's own metrics).
+    strut_ascent: Option<CGFloat>,
     /// Its characters in the text (before any ellipsis).
     pub(crate) range: CFRange,
     /// Where its caret positions end: `range`'s end, before a hard break
@@ -499,6 +510,11 @@ impl CoreTextLayout {
                     l.line
                         .typographic_bounds(&mut ascent, &mut descent, &mut leading)
                 } as CGFloat;
+                if let Some(strut) = l.strut_ascent {
+                    let total = ascent + descent + leading;
+                    ascent = strut;
+                    descent = (total - leading - strut).max(0.0);
+                }
                 let start = usize::try_from(l.range.location).unwrap_or(0);
                 let end = if l.truncated {
                     usize::try_from(l.caret_end).unwrap_or(start)
@@ -666,7 +682,7 @@ impl CoreTextEngine {
             .map_or_else(Default::default, |s| s.style);
         let f = self.fonts.get(&style);
         // SAFETY: a valid font.
-        let (ascent, descent, leading, x) =
+        let (ascent, descent, _leading, x) =
             unsafe { (f.ascent(), f.descent(), f.leading(), f.x_height()) };
         let align = alignments.get(a.index);
         let font = if align == nsh_core::VerticalAlign::Baseline {
@@ -692,8 +708,17 @@ impl CoreTextEngine {
         if line_height <= 0.0 {
             return (top, up, down);
         }
-        let half = (line_height - (ascent + descent + leading)) / 2.0;
-        let (strut_up, strut_down) = (ascent + half, descent + half);
+        let strut_font = self.fonts.get(&text.paragraph_strut_or_first());
+        // SAFETY: a valid font.
+        let (strut_ascent, strut_descent, strut_leading) = unsafe {
+            (
+                strut_font.ascent(),
+                strut_font.descent(),
+                strut_font.leading(),
+            )
+        };
+        let half = (line_height - (strut_ascent + strut_descent + strut_leading)) / 2.0;
+        let (strut_up, strut_down) = (strut_ascent + half, strut_descent + half);
         if align == nsh_core::VerticalAlign::Middle {
             let grow = (up - strut_up).max(down - strut_down).max(0.0);
             (top, strut_up + grow, strut_down + grow)
@@ -888,6 +913,15 @@ impl CoreTextEngine {
             );
         }
         CFMutableAttributedString::end_editing(s);
+        // Italic text CoreText takes from fallback fonts without an italic
+        // face (CJK in the system font) leans like the rest.
+        for span in text.spans.iter().filter(|span| span.style.italic) {
+            let range = CFRange {
+                location: span.start as CFIndex,
+                length: (span.end - span.start) as CFIndex,
+            };
+            slant_fallbacks(&string, range, &self.fonts.get(&span.style));
+        }
         string
     }
 }
@@ -1021,9 +1055,9 @@ fn attachment_points(
     points
 }
 
-/// The text's fixed `lineHeight` (its first span's; 0: none).
+/// The text's fixed `lineHeight`: its root paragraph strut's (0: none).
 fn line_height(text: &AttributedText) -> CGFloat {
-    text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat
+    text.paragraph_strut_or_first().line_height.0 as CGFloat
 }
 
 /// `tallest`: the height a line holding an attachment needs (see
@@ -1087,8 +1121,13 @@ impl Prepared {
 
     /// Length (UTF-16 units) of the first `lines` lines at `width`.
     fn lines_length(&self, lines: u32, width: f64) -> CFIndex {
+        self.last_line(lines, width).end
+    }
+
+    /// The characters of the last of the first `lines` lines at `width`.
+    fn last_line(&self, lines: u32, width: f64) -> Range<CFIndex> {
         let typesetter = self.typesetter();
-        let mut end = 0;
+        let (mut start, mut end) = (0, 0);
         for _ in 0..lines {
             if end >= self.length {
                 break;
@@ -1098,9 +1137,43 @@ impl Prepared {
             if count <= 0 {
                 break;
             }
+            start = end;
             end += count;
         }
-        end
+        start..end
+    }
+
+    /// How much taller (above and below its baseline) the last line gets
+    /// when the text left over after `line` is truncated `width` wide
+    /// ([`truncated_line_growth`]). A clipped line holds the rest of the
+    /// text past the box's edge, not shown, and keeps its line's height.
+    fn truncation_growth(&self, line: Range<CFIndex>, width: f64) -> (CGFloat, CGFloat) {
+        if self.ellipsize == EllipsizeMode::Clip || line.end >= self.length || line.is_empty() {
+            return (0.0, 0.0);
+        }
+        // SAFETY: ranges within the string; the lines typeset from it.
+        unsafe {
+            let typesetter = self.typesetter();
+            let set = typesetter.line(CFRange {
+                location: line.start,
+                length: line.end - line.start,
+            });
+            // The truncated line keeps characters of the rest of the text
+            // and an ellipsis in the font of one of them: no taller than
+            // the rest set on one line. Most texts end in the fonts of
+            // their last line, and skip truncating.
+            let rest = typesetter.line(CFRange {
+                location: line.start,
+                length: self.length - line.start,
+            });
+            if !reaches_past(&rest, &set) {
+                return (0.0, 0.0);
+            }
+            let Some(shown) = self.truncate(line.start, width) else {
+                return (0.0, 0.0);
+            };
+            truncated_line_growth(&self.string, &set, &shown)
+        }
     }
 
     /// `line` (starting at `start`) cut to `width` with an ellipsis, as
@@ -1170,6 +1243,34 @@ impl Prepared {
     }
 }
 
+/// Whether `line` has a run whose own box already reaches past the root
+/// strut: an attachment delegate, or a larger font the fixed line height
+/// holds as it always has.
+fn reaches_past_strut(line: &CTLine, strut_size: CGFloat) -> bool {
+    // SAFETY: the line's own runs and their attribute dictionaries.
+    unsafe {
+        let runs = line.glyph_runs();
+        for i in 0..runs.count() {
+            let run = &*runs.value_at_index(i).cast::<objc2_core_text::CTRun>();
+            let key: *const CFString = kCTRunDelegateAttributeName;
+            if run.attributes().contains_ptr_key(key.cast()) {
+                return true;
+            }
+            let attributes = run.attributes();
+            let attributes: &objc2_core_foundation::CFDictionary<CFString, CFType> =
+                attributes.cast_unchecked();
+            if let Some(font) = attributes
+                .get(kCTFontAttributeName)
+                .and_then(|f| f.downcast::<CTFont>().ok())
+                && font.size() > strut_size + 0.01
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 impl TextEngine for CoreTextEngine {
     type Prepared = Prepared;
 
@@ -1196,6 +1297,20 @@ impl TextEngine for CoreTextEngine {
             rtl: text.rtl,
             writing_direction: text.writing_direction,
             text: Arc::from(text.text.as_str()),
+            strut_size: text.paragraph_strut_or_first().font_size.0 as CGFloat,
+            strut_up: if line_height(text) > 0.0 {
+                let style = text.paragraph_strut_or_first();
+                let font = self.fonts.get(&style);
+                // SAFETY: a valid font.
+                let (ascent, descent, leading) =
+                    unsafe { (font.ascent(), font.descent(), font.leading()) };
+                // CoreText reports fixed-height line ascents in whole
+                // points; quantize the strut the same way so a line of only
+                // smaller spans lands exactly on a root-font line's baseline.
+                Some((ascent + (line_height(text) - (ascent + descent + leading)) / 2.0).round())
+            } else {
+                None
+            },
             attachments: text
                 .attachments
                 .iter()
@@ -1212,14 +1327,11 @@ impl TextEngine for CoreTextEngine {
 
     fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
         let width = max_width.map_or(CGFloat::MAX, |w| w.0 as CGFloat);
-        let range = if prepared.max_lines > 0 {
-            CFRange {
-                location: 0,
-                length: prepared.lines_length(prepared.max_lines, width),
-            }
-        } else {
-            WHOLE
-        };
+        let last = (prepared.max_lines > 0).then(|| prepared.last_line(prepared.max_lines, width));
+        let range = last.as_ref().map_or(WHOLE, |last| CFRange {
+            location: 0,
+            length: last.end,
+        });
         // SAFETY: a range within the string, no frame attributes, no fit
         // range out-param.
         let size = unsafe {
@@ -1230,7 +1342,13 @@ impl TextEngine for CoreTextEngine {
                 std::ptr::null_mut(),
             )
         };
-        Size::new(Points(size.width as f32), Points(size.height as f32))
+        let size = Size::new(Points(size.width as f32), Points(size.height as f32));
+        // The last line as the box this returns lays it out: truncated as
+        // wide as the box.
+        let (up, down) = last.map_or((0.0, 0.0), |last| {
+            prepared.truncation_growth(last, size.width.0 as CGFloat)
+        });
+        Size::new(size.width, Points(size.height.0 + (up + down) as f32))
     }
 
     fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
@@ -1303,6 +1421,7 @@ impl TextEngine for CoreTextEngine {
                     LaidLine {
                         line,
                         origin: origins[i as usize],
+                        strut_ascent: None,
                         range,
                         caret_end,
                         truncated: false,
@@ -1336,9 +1455,37 @@ impl TextEngine for CoreTextEngine {
                         width,
                     )
                 };
+                // As `measure` grew the box for it: below the line above.
+                if prepared.ellipsize != EllipsizeMode::Clip {
+                    // SAFETY: lines typeset from the prepared string.
+                    let (up, _) =
+                        unsafe { truncated_line_growth(&prepared.string, &last.line, &truncated) };
+                    last.origin.y -= up;
+                }
                 last.line = truncated;
                 last.caret_end = prepared.length;
                 last.truncated = true;
+            }
+        }
+        // A line made only of smaller inline spans still contains the root
+        // strut. CoreText centers the line's own extent in the fixed height,
+        // so move such a line down to the strut's baseline; a taller span or
+        // attachment already reaches at least that far and is left as laid out.
+        if let Some(strut_up) = prepared.strut_up {
+            for line in &mut lines {
+                let (mut ascent, mut descent, mut leading) = (0.0, 0.0, 0.0);
+                // SAFETY: a valid line and out pointers.
+                unsafe {
+                    line.line
+                        .typographic_bounds(&mut ascent, &mut descent, &mut leading)
+                };
+                if ascent < strut_up
+                    && !line.truncated
+                    && !reaches_past_strut(&line.line, prepared.strut_size)
+                {
+                    line.origin.y -= strut_up - ascent;
+                    line.strut_ascent = Some(strut_up);
+                }
             }
         }
         let attachments = if prepared.attachments.is_empty() {
@@ -1379,6 +1526,11 @@ impl TextEngine for CoreTextEngine {
                     l.line
                         .typographic_bounds(&mut ascent, &mut descent, &mut leading)
                 };
+                if let Some(strut) = l.strut_ascent {
+                    let total = ascent + descent + leading;
+                    ascent = strut;
+                    descent = (total - leading - strut).max(0.0);
+                }
                 let (cap, x_height) =
                     line_font(&l.line).map_or((ascent * 0.7, ascent * 0.5), |f| {
                         // SAFETY: a valid font.
@@ -1795,5 +1947,198 @@ mod first_baseline {
         );
         let (large, _) = baseline(24.0);
         assert!(large > small * 1.5, "{small} {large}");
+    }
+}
+
+#[cfg(test)]
+mod truncated_tail {
+    use nsh_core::{AttachmentAlignments, TextLine, VerticalAlign};
+
+    use super::*;
+
+    /// What ends the text after the long, small run of words.
+    #[derive(Clone, Copy, Debug)]
+    enum End {
+        /// A word in the same font: the control.
+        Same,
+        /// A word in a font three times the size.
+        Big,
+        /// An attachment twice as tall as the line.
+        Tall,
+    }
+
+    const WORDS: &str = "alpha beta gamma delta epsilon zeta eta theta iota kappa ";
+
+    fn text(
+        end: End,
+        mode: EllipsizeMode,
+        max_lines: u32,
+        line_height: f32,
+    ) -> (AttributedText, AttachmentAlignments) {
+        let style = ResolvedTextStyle {
+            font_size: Points(14.0),
+            line_height: Points(line_height),
+            ..Default::default()
+        };
+        let mut t = AttributedText {
+            max_lines,
+            ellipsize: mode,
+            ..Default::default()
+        };
+        let mut a = AttachmentAlignments::default();
+        t.push(WORDS, style);
+        t.push(WORDS, style);
+        match end {
+            End::Same => t.push("omega", style),
+            End::Big => t.push(
+                "OMEGA",
+                ResolvedTextStyle {
+                    font_size: Points(42.0),
+                    ..style
+                },
+            ),
+            End::Tall => {
+                t.push("omega ", style);
+                a.push(
+                    &mut t,
+                    Size::new(Points(20.0), Points(40.0)),
+                    VerticalAlign::Baseline,
+                    style,
+                );
+            }
+        }
+        (t, a)
+    }
+
+    struct Laid {
+        size: Size<Points>,
+        lines: Vec<TextLine>,
+        attachments: Vec<Option<Point<Points>>>,
+    }
+
+    impl Laid {
+        fn last(&self) -> &TextLine {
+            self.lines.last().expect("a line")
+        }
+
+        fn baseline(&self) -> f32 {
+            self.last().y.0 + self.last().ascender.0
+        }
+
+        /// The last line's glyph box sits below the line above it and
+        /// inside the box.
+        fn fits(&self) -> bool {
+            let last = self.last();
+            let (top, bottom) = (last.y.0, last.y.0 + last.ascender.0 + last.descender.0);
+            let above = self
+                .lines
+                .iter()
+                .rev()
+                .nth(1)
+                .map_or(0.0, |l| l.y.0 + l.ascender.0 + l.descender.0);
+            top >= above - 0.5 && bottom <= self.size.height.0 + 0.5
+        }
+    }
+
+    /// Lays the text out in `size`, or the box it measures 150 wide.
+    fn lay((t, a): (AttributedText, AttachmentAlignments), size: Option<Size<Points>>) -> Laid {
+        let engine = CoreTextEngine::default();
+        let prepared = engine.prepare_aligned(&t, &a);
+        let size = size.unwrap_or_else(|| {
+            let size = engine.measure(&prepared, Some(Points(150.0)));
+            // Measuring as wide as it measured keeps its truncation.
+            assert_eq!(engine.measure(&prepared, Some(size.width)), size);
+            size
+        });
+        let layout = engine.layout(&prepared, size);
+        Laid {
+            size,
+            lines: engine.lines(&layout),
+            attachments: engine.attachments(&layout),
+        }
+    }
+
+    /// `ellipsis-start` and `ellipsis-middle` keep the end of the text on
+    /// the last line: a larger font or a taller attachment there grows
+    /// the measured box, below the line above, as on a line not
+    /// truncated. A fixed `lineHeight` holds a larger font as on any line.
+    /// The ellipsis takes the font of the text's end, in every mode.
+    #[test]
+    fn a_kept_end_fits_in_the_measured_box() {
+        for line_height in [0.0, 20.0] {
+            for max_lines in [1, 2] {
+                let same = lay(
+                    text(End::Same, EllipsizeMode::Tail, max_lines, line_height),
+                    None,
+                );
+                if line_height > 0.0 {
+                    assert_eq!(same.size.height.0, line_height * max_lines as f32);
+                }
+                for mode in [
+                    EllipsizeMode::Head,
+                    EllipsizeMode::Middle,
+                    EllipsizeMode::Tail,
+                ] {
+                    for end in [End::Same, End::Big, End::Tall] {
+                        let what = format!(
+                            "{mode:?}, {max_lines} lines, {end:?}, lineHeight {line_height}"
+                        );
+                        let laid = lay(text(end, mode, max_lines, line_height), None);
+                        assert_eq!(laid.lines.len(), max_lines as usize, "{what}");
+                        let grows = match end {
+                            End::Same => false,
+                            End::Big => line_height == 0.0,
+                            End::Tall => mode != EllipsizeMode::Tail,
+                        };
+                        if !grows {
+                            assert_eq!(laid.size, same.size, "{what}");
+                            assert_eq!(laid.baseline(), same.baseline(), "{what}");
+                            continue;
+                        }
+                        assert!(
+                            laid.size.height.0 > same.size.height.0 + 20.0,
+                            "{what}: {:?}",
+                            laid.size
+                        );
+                        assert!(laid.fits(), "{what}: {:?} in {:?}", laid.lines, laid.size);
+                        if let End::Tall = end {
+                            let top = laid.attachments[0].expect("kept").y.0;
+                            let above = laid
+                                .lines
+                                .iter()
+                                .rev()
+                                .nth(1)
+                                .map_or(0.0, |l| l.y.0 + l.height.0);
+                            assert!(
+                                top >= above - 0.5 && top + 40.0 <= laid.size.height.0 + 0.5,
+                                "{what}: {top} in {:?}",
+                                laid.size
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A box too short for the text (`max_lines` 0) ellipsizes its last
+    /// fitting line; a taller end it keeps sits below the line above.
+    #[test]
+    fn a_kept_end_in_a_short_box_stays_below_the_line_above() {
+        for mode in [EllipsizeMode::Head, EllipsizeMode::Middle] {
+            for end in [End::Big, End::Tall] {
+                let laid = lay(
+                    text(end, mode, 0, 0.0),
+                    Some(Size::new(Points(150.0), Points(34.0))),
+                );
+                assert_eq!(laid.lines.len(), 2, "{mode:?} {end:?}");
+                let first = &laid.lines[0];
+                assert!(
+                    laid.last().y.0 >= first.y.0 + first.ascender.0 + first.descender.0 - 0.5,
+                    "{mode:?} {end:?}: {:?}",
+                    laid.lines
+                );
+            }
+        }
     }
 }

@@ -7,10 +7,11 @@ group: delivery
 
 # 沙箱与能力
 
-用 Rust 编写的应用是编译进发布它的应用中的原生代码，和该应用的其余部分一样，以它的信任运行；它对 NSH 服务的调用（`fetch`、图片、
-web view、状态栏）和 TSX 一样经过同样的原生检查，受宿主授予的范围约束。应用运行的 TSX 和 JavaScript（它自己的，或它下载的
-[签名包](./signed-packages.md)）在每个视图一个的 QuickJS VM 中运行，它们在 VM 之外能做的一切都要经过 NSH 的原生运行时。因此，
-你可以在宿主应用制定的规则下运行并非自己编写的代码，例如第三方小程序或下载的更新：
+沙箱让宿主应用可以在自己制定的规则下运行别人写的代码，例如第三方小程序或下载的更新。
+
+应用运行的 TSX 和 JavaScript（它自己的，或它下载的[签名包](./signed-packages.md)）在每个视图一个的 QuickJS VM 中运行，它们在 VM
+之外能做的一切都要经过 NSH 的原生运行时。Rust 代码不同：它是编译进应用的原生代码，以应用的信任运行；它对 NSH 服务的调用
+（`fetch`、图片、web view、状态栏）仍和 TSX 一样经过同样的原生检查，受宿主授予的范围约束。运行时提供三层保护：
 
 - **限制（Limits）** 约束单个应用可使用的内存、时间和原生资源。
 - **加固（Hardening）** 在 release 构建中移除所有把字符串变成代码的途径。
@@ -200,6 +201,7 @@ Web 上它沿用页面的协议，按补全后的 URL 检查；原生应用没�
 | `hosts` | `string[]` | [web view](./web-view-and-video.md) 可以显示和导航到的主机（`http` 和 `https`）。没有 `webview` 时，应用完全不能显示网页。 |
 | `input` | `boolean` | web view 的 ref 可以向页面发送可信输入（[`sendInput`](./web-view-and-video.md#像用户一样输入)）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 | `media` | `string[]` | 网页可以通过 `getUserMedia` 采集的媒体：`"microphone"`、`"camera"`。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+| `runtimeOrigin` | `boolean` | web view 的 `allowOrigin` 可以在应用运行时为这个 web view 增加一个可显示的源（[`allowOrigin`](../elements/web-view.md)）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
 web view 内的顶层导航也会在加载前由平台的导航代理检查。页面自身的子资源（脚本、图片、XHR）属于网页内容自己的事，
 不做检查。`about:blank` 和内联 HTML（`html`）只要求 web view 被授予即可：`"webview": { "hosts": [] }`
@@ -244,7 +246,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 ### `share`
 
-`"share": true` 允许应用显示系统的分享面板（[`Share`](../modules/nsh.md#share)）：由用户决定内容发往哪里。分享的文件还需要能在 `fs.read` 下读取。
+`"share": true` 允许应用显示系统的分享面板（`nsh-extra` 的 [`Share`](./nshm.md#share)）：由用户决定内容发往哪里。分享的文件还需要能在 `fs.read` 下读取。
 
 ### `speech`
 
@@ -262,7 +264,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 ### `application`
 
-`"application": true` 允许应用作用于整个应用：在桌面上（[`nsh/desktop`](../modules/nsh-desktop.md)）是应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitMode()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`，在 iOS 和 Android 上是系统设置中本应用的页面（`nsh/mobile` 的 [`AppSettings.open()`](../modules/nsh-mobile.md#appsettings)；嵌入的视图打开宿主应用的页面）。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 和 `AppSettings.available()` 返回 `false`，`setLaunchAtLogin` 和 `AppSettings.open()` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
+`"application": true` 允许应用作用于整个应用：在桌面上（[`nsh/desktop`](../modules/nsh-desktop.md)）是应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitMode()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`，在 iOS 和 Android 上是系统设置中本应用的页面（`nsh/mobile` 的 [`AppSettings.open()`](../modules/nsh-mobile.md#appsettings)；嵌入的视图打开宿主应用的页面）。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 和 `AppSettings.available()` 返回 `false`，`setLaunchAtLogin` 和 `AppSettings.open()` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。nsh.json 的 [`window`](./project-structure.md) 启动设置属于读取它的宿主，在应用运行前应用，同样不需要这项能力。
 
 ### `homeDir`
 
@@ -282,7 +284,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 | `kinds` | `string[]` | 可以打开的种类：`"normal"`、`"dialog"`、`"panel"`、`"popup"`、`"overlay"`。缺省：除 `"overlay"` 外的所有种类。 |
 | `levels` | `string[]` | 窗口可以使用的层级：`"normal"`、`"floating"`、`"aboveDock"`、`"desktopIcon"`。缺省：所有层级。 |
 | `max` | `number` | 同时可以打开的自己的窗口数，包含第一个窗口。缺省：不限。 |
-| `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+| `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"` 或 `"box-none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
 `overlay` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面。每个窗口都需要授权，第一个窗口也不例外：没有特权窗口。
 

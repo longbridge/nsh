@@ -65,9 +65,9 @@ use nsh_core::{
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
-        self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
-        SCROLL_PRESS_DELAY, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE, has_press, laid_out,
-        latch_holds, transforms,
+        self, Candidate, ContextMenuTarget, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP,
+        PRESS_SLOP, Pinch, SCROLL_PRESS_DELAY, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE,
+        has_press, laid_out, latch_holds, transforms,
     },
     tailwind::state::{HOVERED, PRESSED},
 };
@@ -550,7 +550,7 @@ fn set_cursor(view: &NshView, over_link: bool) {
 /// handled happened in.
 /// Simulated input goes to the window whose root view is `root` (`None`:
 /// the surface's), as a real event in it would.
-#[cfg(feature = "dev")]
+#[cfg(any(test, feature = "dev"))]
 pub(crate) fn set_event_root(surface: &Surface, root: Option<NshView>) {
     *surface.input.window_root.borrow_mut() = root;
 }
@@ -827,42 +827,51 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
 
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it (true:
-/// the click is taken). Text fields are GTK's widgets, which show their
-/// own menu.
+/// the click is taken), unless selectable text is nearer: that shows its
+/// edit menu, but where its selectable view, or a view between them,
+/// listens ([`nsh_core::input::context_menu_target`], as on macOS and
+/// Windows). Text fields are GTK's widgets, which show their own menu.
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, state: gdk::ModifierType) -> bool {
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return false;
     };
-    for v in chain(&hit.view) {
-        let (id, listens, input) = {
-            let s = v.state();
-            (
-                s.id,
-                s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input,
-            )
-        };
-        if listens {
-            let (location_x, location_y) = local(surface, &v, x, y);
+    let views = chain(&hit.view);
+    let hops: Vec<_> = views.iter().map(|v| context_menu_hop(&v.state())).collect();
+    match input::context_menu_target(&hops) {
+        Some(ContextMenuTarget::Listener(i)) => {
+            let v = &views[i];
+            let (location_x, location_y) = local(surface, v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
                 point(Points(x), Points(y)),
                 modifiers(state),
                 Some(nsh_core::PointerType::Mouse),
             );
-            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
-            return true;
+            surface.event(
+                v.state().id,
+                EventKind::ContextMenu,
+                EventPayload::ContextMenu(event),
+            );
+            true
         }
-        if input {
-            return false;
-        }
-        if crate::text::selectable(&v.state()) || v.state().props.selectable_view {
+        Some(ContextMenuTarget::EditMenu(i)) => {
             // Text in a selectable view has the area's menu.
-            let target = crate::selectable_view::area_of(&v).unwrap_or(v);
-            return edit_menu(surface, &target, x, y);
+            let v = &views[i];
+            let target = crate::selectable_view::area_of(v).unwrap_or_else(|| v.clone());
+            edit_menu(surface, &target, x, y)
         }
+        Some(ContextMenuTarget::Field(_)) | None => false,
     }
-    false
+}
+
+/// What `state`'s view is to a secondary click's menu.
+fn context_menu_hop(state: &crate::view::ViewState) -> input::ContextMenuHop {
+    input::ContextMenuHop {
+        listens: state.events.contains(EventKind::ContextMenu),
+        field: state.kind == ViewKind::Input,
+        selectable_text: crate::text::selectable(state),
+        selectable_view: state.props.selectable_view,
+    }
 }
 
 /// A wheel by `(dx, dy)` (`lines`: notches, else points) at `(x, y)` (root
@@ -1491,6 +1500,131 @@ fn hit(view: &NshView, native: Option<gtk::Widget>) -> Hit {
     }
 }
 
+/// The rectangles (`root`'s coordinates) a window whose `pointerEvents` is
+/// `"box-none"` takes the pointer in, as [`pick_in`] decides it at each
+/// point with the root `box-none`: each view that takes the pointer by its
+/// box with its hit slop, and each hosted widget by its bounds, within the
+/// areas the views around them let the pointer into. A transformed view
+/// counts by its bounds and a `clipPath` by its box.
+pub(crate) fn pointer_rects(root: &NshView) -> Vec<graphene::Rect> {
+    let mut out = Vec::new();
+    rects_in(root, root, None, &mut out);
+    out
+}
+
+fn rects_in(
+    view: &NshView,
+    root: &NshView,
+    mut limit: Option<graphene::Rect>,
+    out: &mut Vec<graphene::Rect>,
+) {
+    if !view.is_visible() || !view.can_target() {
+        return;
+    }
+    let Some(to_root) = view.compute_transform(root) else {
+        return;
+    };
+    let mapped =
+        |x: f32, y: f32, w: f32, h: f32| to_root.transform_bounds(&graphene::Rect::new(x, y, w, h));
+    let bound = {
+        let s = view.state();
+        if s.style.hidden || s.props.pointer_events == PointerEvents::None {
+            return;
+        }
+        let pe = s.props.pointer_events;
+        let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
+        let slop = s.props.hit_slop;
+        let slopped = graphene::Rect::new(
+            -slop.left.0,
+            -slop.top.0,
+            w + slop.left.0 + slop.right.0,
+            h + slop.top.0 + slop.bottom.0,
+        );
+        // A `clipPath` bounds the view, its hit slop and what is in it.
+        if let Some(clip) = s.style.clip_path() {
+            let b = clip.resolve(s.frame.size).0;
+            let b = mapped(b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0);
+            match within(b, limit) {
+                Some(l) => limit = Some(l),
+                None => return,
+            }
+        }
+        // The root is `box-none`.
+        if view != root
+            && pe != PointerEvents::BoxNone
+            && let Some(r) = within(
+                mapped(slopped.x(), slopped.y(), slopped.width(), slopped.height()),
+                limit,
+            )
+        {
+            out.push(r);
+        }
+        if pe == PointerEvents::BoxOnly {
+            return;
+        }
+        // Where its children are looked into ([`input::hit_area`]).
+        let clip = s.style.overflow_hidden
+            || matches!(
+                s.kind,
+                ViewKind::Scroll | ViewKind::Image | ViewKind::Stack | ViewKind::Input
+            );
+        if clip {
+            Some(mapped(0.0, 0.0, w, h))
+        } else if laid_out(s.kind, s.id) {
+            let around = match s.overflow {
+                Some(o) => slopped.union(&graphene::Rect::new(
+                    o.origin.x.0,
+                    o.origin.y.0,
+                    o.size.width.0,
+                    o.size.height.0,
+                )),
+                None => slopped,
+            };
+            Some(mapped(
+                around.x(),
+                around.y(),
+                around.width(),
+                around.height(),
+            ))
+        } else {
+            None
+        }
+    };
+    let limit = match bound {
+        None => limit,
+        Some(bound) => match within(bound, limit) {
+            Some(l) => Some(l),
+            None => return,
+        },
+    };
+    let mut child = view.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        match widget.downcast_ref::<NshView>() {
+            Some(child) => rects_in(child, root, limit, out),
+            // A hosted native widget.
+            None => {
+                if widget.is_visible()
+                    && widget.can_target()
+                    && let Some(b) = widget.compute_bounds(root)
+                    && let Some(r) = within(b, limit)
+                {
+                    out.push(r);
+                }
+            }
+        }
+    }
+}
+
+/// `r` within `limit` (`None`: no bound), if it is left with an area.
+fn within(r: graphene::Rect, limit: Option<graphene::Rect>) -> Option<graphene::Rect> {
+    let r = match limit {
+        Some(l) => r.intersection(&l)?,
+        None => r,
+    };
+    (r.width() > 0.0 && r.height() > 0.0).then_some(r)
+}
+
 /// `view` and its ancestors, innermost first.
 fn chain(view: &NshView) -> Vec<NshView> {
     let mut out = vec![view.clone()];
@@ -1923,12 +2057,15 @@ fn cancel_all(surface: &Rc<Surface>) {
     }
 }
 
-/// A pen's state at the latest pointer event: pressure (0 to 1) and tilt
-/// in degrees, `None` for a mouse.
+/// A pen's state at the latest pointer event: pressure (0 to 1), tilt
+/// in degrees, whether its eraser end is used and its barrel button held;
+/// `None` for a mouse.
 #[derive(Clone, Copy)]
 struct Pen {
     pressure: f32,
     tilt: (f32, f32),
+    eraser: bool,
+    barrel: bool,
 }
 
 thread_local! {
@@ -1956,9 +2093,14 @@ fn pen_sample(event: &gdk::Event) {
                     | gdk::DeviceToolType::Brush
             )
         })
-        .map(|_| {
+        .map(|tool| {
             let axis = |a| event.axis(a).unwrap_or(0.0) as f32;
             Pen {
+                eraser: tool.tool_type() == gdk::DeviceToolType::Eraser,
+                // A stylus reports its side buttons as buttons 2 and 3.
+                barrel: event
+                    .modifier_state()
+                    .intersects(gdk::ModifierType::BUTTON2_MASK | gdk::ModifierType::BUTTON3_MASK),
                 pressure: event
                     .axis(gdk::AxisUse::Pressure)
                     .map_or(0.5, |v| v.clamp(0.0, 1.0) as f32),
@@ -2031,6 +2173,13 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     tilt_y: pen
                         .filter(|_| p.key == Key::Mouse)
                         .map_or(0.0, |pen| pen.tilt.1),
+                    coalesced: Vec::new(),
+                    eraser: pen
+                        .filter(|_| p.key == Key::Mouse)
+                        .is_some_and(|pen| pen.eraser),
+                    barrel: pen
+                        .filter(|_| p.key == Key::Mouse)
+                        .is_some_and(|pen| pen.barrel),
                 }
             })
             .collect()
@@ -3041,14 +3190,14 @@ fn touchpad_hold(surface: &Rc<Surface>, phase: gdk::TouchpadGesturePhase, x: f32
     true
 }
 
-/// The closest file-drop listener under the pointer, within its modal root.
-pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
-    let mut view = pick(&event_root(surface), x, y)?.view;
+/// The closest file-drop listener under `x`, `y` in `root`, within its modal root.
+pub(crate) fn file_drop_target_in(root: &NshView, x: f32, y: f32) -> Option<NshView> {
+    let mut view = pick(root, x, y)?.view;
     loop {
         if view.state().events.contains(EventKind::FileDrop) {
             return Some(view);
         }
-        if view.kind() == ViewKind::Modal || view.id() == ROOT_ID {
+        if view.kind() == ViewKind::Modal || view.id() == root.id() || view.id() == ROOT_ID {
             return None;
         }
         view = view.parent_view()?;
@@ -3284,6 +3433,109 @@ mod tests {
             let focused = RootExt::focus(&window);
             window.destroy();
             assert_eq!(focused, Some(text.upcast::<gtk::Widget>()));
+        });
+    }
+
+    /// A `"box-none"` window's input region ([`pointer_rects`]) is where
+    /// its views take a press ([`pick`] landing on one, not the root).
+    #[test]
+    fn a_box_none_windows_rects_are_where_its_views_take_the_pointer() {
+        use nsh_core::{EdgeInsets, MountItem};
+
+        use crate::gtk_test::{apply, frame, run, show, surface, view, wait_until};
+
+        run(|| {
+            let surface = surface();
+            let mut items = Vec::new();
+            // A `box-none` container filling the window, holding a panel with
+            // a hit slop and a button in it; a menu its parent's `overflow:
+            // hidden` cuts; a dropdown reached through its field's overflow
+            // area; a `box-only` view; a hidden and a `none` view.
+            for (id, parent, (x, y, w, h)) in [
+                (2, ROOT_ID, (0.0, 0.0, 200.0, 200.0)),
+                (4, 2, (20.0, 10.0, 100.0, 40.0)),
+                (6, 4, (10.0, 10.0, 20.0, 20.0)),
+                (8, 2, (10.0, 100.0, 60.0, 30.0)),
+                (10, 8, (0.0, 20.0, 60.0, 60.0)),
+                (12, 2, (100.0, 100.0, 60.0, 20.0)),
+                (14, 12, (0.0, 20.0, 60.0, 40.0)),
+                (16, 2, (10.0, 150.0, 30.0, 30.0)),
+                (18, 16, (40.0, 0.0, 30.0, 30.0)),
+                (20, 2, (150.0, 150.0, 30.0, 30.0)),
+                (22, 2, (100.0, 170.0, 30.0, 30.0)),
+            ] {
+                items.push(MountItem::Create {
+                    id,
+                    kind: ViewKind::View,
+                });
+                items.push(MountItem::Insert {
+                    parent,
+                    child: id,
+                    before: None,
+                });
+                items.push(MountItem::Frame {
+                    id,
+                    frame: frame(x, y, w, h),
+                });
+            }
+            apply(&surface, &items);
+            let v = |id| view(&surface, id);
+            v(2).state_mut().props.pointer_events = PointerEvents::BoxNone;
+            v(4).state_mut().props.hit_slop = EdgeInsets {
+                bottom: Points(10.0),
+                ..Default::default()
+            };
+            v(8).state_mut().style.overflow_hidden = true;
+            v(12).state_mut().overflow = Some(frame(0.0, 0.0, 60.0, 60.0));
+            v(16).state_mut().props.pointer_events = PointerEvents::BoxOnly;
+            v(20).state_mut().style.hidden = true;
+            v(22).state_mut().props.pointer_events = PointerEvents::None;
+            let window = show(&surface);
+            assert!(wait_until(|| [6, 10, 14, 18, 22].into_iter().all(|id| v(
+                id
+            )
+            .is_mapped()
+                && v(id).width() > 0)));
+            let root = surface.root.clone();
+            let rects = pointer_rects(&root);
+            let in_rects = |x: f32, y: f32| {
+                rects
+                    .iter()
+                    .any(|r| r.contains_point(&graphene::Point::new(x, y)))
+            };
+            let takes = |x: f32, y: f32| {
+                pick(&root, x, y).is_some_and(|hit| hit.native.is_some() || hit.view != root)
+            };
+            let mut mismatches = Vec::new();
+            for y in (0..200).step_by(5) {
+                for x in (0..200).step_by(5) {
+                    let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+                    if in_rects(x, y) != takes(x, y) {
+                        mismatches.push((x, y));
+                    }
+                }
+            }
+            let checks = [
+                in_rects(30.0, 20.0),
+                in_rects(50.0, 55.0),
+                !in_rects(30.0, 140.0),
+                in_rects(110.0, 150.0),
+                !in_rects(60.0, 160.0),
+                !in_rects(165.0, 165.0),
+                !in_rects(110.0, 180.0),
+                !in_rects(190.0, 10.0),
+            ];
+            window.destroy();
+            assert!(
+                mismatches.is_empty(),
+                "the rectangles and the picking differ at {mismatches:?}"
+            );
+            assert_eq!(
+                checks, [true; 8],
+                "in the panel, its hit slop; not past a clip; in an overflow \
+                 area; not outside a box-only view, on a hidden or a none view \
+                 or the container"
+            );
         });
     }
 }

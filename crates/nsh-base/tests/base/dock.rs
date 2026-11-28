@@ -9,8 +9,8 @@
 //! The app controls the layout: what it shows is what the area reported.
 
 use nsh_base::dock::{
-    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockLayout, DockNode, DockPanel,
-    DockPlacement, DockRegion, DockTab, PanelId, dock_area,
+    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockDropIndicator, DockLayout, DockNode,
+    DockPanel, DockPlacement, DockRegion, DockTab, PanelId, dock_area,
 };
 use nsh_core::{
     Size, ViewKind,
@@ -193,6 +193,9 @@ fn Workspace(props: WorkspaceProps) -> impl IntoElement {
                         .render_empty(|placement: &DockPlacement| {
                             text(format!("Empty {placement:?}"))
                         })
+                        .render_drop_indicator(|_: &DockDropIndicator| {
+                            view().test_id("drop-indicator")
+                        })
                         .on_layout_change(move |next: &DockAreaLayout| layout.set(next.clone()))
                         .on_panel_remove(move |panel: &PanelId| removed.set(panel.to_string()))
                         .on_dock_open_change(move |event: &DockAreaEvent| {
@@ -340,6 +343,51 @@ fn a_layout_shows_each_group_s_tabs_and_displayed_panel() {
     assert_eq!(app.screen().count("role:tablist").unwrap(), 2);
 }
 
+/// The panel tab `tab` (`role:tab[<name>]`) controls, which must be a
+/// tab panel.
+fn controlled_panel(app: &Headless, tab: &str) -> nsh_core::NodeId {
+    let screen = app.screen();
+    let panel = screen
+        .accessibility_controls(&format!("role:tab[{tab}]"))
+        .unwrap()
+        .unwrap_or_else(|| panic!("{tab} controls a view"));
+    let panels = (0..screen.count("role:tabpanel").unwrap())
+        .map(|n| screen.id(&format!("role:tabpanel >> nth={n}")).unwrap())
+        .collect::<Vec<_>>();
+    assert!(panels.contains(&panel), "{tab} controls a tab panel");
+    panel
+}
+
+/// Whether view `panel` holds the text `text`.
+fn holds(app: &Headless, panel: nsh_core::NodeId, text: &str) -> bool {
+    app.screen()
+        .id(&format!("view:{panel} >> text:{text}"))
+        .is_ok()
+}
+
+/// As WAI-ARIA's tabs pattern: each group's content frame is a tab panel
+/// holding the displayed panel, and every tab of the group names it as
+/// the element it controls.
+#[test]
+fn each_group_s_tabs_control_its_tab_panel() {
+    let mut app = start(two_groups(), 1000.0);
+    assert_eq!(app.screen().count("role:tabpanel").unwrap(), 2);
+    let (a, b, c) = (
+        controlled_panel(&app, "Tab a"),
+        controlled_panel(&app, "Tab b"),
+        controlled_panel(&app, "Tab c"),
+    );
+    assert_eq!(a, b, "the tabs of a group control one panel");
+    assert_ne!(a, c, "another group's tabs control its own");
+    assert!(holds(&app, a, "Panel a"));
+    assert!(holds(&app, c, "Panel c"));
+    // Selecting another tab shows its panel in the same tab panel.
+    app.press("id:tab-b").unwrap();
+    app.wait_for("Panel b").unwrap();
+    assert!(holds(&app, a, "Panel b"));
+    assert_eq!(controlled_panel(&app, "Tab a"), a);
+}
+
 #[test]
 fn a_press_on_a_tab_selects_it() {
     let mut app = start(two_groups(), 1000.0);
@@ -412,6 +460,132 @@ fn dragging_a_tab_onto_a_tab_bar_inserts_it_at_the_slot() {
     )
     .unwrap();
     app.wait_for("Layout h([*b c a])").unwrap();
+}
+
+/// Whether the screen shows a view of `bounds` (the insertion line has no
+/// test id: it is the area's own).
+fn shows_frame(screen: &nsh_testing::Screen, bounds: nsh_core::Bounds<Points>) -> bool {
+    screen
+        .layout_nodes()
+        .iter()
+        .any(|node| node.bounds == bounds && !node.hidden)
+}
+
+/// Whether the screen shows the drop indicator the app renders.
+fn shows_indicator(screen: &nsh_testing::Screen) -> bool {
+    screen
+        .layout_nodes()
+        .iter()
+        .any(|node| node.test_id.as_deref() == Some("drop-indicator"))
+}
+
+/// A line 2 wide and 24 tall (a tab bar's height) at `x`, on the bars'
+/// top at `y`.
+fn line_frame(x: f32, y: f32) -> nsh_core::Bounds<Points> {
+    nsh_core::Bounds {
+        origin: point(px(x), px(y)),
+        size: Size::new(px(2.0), px(24.0)),
+    }
+}
+
+#[test]
+fn a_drag_along_a_tab_bar_shows_the_insertion_line_and_not_the_indicator() {
+    let mut app = start(two_groups(), 1000.0);
+    // Past the middle of c's tab (400 to 480): after it, the line centered
+    // on its end.
+    app.drag_and_hold(
+        "id:tab-a",
+        point(px(450.0), px(0.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
+    app.wait_until(
+        "the line after c",
+        std::time::Duration::from_secs(5),
+        |screen| shows_frame(screen, line_frame(479.0, 0.0)),
+    )
+    .unwrap();
+    assert!(!shows_indicator(app.screen()));
+    app.drop_held().unwrap();
+    app.wait_for("Layout h([*b]:400 [c *a])").unwrap();
+    assert!(!shows_frame(app.screen(), line_frame(479.0, 0.0)));
+    // b (alone now, its tab 0 to 80) before c: the line at c's start
+    // (400), centered on it unless the bar starts there.
+    app.drag_and_hold(
+        "id:tab-b",
+        point(px(380.0), px(0.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
+    app.wait_until(
+        "the line before c",
+        std::time::Duration::from_secs(5),
+        |screen| {
+            screen.layout_nodes().iter().any(|node| {
+                node.bounds.size == Size::new(px(2.0), px(24.0))
+                    && (px(399.0)..=px(400.0)).contains(&node.bounds.origin.x)
+            })
+        },
+    )
+    .unwrap();
+    assert!(!shows_indicator(app.screen()));
+    app.drop_held().unwrap();
+    app.wait_for("Layout h([*b c a])").unwrap();
+}
+
+#[test]
+fn a_drag_over_a_group_s_content_shows_the_indicator_and_no_line() {
+    let mut app = start(two_groups(), 1000.0);
+    app.drag_and_hold(
+        "id:tab-a",
+        point(px(560.0), px(288.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
+    app.wait_until(
+        "the indicator over c",
+        std::time::Duration::from_secs(5),
+        shows_indicator,
+    )
+    .unwrap();
+    let lines = app
+        .screen()
+        .layout_nodes()
+        .iter()
+        .filter(|node| node.bounds.size == Size::new(px(2.0), px(24.0)))
+        .count();
+    assert_eq!(lines, 0);
+    app.drop_held().unwrap();
+    app.wait_for("Layout h([*b]:400 [c *a])").unwrap();
+}
+
+#[test]
+fn at_compact_width_a_drag_along_the_strip_shows_the_insertion_line() {
+    let mut app = start(two_groups(), 400.0);
+    let a = frame_of(&app, "tab-a");
+    // c (160 to 240) before a: the line at a's start (centered on it
+    // unless the strip starts there).
+    app.drag_and_hold(
+        "id:tab-c",
+        point(px(-170.0), px(0.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
+    app.wait_until(
+        "the line before a",
+        std::time::Duration::from_secs(5),
+        |screen| {
+            screen.layout_nodes().iter().any(|node| {
+                (a.origin.x - px(1.0)..=a.origin.x).contains(&node.bounds.origin.x)
+                    && node.bounds.size.width == px(2.0)
+                    && node.bounds.size.height > px(0.0)
+            })
+        },
+    )
+    .unwrap();
+    assert!(!shows_indicator(app.screen()));
+    app.drop_held().unwrap();
+    app.wait_for("Layout h([*c a b]:400)").unwrap();
 }
 
 #[test]
@@ -695,6 +869,11 @@ fn a_narrow_area_in_a_wide_window_is_compact() {
     assert!(app.shows("Tab c"));
     assert!(app.shows("Panel a"));
     assert!(!app.shows("Panel c"));
+    // Its tabs, every group's, control the one tab panel.
+    assert_eq!(app.screen().count("role:tabpanel").unwrap(), 1);
+    let panel = controlled_panel(&app, "Tab a");
+    assert_eq!(controlled_panel(&app, "Tab c"), panel);
+    assert!(holds(&app, panel, "Panel a"));
 }
 
 #[test]
@@ -1032,6 +1211,7 @@ fn Toolbar(props: ToolbarProps) -> impl IntoElement {
                     .child(text(format!("Tab {}", tab.panel)))
             })
             .render_toolbar(|tab: &DockTab| text(format!("Toolbar {} of {}", tab.panel, tab.index)))
+            .render_tab_bar_prefix(|tab: &DockTab| text(format!("Prefix {}", tab.panel)))
             .size_full(),
     )
 }
@@ -1061,9 +1241,15 @@ fn a_tab_bar_ends_with_the_toolbar_of_its_displayed_tab() {
     app.wait_for("Toolbar a of 0").unwrap();
     app.wait_for("Toolbar c of 0").unwrap();
     app.wait_for("Toolbar files of 0").unwrap();
+    // And starts with its displayed tab's prefix, before the tabs.
+    app.wait_for("Prefix a").unwrap();
+    app.wait_for("Prefix c").unwrap();
+    app.wait_for("Prefix files").unwrap();
     // It follows the group: another tab displayed.
     app.press("id:tab-b").unwrap();
     app.wait_for("Toolbar b of 1").unwrap();
+    app.wait_for("Prefix b").unwrap();
+    assert_eq!(app.screen().count("text:Prefix a"), Ok(0));
     assert_eq!(app.screen().count("text:Toolbar a of 0"), Ok(0));
     app.wait_for("Toolbar c of 0").unwrap();
 

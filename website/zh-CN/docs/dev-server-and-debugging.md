@@ -1,6 +1,6 @@
 ---
 title: 开发服务器与调试
-description: 用 nsh run 和 nsh dev 运行 Rust 和 TSX 应用，连接模拟器、Android 模拟器和真机，并使用重新构建、模块热替换、日志、错误浮层和经 source map 映射的调用栈。
+description: 用 nsh run 和 nsh dev 运行 TSX 和 Rust 应用，连接模拟器、Android 模拟器和真机，并使用重新构建、模块热替换、日志、错误浮层和经 source map 映射的调用栈。
 order: 60
 group: tools
 ---
@@ -42,7 +42,7 @@ nsh dev App.tsx --server-only       # server only
 
 各个目标的行为：
 
-- **`macos`**（macOS）在一个 1200×800 的窗口中以桌面应用的形式运行 AppKit 开发宿主。停止 `nsh run`（Ctrl-C）会关闭它，关闭窗口也会结束
+- **`macos`**（macOS）在一个 1200×800 的窗口中以桌面应用的形式运行 AppKit 开发宿主。停止 `nsh run`（Ctrl-C 或 `kill`）会关闭它，关闭窗口也会结束
   `nsh run`；Cmd+R 重新加载最新构建。
   需要 macOS 14 及以上（[macOS](./macos.md)）。
 - **`linux`**（Linux）在一个 390×844 的窗口中运行 GTK 开发宿主，行为相同：Ctrl-C 会关闭它，关闭窗口也会结束 `nsh run`。
@@ -56,6 +56,8 @@ nsh dev App.tsx --server-only       # server only
   `nsh run` 结束时（包括 Ctrl-C）会停止宿主并移除这条端口转发，因此该宿主不会接入下一次会话。
 
 **开发工具：**`catalyst`（macOS）以 Mac Catalyst 应用的形式运行 iOS 开发宿主，仅在确有需要时使用：检查 Catalyst 特有的行为，或在 Mac Catalyst 应用中嵌入 NSH。它和 `macos` 一样随 `nsh run` 启动和停止。
+
+无论 `nsh run` 怎样结束，都会停掉它启动的宿主：关闭 macOS、Linux 或 Windows 宿主，结束模拟器里的开发宿主，强制停止设备上的宿主，或者退出 Catalyst 应用。
 
 对 Rust 应用，每个目标都运行应用自己的、用它的 crate 构建的 runner：桌面平台直接运行 debug 构建，输出显示在终端；iOS 和 Android
 安装它的一个包。对 TSX，这些宿主是通用的：服务器发来的任何 NSH 应用都能运行，因此不需要为每个应用单独构建宿主（带有自己 crate
@@ -76,10 +78,11 @@ nsh dev App.tsx --server-only
 | 参数 | 说明 |
 |---|---|
 | `--port <port>` | 开发服务器端口。规则与 `nsh run` 相同；使用 `--server-only` 时默认 8790，并替换该端口上之前的 NSH 会话。 |
+| `--host <ipv4>` | 绑定的 IPv4 地址。`--server-only` 以及 `--target ios`、`android`、`web` 默认绑定 `0.0.0.0`，本机目标默认绑定 `127.0.0.1`。使用 `--target android` 时仅支持 `127.0.0.1` 和 `0.0.0.0`（`adb reverse` 转发到本机 `127.0.0.1`）。 |
 | `--release` | 提供 release 构建。 |
 
-`nsh dev --server-only` 监听这台电脑的所有地址，网络中的手机和其他电脑都可以连接。`nsh run` 和 `nsh dev` 在这台电脑上启动宿主
-（窗口、终端、Catalyst）时监听 `127.0.0.1`；使用 `--target ios`、`android` 或 `web` 时与 `--server-only` 一样监听所有地址。
+默认情况下，`nsh dev --server-only` 监听这台电脑的所有地址（`0.0.0.0`），网络中的手机和其他电脑都可以连接。`nsh run` 和 `nsh dev` 在这台电脑上启动宿主
+（窗口、终端、Catalyst）时默认监听 `127.0.0.1`；使用 `--target ios`、`android` 或 `web` 时与 `--server-only` 一样默认监听所有地址。传入 `--host <ipv4>` 可覆盖绑定地址，例如 `nsh dev App.tsx --server-only --host 127.0.0.1` 让 `--server-only` 仅监听本机回环地址。
 
 将宿主连接到打印出的 URL：
 
@@ -99,7 +102,7 @@ UI 集，例如为另一个应用构建的开发宿主）不会收到构建：�
 ## 修改 Rust 代码
 
 Rust 需要编译：修改应用的 crate，或它以路径依赖的 crate，会重新构建应用，`nsh run` 用新代码重启它。应用的状态从头开始；需要在重启后
-保留的内容请放进[存储](../modules/nsh.md#storage)。构建错误会打印在终端，下一次能编译通过的保存会重新运行。在同时有 Rust 和 TSX
+保留的内容请放进[存储](../modules/nsh.md#storage)。构建错误会打印在终端，下一次能编译通过的保存会重新运行。在同时有 TSX 和 Rust
 的应用中，修改 TSX 仍是热更新（见下文），修改 Rust 会重启应用。
 
 ## 模块热替换
@@ -113,9 +116,13 @@ TSX 的开发构建为每个源文件保留一个模块。保存时，NSH 重新
   （或它可能用到的、所在模块的其余代码）发生变化时，它的实例会用新代码重新渲染；代码没有变化的组件则保留其实例，以及
   其中的 signal 和状态。修改一个按钮的样式，屏幕会停留在原处，输入框文本和滚动位置都不变。
 - **变化的模块会重新运行**，导入了变化模块且自身无法接收该更新的模块也会重新运行，一直到入口为止。因此模块级代码会
-  重新运行：在被编辑模块顶层创建的 `signal` 会从初始值重新开始。
+  重新运行，但下面这些会保留状态：
+- **顶层 signal 和导航栈保留状态。** 在模块顶层用 `signal(…)` 或 `createNavStack(…)` 创建的 `const`，只要初始化表达式不变，
+  编辑后仍保留原值（导航栈保留它的页面）。想重新开始，就改一下初始化表达式（比如 `signal(0)` 改成 `signal(10)`）。
 - **顶层的 `context()` 对象保持同一身份**，只采用新的默认值，因此位于不同模块的 provider 和 consumer 依然能对应上。
-- **模块重新运行时，其中的 `mount` 调用会被撤销**，因此入口模块重新 mount 不会叠加出多个应用。
+- **编辑入口时，应用保持挂载。** `mount(App)`（或 `mount(() => <App />)`）用同一个组件再次运行时，会保留已挂载的内容，
+  只有你编辑过的组件重新渲染。如果编辑的是 `App` 本身，它会连同子组件一起重新渲染，子组件的状态从头开始。
+  但模块顶层创建的导航器保留路由，已经 push 的页面不会退回。如果 `mount` 调用本身变了（换了组件或 props），应用会重新挂载。
 - **抛出异常的组件** 会报告错误，并在你修复之前不渲染任何内容；应用的其余部分继续运行。下一次成功的保存即可恢复。
 
 在以下情况下，宿主会 **重新加载整个应用**，而不是打补丁：
@@ -200,7 +207,7 @@ Studio 会显示），Linux 应用写入标准错误。
 
 #### 桌面上的日志文件和级别
 
-打包后的 macOS、Windows、Linux 应用除了写入平台日志，还把日志写到它数据目录下的文件 `logs/app.log`：
+打包后的 macOS、Windows、Linux 应用除了写入平台日志，还把日志写到它数据目录下的文件 `logs/app.log`。应用可以用 `nsh.json` 的 `logDir` 另选目录（见[项目结构](./project-structure.md)），下表是默认位置：
 
 | 平台 | 日志文件 |
 |---|---|
@@ -214,6 +221,12 @@ Studio 会显示），Linux 应用写入标准错误。
 Rust 中的 `log_file()`、TSX 中的 `process.logFile` 给出这个文件的路径，应用可以把它附进诊断报告，或者提供“打开日志文件夹”；
 日志只写入平台日志时（开发宿主、嵌入应用、移动端、Web）为 `None`（`null`）。
 
+```tsx tabs
+import process from "process";
+
+const report = { logFile: process.logFile, version: "1.4.0" };
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -223,12 +236,6 @@ if let Some(file) = log_file() {
         let _ = reveal_path(file).await;
     });
 }
-```
-
-```tsx tabs
-import process from "process";
-
-const report = { logFile: process.logFile, version: "1.4.0" };
 ```
 
 默认情况下，打包应用记录它的警告、错误和 `js` 日志（`nsh run` 下记录 info 及以上的所有日志）。环境变量 `RUST_LOG`
@@ -267,8 +274,8 @@ App.tsx
  4 | }
 ```
 
-打包器只会移除 TypeScript 类型，不做类型检查；类型错误请运行 `tsc`（使用 `nsh init` 生成的 `tsconfig.json`）或依靠
-编辑器发现。
+打包器只会移除 TypeScript 类型，不做类型检查；类型错误请运行 [`nsh check`](./cli.md#nsh-check)
+（TypeScript 的原生编译器，使用 `nsh init` 生成的 `tsconfig.json`，不需要 Node）或依靠编辑器发现。
 
 在 release 构建中（使用 release 版 SDK 的嵌入式应用、打包后的应用），错误会被记录并传给宿主应用的错误处理器
 （`NshAppView.onError`、`NshView.setErrorListener`），但不会显示在应用上方。

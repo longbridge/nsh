@@ -1,6 +1,6 @@
 ---
 title: Android
-description: Run Rust and TSX NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
+description: Run TSX and Rust NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
 order: 12
 group: platforms
 ---
@@ -8,7 +8,7 @@ group: platforms
 # Android
 
 NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 8 (API 26), on `arm64-v8a`,
-`armeabi-v7a` and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
+`armeabi-v7a` and `x86_64`. Whole apps written in TSX and in Rust run and package as on the other platforms, and an existing app
 can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 
@@ -58,19 +58,19 @@ runtime in `symbols/<abi>/libnsh.so` (a Rust app's in `.nsh/rust/android-rust-re
 
 ## Upload to Google Play
 
-`nsh publish android` uploads an Android App Bundle (`.aab`) to Google Play's internal testing track
-([CLI](./cli.md#nsh-publish-android)):
+`nsh publish android` uploads an Android App Bundle (`.aab`) to a Google Play track, internal testing unless `--track`
+names another ([CLI](./cli.md#nsh-publish-android)):
 
 ```sh
-export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # never commit it
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json
+nsh publish doctor android
 nsh publish android .nsh/out/App.aab
+nsh publish android --from internal --track production --rollout 0.1
+nsh publish status android --json
 ```
 
-Once per app: create the app in Play Console, create a service account in Google Cloud with the Google Play Android
-Developer API enabled, download its JSON key, and invite the service account's email under **Users and permissions**
-with permission to release to testing tracks. Until the app's first release is made in Play Console, pass `--draft`.
-The bundle's version code must be higher than any uploaded before. Promoting a release beyond internal testing stays a
-step in Play Console.
+The Play Console and service account setup, the upload key, tracks, staged rollouts, the store listing and common errors:
+[Publish to Google Play](./publish.md#publish-to-google-play).
 
 ## Embedding in an Android app
 
@@ -106,7 +106,9 @@ cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
-`INTERNET` and `ACCESS_NETWORK_STATE` permissions and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
+`INTERNET` and `ACCESS_NETWORK_STATE` permissions, and the signature permission
+`${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (androidx's name, so the two merge) that keeps the receivers
+registered at run time to the app before Android 13, and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
 minified build applies on its own: the native library finds the runtime's classes by name, so `com.longbridge.nsh`
 stays as it is.
 
@@ -412,10 +414,22 @@ result code and the intent the other app returned), across configuration changes
 whether an installed app answers the intent. Android 11+ shows an app only the apps its manifest queries: a crate
 declares its queries in its `Cargo.toml` ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
 `output_file(env, name)` makes a new file in the app's cache with a `content://` URI the other app writes through the
-app's file provider (`MediaStore.EXTRA_OUTPUT`), and `picker::prepare_image(path, name, &request)` prepares an image
+app's file provider (`MediaStore.EXTRA_OUTPUT`); `content_uri(env, path)` is the `content://` URI and MIME type another
+app reads an existing file of the app's own storage through (`EXTRA_STREAM` of a share or an "open with" intent),
+`None` for a file outside it. `picker::prepare_image(path, name, &request)` prepares an image
 file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI environment (code of the app and its nshm; other crates reach the VM through `ndk-context` above) and returns its result, or the JNI error (a Java exception is
 logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
 (`crates/nsh-extra/src/camera/android.rs`) uses all of them.
+
+## Presenting from Rust
+
+Rust code that shows system UI (a popup menu, a dialog, a share sheet) shows it from the surface whose code asked. In
+a UI-thread task (`run_on_main_thread`), `nsh::presenting_activity(env)` is the activity that surface's view is in, to
+show UI over when no element anchors it (`None` when the view is in no activity that can show anything), and
+`nsh::native_view(env, node)` is the `View` of an element of that surface (the node of its `ref`, a `NodeRef` argument
+of a module function; `ROOT_ID` for the surface's root view), in the surface or one of its modals: the anchor of a
+popup that belongs to the element. Both give a global reference, `None` outside such a task, or the JNI error. Take
+them while the task runs. They are for anchoring and presenting system UI only: a module never changes, re-parents, restyles or removes a view NSH owns.
 
 ## Java listeners in Rust
 
@@ -429,6 +443,18 @@ listens to `SpeechRecognizer` this way. Only interfaces can be implemented so: a
 ([Java code](./packaging.md#java-code)). A method that returns a primitive must get a value boxed as its type
 (`java.lang.Boolean` for `boolean`): returning `None` there, or a call after the `Proxy` is dropped, throws a
 `NullPointerException` in Java.
+
+## Broadcasts in Rust
+
+An Android API that answers with a broadcast (the app a chooser's `IntentSender` reports the user chose, a
+`PendingIntent` an alarm or a notification sends back, a finished download) is heard by
+`receiver::register(env, action, handler)`: a receiver of that action, registered on the application, whose
+broadcasts reach `handler` (the broadcast `Intent`) on the UI thread, so the crate ships no `BroadcastReceiver`
+subclass. It is not exported: it hears the app's own broadcasts (aim the `PendingIntent`'s intent at the app's
+package) and the system's, never other apps'. On Android 12 and below that takes a signature permission, which the
+runtime's manifest declares, so a broadcast another system app sends as itself (`DOWNLOAD_COMPLETE`, from the download
+provider) may not arrive there. Keep the `Receiver` it returns while the broadcast may come; dropping it unregisters
+it.
 
 ## Notifications from other code
 
@@ -567,6 +593,7 @@ config of the app may override it). The release `nsh.aar` does not.
 
 ## See also
 
+- [Publish to Google Play](./publish.md#publish-to-google-play)
 - [Building with Rust](./rust.md)
 - [Embedding in iOS apps](./ios.md)
 - [Native components](./native-components.md)

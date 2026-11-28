@@ -6,7 +6,18 @@ order: 15
 
 # 全局 API
 
-除了 ECMAScript 标准库，NSH 应用的 JS 环境还提供一组标准全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import，因此大量基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
+NSH 应用无需 import 就能使用一组标准全局对象。它们用 Rust 原生实现，遵循 WHATWG 标准，是 ECMAScript 标准库之外的补充：
+
+- `fetch` 及 `Headers`、`Request`、`Response`
+- Streams 标准
+- `URL` 和 `URLSearchParams`
+- `TextEncoder` / `TextDecoder`
+- `Blob`、`File` 和 `FormData`
+- `EventTarget`、`Event` 和 `AbortController`
+- 定时器、`requestAnimationFrame` 和 `console`
+- `Intl`，用于格式化数字和日期
+
+既然遵循标准，基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）都能直接用。
 
 本页列出了应用拥有的全部全局对象。它们属于 TSX 环境：Rust 代码改用 Rust 标准库、crates.io 和 `nsh_core::prelude` 中 NSH 的服务（`fetch`、定时器、任务；见[用 Rust 开发](../docs/rust.md)），表格的 Rust 列给出了对应项。界面用[元素](../elements/index.md)和应用自己的组件搭建，其余能力来自应用导入的[模块](./index.md)。
 
@@ -73,6 +84,16 @@ Rust：`set_timeout(delay, f)` 和 `set_interval(period, f)` 返回一个 `Spawn
 
 `requestAnimationFrame` 的回调在引擎产出下一帧时执行一次，同一帧的回调拿到相同的 `performance.now()` 时间。回调里再次请求的帧会在下一帧调用，所以常见的循环写法可以正常工作：
 
+```tsx tabs
+let start = 0;
+function tick(time: number) {
+  if (!start) start = time;
+  progress.set(Math.min(1, (time - start) / 300));
+  if (time - start < 300) requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+```
+
 ```rust tabs
 spawn(async move {
     let start = next_frame().await;
@@ -85,16 +106,6 @@ spawn(async move {
         }
     }
 });
-```
-
-```tsx tabs
-let start = 0;
-function tick(time: number) {
-  if (!start) start = time;
-  progress.set(Math.min(1, (time - start) / 300));
-  if (time - start < 300) requestAnimationFrame(tick);
-}
-requestAnimationFrame(tick);
 ```
 
 > [!TIP]
@@ -196,14 +207,6 @@ channel.send("hello");
 
 `AbortSignal` 可以取消 `fetch` 请求和流的管道传输，也可以移除用 `{ signal }` 添加的监听器。在 Rust 中，请求运行在任务里，取消任务即取消请求：
 
-```rust tabs
-let search = spawn(async move {
-    let _ = fetch("https://api.example.com/search?q=nsh").await;
-});
-// 之后，例如屏幕关闭时（任务也会随组件一起结束）：
-search.cancel();
-```
-
 ```tsx tabs
 const controller = new AbortController();
 const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
@@ -213,6 +216,14 @@ fetch("https://api.example.com/search?q=nsh", { signal }).catch((e) => {
 });
 // later, for example when the screen closes:
 controller.abort();
+```
+
+```rust tabs
+let search = spawn(async move {
+    let _ = fetch("https://api.example.com/search?q=nsh").await;
+});
+// 之后，例如屏幕关闭时（任务也会随组件一起结束）：
+search.cancel();
 ```
 
 ## URL
@@ -262,17 +273,17 @@ class URLSearchParams {
 
 URL 按 URL 标准解析。`searchParams` 是双向联动的：修改参数会重写查询串，设置 `search` 或 `href` 会重新解析参数。Rust 代码使用遵循同一标准的 `url` crate：
 
-```rust tabs
-let mut url = url::Url::parse("https://api.example.com")?.join("/v1/items")?;
-url.query_pairs_mut().append_pair("page", "2").append_pair("tag", "new");
-url.as_str(); // "https://api.example.com/v1/items?page=2&tag=new"
-```
-
 ```tsx tabs
 const url = new URL("/v1/items", "https://api.example.com");
 url.searchParams.set("page", "2");
 url.searchParams.append("tag", "new");
 url.href; // "https://api.example.com/v1/items?page=2&tag=new"
+```
+
+```rust tabs
+let mut url = url::Url::parse("https://api.example.com")?.join("/v1/items")?;
+url.query_pairs_mut().append_pair("page", "2").append_pair("tag", "new");
+url.as_str(); // "https://api.example.com/v1/items?page=2&tag=new"
 ```
 
 `URLSearchParams`（以及 `Headers`、`FormData`）的迭代器遍历的是创建迭代器那一刻的快照，并且带有迭代器辅助方法（`map`、`filter`、`toArray` 等）。
@@ -386,6 +397,18 @@ type BodyInit = ReadableStream<Uint8Array> | Blob | BufferSource | FormData | UR
 
 `fetch` 通过平台自身的网络栈发送 HTTP 和 HTTPS 请求：iOS 和 Mac Catalyst 上是 `NSURLSession`，Android 上是 `HttpURLConnection`。因此系统的代理设置、TLS 配置和证书信任都会生效。`data:` URL 和 `blob:` URL（来自 `URL.createObjectURL`）在本地直接应答，不经过网络；其他协议一律 reject。Rust 的 `fetch(request)` 走同一个网络栈、受同样的能力约束，接受 URL 或 `HttpRequest`，resolve 为包含完整响应体的 `HttpResponse`（[网络](../docs/networking.md#在-rust-组件中)）：
 
+```tsx tabs
+type Todo = { id: number; title: string; done: boolean };
+
+async function loadTodos(): Promise<Todo[]> {
+  const res = await fetch("https://api.example.com/todos", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+```
+
 ```rust tabs
 #[derive(serde::Deserialize)]
 struct Todo {
@@ -401,18 +424,6 @@ async fn load_todos(token: &str) -> Result<Vec<Todo>, String> {
         return Err(format!("HTTP {}", response.status()));
     }
     serde_json::from_slice(&response.body).map_err(|e| e.to_string())
-}
-```
-
-```tsx tabs
-type Todo = { id: number; title: string; done: boolean };
-
-async function loadTodos(): Promise<Todo[]> {
-  const res = await fetch("https://api.example.com/todos", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
 }
 ```
 
@@ -687,7 +698,7 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).fo
 不传 `locales` 时使用应用显示的区域：设备的区域格式（iOS 的 `NSLocale.currentLocale`、Android 的 `Locale.getDefault()`；`nsh test` 和 Web 上为 `en-US`），或者 `setLocale`（`nsh/i18n`）设置的区域。
 
 - **数字**：`decimal`、`percent`、`currency`（`currencyDisplay` 为 `symbol`、`narrowSymbol`、`code`）和 `unit`（常用单位：长度、质量、时长、数据大小、温度、速度）样式；`minimumIntegerDigits`、`minimum` / `maximumFractionDigits`、`minimum` / `maximumSignificantDigits`、`roundingPriority`、`trailingZeroDisplay`、`useGrouping`、`signDisplay`；`standard`、`scientific`、`engineering` 和 `compact` 记数法（`compactDisplay` 为 `short` / `long`）。舍入方式是四舍五入（远离零），按数字的书写形式进行（`1.005` 舍入为 `1.01`，与浏览器一致）。`format` 也精确地接受 BigInt 和十进制字符串。`formatToParts` 和 `resolvedOptions` 与浏览器一致。
-- **日期**：`weekday`、`year`、`month`（`numeric`、`2-digit`、`short`、`long`、`narrow`）、`day`、`hour`、`minute`、`second`、`fractionalSecondDigits`、`hour12` / `hourCycle`、`timeZoneName` 以及 `dateStyle` / `timeStyle`，使用公历。`timeZone` 支持本地时间的时区（默认的 `resolvedOptions().timeZone` 就是它：设备上即 `localeSettings().timeZone`，浏览器中为浏览器的时区）、`UTC` 和偏移量（`"+08:00"`）；其他时区名会抛出 `RangeError`（没有时区数据库）。
+- **日期**：`weekday`、`year`、`month`（`numeric`、`2-digit`、`short`、`long`、`narrow`）、`day`、`hour`、`minute`、`second`、`fractionalSecondDigits`、`hour12` / `hourCycle`、`timeZoneName` 以及 `dateStyle` / `timeStyle`，使用公历。`timeZone` 支持本地时间的时区（默认的 `resolvedOptions().timeZone` 就是它：设备上即 `localeSettings().timeZone`，浏览器中为浏览器的时区）、`UTC`、偏移量（`"+08:00"`）以及 `nsh.json` 的 `timeZones` 列出的时区（[时区](../docs/i18n.md#时区)）；其他时区名会抛出 `RangeError`。
 - **区域**：运行时自带英语（`en-US` 及其地区变体：`en-GB`、`en-IN` 等）的数据；其他语言的数据随应用提供，即 `nsh.json` 中 `locales` 列出的语言，没有它时为应用翻译所包含的语言（[I18n](../docs/i18n.md#数字和日期)）。Native Shell 有德语、法语、西班牙语、意大利语、葡萄牙语、荷兰语、俄语、瑞典语、波兰语、土耳其语、印尼语、越南语、泰语、印地语、中文、日语和韩语的数据，以及它们的地区变体（`de-CH`、`es-MX`、`pt-PT`、`zh-TW` 等），这是一张常用数据的表，而不是完整的 CLDR，所以细节可能与浏览器的输出不同。没有数据的区域会依次回退到下一个请求的区域、设备的区域、`en-US`；俄语、瑞典语、波兰语、土耳其语、印尼语、越南语、泰语和印地语的日期没有月份名（月份写成数字，星期用英语）。数字始终是拉丁数字。
 - **不支持**：`Intl.Collator`（`String.prototype.localeCompare` 是 QuickJS 自带的，不区分区域）、`PluralRules`、`RelativeTimeFormat`、`ListFormat`、`DisplayNames`、`Segmenter` 和 `Intl.Locale`；`currencySign: "accounting"` 和 `currencyDisplay: "name"` 分别按 `standard` 和 `code` 格式化。
 

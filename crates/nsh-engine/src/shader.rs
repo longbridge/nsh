@@ -43,11 +43,7 @@
 
 use std::{
     borrow::Cow,
-    sync::{
-        Arc, Condvar, Mutex, OnceLock, PoisonError,
-        atomic::{AtomicU8, Ordering},
-        mpsc,
-    },
+    sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, atomic::Ordering, mpsc},
     time::{Duration, Instant},
 };
 
@@ -58,6 +54,7 @@ use nsh_core::{
 };
 use rustc_hash::FxHashMap;
 
+use crate::frames::{FrameTarget, Submission, Writes, texture_format};
 #[cfg(windows)]
 pub use crate::shader_frame::SharedTexture;
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
@@ -75,13 +72,6 @@ static NO_GPU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 /// Whether [`Renderer::new`] found no GPU in this process.
 pub(crate) fn no_gpu() -> bool {
     NO_GPU.load(Ordering::Relaxed)
-}
-
-fn texture_format(format: PixelFormat) -> wgpu::TextureFormat {
-    match format {
-        PixelFormat::Rgba => wgpu::TextureFormat::Rgba8Unorm,
-        PixelFormat::Bgra => wgpu::TextureFormat::Bgra8Unorm,
-    }
 }
 
 /// A pipeline in the cache: compiling on the worker, or done (`None`: the
@@ -141,6 +131,20 @@ pub struct Renderer {
     /// The worker thread's queue, started with the first pipeline asked for
     /// (the thread ends when the renderer is dropped).
     worker: OnceLock<Option<mpsc::Sender<Job>>>,
+    /// Apple: the thread that finishes and submits the frames encoded on
+    /// the main thread, and asks the GPU to tell when they are done
+    /// ([`Renderer::when_done`]), in order; started with the first frame
+    /// (it ends when the renderer is dropped).
+    #[cfg(target_vendor = "apple")]
+    submitter: OnceLock<Option<mpsc::Sender<Submit>>>,
+}
+
+/// Work for the submitting thread ([`Renderer::submitter`]).
+#[cfg(target_vendor = "apple")]
+enum Submit {
+    Frame(Submission),
+    /// Once the frames sent before are submitted.
+    WhenDone(Box<dyn FnOnce() + Send>),
 }
 
 /// The backends to open a device on, in order: the renderer takes the
@@ -157,7 +161,7 @@ pub struct Renderer {
 /// instance alone takes some 200 ms to open (Direct3D 12's: a few). Then
 /// every backend at once, as before, for a machine whose only Direct3D 12
 /// adapter is the software one ([`takes`]).
-fn backend_order() -> Vec<wgpu::Backends> {
+pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(all(target_os = "linux", not(target_os = "android"))) {
         vec![wgpu::Backends::GL, wgpu::Backends::PRIMARY]
     } else if cfg!(windows) {
@@ -175,7 +179,7 @@ fn backend_order() -> Vec<wgpu::Backends> {
 /// adapter on Haswell's integrated GPUs and in many virtual machines) only
 /// from the last entry, which offers every backend, so that a hardware
 /// adapter of another one sorts ahead of it.
-fn takes(device_type: wgpu::DeviceType, last_entry: bool) -> bool {
+pub(crate) fn takes(device_type: wgpu::DeviceType, last_entry: bool) -> bool {
     last_entry || !cfg!(windows) || device_type != wgpu::DeviceType::Cpu
 }
 
@@ -186,15 +190,22 @@ impl Renderer {
     /// ([`crate::EngineControl::shaders_unavailable`]).
     pub fn new(format: PixelFormat) -> Option<Renderer> {
         // The first backend that gives a device: an adapter found may still
-        // refuse its device, and the next backend then gets its turn. On
-        // NVIDIA's driver OpenGL does (wgpu's validation of indirect calls
-        // needs compute shaders its GL context lacks), and Vulkan opens.
+        // refuse its device, and the next backend then gets its turn.
         let mut opened = None;
         let mut last = None;
         let order = backend_order();
         for (i, &backends) in order.iter().enumerate() {
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends,
+                // None, in debug builds as in release ones (wgpu's `WGPU_*`
+                // variables still turn them on). Shader views never draw or
+                // dispatch indirectly, and the validation of indirect calls
+                // needs compute shaders: an OpenGL context without them
+                // (NVIDIA's driver) would refuse the device, wgpu logging its
+                // pipeline's failure as an error. The backends' validation
+                // layers are for wgpu's own development: OpenGL's debug
+                // output logs the driver's performance notes as warnings.
+                flags: wgpu::InstanceFlags::empty().with_env(),
                 ..wgpu::InstanceDescriptor::new_without_display_handle()
             });
             let adapter =
@@ -322,6 +333,8 @@ impl Renderer {
             sampler,
             cache: Default::default(),
             worker: OnceLock::new(),
+            #[cfg(target_vendor = "apple")]
+            submitter: OnceLock::new(),
         })
     }
 
@@ -414,6 +427,20 @@ impl Renderer {
     /// they are [`ShaderView::pending`]. `false` (and `f` dropped) where the
     /// device cannot tell: the backend polls.
     pub fn when_done(&self, f: impl FnOnce() + Send + 'static) -> bool {
+        // After the frames still on the submitting thread, which asks.
+        #[cfg(target_vendor = "apple")]
+        if let Some(thread) = self.submitter() {
+            if !crate::shader_surfaces::is_metal(&self.queue) {
+                return false;
+            }
+            return match thread.send(Submit::WhenDone(Box::new(f))) {
+                Ok(()) => true,
+                Err(mpsc::SendError(Submit::WhenDone(f))) => {
+                    crate::shader_surfaces::when_done(&self.queue, f)
+                }
+                Err(_) => false,
+            };
+        }
         #[cfg(target_vendor = "apple")]
         return crate::shader_surfaces::when_done(&self.queue, f);
         #[cfg(not(target_vendor = "apple"))]
@@ -457,6 +484,52 @@ impl Renderer {
         // No worker: compiled here, as before there was one.
         compile(&self.device, &self.cache, job);
         self.pipeline(layer, format)
+    }
+
+    /// Apple: the submitting thread's queue, its thread started the first
+    /// time (`None` without one: frames are submitted where they are
+    /// encoded).
+    #[cfg(target_vendor = "apple")]
+    fn submitter(&self) -> Option<&mpsc::Sender<Submit>> {
+        self.submitter
+            .get_or_init(|| {
+                let (tx, rx) = mpsc::channel::<Submit>();
+                let queue = self.queue.clone();
+                let spawned = std::thread::Builder::new()
+                    .name("nsh-shader-submit".into())
+                    .spawn(move || {
+                        // Ends once the renderer (the sender) is dropped.
+                        while let Ok(work) = rx.recv() {
+                            match work {
+                                Submit::Frame(frame) => frame.run(&queue),
+                                Submit::WhenDone(f) => {
+                                    crate::shader_surfaces::when_done(&queue, f);
+                                }
+                            }
+                        }
+                    });
+                match spawned {
+                    Ok(_) => Some(tx),
+                    Err(e) => {
+                        log::warn!("shaders: no thread to submit frames on ({e})");
+                        None
+                    }
+                }
+            })
+            .as_ref()
+    }
+
+    /// Sends `frame` to the submitting thread, or submits it here without
+    /// one.
+    fn submit(&self, frame: Submission) {
+        #[cfg(target_vendor = "apple")]
+        if let Some(thread) = self.submitter() {
+            if let Err(mpsc::SendError(Submit::Frame(frame))) = thread.send(Submit::Frame(frame)) {
+                frame.run(&self.queue);
+            }
+            return;
+        }
+        frame.run(&self.queue);
     }
 
     /// The worker's queue, its thread started the first time.
@@ -609,31 +682,6 @@ struct Picture {
     format: wgpu::TextureFormat,
 }
 
-/// Where a read-back buffer is.
-mod state {
-    pub(super) const IDLE: u8 = 0;
-    pub(super) const MAPPING: u8 = 1;
-    pub(super) const MAPPED: u8 = 2;
-    pub(super) const FAILED: u8 = 3;
-}
-
-struct Readback {
-    buffer: wgpu::Buffer,
-    state: Arc<AtomicU8>,
-    /// The frame's number.
-    serial: u64,
-}
-
-/// What a view renders into, for one size.
-struct Target {
-    width: u32,
-    height: u32,
-    stride: u32,
-    view: wgpu::TextureView,
-    texture: wgpu::Texture,
-    readbacks: [Readback; 2],
-}
-
 /// The buffers of a view's uniforms and the bind group naming them.
 struct Bindings {
     builtins: wgpu::Buffer,
@@ -677,10 +725,9 @@ pub struct ShaderView {
     dirty: bool,
     /// The last [`Self::render`] found its pipeline compiling.
     compiling: bool,
-    target: Option<Target>,
     bindings: Option<Bindings>,
-    serial: u64,
-    frame: Frame,
+    /// Where its frames go, and the last one read back.
+    frames: FrameTarget,
     /// The pictures the platform gave, by [`ShaderInput::index`].
     pictures: [Option<Picture>; 4],
     /// The pictures changed since the bind group was made.
@@ -691,17 +738,6 @@ pub struct ShaderView {
     transition: Option<(Instant, Duration)>,
     /// It runs backwards: `nsh.progress` goes from 1 to 0.
     backwards: bool,
-    /// Its frames go to IOSurfaces ([`Self::show_on_surfaces`]).
-    #[cfg(any(target_vendor = "apple", windows))]
-    on_surfaces: bool,
-    /// The surfaces, once a frame was rendered into one.
-    #[cfg(any(target_vendor = "apple", windows))]
-    surfaces: Option<crate::shader_surfaces::Surfaces>,
-    /// Windows: the textures of the size before the last resize, while the
-    /// new size has no frame to show: their frame shows until one does, as
-    /// a read-back frame stays shown until the next comes back.
-    #[cfg(windows)]
-    previous: Option<crate::shader_surfaces::Surfaces>,
 }
 
 impl ShaderView {
@@ -734,7 +770,7 @@ impl ShaderView {
             Some(l) => self.words = l.uniforms.to_vec(),
             None => {
                 self.words.clear();
-                self.frame = Frame::default();
+                self.frames.clear_frame();
                 self.compiling = false;
             }
         }
@@ -827,11 +863,7 @@ impl ShaderView {
     /// when it shows none. On the GPU when the frame is on a surface.
     pub fn set_input_from_frame(&mut self, renderer: &Renderer, input: ShaderInput) -> bool {
         #[cfg(any(target_vendor = "apple", windows))]
-        let shown = self.surfaces.as_ref().and_then(|s| s.shown_texture());
-        #[cfg(windows)]
-        let shown = shown.or_else(|| self.previous.as_ref().and_then(|s| s.shown_texture()));
-        #[cfg(any(target_vendor = "apple", windows))]
-        if let Some(texture) = shown {
+        if let Some(texture) = self.frames.shown_texture() {
             let (width, height) = (texture.width(), texture.height());
             let slot = &mut self.pictures[input.index()];
             if picture_slot(renderer, slot, width, height, texture.format()) {
@@ -850,17 +882,17 @@ impl ShaderView {
             self.dirty = true;
             return true;
         }
-        if self.frame.width == 0 {
+        if self.frames.frame().width == 0 {
             return false;
         }
-        let frame = std::mem::take(&mut self.frame);
+        let frame = self.frames.take_frame();
         let (width, height) = (frame.width, frame.height);
         self.set_input(
             renderer,
             input,
             Some((&frame.tight(), width, height, width * 4)),
         );
-        self.frame = frame;
+        self.frames.restore_frame(frame);
         true
     }
 
@@ -995,22 +1027,14 @@ impl ShaderView {
 
     /// Whether a frame is on its way back from the GPU.
     pub fn pending(&self) -> bool {
-        #[cfg(any(target_vendor = "apple", windows))]
-        if self.surfaces.as_ref().is_some_and(|s| s.pending()) {
-            return true;
-        }
-        self.target.as_ref().is_some_and(|t| {
-            t.readbacks
-                .iter()
-                .any(|r| r.state.load(Ordering::Acquire) != state::IDLE)
-        })
+        self.frames.pending()
     }
 
     /// The last frame collected (empty until one is, and while its frames
     /// go to surfaces; on Windows its serial still counts the frames shown
     /// on shared textures).
     pub fn frame(&self) -> &Frame {
-        &self.frame
+        self.frames.frame()
     }
 
     /// Renders its frames into IOSurfaces the backend shows as they are
@@ -1026,16 +1050,7 @@ impl ShaderView {
     /// adapter, no shared fences) passes `false`.
     #[cfg(any(target_vendor = "apple", windows))]
     pub fn show_on_surfaces(&mut self, on: bool) {
-        if self.on_surfaces == on {
-            return;
-        }
-        self.on_surfaces = on;
-        if !on {
-            self.surfaces = None;
-            #[cfg(windows)]
-            {
-                self.previous = None;
-            }
+        if self.frames.show_on_surfaces(on) {
             self.dirty = true;
         }
     }
@@ -1047,8 +1062,7 @@ impl ShaderView {
     /// backend signals the value returned once its frame is submitted.
     #[cfg(windows)]
     pub fn surface(&self) -> Option<SharedTexture> {
-        (self.surfaces.as_ref().and_then(|s| s.shown()))
-            .or_else(|| self.previous.as_ref().and_then(|s| s.shown()))
+        self.frames.surface()
     }
 
     /// The surface of the last frame collected, while its frames go to
@@ -1057,7 +1071,7 @@ impl ShaderView {
     /// each time [`Self::render`] says the frame is new.
     #[cfg(target_vendor = "apple")]
     pub fn surface(&self) -> Option<&objc2_io_surface::IOSurfaceRef> {
-        self.surfaces.as_ref().and_then(|s| s.shown())
+        self.frames.surface()
     }
 
     /// Collects a frame that came back without rendering another; `true`
@@ -1065,7 +1079,7 @@ impl ShaderView {
     /// transition ended shows the frames still on their way this way.
     pub fn collect_frame(&mut self, renderer: &Renderer) -> bool {
         let _ = renderer.device.poll(wgpu::PollType::Poll);
-        self.collect()
+        self.frames.collect()
     }
 
     /// Renders a frame if one is due and collects one that came back;
@@ -1083,63 +1097,17 @@ impl ShaderView {
         }
         let (width, height) = self.pixels();
         if width == 0 || height == 0 {
-            if self.frame.width != 0 {
-                self.frame = Frame::default();
-                collected = true;
-            }
+            collected |= self.frames.clear_frame();
             self.dirty = false;
             return collected;
         }
-        // On surfaces where asked and possible (else read back): a free one,
-        // or none (all busy: the frame is skipped).
-        #[cfg(any(target_vendor = "apple", windows))]
-        let mut surface = None;
-        #[cfg(any(target_vendor = "apple", windows))]
-        if self.on_surfaces {
-            if self
-                .surfaces
-                .as_ref()
-                .is_none_or(|s| (s.width, s.height) != (width, height))
-            {
-                // The old size's frame shows until the new size has one.
-                #[cfg(windows)]
-                if let Some(old) = (self.surfaces.take()).filter(|s| s.shown_texture().is_some()) {
-                    self.previous = Some(old);
-                }
-                self.surfaces = Some(crate::shader_surfaces::Surfaces::new(width, height));
-            }
-            match self
-                .surfaces
-                .as_mut()
-                .expect("surfaces")
-                .free(&renderer.device)
-            {
-                Ok(Some(i)) => surface = Some(i),
-                Ok(None) => return collected,
-                Err(_) => {
-                    log::debug!("shaders: no shared frames on this device; reading frames back");
-                    self.on_surfaces = false;
-                    self.surfaces = None;
-                    #[cfg(windows)]
-                    {
-                        self.previous = None;
-                    }
-                }
-            }
-        }
-        #[cfg(any(target_vendor = "apple", windows))]
-        let on_surfaces = self.on_surfaces;
-        #[cfg(not(any(target_vendor = "apple", windows)))]
-        let on_surfaces = false;
-        let format = if on_surfaces {
-            #[cfg(any(target_vendor = "apple", windows))]
-            {
-                crate::shader_surfaces::FORMAT
-            }
-            #[cfg(not(any(target_vendor = "apple", windows)))]
-            unreachable!()
-        } else {
-            texture_format(renderer.format)
+        // On surfaces where asked and possible (else read back); none free:
+        // the frame is skipped.
+        let Some(format) =
+            self.frames
+                .surface_format(&renderer.device, renderer.format, width, height)
+        else {
+            return collected;
         };
         let pipeline = match renderer.pipeline(&layer, format) {
             Pipeline::Ready(pipeline) => {
@@ -1157,32 +1125,12 @@ impl ShaderView {
                 return collected;
             }
         };
-        // Where the frame goes: a free surface, or the texture and a free
-        // read-back buffer. None free: the GPU is behind, skip this frame.
-        let destination = if on_surfaces {
-            #[cfg(any(target_vendor = "apple", windows))]
-            {
-                Destination::Surface(surface.expect("a free surface"))
-            }
-            #[cfg(not(any(target_vendor = "apple", windows)))]
-            unreachable!()
-        } else {
-            if self
-                .target
-                .as_ref()
-                .is_none_or(|t| (t.width, t.height) != (width, height))
-            {
-                self.target = Some(target(renderer, width, height));
-            }
-            let target = self.target.as_ref().expect("target");
-            match target
-                .readbacks
-                .iter()
-                .position(|r| r.state.load(Ordering::Acquire) == state::IDLE)
-            {
-                Some(i) => Destination::Readback(i),
-                None => return collected,
-            }
+        // None free: the GPU is behind, skip this frame.
+        let Some(destination) =
+            self.frames
+                .destination(&renderer.device, renderer.format, width, height)
+        else {
+            return collected;
         };
         let size = layer.shader.uniform_size();
         let layout = layout_index(&layer);
@@ -1198,27 +1146,21 @@ impl ShaderView {
         let overflow = layer.overflow;
         let scale = width as f32 / (self.size.width.0 + 2.0 * overflow.0).max(f32::MIN_POSITIVE);
         let time = self.clock.time(now);
-        renderer.queue.write_buffer(
-            &bindings.builtins,
-            0,
-            &words_bytes(&builtins(
+        // Written with the frame, wherever it is submitted.
+        let mut writes: Writes = vec![(
+            bindings.builtins.clone(),
+            words_bytes(&builtins(
                 self.size,
                 time,
                 scale,
                 Percentage(progress),
                 overflow,
             )),
-        );
+        )];
         if let Some(buffer) = &bindings.uniforms {
-            renderer
-                .queue
-                .write_buffer(buffer, 0, &words_bytes(&self.words));
+            writes.push((buffer.clone(), words_bytes(&self.words)));
         }
-        let view = match destination {
-            Destination::Readback(_) => &self.target.as_ref().expect("target").view,
-            #[cfg(any(target_vendor = "apple", windows))]
-            Destination::Surface(i) => self.surfaces.as_ref().expect("surfaces").view(i),
-        };
+        let view = self.frames.view(destination);
         let mut encoder = renderer
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -1243,61 +1185,16 @@ impl ShaderView {
             pass.set_bind_group(0, &bindings.group, &[]);
             pass.draw(0..3, 0..1);
         }
-        self.serial += 1;
-        match destination {
-            #[cfg(any(target_vendor = "apple", windows))]
-            Destination::Surface(i) => {
-                renderer.queue.submit([encoder.finish()]);
-                self.surfaces.as_mut().expect("surfaces").submitted(
-                    i,
-                    self.serial,
-                    &renderer.queue,
-                );
-            }
-            Destination::Readback(i) => {
-                let target = self.target.as_mut().expect("target");
-                let readback = &mut target.readbacks[i];
-                encoder.copy_texture_to_buffer(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &target.texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::TexelCopyBufferInfo {
-                        buffer: &readback.buffer,
-                        layout: wgpu::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(target.stride),
-                            rows_per_image: Some(height),
-                        },
-                    },
-                    wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                renderer.queue.submit([encoder.finish()]);
-                readback.serial = self.serial;
-                readback.state.store(state::MAPPING, Ordering::Release);
-                let flag = readback.state.clone();
-                readback
-                    .buffer
-                    .slice(..)
-                    .map_async(wgpu::MapMode::Read, move |result| {
-                        let s = if result.is_ok() {
-                            state::MAPPED
-                        } else {
-                            state::FAILED
-                        };
-                        flag.store(s, Ordering::Release);
-                    });
-            }
-        }
+        self.frames.submit_on(
+            &renderer.queue,
+            Some(&|frame| renderer.submit(frame)),
+            destination,
+            encoder,
+            writes,
+        );
         self.dirty = false;
         let _ = renderer.device.poll(wgpu::PollType::Poll);
-        self.collect() || collected
+        self.frames.collect() || collected
     }
 
     /// The frame's size in pixels: the box and the overflow around it.
@@ -1314,68 +1211,6 @@ impl ShaderView {
         }
         ((w * scale).round() as u32, (h * scale).round() as u32)
     }
-
-    /// Shows the newest frame done: on its surface, or copied into
-    /// [`Self::frame`] from the newest mapped buffer.
-    fn collect(&mut self) -> bool {
-        #[cfg(any(target_vendor = "apple", windows))]
-        if let Some(surfaces) = &mut self.surfaces
-            && surfaces.collect()
-        {
-            #[cfg(windows)]
-            {
-                self.frame.serial = surfaces.shown_serial();
-                self.previous = None;
-            }
-            return true;
-        }
-        let Some(target) = &mut self.target else {
-            return false;
-        };
-        let mut newest: Option<usize> = None;
-        for (i, r) in target.readbacks.iter().enumerate() {
-            match r.state.load(Ordering::Acquire) {
-                state::MAPPED if newest.is_none_or(|n| target.readbacks[n].serial < r.serial) => {
-                    newest = Some(i)
-                }
-                state::FAILED => r.state.store(state::IDLE, Ordering::Release),
-                _ => {}
-            }
-        }
-        let Some(newest) = newest else {
-            return false;
-        };
-        let mut changed = false;
-        for (i, r) in target.readbacks.iter().enumerate() {
-            if r.state.load(Ordering::Acquire) != state::MAPPED {
-                continue;
-            }
-            if i == newest && r.serial > self.frame.serial {
-                let data = r.buffer.slice(..).get_mapped_range();
-                self.frame.pixels.clear();
-                self.frame.pixels.extend_from_slice(&data);
-                drop(data);
-                self.frame.width = target.width;
-                self.frame.height = target.height;
-                self.frame.stride = target.stride;
-                self.frame.serial = r.serial;
-                changed = true;
-            }
-            r.buffer.unmap();
-            r.state.store(state::IDLE, Ordering::Release);
-        }
-        changed
-    }
-}
-
-/// Where [`ShaderView::render`] draws a frame.
-#[derive(Clone, Copy)]
-enum Destination {
-    /// The target's texture, then read-back buffer `.0`.
-    Readback(usize),
-    /// Surface `.0`.
-    #[cfg(any(target_vendor = "apple", windows))]
-    Surface(usize),
 }
 
 /// Makes `slot` a picture of `width` × `height` pixels in `format` unless
@@ -1405,42 +1240,6 @@ fn picture_slot(
         format,
     });
     true
-}
-
-fn target(renderer: &Renderer, width: u32, height: u32) -> Target {
-    let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("nsh shader"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: texture_format(renderer.format),
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let stride = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let readback = || Readback {
-        buffer: renderer.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("nsh shader frame"),
-            size: u64::from(stride) * u64::from(height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }),
-        state: Arc::new(AtomicU8::new(state::IDLE)),
-        serial: 0,
-    };
-    Target {
-        width,
-        height,
-        stride,
-        view: texture.create_view(&Default::default()),
-        texture,
-        readbacks: [readback(), readback()],
-    }
 }
 
 fn bindings(
@@ -1656,6 +1455,55 @@ mod tests {
         panic!("no frame");
     }
 
+    /// The main thread's cost of rendering an animated shader on surfaces,
+    /// as the display link does each frame (`cargo test -p nsh-engine --lib
+    /// main_thread_cost -- --ignored --nocapture`).
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    #[ignore = "a measurement"]
+    fn main_thread_cost_of_an_animated_frame_on_surfaces() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut views: Vec<ShaderView> = (0..3)
+            .map(|_| {
+                let mut view = ShaderView::default();
+                view.show_on_surfaces(true);
+                view.set_size(size(px(64.0), px(14.0)), 2.0);
+                view.set_layer(Some(layer(
+                    "struct Uniforms { color: vec4f }\n\
+                     fn shade(uv: vec2f) -> vec4f { return uniforms.color * fract(nsh.time + uv.x); }",
+                    &[("color", UniformValue::Color(Color(0xff0000ff)))],
+                )));
+                prepare(&mut view, &renderer);
+                view
+            })
+            .collect();
+        let start = Instant::now();
+        let mut spent = Vec::new();
+        let mut shown = 0;
+        for i in 0..400u32 {
+            let now = start + Duration::from_millis(u64::from(i) * 8);
+            let t = Instant::now();
+            for view in &mut views {
+                shown += usize::from(view.render(&renderer, now));
+            }
+            spent.push(t.elapsed().as_secs_f64() * 1000.0);
+            std::thread::sleep(Duration::from_millis(8));
+        }
+        spent.sort_by(f64::total_cmp);
+        let at = |q: f64| spent[((spent.len() - 1) as f64 * q) as usize];
+        eprintln!(
+            "3 views, ms per display frame: p50 {:.3} p95 {:.3} max {:.3}; {shown} frames shown",
+            at(0.5),
+            at(0.95),
+            at(1.0)
+        );
+        // Frames are not skipped for want of a free surface.
+        assert!(shown > 3 * 350, "{shown} frames shown");
+    }
+
     #[cfg(target_vendor = "apple")]
     #[test]
     fn frames_on_surfaces_have_the_pixels_read_back_ones_have() {
@@ -1692,6 +1540,10 @@ mod tests {
         let rows = surface_frame(&mut view, &renderer);
         assert_eq!(rows[1][0], [0, 255, 0, 255]);
         assert_ne!(view.surface().map(|s| s as *const _), first);
+
+        view.set_layer(None);
+        assert!(view.surface().is_none(), "the cleared layer has no surface");
+        assert!(!view.collect_frame(&renderer), "no stale frame can show");
     }
 
     #[cfg(target_vendor = "apple")]
@@ -1725,6 +1577,16 @@ mod tests {
         let rows = surface_frame(&mut view, &renderer);
         assert_eq!(rows[0][0], [0, 0, 255, 255]);
         assert_eq!(rows[0][1], [0, 0, 255, 255]);
+
+        view.set_size(size(px(0.0), px(0.0)), 1.0);
+        assert!(
+            view.render(&renderer, Instant::now()),
+            "the shown frame changed"
+        );
+        assert!(
+            view.surface().is_none(),
+            "a zero-sized shader has no surface"
+        );
     }
 
     #[test]
@@ -2013,11 +1875,7 @@ mod tests {
         while start.elapsed() < Duration::from_secs(5) {
             if view.render(renderer, Instant::now()) {
                 assert_eq!(view.frame().width, 0, "nothing is read back");
-                let texture = view
-                    .surfaces
-                    .as_ref()
-                    .and_then(|s| s.shown_texture())
-                    .expect("a texture");
+                let texture = view.frames.shown_texture().expect("a texture");
                 let (width, height) = (texture.width(), texture.height());
                 let stride = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
                 let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
@@ -2168,7 +2026,7 @@ mod tests {
         assert!(!view.render(&renderer, Instant::now()), "skipped");
         assert!(!view.pending(), "no texture was free");
         let last = drawn.last().expect("drawn").value;
-        view.surfaces.as_ref().expect("textures").signal(last);
+        view.frames.signal_surfaces(last);
         assert_eq!(texture_frame(&mut view, &renderer)[0][0], [255, 0, 0, 255]);
     }
 

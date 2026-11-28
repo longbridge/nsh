@@ -66,6 +66,34 @@ use crate::{
 /// (less than the platforms' long press, so it opens while the finger is
 /// still down), and how far it may move meanwhile.
 const HOLD: Duration = Duration::from_millis(400);
+
+thread_local! {
+    /// The finger (its id) whose hold a context menu's trigger took, and
+    /// that trigger. A touch reaches every trigger around the finger,
+    /// innermost first: the triggers outside the one that took it start no
+    /// hold of their own, so one hold opens one menu, as the secondary
+    /// click does.
+    static HELD: std::cell::Cell<Option<(u32, nsh_core::NodeId)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Whether the hold of the finger starting `e` belongs to a context menu
+/// inside the trigger `me` (one before it on the finger's path).
+fn held_inside(e: &TouchEvent, me: Option<nsh_core::NodeId>) -> bool {
+    let (Some(point), Some(me)) = (e.points.first(), me) else {
+        return false;
+    };
+    let Some((finger, by)) = HELD.get() else {
+        return false;
+    };
+    finger == point.id
+        && by != me
+        && point
+            .path
+            .iter()
+            .position(|&n| n == by)
+            .zip(point.path.iter().position(|&n| n == me))
+            .is_some_and(|(inner, outer)| inner < outer)
+}
 const SLOP: f32 = 10.0;
 /// iOS's system menu: how long a `ContextMenu`'s preview stays made after
 /// the finger lifted or was taken over without the menu coming up (a tap,
@@ -1184,9 +1212,17 @@ impl Items {
     /// ahead of a move under way: a Return or Space typed ahead, which
     /// selects the item the keys move to once they are there. Whether it
     /// took the press.
-    fn press_ahead(&self, key: u64) -> bool {
+    ///
+    /// Only a key is typed ahead: a press from no pointer (`clicks` 0) on
+    /// the item with the keyboard focus, which Return and Space press. A
+    /// pointer's press (a tap, a click) and an assistive technology's
+    /// activation of another item are that item's own, also while the
+    /// focus the keys moved has not come: on a touch screen no pointer
+    /// moves over the item first to take the keys' place ([`Self::point`]).
+    fn press_ahead(&self, key: u64, press: &PressEvent) -> bool {
+        let typed = press.clicks == 0 && self.focused.get_untracked() == Some(key);
         let ahead = self.cursor.get().is_some_and(|c| c != key);
-        if self.busy.get() == 0 && !ahead {
+        if !typed || (self.busy.get() == 0 && !ahead) {
             return false;
         }
         self.in_turn(move |items| {
@@ -1394,19 +1430,34 @@ impl Items {
     /// enabled item, Up and End the last, Page Down and Page Up a page
     /// from either end; from the item the pointer is on when its focus is
     /// still on its way. Once an item has the focus, its own keys take
-    /// over.
-    fn bind_entry_keys(&self, active: impl Fn() -> bool + 'static) {
-        let (items, current) = (self.clone(), self.focused);
-        crate::keys::bind_while(
-            move || active() && current.get().is_none(),
-            ITEM_KEYS,
+    /// over. While the keyboard focus is outside the menu (`outside`) they
+    /// fire even though a text input edits: the pointer opens a menu over
+    /// a field that keeps editing, and the open menu takes its arrows, not
+    /// the field's caret. While it is in the menu, a field of the menu's
+    /// own (a filter) keeps them.
+    fn bind_entry_keys(
+        &self,
+        active: impl Fn() -> bool + Clone + 'static,
+        outside: impl Fn() -> bool + Clone + 'static,
+    ) {
+        let enter = |items: Items| {
             move |step| {
                 items.in_turn(move |items| match items.moved_to() {
                     Some(key) => items.step(key, step),
                     None => items.step_in(0, None, step),
                 })
-            },
-        );
+            }
+        };
+        let current = self.focused;
+        for (when, wanted) in [(When::NotEditing, false), (When::Always, true)] {
+            let (active, outside) = (active.clone(), outside.clone());
+            crate::keys::bind_while_when(
+                move || active() && current.get().is_none() && outside() == wanted,
+                when,
+                ITEM_KEYS,
+                enter(self.clone()),
+            );
+        }
     }
 
     /// Binds the keys that move the focus from item `key` while `focused`
@@ -1598,14 +1649,6 @@ fn surface(
 ) -> AnyElement {
     let Asked { keyed, why } = asked;
     let sheet = at.is_none();
-    // Why it last closed: a press outside put the focus where it pressed.
-    let closed_by = stored(None::<OpenChangeReason>);
-    let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
-        if !next {
-            closed_by.replace(Some(reason));
-        }
-        change(next, reason);
-    });
     let path = signal(Vec::<u32>::new());
     let open_sub = signal(None::<u32>);
     let close = {
@@ -1617,7 +1660,16 @@ fn surface(
     // A popup opened with no item focused (by the pointer) takes the
     // arrows, Home and End as well.
     if !sheet {
-        items.bind_entry_keys(move || presence.mounted() && open.get());
+        // Whether the keyboard focus is in the popup: a field of the menu's
+        // own (a filter) keeps its arrows; one outside it (the field the
+        // pointer left editing) does not.
+        let inside = signal(false);
+        presence.popup().on_focus_in(move || inside.set(true));
+        presence.popup().on_focus_out(move || inside.set(false));
+        items.bind_entry_keys(
+            move || presence.mounted() && open.get(),
+            move || !inside.get(),
+        );
         // Letters and digits move the focus by typeahead in the level the
         // keys are in, as the desktops' menus do; a text field in the menu
         // keeps them. Each opening starts again.
@@ -1709,7 +1761,7 @@ fn surface(
         presence.focus_back_on_close(
             move || open.get(),
             move || {
-                if closed_by.get() != Some(OpenChangeReason::PressOutside) {
+                if open.take_closed_by() != Some(OpenChangeReason::PressOutside) {
                     anchor.focus_back(presence.popup());
                 }
             },
@@ -1735,13 +1787,15 @@ fn surface(
                     presence.mounted()
                 }
             },
+            // A reason the focus's return did not read (the focus was not in
+            // the popup as it closed) goes as it opens or is gone.
             move || {
-                closed_by.replace(None);
+                open.take_closed_by();
                 opened(MenuEvent::Open);
             },
             move || {
                 closed(MenuEvent::Close);
-                closed_by.replace(None);
+                open.take_closed_by();
             },
         );
     }
@@ -2023,7 +2077,10 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
             keyed.replace(None);
         }
         why.stamp(reason);
-        open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
+        // The reason a close keeps says where the keyboard goes (`surface`).
+        open.request_for(next, reason, || {
+            cx.emit(MenuEvent::OpenChange(next, reason))
+        });
     });
     let anchor = element_ref();
     let parts = Surface {
@@ -2274,7 +2331,8 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> imp
             return;
         }
         why.stamp(reason);
-        open.request(next, || {
+        // The reason a close keeps says where the keyboard goes (`surface`).
+        open.request_for(next, reason, || {
             cx.emit(ContextMenuEvents::OpenChange(next, reason))
         });
     });
@@ -2309,6 +2367,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> imp
     };
     let hold = stored(None::<(Spawned<()>, Point<Points>)>);
     let opener = change.clone();
+    let disabled = props.disabled;
     view()
         .child(props.trigger.place(move |trigger| {
             let on_menu = opener.clone();
@@ -2340,12 +2399,25 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> imp
                     if is_system() {
                         preview.touched(e.phase);
                     }
+                    let me = anchor.node();
+                    let takes = e.phase == TouchPhase::Start
+                        && e.points.len() == 1
+                        && e.points[0].pointer_type != PointerType::Mouse
+                        && !disabled.get_untracked()
+                        && !held_inside(e, me);
+                    if e.phase == TouchPhase::Start {
+                        // Claimed for the triggers around this one; a
+                        // trigger that declines lets go of its old claim.
+                        match (takes, me, e.points.first()) {
+                            (true, Some(me), Some(p)) => HELD.set(Some((p.id, me))),
+                            _ if HELD.get().is_some_and(|(_, by)| Some(by) == me) => HELD.set(None),
+                            _ => {}
+                        }
+                    }
                     match e.phase {
-                        TouchPhase::Start
-                            if e.points.len() == 1
-                                && e.points[0].pointer_type != PointerType::Mouse
-                                && !opens_itself() =>
-                        {
+                        // iOS opens its system menu itself: the hold is
+                        // taken, with no timer.
+                        TouchPhase::Start if takes && !opens_itself() => {
                             let on_hold = on_hold.clone();
                             let page = at.unwrap_or_default();
                             let task = set_timeout(HOLD, move || {
@@ -2857,11 +2929,11 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .when_some(left, |v, (items, key)| {
             v.on_mouse_leave(move |_: &MouseEvent| items.unpoint(key, node))
         })
-        .on_press(move || {
+        .on_press(move |e: &PressEvent| {
             // A Return or Space typed ahead of a key move selects the item
             // the keys move to.
             if let (Some(m), Some(key)) = (&chosen, key)
-                && m.items.press_ahead(key)
+                && m.items.press_ahead(key, e)
             {
                 return;
             }

@@ -33,6 +33,7 @@ comments before editing. Read only the relevant sections of these reference page
 | Build, platform prerequisites, packaging, signing, native testing | [Commands](docs/dev/commands.md) |
 | PRs, reviews, CI scheduling, caches, parallel work | [Workflow](docs/dev/workflow.md) |
 | Public names and compatibility | [API naming](docs/dev/api-naming.md), [compatibility](docs/dev/compatibility.md) |
+| User docs and website copy | [Writing user docs](docs/dev/writing-docs.md) |
 | Platform code | [Pitfalls](docs/dev/pitfalls.md) and the platform's dev page |
 | Hot paths | [Performance baselines](docs/dev/performance.md) |
 
@@ -89,13 +90,13 @@ Platform crates can compile as **empty crates on the wrong target**. Check chang
 platform code on its real target, using [commands](docs/dev/commands.md):
 
 ```sh
-cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app -p nsh-extra --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev,nsh-extra/camera,nsh-extra/photos,nsh-extra/push,nsh-extra/speech
+cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app -p nsh-extra --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev,nsh-extra/camera,nsh-extra/photos,nsh-extra/location,nsh-extra/push,nsh-extra/share,nsh-extra/speech
 cargo xtask clippy-android
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets
-cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app -p nsh-extra --all-targets --features nsh-platform-macos/dev,nsh-extra/speech
+cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app -p nsh-extra --all-targets --features nsh-platform-macos/dev,nsh-extra/location,nsh-extra/share,nsh-extra/speech
 cargo clippy -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-extra --all-targets --features nsh-extra/speech
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler
-cargo clippy -p nsh-extra --target wasm32-unknown-unknown --features nsh-extra/speech
+cargo clippy -p nsh-extra --target wasm32-unknown-unknown --features nsh-extra/location,nsh-extra/share,nsh-extra/speech
 cargo clippy --manifest-path crates/gpui/Cargo.toml --all-targets --features nsh-platform-gpui/dev
 cargo test --manifest-path crates/gpui/Cargo.toml
 cargo +nightly fmt --manifest-path crates/gpui/Cargo.toml --all
@@ -133,6 +134,9 @@ cargo +nightly fmt --manifest-path crates/gpui/Cargo.toml --all
 5. **Text**: measurements are cached per constraint (`TextContext.cache`); platforms cache font objects (`FontCache`).
 6. **Changes to hot paths come with before / after `nsh test --trace` timings and item counts**, compared with the baselines
    in `docs/dev/performance.md` (update them when they move).
+7. **Changes to window showing, frame scheduling or scrolling come with `examples/bench/jank/jank.py` results** from before and
+   after the change, on each desktop the change touches. The jank benchmark does not run in CI, so the PR is where a startup
+   wait or a long frame gets caught.
 
 ## Delivery
 

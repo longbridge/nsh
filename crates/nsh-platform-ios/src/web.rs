@@ -59,6 +59,10 @@ pub(crate) struct WebIvars {
     events_downloads: Cell<bool>,
     /// The core asked the view to hold downloads (`defer_downloads`).
     defer_downloads: Cell<bool>,
+    /// The web view's `allowOrigin`, from its latest props.
+    allow_origin: RefCell<Option<nsh_core::access::WebOrigin>>,
+    /// The web view's `allowNavigation`, from its latest props.
+    allow_navigation: RefCell<Option<nsh_core::access::WebHosts>>,
     navigation: Cell<Option<usize>>,
     /// Only these navigations may report an expected policy interruption.
     downloading: RefCell<FxHashSet<usize>>,
@@ -100,7 +104,16 @@ define_class!(
                 (main, url.unwrap_or_default())
             };
             // WKNavigationActionPolicyCancel = 0, Allow = 1.
-            let allowed = !main || url.is_empty() || self.ivars().access.allows_webview(&url);
+            let allowed = !main
+                || url.is_empty()
+                || self
+                    .ivars()
+                    .access
+                    .allows_webview_in(
+                        &url,
+                        self.ivars().allow_origin.borrow().as_ref(),
+                        self.ivars().allow_navigation.borrow().as_ref(),
+                    );
             if !allowed {
                 log::warn!(target: "js", "web view navigation to {url} is not granted");
                 self.send(
@@ -246,6 +259,8 @@ impl WebHandler {
             download,
             events_downloads: Cell::new(false),
             defer_downloads: Cell::new(false),
+            allow_origin: RefCell::default(),
+            allow_navigation: RefCell::default(),
             navigation: Cell::default(),
             downloading: RefCell::default(),
             evaluations,
@@ -278,6 +293,17 @@ impl WebHandler {
     /// The core asked (or stopped asking) this view to hold downloads.
     pub(crate) fn set_defer_downloads(&self, defer: bool) {
         self.ivars().defer_downloads.set(defer);
+    }
+
+    /// The web view's `allowOrigin`: its next navigations are checked with it.
+    pub(crate) fn set_allow_origin(&self, origin: Option<nsh_core::access::WebOrigin>) {
+        *self.ivars().allow_origin.borrow_mut() = origin;
+    }
+
+    /// The web view's `allowNavigation`: its next navigations are checked
+    /// with it.
+    pub(crate) fn set_allow_navigation(&self, hosts: Option<nsh_core::access::WebHosts>) {
+        *self.ivars().allow_navigation.borrow_mut() = hosts;
     }
 
     /// The host is going: WebKit stops writing its transfers.
@@ -496,10 +522,33 @@ impl WebHost {
         // is unregistered when the host is dropped.
         let web = unsafe {
             let config: Retained<AnyObject> = msg_send![class(c"WKWebViewConfiguration"), new];
+            // A phone's WKWebViewConfiguration answers `false` here, and a
+            // page's `playsinline` does not help: the first frame of a video
+            // the page plays takes the screen. The iPad, the Mac and the
+            // other engines NSH embeds all play inline, so the iPhone does
+            // too; a page whose own control asks for the whole screen gets it.
+            let _: () = msg_send![&config, setAllowsInlineMediaPlayback: true];
+            // A page's own full-screen control (`element.requestFullscreen`)
+            // is off unless the configuration turns it on, and Safari has it
+            // on: without it bilibili's player and every other page that asks
+            // for the screen does nothing when its button is tapped. The
+            // runtime runs on iOS 15.0, where the property is not there yet.
+            let preferences: Retained<AnyObject> = msg_send![&config, preferences];
+            let has_fullscreen: Bool = msg_send![&preferences, respondsToSelector: objc2::sel!(setElementFullscreenEnabled:)];
+            if has_fullscreen.as_bool() {
+                let _: () = msg_send![&preferences, setElementFullscreenEnabled: true];
+            }
             if p.incognito {
                 let store: Retained<AnyObject> =
                     msg_send![class(c"WKWebsiteDataStore"), nonPersistentDataStore];
                 let _: () = msg_send![&config, setWebsiteDataStore: &*store];
+            }
+            // `zoomable`: pinch zoom past the page's viewport limits
+            // (`user-scalable=no`, `maximum-scale`). WKWebView pinches
+            // within them anyway; the configuration is read only when the
+            // web view is made.
+            if p.zoomable {
+                let _: () = msg_send![&config, setIgnoresViewportScaleLimits: Bool::YES];
             }
             self.schemes =
                 nsh_platform_apple::web_scheme::serve(handler.mtm(), &config, &p.url_schemes);
@@ -524,6 +573,10 @@ impl WebHost {
 
     pub(crate) fn configure(&mut self, p: WebProps) {
         self.handler.set_defer_downloads(p.defer_downloads);
+        // Before the source loads: it applies to that navigation.
+        self.handler.set_allow_origin(p.allow_origin.clone());
+        self.handler
+            .set_allow_navigation(p.allow_navigation.clone());
         if !self.made {
             // The core keeps `incognito` and the URL schemes from changing
             // once it is made.

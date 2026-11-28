@@ -429,6 +429,20 @@ impl Native for GpuiNative {
             .flatten()
     }
 
+    fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        // As the user's paste of `content` does, without the system's
+        // clipboard: reported, then its text inserted as `pasteBehavior`
+        // says.
+        let content = content.clone();
+        let (done, result) = std::sync::mpsc::channel();
+        self.edit_in_focus(move |surface| {
+            let _ = done.send(crate::text_input::paste_focused(surface, content));
+        })?;
+        result
+            .try_recv()
+            .unwrap_or_else(|_| Err("the focused window did not take the paste".into()))
+    }
+
     fn right_click(&self, at: Point<Points>) -> Result<(), String> {
         // The secondary button.
         self.click(at, CLICK, 1);
@@ -526,7 +540,19 @@ impl Native for GpuiNative {
     }
 
     fn screenshot(&self) -> Result<Vec<u8>, String> {
-        self.window_screenshot(ROOT_ID)
+        // The window the app shows: the targeted one, else the frontmost
+        // of the app's own. A desktop app's content is in a window of its
+        // own (its implicit `<Window>`), and the surface's own window shows
+        // none of it.
+        let target = self.target();
+        let window = if target != ROOT_ID {
+            target
+        } else {
+            self.in_app(|surface, cx| crate::window::shown_front(surface, cx))
+                .flatten()
+                .unwrap_or(ROOT_ID)
+        };
+        self.window_screenshot(window)
     }
 
     fn window_screenshot(&self, window: NodeId) -> Result<Vec<u8>, String> {

@@ -1,6 +1,6 @@
 ---
 title: Web
-description: Build web apps in Rust or TSX with Native Shell components rendered as HTML and CSS, develop in the browser, and publish to any static host or CDN.
+description: Build web apps in TSX or Rust with Native Shell components rendered as HTML and CSS, develop in the browser, and publish to any static host or CDN.
 order: 16
 group: platforms
 demo: counter
@@ -210,6 +210,22 @@ gets the whole runtime, its crates included, in its `nsh.<digest>.wasm`. Measure
 |---|---|---|---|---|
 | `examples/counter` | The core components | 3.96 MB | 1.32 MB | 0.97 MB |
 | `examples/gallery` | Every component, `zlib` and shaders | 4.13 MB | 1.36 MB | 1.01 MB |
+
+#### One runtime for several apps
+
+Several apps on one site can share one runtime. Package each of them with `--shared-runtime` (web only; other targets ignore it):
+
+```sh
+nsh package --target web --shared-runtime --asset-url https://cdn.example.com/nsh/
+```
+
+`nsh.<digest>.wasm` then holds only the engine, and each `nsh/base` part, standard module and shader is a side
+module of its own (`nsh-<part>.<digest>.wasm`). These files are the same for every app packaged with the same
+version of NSH, wherever and in whatever order they are packaged, so each app can be built in its own CI job.
+Serve them from one place (`--asset-url`) and the browser downloads them once for the whole site.
+
+Without the flag each app gets its own runtime, trimmed to what it uses, which is smaller for a site with one app.
+An app with Rust components of its own has its own runtime, and `--shared-runtime` fails for it.
 
 ### Deploy it
 
@@ -593,6 +609,7 @@ The player and the dev server run apps with development settings; published apps
 
 ## See also
 
+- [Host the site](./packaging.md#host-the-site)
 - [Packaging](./packaging.md): the other targets of `nsh package`.
 - [Architecture](./architecture.md): the engine, the core and the mount batches the web build reuses.
 - [Testing](./testing-and-trace.md): `nsh test` runs the same engine headless, with an approximate text engine.

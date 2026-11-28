@@ -31,6 +31,7 @@ mod file_drop;
 mod file_requests;
 mod fps;
 mod global_shortcut;
+mod gpu;
 #[cfg(test)]
 mod gtk_test;
 mod image;
@@ -45,12 +46,15 @@ mod mount;
 mod native;
 mod navigation;
 mod notifications;
+mod presenting;
 mod scroll;
 mod selectable_view;
 mod session;
 mod shader;
 // Without GStreamer (the feature `sound`), a stand-in whose loads fail
 // as not supported.
+#[cfg(feature = "sound")]
+mod gst;
 #[cfg_attr(not(feature = "sound"), path = "sound_off.rs")]
 mod sound;
 mod surface;
@@ -82,4 +86,5 @@ pub use crate::{
     image::AssetBase,
     links::set_exec_args,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
+    presenting::{native_view, presenting_window},
 };

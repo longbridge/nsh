@@ -27,6 +27,28 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `network()` | `network()` (`nsh`) | How the device reaches the network: online or not, Wi-Fi, cellular or wired, expensive or constrained, and on iOS whether the app may use cellular data ([The network](#the-network)). |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
 
+```tsx tabs
+import { mount, Text, View, safeArea } from "nsh";
+import { colorScheme, fontScale, windowSize } from "nsh";
+import { Window } from "nsh/desktop";
+
+function App() {
+  return (
+    <View style={{ flex: 1, paddingTop: safeArea().top + 16, paddingHorizontal: 16, backgroundColor: colorScheme() === "dark" ? "#0d1117" : "#ffffff" }}>
+      <Text style={{ color: colorScheme() === "dark" ? "#e6edf3" : "#1f2328" }}>
+        {Math.round(windowSize().width)} × {Math.round(windowSize().height)} pt, text at {fontScale().toFixed(2)}×
+      </Text>
+    </View>
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -53,31 +75,25 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { mount, Text, View, safeArea } from "nsh";
-import { colorScheme, fontScale, windowSize } from "nsh";
-import { Window } from "nsh/desktop";
+## Window size and responsive layout
 
-function App() {
+`window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view, the host view when NSH is embedded. On macOS, Windows and Linux the app host is invisible, so this is the content size of the app's primary window: the first of its own windows still open, followed as the user resizes it, whichever window has the focus. When that window closes, it is the next one's. It is not the calling window's size: with several windows open, read a window's own `state()?.contentBounds` and `state()?.scaleFactor` for layout inside it. Use it to change the layout, not only sizes:
+
+```tsx tabs
+import { Image, View } from "nsh";
+import { windowSize } from "nsh";
+
+function Gallery() {
+  const columns = () => (windowSize().width >= 700 ? 4 : windowSize().width >= 500 ? 3 : 2);
   return (
-    <View style={{ flex: 1, paddingTop: safeArea().top + 16, paddingHorizontal: 16, backgroundColor: colorScheme() === "dark" ? "#0d1117" : "#ffffff" }}>
-      <Text style={{ color: colorScheme() === "dark" ? "#e6edf3" : "#1f2328" }}>
-        {Math.round(windowSize().width)} × {Math.round(windowSize().height)} pt, text at {fontScale().toFixed(2)}×
-      </Text>
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+      <Each of={photos}>
+        {(p) => <Image src={p().url} style={{ width: (windowSize().width - 32 - (columns() - 1) * 8) / columns(), aspectRatio: 1 }} />}
+      </Each>
     </View>
   );
 }
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
 ```
-
-## Window size and responsive layout
-
-`window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view, the host view when NSH is embedded. On the desktops the app host is invisible, so this is the host surface's size, not the calling window's; read a window's own `state()?.contentBounds` and `state()?.scaleFactor` for layout inside it. Use it to change the layout, not only sizes:
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -96,27 +112,17 @@ fn gallery() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { Image, View } from "nsh";
-import { windowSize } from "nsh";
-
-function Gallery() {
-  const columns = () => (windowSize().width >= 700 ? 4 : windowSize().width >= 500 ? 3 : 2);
-  return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-      <Each of={photos}>
-        {(p) => <Image src={p().url} style={{ width: (windowSize().width - 32 - (columns() - 1) * 8) / columns(), aspectRatio: 1 }} />}
-      </Each>
-    </View>
-  );
-}
-```
-
 Often flexbox, percentages and `aspect_ratio` (`aspectRatio`) do the job without reading the size at all; see [Layout](./layout.md). Rust's `style_when(|| window().width.0 >= 640.0, |s| s.flex_row())` switches styles with the width; in TSX with Tailwind, the breakpoint variants (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`, `max-*:`, `min-[…]:`) and `portrait:` / `landscape:` follow the window too: `class="grid grid-cols-2 md:grid-cols-4"`.
 
 ## Dark mode
 
 The appearance follows the system unless the app sets its own. In Rust, the simplest way to support dark mode is a color with a light and a dark value, `AdaptiveColor::rgb(light, dark)`: it switches natively when the appearance does, with nothing to run. In TSX it is the `dark:` Tailwind variant, which applies when `colorScheme()` is `"dark"`:
+
+```tsx tabs
+<View class="flex-1 bg-white dark:bg-zinc-900 p-4">
+  <Text class="text-zinc-900 dark:text-zinc-100">Follows the system appearance</Text>
+</View>
+```
 
 ```rust tabs
 view()
@@ -129,23 +135,7 @@ view()
     )
 ```
 
-```tsx tabs
-<View class="flex-1 bg-white dark:bg-zinc-900 p-4">
-  <Text class="text-zinc-900 dark:text-zinc-100">Follows the system appearance</Text>
-</View>
-```
-
 For anything else, read `dark()` (TSX: `colorScheme()`) in a closure or a computed value; in TSX, for more than a few colors, derive a palette once:
-
-```rust tabs
-use nsh_core::prelude::*;
-
-// `dark()` is reactive: the closure runs again when the appearance changes.
-view()
-    .flex_1()
-    .bg(move || if dark() { rgb(0x0d1117) } else { rgb(0xf6f8fa) })
-    .child(text("Hello"))
-```
 
 ```tsx tabs
 import { computed, Text, View } from "nsh";
@@ -162,6 +152,16 @@ const palette = computed(() =>
 </View>
 ```
 
+```rust tabs
+use nsh_core::prelude::*;
+
+// `dark()` is reactive: the closure runs again when the appearance changes.
+view()
+    .flex_1()
+    .bg(move || if dark() { rgb(0x0d1117) } else { rgb(0xf6f8fa) })
+    .child(text("Hello"))
+```
+
 Rust components also take their colors from the theme, which has light and dark values (`nsh.json` `"theme"`, see [Building with Rust](./rust.md)), so they switch with the system as well. To match the status bar to your background, give your pages and dialogs a [`statusBar`](../modules/nsh-base.md#status-bar), or the app one in `nsh.json`.
 
 ### An app with its own appearance
@@ -173,6 +173,15 @@ An app that is always dark (or always light) says so in `nsh.json`, and `dark()`
 ```
 
 `set_color_scheme(Appearance::Dark)` (TSX: `setColorScheme` from `nsh`) changes it at run time, for an in-app appearance setting; `Appearance::System` (`"system"`) follows the system again:
+
+```tsx tabs
+import { Text, View } from "nsh";
+import { colorScheme, setColorScheme } from "nsh";
+
+<View onPress={() => setColorScheme(colorScheme() === "dark" ? "light" : "dark")} role="button" class="rounded-lg px-4 py-2 bg-neutral-200 dark:bg-neutral-800">
+  <Text class="text-neutral-900 dark:text-neutral-50">{colorScheme() === "dark" ? "Light" : "Dark"}</Text>
+</View>
+```
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -192,15 +201,6 @@ view()
     )
 ```
 
-```tsx tabs
-import { Text, View } from "nsh";
-import { colorScheme, setColorScheme } from "nsh";
-
-<View onPress={() => setColorScheme(colorScheme() === "dark" ? "light" : "dark")} role="button" class="rounded-lg px-4 py-2 bg-neutral-200 dark:bg-neutral-800">
-  <Text class="text-neutral-900 dark:text-neutral-50">{colorScheme() === "dark" ? "Light" : "Dark"}</Text>
-</View>
-```
-
 > [!TIP]
 > Test both appearances while developing: `xcrun simctl ui booted appearance dark` switches an iOS simulator, and Android has a dark theme toggle in Quick Settings. The change reaches your app at once, without a reload.
 
@@ -213,15 +213,15 @@ import { colorScheme, setColorScheme } from "nsh";
 | `.allow_font_scaling(..)` | `allowFontScaling` | `true` | Follow the system text size. |
 | `.max_font_size_multiplier(..)` | `maxFontSizeMultiplier` | `0` (none) | The largest scale applied to this text. |
 
+```tsx tabs
+<Text style={{ fontSize: 34, fontWeight: "700" }} maxFontSizeMultiplier={1.4}>Today</Text>
+```
+
 ```rust tabs
 text("Today")
     .text_size(px(34.0))
     .font_weight(FontWeight::BOLD)
     .max_font_size_multiplier(1.4)
-```
-
-```tsx tabs
-<Text style={{ fontSize: 34, fontWeight: "700" }} maxFontSizeMultiplier={1.4}>Today</Text>
 ```
 
 Read `font_scale()` to adapt layout that does not follow text automatically, such as switching a row to a column when the text gets large: `.style_when(|| font_scale() > 1.3, |s| s.flex_col())` in Rust, `flexDirection: fontScale() > 1.3 ? "column" : "row"` in TSX.
@@ -234,17 +234,17 @@ The text size scales text: every text and input that allows font scaling, and th
 
 The app's own text in each language comes from its translations: `t("hello")` (`nsh/i18n`; Rust `t!("hello")`) shows a key in the user's language, and `setLocale` shows the app in another one. See [I18n](./i18n.md).
 
-```rust tabs
-use nsh_core::prelude::*;
-
-text(move || t!("welcome"))
-```
-
 ```tsx tabs
 import { Text } from "nsh";
 import { t } from "nsh/i18n";
 
 <Text>{t("welcome")}</Text>
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+text(move || t!("welcome"))
 ```
 
 ## Locale settings
@@ -258,14 +258,6 @@ The names and values are `Intl`'s, so they pass into its options as they are.
 To follow one of them alone, read it through a `computed`: what reads that updates only when that one
 changes, not when the user travels to another time zone or adds a language.
 
-```rust tabs
-use nsh_core::prelude::*;
-
-// Updates when the user switches between 12- and 24-hour time, and only then.
-let twelve_hour = computed(|| locale_settings().hour_cycle.twelve_hour());
-text(move || if twelve_hour.get() { "3:00 PM" } else { "15:00" })
-```
-
 ```tsx tabs
 import { Text } from "nsh";
 import { computed, localeSettings } from "nsh";
@@ -274,6 +266,14 @@ import { computed, localeSettings } from "nsh";
 const twelveHour = computed(() => ["h11", "h12"].includes(localeSettings().hourCycle));
 
 <Text>{twelveHour() ? "3:00 PM" : "15:00"}</Text>
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+// Updates when the user switches between 12- and 24-hour time, and only then.
+let twelve_hour = computed(|| locale_settings().hour_cycle.twelve_hour());
+text(move || if twelve_hour.get() { "3:00 PM" } else { "15:00" })
 ```
 
 In tests, `open`'s `localeSettings` sets the ones it names over the locale's (the locale alone as the languages, its
@@ -297,6 +297,22 @@ The systems keep a few settings of how the user reads times, weeks and measureme
 
 Each is the system's setting where the user made one, else the region's own (as the Unicode CLDR gives them: 12-hour time and weeks from Sunday in the US, 24-hour time and weeks from Monday in Germany).
 
+```tsx tabs
+import { localeSettings } from "nsh";
+
+const time = (date: Date) =>
+  date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hourCycle: localeSettings().hourCycle });
+
+const temperature = (celsius: number) =>
+  localeSettings().temperatureUnit === "fahrenheit"
+    ? `${Math.round((celsius * 9) / 5 + 32)} °F`
+    : `${Math.round(celsius)} °C`;
+
+// A calendar's columns from the user's first day: 1 for Monday to 7 for Sunday.
+const weekColumns = () =>
+  Array.from({ length: 7 }, (_, i) => ((localeSettings().firstDayOfWeek - 1 + i) % 7) + 1);
+```
+
 ```rust tabs
 use nsh_core::{platform::TemperatureUnit, prelude::*};
 
@@ -316,22 +332,6 @@ fn week_columns() -> [u8; 7] {
 }
 ```
 
-```tsx tabs
-import { localeSettings } from "nsh";
-
-const time = (date: Date) =>
-  date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hourCycle: localeSettings().hourCycle });
-
-const temperature = (celsius: number) =>
-  localeSettings().temperatureUnit === "fahrenheit"
-    ? `${Math.round((celsius * 9) / 5 + 32)} °F`
-    : `${Math.round(celsius)} °C`;
-
-// A calendar's columns from the user's first day: 1 for Monday to 7 for Sunday.
-const weekColumns = () =>
-  Array.from({ length: 7 }, (_, i) => ((localeSettings().firstDayOfWeek - 1 + i) % 7) + 1);
-```
-
 `Intl` writes times in the locale's own hour cycle: pass `hourCycle` as its `hourCycle` option, as above, to write them as the user reads them. On the web, the browser tells no user settings of these: the hour cycle and the first day of the week are the browser's for its language, the units its region's.
 
 The base components show what the app passes them, in their own forms. `Calendar`'s and `DatePicker`'s
@@ -344,17 +344,17 @@ or `"h12"`, else `"h23"` (Rust: `HourCycle::H12` where `locale_settings().hour_c
 
 `time_zone` (TSX: `timeZone`) is the device's time zone as the system names it: an IANA name such as `Europe/Berlin` or `America/New_York`, `UTC`, or an offset zone where the system has one (`GMT+01:00` on Android). It changes when the user changes the setting or the device moves to another zone, and what read it updates: a clock that names its zone, a list of times in the user's zone, a date saved with the zone it was made in.
 
-```rust tabs
-use nsh_core::prelude::*;
-
-text(move || format!("Times in {}", locale_settings().time_zone))
-```
-
 ```tsx tabs
 import { Text } from "nsh";
 import { localeSettings } from "nsh";
 
 <Text>{`Times in ${localeSettings().timeZone}`}</Text>
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+text(move || format!("Times in {}", locale_settings().time_zone))
 ```
 
 `Date`'s local times follow the system's zone, as they always have: `time_zone` names it. `Intl` formats local time in that zone and names it the same way: `Intl.DateTimeFormat().resolvedOptions().timeZone` is `localeSettings().timeZone`, and `{ timeZone: localeSettings().timeZone }` formats in local time. In tests, the zone `open` or `app.setLocaleSettings` gives (`UTC` otherwise) is the one `localeSettings()` reports; local times, `Date`'s and `Intl`'s, stay the machine's, and `Intl` names the machine's zone.
@@ -367,6 +367,13 @@ An app shown inside a native app follows that app's own settings when it sets th
 
 `lifecycle()` (the same in TSX) says whether the user is using the app. It is `active` in the foreground, `inactive` while the app is still visible but another app or window has the focus (or the system shows something over it: the app switcher, an incoming call), and `background` while it is not visible: in the background on a phone, minimized on a desktop, a hidden tab on the web. Like every accessor it updates what read it, so an effect pauses a live feed, polling or a video in the background and resumes them when the user comes back:
 
+```tsx tabs
+effect(() => {
+  if (lifecycle() === "background") feed.pause();
+  else feed.resume();
+});
+```
+
 ```rust tabs
 effect(move || {
     if lifecycle() == Lifecycle::Background {
@@ -377,18 +384,17 @@ effect(move || {
 });
 ```
 
-```tsx tabs
-effect(() => {
-  if (lifecycle() === "background") feed.pause();
-  else feed.resume();
-});
-```
-
 Use `background` to pause work, and save what the user changes as they change it: the system may suspend an app seconds after it moves to the background, before an effect that reads the change has run. An app shown inside a native app follows that app's state, and where an app has several windows (an iPad, a desktop) a view follows the window it is in. Standalone apps and views embedded in AppKit and Win32 apps are in the `background` too on macOS and Windows while the screen is locked or turned off and while their window is on another desktop (a Space, a virtual desktop). On Windows, an app moves to `background` when the user signs out, Windows shuts down or restarts, or an installer closes it, and its handlers run before the session ends; then the app quits ([`Application.on("quit")`](../modules/nsh-desktop.md#quitting)). A standalone app on Linux does the same when the user signs out or the system shuts down or restarts, and when it is sent `SIGTERM` (as systemd does to end a session or stop a service). In tests, `app.setLifecycle("background")` of `nsh/test` moves the app there ([Testing](./testing-and-trace.md#steps)).
 
 ## After a sleep
 
 `wake_count()` (TSX: `wakeCount()`) counts the times the system woke from sleep while the app ran: 0 at the start, one more after each wake. A laptop whose lid closes and opens again with the app in front keeps the app `active` throughout, yet the network connections it held and the timers it set did not live through the sleep. An effect that reads the count runs again after each wake, so the app checks its connections or opens them again there:
+
+```tsx tabs
+effect(() => {
+  if (wakeCount() > 0) feed.reconnect();
+});
+```
 
 ```rust tabs
 effect(move || {
@@ -398,29 +404,23 @@ effect(move || {
 });
 ```
 
-```tsx tabs
-effect(() => {
-  if (wakeCount() > 0) feed.reconnect();
-});
-```
-
 Standalone apps and views embedded in AppKit, Win32 and GTK apps count wakes on macOS, Windows and Linux (Linux through systemd's `logind`). On iOS and Android a sleeping device takes the app to the background, which `lifecycle()` reports. In tests, `app.wake()` of `nsh/test` wakes the system ([Testing](./testing-and-trace.md#steps)).
 
 ## The network
 
 `network()` (the same in TSX) says how the device reaches the network now: `online` (false only while the system knows there is no route), the `kind` of link the route takes (`"wifi"`, `"cellular"`, `"wired"`, `"other"`, `"none"` offline, `"unknown"` where the platform does not say, which counts as online), whether that link is `expensive` (cellular data, a phone's hotspot, a metered network) or `constrained` (Low Data Mode, Data Saver), and on iOS whether the user lets the app use cellular data (`cellularData`: `"unknown"`, `"restricted"` or `"notRestricted"`). An effect that reads it runs again when the route changes, so a request that failed offline waits for the network and tries again at once, instead of retrying on a timer:
 
+```tsx tabs
+effect(() => {
+  if (network().online && sync.failedOffline()) sync.retry();
+});
+```
+
 ```rust tabs
 effect(move || {
     if network().online() && sync.failed_offline() {
         sync.retry();
     }
-});
-```
-
-```tsx tabs
-effect(() => {
-  if (network().online && sync.failedOffline()) sync.retry();
 });
 ```
 
@@ -435,6 +435,24 @@ Notches, the home indicator, the status bar, Android's navigation bar, the Mac C
 - `safe_area()` (TSX: `safeArea()`) gives the surface's insets.
 - A component's `cx.insets()` (TSX: `safeAreaInsets()`) gives the insets **where the component renders**: inside a navigation [page](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [dialog](../elements/dialog.md) they are the dialog's. Prefer it in components that may be shown in several places.
 - CSS's `env(safe-area-inset-top)`, `-right`, `-bottom` and `-left` pad or space any view by the insets where it renders, in `padding*` and `margin*` (`calc(env(safe-area-inset-bottom) + 8px)` adds a length; Tailwind `pt-[env(safe-area-inset-top)]`; Rust `.p_safe_area()`, `.pt_safe_area()`, `.pb_safe_area_plus(px(8.0))`, ...). The padding updates natively when the insets change ([Safe area](../elements/safe-area.md)).
+
+```tsx tabs
+import { View, safeAreaInsets } from "nsh";
+
+function Screen() {
+  return (
+    <View class="flex-1 bg-white pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
+      <Content />
+      <BottomBar />
+    </View>
+  );
+}
+
+function BottomBar() {
+  const insets = safeAreaInsets();
+  return <View style={{ paddingBottom: insets().bottom + 8, paddingTop: 8, flexDirection: "row" }}>…</View>;
+}
+```
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -460,25 +478,45 @@ fn BottomBar(cx: Scope<NoEvent>) -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { View, safeAreaInsets } from "nsh";
+On Android, a view embedded below a toolbar gets only the parts of the system bars that overlap it, like UIKit's safe area: no top inset if it does not reach the status bar.
 
-function Screen() {
+## Reserved regions
+
+Inside the safe area, a device can reserve parts of the surface. On iPhone Duo, the fold of the inner display divides the surface while the device is partly open, and the cameras show through the display. `reserved_regions()` (TSX: `reservedRegions()`) lists them in the surface's points, the coordinates layout uses. It updates when they change, as the device folds and opens:
+
+- `"division"`: the display divides there (a fold). Keep content clear of it: move a centered column to one side, or leave a gap down the middle.
+- `"occlusion"`: something covers it (a camera). Keep what matters out of it.
+
+Each region's `bounds` include the margin that interactive content keeps from it. The system's own controls (alerts, menus, sheets, split views) move by themselves; the list is for the app's own layout. Make small adjustments rather than a new layout, so nothing jumps as the device folds. The list is empty where the platform reports none: before iOS 27.1, on other devices, and on the other platforms. Android's folding displays (Jetpack WindowManager's display features) are a likely next source.
+
+```tsx tabs
+import { View, reservedRegions } from "nsh";
+
+function Chat() {
+  // A fold down the middle: the chat column moves to the right half.
+  const fold = () => reservedRegions().find((r) => r.kind === "division");
   return (
-    <View class="flex-1 bg-white pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
-      <Content />
-      <BottomBar />
+    <View style={{ flex: 1, paddingLeft: fold() ? fold()!.bounds.origin.x + fold()!.bounds.size.width : 0 }}>
+      <Messages />
     </View>
   );
 }
+```
 
-function BottomBar() {
-  const insets = safeAreaInsets();
-  return <View style={{ paddingBottom: insets().bottom + 8, paddingTop: 8, flexDirection: "row" }}>…</View>;
+```rust tabs
+use nsh_core::{platform::ReservedRegionKind, prelude::*};
+
+fn chat() -> impl IntoElement {
+    view().flex_1().child(messages()).pl(move || {
+        let fold = reserved_regions()
+            .iter()
+            .find(|r| r.kind == ReservedRegionKind::Division);
+        Length::from(fold.map_or(px(0.0), |r| r.bounds.right()))
+    })
 }
 ```
 
-On Android, a view embedded below a toolbar gets only the parts of the system bars that overlap it, like UIKit's safe area: no top inset if it does not reach the status bar.
+In tests, `open(entry, { reservedRegions })` of `nsh/test` gives the app a fold to lay out around, headless ([Testing](./testing-and-trace.md)). On the iPhone Duo simulator, Xcode's Device Hub folds the device.
 
 ## The platform
 
@@ -503,16 +541,16 @@ TSX's `platform` in full:
 | `platform.catalyst` | The app runs under Mac Catalyst (`os` `"ios"`), in the Mac or the iPad idiom. |
 | `platform.select(spec)` | The value for this platform; see [Platform-specific code](./platform-specific.md#platformselect). |
 
-```rust tabs
-use nsh_core::{element::Os, prelude::*};
-
-let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().0 >= 30);
-```
-
 ```tsx tabs
 import { platform } from "nsh";
 
 const hapticsSupported = platform.os === "ios" || (platform.os === "android" && Number(platform.version) >= 30);
+```
+
+```rust tabs
+use nsh_core::{element::Os, prelude::*};
+
+let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().0 >= 30);
 ```
 
 `nsh test` runs headless as iOS.
@@ -586,17 +624,17 @@ if let Some(info) = app_info() {
 
 A hairline, one device pixel tall:
 
-```rust tabs
-view()
-    .h(move || px(1.0 / pixel_ratio()))
-    .bg(rgb(0xd0d7de))
-```
-
 ```tsx tabs
 import { View } from "nsh";
 import { pixelRatio } from "nsh";
 
 <View style={{ height: 1 / pixelRatio(), backgroundColor: "#d0d7de" }} />
+```
+
+```rust tabs
+view()
+    .h(move || px(1.0 / pixel_ratio()))
+    .bg(rgb(0xd0d7de))
 ```
 
 `pixel_ratio()` and `pixelRatio()` are reactive. On the desktops they report the host display's scale; a window moved to a screen with another density reports its own scale in `state()?.scaleFactor`.

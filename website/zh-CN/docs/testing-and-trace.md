@@ -19,6 +19,19 @@ Linux CI 机器。它做两件事：
 
 同一个测试，分别用 Rust 和 TypeScript 编写：它在存储中放一个空的待办列表打开应用，输入、点击，并检查屏幕显示的内容。
 
+```tsx tabs
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
 ```rust tabs
 // tests/app/main.rs
 use nsh_engine::{EngineConfig, Root};
@@ -34,19 +47,6 @@ fn adds_a_todo() {
     app.wait_for("text:Buy milk").unwrap();
     assert!(app.screen().texts().contains(&"1 item left"));
 }
-```
-
-```tsx tabs
-// App.test.tsx
-import { expect, open, test } from "nsh/test";
-
-test("adds a todo", async () => {
-  const app = await open("./App.tsx", { storage: { todos: "[]" } });
-  await app.type("id:new-todo", "Buy milk");
-  await app.press("text:Add");
-  await app.waitFor("text:Buy milk");
-  expect(app.texts()).toContain("1 item left");
-});
 ```
 
 ## 用 cargo test 编写 Rust 测试
@@ -159,6 +159,7 @@ describe("the cart", () => {
 | `network` | 无 | 应用的请求按路由得到的结果，见[模拟网络](#模拟网络)。`"live"`：请求、socket 和 WebSocket 都使用真实网络。 |
 | `width`、`height` | 390、844 | 视口大小，单位为点：headless、桌面平台的窗口、web 的页面。在 iOS 和 Android 上应用占满设备屏幕。 |
 | `safeArea` | 0 | 安全区域内边距，单位为点：`{ top: 47, bottom: 34 }`。 |
+| `reservedRegions` | 无 | 设备保留的区域（`reservedRegions()`），比如布局要避开的折痕：`[{ kind: "division", bounds: { origin: { x: 460, y: 0 }, size: { width: 31, height: 669 } } }]`。只用于无头运行：加 `--target` 时由设备报告自己的，给出它会以 `ERR_NSH_TEST_UNSUPPORTED` 拒绝。 |
 | `clipboard` | 空 | 剪贴板初始的文字。 |
 | `colorScheme` | `"light"` | 系统外观：`"light"` 或 `"dark"`（`colorScheme()`、`dark:` 类）。 |
 | `locale` | `"en-US"` | 设备的区域设置，BCP 47 标签（`locale()`、`Intl` 的默认值）。 |
@@ -248,6 +249,20 @@ expect(app.shows("Could not open the link")).toBe(true);
 未经允许时访问网络。路由是一个响应，或者一个接收请求、返回响应（或响应的 Promise）的函数；在 Rust 中，
 `StubNetwork::new(routes)` 接受同样的路由，每个是一个 `StubResponse` 或一个 `StubRoute::Handler`：
 
+```tsx tabs
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
 ```rust tabs
 use std::sync::Arc;
 use nsh_engine::{EngineConfig, Root};
@@ -277,20 +292,6 @@ fn adds_a_todo_on_the_server() {
 }
 ```
 
-```tsx tabs
-const app = await open("./App.tsx", {
-  network: {
-    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
-    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
-    "GET https://api.example.com/todos/*": { status: 404 },
-    "GET https://api.example.com/sync": { error: "offline" },
-    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
-  },
-});
-await app.press("Add");
-expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
-```
-
 | 响应成员 | 默认值 | 说明 |
 |---|---|---|
 | `status` | 200 | 状态码。 |
@@ -314,6 +315,13 @@ reject，全局 `WebSocket` 先触发 `error`，再触发 `close`（1006，非�
 `EngineConfig::clock`，TypeScript 中 `open` 的 `clock`）时，应用改在手动时钟上运行，就像 Jest 的假定时器或 Playwright 的
 `page.clock`：时间只随测试推进，并且立即推进。`app.clock` 就是这个时钟，应用使用系统时钟时它为 `null`：
 
+```tsx tabs
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock!.runFor(10_000);           // 十秒后的自动保存
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
 ```rust tabs
 use std::time::{Duration, SystemTime};
 use nsh_engine::{Clock, EngineConfig, Root};
@@ -329,13 +337,6 @@ fn autosaves() {
     app.run_for(Duration::from_secs(10)).unwrap(); // 十秒后的自动保存
     assert!(app.shows("Saved at 09:00:10"));
 }
-```
-
-```tsx tabs
-const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
-await app.type("label:Note", "Milk");
-await app.clock!.runFor(10_000);           // 十秒后的自动保存
-expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
 响应带 `delay` 的 `StubNetwork` 用 `.with_clock(clock.clone())` 跟随手动时钟。下面是 `nsh test` 的步骤；`Headless` 都有对应的方法
@@ -391,7 +392,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.scroll(selector, distance)` | 沿滚动视图或列表（该视图、它外层的滚动视图，或它内部的第一个）的方向拖动 `distance` 点，每帧 10 点，不超出内容范围，前提是用户可以滚动它（`scrollable`）。负数表示往回滚。 |
 | `await app.hover(selector)` | 把鼠标移到视图中央：鼠标离开的视图收到 `onMouseLeave`，移入的视图收到 `onMouseEnter` 并应用 `hover:` 样式，监听的视图收到带位置、没有按下按键的 `onMouseMove`。用于桌面和任意宽度的 web，包括手机形态的浏览器（headless 时使用桌面或 `"web"` `platform`）；iOS 和 Android 手机没有鼠标，在那里会 reject。 |
 | `await app.rightClick(selector)` | 在视图中央按下鼠标右键：该视图或其外层最近的监听视图收到 `onContextMenu`。用于桌面和 web（headless 时使用桌面 `platform`）；手机没有鼠标，在那里会 reject。 |
-| `await app.paste(selector, { text?, html?, files?, uris? })` | 像剪贴板上有这些内容时用户粘贴一样粘贴到输入框：输入框获得焦点并收到 `onPaste`（`html` 是带格式的同一内容，`files` 是文件路径，其字节以 `File` 交给它，`uris` 是 `file:` URL），然后按 `pasteBehavior` 插入文本。支持 headless、macOS、iOS 和 web；本机剪贴板保持不变。 |
+| `await app.paste(selector, { text?, html?, files?, uris? })` | 像剪贴板上有这些内容时用户粘贴一样粘贴到输入框：输入框获得焦点并收到 `onPaste`（`html` 是带格式的同一内容，`files` 是文件路径，其字节以 `File` 交给它，`uris` 是 `file:` URL），然后按 `pasteBehavior` 插入文本。支持 headless、macOS、iOS 和 web；本机剪贴板保持不变。在 headless 以外的宿主上，一次粘贴的文件合在一条消息里送达，文件总共最多约 48 MB。 |
 | `app.menu()` | 应用显示的上下文菜单（`Menu.popup`）中的操作，或编辑器在手机上于选区处显示的系统编辑菜单（`RichEditor` 的，标签与平台一致：`Cut`、`Copy`、`Paste`、`Select All`）中的操作：`label`（子菜单中的项写在子菜单名之后，如 `"Share > Mail"`）、`disabled`，可勾选项还有 `checked`；没有打开的菜单时为 `null`。 |
 | `await app.chooseMenuItem(label)` | 选择已打开上下文菜单中的操作，如同点击它：应用收到 `onMenu`（其 `onSelect` 运行），然后菜单关闭。在编辑菜单中选择时，由编辑器执行该操作；Paste 粘贴测试自己的剪贴板。在 iOS 和 Android 上从系统显示的菜单（`MenuButton`、`ContextMenu` 的菜单；iOS 上还有标题栏按钮的菜单）里选，如同点按。该项被禁用或不存在时 reject。 |
 | `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape（iOS 上是点按系统菜单之外，Android 上是返回键）。 |
@@ -408,10 +409,10 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求不是 `readonly`。 |
 | `app.texts()` | 当前屏幕上的文字，按顺序排列。 |
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
-| `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
+| `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、可选的 `lineHeight`（使用字体自然行高时不返回）、`letterSpacing`、可选的 `fontFamily`（应用设置的字体族，按原样返回；使用系统字体时不返回）、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，尺寸单位为 pt。 |
 | `app.viewStyle(selector)` | 返回匹配视图由应用设置的样式（无界面测试和各个 `--target` 都支持）：可选的 `backgroundColor`（透明时不返回）、自身的 `opacity`，以及 `effectiveOpacity`（自身透明度乘以所有祖先视图的透明度）。颜色为 `#rrggbbaa`。没有匹配时返回 `null`，匹配不唯一时报错。 |
 | `app.layout(selector)` | 返回匹配视图的布局位置（根坐标，单位 pt）：`x`、`y`、`width`、`height`，`hidden`（自身或祖先为 `visibility: hidden`），以及 `clipped`（被 `overflow: hidden` 的祖先或滚动视图裁掉一部分）。屏幕上没有匹配时返回 `null`，匹配不唯一时报错。 |
-| `app.accessibility(selector?)` | 返回无障碍树：屏幕上带 `role` 或 `accessibilityLabel` 的视图，每个节点含 `role`、`label`、`disabled`、`selected`、`checked`（`"true"`、`"false"` 或 `"mixed"`）、`expanded`、`level`、`description` 和 `children`。传 selector 时从匹配视图开始（屏幕上没有匹配时返回 `null`）；不传时从没有 role 的根节点开始。 |
+| `app.accessibility(selector?)` | 返回无障碍树：屏幕上带 `role` 或 `accessibilityLabel` 的视图，每个节点含 `role`、`label`、`name`（`role:<role>[<name>]` 匹配的无障碍名称：有 `accessibilityLabel` 时取它，否则把视图内的文字拼起来；根节点为空字符串）、`disabled`、`selected`、`checked`（`"true"`、`"false"` 或 `"mixed"`）、`expanded`、`pressed`（切换按钮的切换状态：`"true"`、`"false"` 或 `"mixed"`；未设置 `accessibilityState.pressed` 时省略）、`busy`（`accessibilityState.busy`）、`value`（`accessibilityValue.text`；未设置时省略）、`level`、`description` 和 `children`。传 selector 时从匹配视图开始（屏幕上没有匹配时返回 `null`）；不传时从没有 role 的根节点开始。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页；弹出页里推入了页面时按它标题栏的返回按钮）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层、布局尺寸不为零（不在尺寸为零的标签页里）的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `await app.forward()` | 像浏览器的前进按钮那样在浏览器历史中前进。仅限 `--target web`；其他情况下以 `ERR_NSH_TEST_UNSUPPORTED` reject。 |
@@ -419,9 +420,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.dialogs()` | 应用弹出过的对话框，按顺序排列。 |
 | `app.onPick(handler)` | 回答应用之后发起的选取（`Picker.pickImages`、`Picker.pickFiles`）：`handler` 接收这次选取的要求（`kind`：`"images"` 或 `"files"`，`multiple`、`limit`、`maxDimension`、`quality`、`format`、`filters`、`maxSize`），返回用户选中的文件（`{ name, type?, data: Uint8Array }`，原样交给应用；超过 `maxSize` 的文件到应用时不带内容，`status` 为 `"tooLarge"`），返回 `null` 则取消。没有 handler 时选取都会被取消。仅限无界面运行。 |
 | `app.picks()` | 应用发起过的选取，按顺序排列。 |
-| `app.onShare({ action, target })` | 给这次运行一个分享面板，并回答应用之后显示的分享（`Share.show`）：`action` 为 `"shared"`（分享到 `target`）或 `"dismissed"`。仅限无界面运行。 |
-| `app.shares()` | 应用分享过的内容，按顺序排列（`{ title, text, url, files }`）。 |
-| `await app.fake(name, method, args?)` | 按名称调用原生模块在无界面运行中代替设备的模拟实现，`args` 是一个数组，应用静止后 resolve 为它的 JSON 回答。模拟实现有哪些方法由模块自己的文档说明：`nsh-extra` 的语音识别器是 `"nsh-extra/speech"`（[`Speech`](./nshm.md#speech)：`app.fake("nsh-extra/speech", "hear", ["hello"])` 代替用户说话）。仅限无界面运行。 |
+| `await app.fake(name, method, args?)` | 按名称调用原生模块在无界面运行中代替设备的模拟实现，`args` 是一个数组，应用静止后 resolve 为它的 JSON 回答。模拟实现有哪些方法由模块自己的文档说明：`nsh-extra` 的语音识别器是 `"nsh-extra/speech"`（[`Speech`](./nshm.md#speech)：`app.fake("nsh-extra/speech", "hear", ["hello"])` 代替用户说话），分享面板是 `"nsh-extra/share"`（[`Share`](./nshm.md#share)：`app.fake("nsh-extra/share", "answer", [{ action: "shared" }])` 代替用户作答）。仅限无界面运行。 |
 | `app.audio()` | 应用对扬声器发出的请求（`Sound`、`AudioPlayer`），按顺序：`command`（`"load"`、`"play"`、`"stop"`、`"unload"`、`"open"`、`"preload"`、`"resume"`、`"pause"`、`"seek"`、`"set"`、`"close"`）、`src`，以及适用时的 `volume`、`rate`、`position`。仅限无界面运行。 |
 | `app.endAudio()` | 正在播放的播放器播到结尾（`end`；循环的从头再播）。仅限无界面运行。 |
 | `app.clipboard()` | 剪贴板当前的文字，没有时为 `null`。 |
@@ -449,7 +448,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.quitRequest()` | 像 Quit 菜单项那样请求退出：运行 `Application.on("quitRequest")`，应用只有调用 `Application.quit()` 才会退出。仅限 headless 运行。 |
 | `app.quit()` | 应用是否已退出（`Application.quit()`、Quit 菜单项或最后窗口策略）。退出后后续步骤会报告应用已停止。 |
 
-步骤会等到应用连续 100 ms 没有渲染、没有正在运行的、会自行结束的原生动画，并且（`--target macos` 时）应用打开的窗口都已显示出来（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
+步骤会等到应用连续 100 ms 没有渲染、没有正在运行的、会自行结束的原生动画，并且（`--target macos` 或 `linux` 时）应用打开的窗口都已显示出来（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。在手动时钟上，步骤不等这
 100 ms：应用一旦跑完这一步和当前时钟时间带来的全部工作（此刻到期的定时器、promise、立即应答的桩响应），且不再需要帧，步骤
 就 resolve（仍有请求在途时除外），所以手动时钟上的测试在步骤之间没有停顿。由其他线程应答的结果（`nsh/host` 调用、
@@ -467,7 +466,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `ERR_NSH_TEST_COVERED` | `press` 指向的视图上面盖着另一个视图，手指按在那里会按到它（盖住按钮的浮层、滚到底栏下面的行、盖住视图的选区编辑菜单）。 |
 | `ETIMEDOUT` | `waitFor` 或 `waitUntil` 超时，或者应用在 `open` 之后没有渲染任何内容。 |
 | `ERR_NSH_TEST_NO_BACK` | `back()` 没有可以返回的地方。 |
-| `ERR_NSH_TEST_UNSUPPORTED` | 使用 `--target` 时，`open` 收到了目标平台无法满足的选项：iOS 和 Android 上的 `width` 或 `height`、桌面或 web 上的手机 `platform`、iOS 或 Android 上的桌面平台或另一种手机的 `platform`、`host.handlers`、`modules`、`url`。消息会指出是哪一个。不使用 `--target web` 时的 `forward()` 也是如此。 |
+| `ERR_NSH_TEST_UNSUPPORTED` | 使用 `--target` 时，`open` 收到了目标平台无法满足的选项：iOS 和 Android 上的 `width` 或 `height`、桌面或 web 上的手机 `platform`、iOS 或 Android 上的桌面平台或另一种手机的 `platform`、`host.handlers`、`modules`、`url`、`reservedRegions`。消息会指出是哪一个。不使用 `--target web` 时的 `forward()` 也是如此。 |
 
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
@@ -478,6 +477,12 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 `app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`；`text:word` 读取匹配文字的第一个字符。
 用 `id:note >> text:word` 限定范围，用 `>> nth=0` 选择重复匹配中的一个。
 没有匹配、匹配不唯一或 span 为空时会报错。更新 span 的 `testID` 会复用文本排版，保持 `onTextLayout` 的回调次数。
+
+`lineHeight` 和 `letterSpacing` 按 span 自己的字号换算：10 pt 的 span 加 `leading-loose` 读到 `lineHeight: 20`，加 `tracking-wide` 读到 `letterSpacing: 0.25`。`fontFamily` 是应用要求的字体族（`"Inter, sans-serif"` 仍是列表），不是平台为缺字回退到的字体；设计系统测试用它检查设置的字体族，实际绘制效果用截图检查：
+
+```tsx
+expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, fontFamily: "Inter" });
+```
 
 `drag` 和 `dragAndHold` 的第三个可选参数是 `DragOptions`：`{ hold?: number }`。`hold` 是落指后、开始移动前停留的总毫秒数，省略时保持 100 ms。无头和 iOS 测试支持自定义停留；其他原生 agent 会在开始新的拖动前以 `ERR_NSH_TEST_UNSUPPORTED` 拒绝不支持的自定义停留。负值、非有限值和不可表示的时长会被拒绝。需要长按后拖动时可传 `{ hold: 600 }`，并用 `try` / `finally` 保证 `drop()` 抬起同一根手指。
 
@@ -494,8 +499,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
 - **URL 只被记录**：应用打开的 URL 以“已打开”回报（测试用 `app.failOpenUrls` 让它失败的除外），`app.openedUrls()` 列出它们。
 - **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` 和 `Picker.pickFiles` resolve 为 `[]`。
-- **分享由测试决定**：`onShare` 给出分享面板后，每次分享都按它的回答；在此之前 `Share.available()` resolve 为 `false`。
-- **原生模块运行在模拟实现上**：会访问设备的模块在无界面运行中提供一个模拟实现代替设备，由测试驱动（`app.fake`）。开启 `nsh-extra` 的 `speech` 时，`Speech.available()` resolve 为 `true`，会话立即开始，听到模拟实现的 `hear` 说的内容。模拟实现在整个进程内生效，所以启动带模拟实现模块的 `Headless` 应用的 Rust 测试在同一进程里轮流运行；用同一个 registry 的克隆启动的应用可以同时运行。
+- **原生模块运行在模拟实现上**：会访问设备的模块在无界面运行中提供一个模拟实现代替设备，由测试驱动（`app.fake`）。开启 `nsh-extra` 的 `speech` 时，`Speech.available()` resolve 为 `true`，会话立即开始，听到模拟实现的 `hear` 说的内容。开启它的 `share` 时，模拟实现的 `answer` 给出分享面板后，每次分享都按它的回答；在此之前 `Share.available()` resolve 为 `false`。模拟实现在整个进程内生效，所以启动带模拟实现模块的 `Headless` 应用的 Rust 测试在同一进程里轮流运行；用同一个 registry 的克隆启动的应用可以同时运行。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
 - **图片不会加载**：不会有 `onLoad`，也不会有 `onError`，除非测试让这张图片加载失败（`app.failImages`）；`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。
@@ -589,7 +593,7 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变；文本输入框自身的复制和
 粘贴使用系统剪贴板。`host.params` 会传给应用，`app.host.send` 发送事件，应用打开的 URL 被记录下来供 `app.openedUrls()` 读取，而不会真正打开。
 `host.handlers` 在 headless 运行，由测试回答应用的调用。`open` 会按目标检查它的选项：iOS 和 Android 上的 `width` 与
-`height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）、`host.handlers`、`modules` 以及 `url` 会以
+`height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）、`host.handlers`、`modules`、`url` 以及 `reservedRegions` 会以
 `ERR_NSH_TEST_UNSUPPORTED` reject，这样测试要么按写的那样运行，要么说明它需要什么。桌面平台的 `platform`（例如用 `"macos"` 获得桌面的鼠标和按键）
 可以在任何桌面目标和 web 上运行，应用以该目标的平台运行，且总是桌面形态：在浏览器中页面无论宽度都以桌面形态启动；
 不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中（Android 上和 `nsh run` 一样，只为设备的 ABI 构建）；
@@ -630,6 +634,41 @@ echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh tes
 
 这 1.2 s 让引擎的空闲垃圾回收在第一步之前运行，这样，如果应用丢掉了它仍在使用的对象，问题就会暴露出来：它的处理函数
 不再生效。
+
+### 驱动正在运行的会话
+
+`nsh test --attach` 直接驱动你已经用 `nsh run` 或 `nsh dev` 打开的应用，就在它的窗口里，保持它现在的样子。有些问题只在那个
+窗口里出现，比如开发了很久、热更新了很多次之后，这时就用它。另起的 `nsh test` 实例从头开始，复现不出这类问题。
+
+在应用目录里运行，步骤从标准输入给出：
+
+```sh
+nsh run --target gpui                         # 一个终端里：你正在用的窗口
+echo 'console.log(app.texts()); await app.press("text:+1"); await app.screenshot("now.png")' | nsh test --attach
+```
+
+可用的步骤和查询与[在真实平台上运行](#在真实平台上运行)相同：`press`、`type`、`scroll`、`hover`、`waitFor`、`texts()`、
+`shows()`、`layout()`、`accessibility()`、`screenshot(path)` 等。它们用平台自己的输入作用在正在运行的应用上。`app` 就是这个
+应用，马上可用，不会先等 1.2 s。
+
+- `--attach` 选本机正在运行的会话。同时有几个会话时，选当前目录这个应用的那个。`--attach=<port>` 按端口指定会话
+  （`nsh run` 打印的端口）。
+- 一个会话可以连着几个宿主，比如一个 GPUI 窗口加一个浏览器。步骤默认发给最后连上的宿主。用 `--device <name>` 换一个：
+  按会话终端里显示的名字，或按 `--target` 的平台名（`--device gpui`）。`nsh test --attach` 会打印它选中的宿主和其余宿主。
+- 也可以给一个测试文件：`nsh test tests/repro.test.tsx --attach`。文件里的 `open("./App.tsx")` 会附着到正在运行的应用。
+  这时 `open` 不接受选项，因为选项是给新应用做准备的：`storage`、`network`、`width`、`colorScheme` 等都会以
+  `ERR_NSH_TEST_UNSUPPORTED` 拒绝。
+- 步骤结束后应用照常运行，测试里关闭应用也不会让它退出。应用的请求照常走网络，所以 `app.requests()` 是空的。
+- 步骤看到的是应用已经创建的视图。长列表在行接近屏幕时才创建它们，所以靠下的行要先 `scroll` 才能找到。
+- `--target`、`--trace`、`--fps`、`--display` 和 `--foreground` 是给测试打开的应用做准备的，不能和 `--attach` 一起用。
+
+macOS 和 GPUI 的开发宿主接受附着的步骤。其他宿主（Windows、Linux、iOS、Android、终端和浏览器）会明确报告不接受。
+
+只有本机能驱动会话。开发服务器只在回环地址上接受附着的步骤，拒绝任何网页（包括它自己的页面），还要求一个令牌。会话把令牌
+写在只有你的用户能读的文件里。网络上的其他机器、本机的其他用户和浏览器里打开的网页都无法驱动你的应用。
+
+附着只用于开发。只有 `nsh run` 和 `nsh dev` 的宿主会连开发服务器、保留步骤需要的模型；打包的应用（`nsh package`）和正式构建的应用
+两样都没有，也就无法附着。
 
 示例中有可以参考的测试：Rust 应用见 `examples/gallery-rs`（`cargo test`，每个演示一个模块，以及 `App.test.tsx`），带 Rust crate
 的应用见 `examples/rust-exports`，TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求、
@@ -794,18 +833,18 @@ jobs:
 无界面测试检查的是运行时渲染出的内容，它们的 `id:` 选择器按测试 id 查找视图。如果要用平台的测试工具（XCUITest、Espresso / UI Automator、Appium、Maestro）
 驱动真实的原生 UI，请给视图设置测试 id：Rust 中用 `.test_id(…)`，TSX 中用 `testID`：
 
+```tsx tabs
+<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
+  <Text testID="cart-count">{`${count()} items`}</Text>
+</View>
+```
+
 ```rust tabs
 view()
     .test_id("add-to-cart")
     .p_3()
     .on_press(add)
     .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
-```
-
-```tsx tabs
-<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
-  <Text testID="cart-count">{`${count()} items`}</Text>
-</View>
 ```
 
 | 平台 | `testID` 对应到哪里 |

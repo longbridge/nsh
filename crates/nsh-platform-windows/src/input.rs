@@ -438,7 +438,7 @@ impl Item {
 
 /// What a touch or pen contact last reported besides its position
 /// (`WM_POINTER*`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PenSample {
     /// A pen rather than a finger.
     pub(crate) pen: bool,
@@ -446,6 +446,27 @@ pub(crate) struct PenSample {
     pub(crate) pressure: Option<f32>,
     /// A pen's tilt in degrees (x, y).
     pub(crate) tilt: (f32, f32),
+    /// The pen's eraser end (or inverted pen) touches.
+    pub(crate) eraser: bool,
+    /// The pen's barrel button is held.
+    pub(crate) barrel: bool,
+    /// The samples the system merged into this message, oldest first, the
+    /// message's own one left out (`GetPointerPenInfoHistory`).
+    pub(crate) merged: Vec<MergedSample>,
+}
+
+/// A pen sample the system merged into a later `WM_POINTER*` message.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MergedSample {
+    /// Position in the surface (points).
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    /// As [`PenSample::pressure`].
+    pub(crate) pressure: Option<f32>,
+    /// As [`PenSample::tilt`].
+    pub(crate) tilt: (f32, f32),
+    /// When the device took it, in the clock of [`PointerEvent::time`].
+    pub(crate) time: f64,
 }
 
 thread_local! {
@@ -468,7 +489,7 @@ fn pen_sample(pointer: u32) -> Option<PenSample> {
         samples
             .iter()
             .find(|(id, _)| *id == pointer)
-            .map(|(_, s)| *s)
+            .map(|(_, s)| s.clone())
     })
 }
 
@@ -716,6 +737,7 @@ pub(crate) fn batch_applied(surface: &Rc<Surface>) {
     if surface.input.cursor_changed.take() {
         crate::window::refresh_cursor(surface);
     }
+    crate::keyboard::release_hidden_focus(surface);
 }
 
 /// `SetJsResponder` / `ClearJsResponder`. Runs while the mounter applies a
@@ -971,51 +993,57 @@ pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
 /// menu, but where its selectable view, or a view between them, listens
-/// ([`menu_area`]).
+/// ([`nsh_core::input::context_menu_target`], as on Linux and macOS; the
+/// listener's menu acts on that view's selection: [`menu_area`]).
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
-    let menu_area = menu_area(&hit.view);
-    let app_menu = menu_area.is_some();
     surface.chrome.context_area.take();
-    let mut view = Some(hit.view);
-    while let Some(v) = view {
-        let (id, listens, input, selectable, area) = {
+    let mut views = Vec::new();
+    let mut at = Some(hit.view);
+    while let Some(v) = at {
+        at = v.parent_view();
+        views.push(v);
+    }
+    let hops: Vec<_> = views
+        .iter()
+        .map(|v| {
             let s = v.state();
-            (
-                s.id,
-                s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input,
-                crate::text::selectable(&s),
-                s.props.selectable_view,
-            )
-        };
-        if listens {
-            surface.chrome.context_area.replace(menu_area);
-            let (location_x, location_y) = local(&v, x, y);
+            nsh_core::input::ContextMenuHop {
+                listens: s.events.contains(EventKind::ContextMenu),
+                field: s.kind == ViewKind::Input,
+                selectable_text: crate::text::selectable(&s),
+                selectable_view: s.props.selectable_view,
+            }
+        })
+        .collect();
+    match nsh_core::input::context_menu_target(&hops) {
+        Some(nsh_core::input::ContextMenuTarget::Listener(i)) => {
+            let v = &views[i];
+            surface.chrome.context_area.replace(menu_area(&views[0]));
+            let (location_x, location_y) = local(v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
                 point(Points(x), Points(y)),
                 modifiers.core(),
                 Some(nsh_core::PointerType::Mouse),
             );
+            let id = v.state().id;
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
-            return;
         }
-        if input {
-            crate::text_input::context_menu(surface, &v, None);
-            return;
+        Some(nsh_core::input::ContextMenuTarget::Field(i)) => {
+            crate::text_input::context_menu(surface, &views[i], None);
         }
-        if (selectable || area) && !app_menu {
+        Some(nsh_core::input::ContextMenuTarget::EditMenu(i)) => {
             // Text in a selectable view has the area's menu.
-            match crate::selectable_view::area_of(&v) {
+            let v = &views[i];
+            match crate::selectable_view::area_of(v) {
                 Some(area) => crate::selectable_view::context_menu(surface, &area),
-                None => crate::text::context_menu(surface, &v),
+                None => crate::text::context_menu(surface, v),
             }
-            return;
         }
-        view = v.parent_view();
+        None => {}
     }
 }
 
@@ -1468,7 +1496,9 @@ fn collect_stops(view: &NshView, out: &mut Vec<NshView>) {
                 s.props.accessibility.state.disabled,
             )
         };
-        !disabled && (field || crate::keyboard::is_stop(view))
+        // A field in a `display: none` view has no area, as a custom stop
+        // there has none (`keyboard::has_area`).
+        !disabled && ((field && crate::keyboard::has_area(view)) || crate::keyboard::is_stop(view))
     }));
 }
 
@@ -1494,6 +1524,13 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
         }
         view = view.parent_view()?;
     }
+}
+
+/// Whether a press at `(x, y)` (root coordinates) lands on a view in
+/// `root` that takes it, the root aside, as if it were `box-none`: where a
+/// window whose `pointerEvents` is `"box-none"` takes the pointer.
+pub(crate) fn takes_pointer(root: &NshView, x: f32, y: f32) -> bool {
+    pick(root, x, y, true).is_some_and(|hit| hit.item.is_some() || hit.view.id() != root.id())
 }
 
 /// The innermost view at `(x, y)` (root coordinates); hosted items are
@@ -1723,14 +1760,17 @@ fn down(
         _ => {
             if let Some(target) = crate::keyboard::focus_target(surface, &hit.view) {
                 crate::keyboard::focus_pointer(surface, &target);
-            } else if let Some(field) = crate::text_input::focused(surface)
+            } else if !matches!(item, Some(Item::Text(_) | Item::Area(..)))
+                && let Some(field) = crate::text_input::focused(surface)
                 && crate::app_window::window_of(surface, &field)
                     == crate::app_window::window_of(surface, &hit.view)
             {
                 // A press on no stop (blank space) leaves the field of its
                 // window, as one on a stop does: the field is drawn here,
                 // not a system control that would lose the focus to the
-                // click itself.
+                // click itself. A press that starts a text selection keeps
+                // the field focused, so Ctrl+C copies the selection around
+                // a chat's composer (copy-selection-windows.test.tsx).
                 crate::text_input::blur(&field);
             }
         }
@@ -2042,7 +2082,8 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     Key::Touch(id) => pen_sample(id),
                     Key::Mouse => None,
                 };
-                TouchPoint {
+                let sample = sample.as_ref();
+                let mut touch = TouchPoint {
                     id: p.id,
                     target: p.target.id(),
                     // JS keeps a finger's path from its start.
@@ -2070,13 +2111,34 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     },
                     tilt_x: sample.map_or(0.0, |s| s.tilt.0),
                     tilt_y: sample.map_or(0.0, |s| s.tilt.1),
+                    coalesced: Vec::new(),
+                    eraser: sample.is_some_and(|s| s.eraser),
+                    barrel: sample.is_some_and(|s| s.barrel),
+                };
+                // The merged samples belong to the message being handled: a
+                // cancel follows another report of the same message.
+                if is_changed && phase != TouchPhase::Cancel {
+                    for m in sample.map_or(&[][..], |s| s.merged.as_slice()) {
+                        let pressure = m
+                            .pressure
+                            .unwrap_or_else(|| TouchPoint::default_pressure(phase, false));
+                        touch.push_coalesced(
+                            point(Points(m.x), Points(m.y)),
+                            pressure,
+                            m.tilt.0,
+                            m.tilt.1,
+                            m.time * 1000.0,
+                        );
+                    }
                 }
+                touch
             })
             .collect()
     };
     let event = TouchEvent {
         phase,
-        timestamp: changed.time,
+        // `PointerEvent::time` is in seconds, a touch's in milliseconds.
+        timestamp: changed.time * 1000.0,
         points,
         modifiers: changed.modifiers.core(),
         activated,
@@ -3080,8 +3142,15 @@ mod tests {
             &surface.root,
             4,
             ViewKind::View,
-            rect(0.0, 100.0, 400.0, 300.0),
+            rect(0.0, 100.0, 400.0, 200.0),
         );
+        let area = view(
+            &surface.root,
+            5,
+            ViewKind::View,
+            rect(0.0, 300.0, 400.0, 100.0),
+        );
+        area.state_mut().props.selectable_view = true;
         let click = |x: f32, y: f32| {
             let event = |kind| PointerEvent {
                 kind,
@@ -3102,6 +3171,10 @@ mod tests {
         click(10.0, 10.0);
         assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
         click(10.0, 10.0);
+        assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
+        // A press that starts a selection keeps the field focused, so
+        // Ctrl+C copies the selection around it.
+        click(200.0, 350.0);
         assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
         click(200.0, 200.0);
         assert_eq!(crate::text_input::focused(&surface), None);
@@ -3236,6 +3309,39 @@ mod tests {
         assert_eq!(at(&root, 25.0, 25.0), Some(2));
         a.state_mut().props.pointer_events = PointerEvents::None;
         assert_eq!(at(&root, 25.0, 25.0), Some(ROOT_ID));
+    }
+
+    #[test]
+    fn a_box_none_window_takes_the_pointer_over_its_views_only() {
+        let root = root();
+        // A panel at the top of a window larger than it.
+        let panel = view(&root, 2, ViewKind::View, rect(100.0, 0.0, 200.0, 80.0));
+        view(&panel, 4, ViewKind::View, rect(10.0, 10.0, 40.0, 40.0));
+        assert!(takes_pointer(&root, 120.0, 20.0));
+        assert!(takes_pointer(&root, 250.0, 60.0));
+        // Below and beside it: the root's own, so nothing.
+        assert!(!takes_pointer(&root, 200.0, 200.0));
+        assert!(!takes_pointer(&root, 20.0, 20.0));
+        // A view filling the root takes it, as in a `box-none` view, unless
+        // it is `box-none` itself.
+        let fill = view(&root, 6, ViewKind::View, rect(0.0, 0.0, 400.0, 400.0));
+        assert!(takes_pointer(&root, 200.0, 200.0));
+        fill.state_mut().props.pointer_events = PointerEvents::BoxNone;
+        assert!(!takes_pointer(&root, 200.0, 200.0));
+        // Views the pointer cannot reach take nothing.
+        let hidden = view(&fill, 8, ViewKind::View, rect(0.0, 300.0, 100.0, 100.0));
+        hidden.state_mut().style.hidden = true;
+        let none = view(&fill, 10, ViewKind::View, rect(200.0, 300.0, 100.0, 100.0));
+        none.state_mut().props.pointer_events = PointerEvents::None;
+        assert!(!takes_pointer(&root, 50.0, 350.0));
+        assert!(!takes_pointer(&root, 250.0, 350.0));
+        // The panel's hit slop reaches past its frame.
+        panel.state_mut().props.hit_slop = EdgeInsets {
+            bottom: Points(10.0),
+            ..Default::default()
+        };
+        assert!(takes_pointer(&root, 200.0, 85.0));
+        assert!(!takes_pointer(&root, 200.0, 95.0));
     }
 
     #[test]

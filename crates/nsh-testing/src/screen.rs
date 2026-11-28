@@ -164,7 +164,8 @@ pub struct Screen {
     /// Inputs configured to take the focus when they mount (`autoFocus`)
     /// that are not in a window yet, in the order they were configured.
     auto_focus: Vec<NodeId>,
-    /// Scroll views a command moved, whose offset the engine is told
+    /// Scroll views the core's items moved (`ScrollBy`, `ScrollTo`, a
+    /// content's new end), whose offset the engine is told
     /// ([`Screen::take_scrolled`]), as a platform reports it.
     scrolled: Vec<NodeId>,
     /// Screens a back popped natively, until the app removes them.
@@ -199,17 +200,6 @@ pub struct Screen {
     url_opens: Vec<(u32, String)>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
-    /// What the app shared (`Share.show`), in order.
-    shares: Vec<nsh_core::share::ShareSheet>,
-    /// The shares to answer.
-    share_answers: Vec<u32>,
-    /// The web sign-in sessions the app opened in the app, in order.
-    auth_sessions: Vec<nsh_core::auth_session::AuthSessionPage>,
-    /// The sign-in sessions to answer.
-    auth_session_answers: Vec<u32>,
-    /// The sign-in session showing: not answered, closed by the app nor
-    /// replaced yet.
-    auth_session_showing: Option<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
     file_requests: Vec<nsh_core::file_dialog::FileRequest>,
@@ -434,6 +424,10 @@ pub struct AccessibilityNode {
     pub role: Option<AccessibilityRole>,
     /// Its `accessibilityLabel`.
     pub label: Option<String>,
+    /// Its accessible name, the one `role:<role>[<name>]` matches: its
+    /// `accessibilityLabel`, else the texts inside it joined by spaces;
+    /// empty for the root and for a view with neither.
+    pub name: String,
     /// It takes no presses.
     pub disabled: bool,
     /// It is selected.
@@ -442,6 +436,13 @@ pub struct AccessibilityNode {
     pub checked: Option<nsh_core::Checked>,
     /// Its `accessibilityState.expanded`.
     pub expanded: Option<bool>,
+    /// Its `accessibilityState.pressed`, for a toggle button; `None` when
+    /// it is unset.
+    pub pressed: Option<nsh_core::Checked>,
+    /// Its `accessibilityState.busy`: it is loading.
+    pub busy: bool,
+    /// Its `accessibilityValue.text`.
+    pub value: Option<String>,
     /// Its `accessibilityLevel`.
     pub level: Option<u32>,
     /// Its `accessibilityDescription`.
@@ -844,7 +845,11 @@ impl Screen {
                 self.pull_back(*id);
             }
             MountItem::ScrollBy { id, dx, dy } => {
-                // Not clamped: the core knows its content.
+                // Not clamped: the core knows its content. Reported, as
+                // the platforms report the offset it moves a view to: the
+                // core's offset (`ref.measure()`, a list's window) takes in
+                // the scrolls that keep rows in place as rows above them
+                // change size.
                 if let Some(scroll) = self.scroll_mut(*id) {
                     scroll.applied = scroll.applied.wrapping_add(1);
                     if scroll.horizontal {
@@ -852,6 +857,7 @@ impl Screen {
                     } else {
                         scroll.y += *dy;
                     }
+                    self.moved(*id);
                 }
             }
             MountItem::Command { id, command } => {
@@ -939,18 +945,6 @@ impl Screen {
                 self.url_opens.push((*id, url.clone()));
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
-            // Recorded, never shared: a test's machine has no share sheet.
-            Command::Share { id, sheet } => {
-                self.shares.push((**sheet).clone());
-                self.share_answers.push(*id);
-            }
-            // Recorded, never shown: a test's machine signs in nowhere.
-            Command::AuthSession { id, page } => {
-                self.auth_sessions.push((**page).clone());
-                self.auth_session_answers.push(*id);
-                self.auth_session_showing = Some(*id);
-            }
-            Command::CloseAuthSession(id) => self.auth_session_ended(*id),
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
             Command::FileRequest { id, request } => {
@@ -994,7 +988,7 @@ impl Screen {
                         scroll.y = y.clamp(Points::ZERO, end);
                     }
                     scroll.applied = scroll.applied.wrapping_add(1);
-                    self.scrolled.push(id);
+                    self.moved(id);
                 }
             }
             Command::ScrollToEnd { .. } => {
@@ -1006,7 +1000,7 @@ impl Screen {
                         scroll.y = end;
                     }
                     scroll.applied = scroll.applied.wrapping_add(1);
-                    self.scrolled.push(id);
+                    self.moved(id);
                 }
             }
             _ => {}
@@ -1260,10 +1254,14 @@ impl Screen {
             Some(v) => AccessibilityNode {
                 role: Some(v.role).filter(|r| *r != AccessibilityRole::None),
                 label: v.label.as_deref().map(str::to_owned),
+                name: self.name(id),
                 disabled: v.disabled,
                 selected: v.selected,
                 checked: v.accessibility_state.checked,
                 expanded: v.accessibility_state.expanded,
+                pressed: v.accessibility_state.pressed,
+                busy: v.accessibility_state.busy,
+                value: v.value_text.as_deref().map(str::to_owned),
                 level: v.level,
                 description: v.description.as_deref().map(str::to_owned),
                 children: Vec::new(),
@@ -1583,6 +1581,17 @@ impl Screen {
             });
         }
         children
+    }
+
+    /// A screen for the app that replaces this one's (a reload), in the
+    /// same window: its viewport and system bar, none of its views.
+    #[cfg(feature = "agent")]
+    pub(crate) fn restarted(&self) -> Screen {
+        Screen {
+            viewport: self.viewport,
+            system_bar: self.system_bar,
+            ..Screen::default()
+        }
     }
 
     /// The window is `size` (what lies outside it is not on screen).
@@ -2068,48 +2077,6 @@ impl Screen {
         std::mem::take(&mut self.file_answers)
     }
 
-    /// What the app shared (`Share.show`, [`nsh_core::element::share`]),
-    /// in order: what reached the platform, past the content's checks and
-    /// the `share` capability (only once the environment has
-    /// [`nsh_core::platform::Environment::share`]).
-    pub fn shares(&self) -> &[nsh_core::share::ShareSheet] {
-        &self.shares
-    }
-
-    /// The web sign-in sessions the app opened in the app
-    /// ([`nsh_core::element::open_auth_session`]), in order: those that
-    /// reached the platform, past the request's checks (only once the
-    /// environment has [`nsh_core::platform::Environment::auth_session`];
-    /// elsewhere the page is in [`Screen::opened_urls`]).
-    pub fn auth_sessions(&self) -> &[nsh_core::auth_session::AuthSessionPage] {
-        &self.auth_sessions
-    }
-
-    /// Whether a sign-in session the app opened in the app still shows:
-    /// the user has not ended it (as
-    /// [`crate::Headless::keep_auth_sessions_open`] leaves it), and the app
-    /// has not closed it ([`nsh_core::element::close_auth_session`]).
-    pub fn auth_session_showing(&self) -> bool {
-        self.auth_session_showing.is_some()
-    }
-
-    /// Sign-in session `id` is no longer showing.
-    pub(crate) fn auth_session_ended(&mut self, id: u32) {
-        if self.auth_session_showing == Some(id) {
-            self.auth_session_showing = None;
-        }
-    }
-
-    /// The sign-in sessions to answer since the last call.
-    pub(crate) fn take_auth_session_answers(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.auth_session_answers)
-    }
-
-    /// The share requests to answer since the last call.
-    pub(crate) fn take_share_answers(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.share_answers)
-    }
-
     /// The screen color requests to answer since the last call.
     pub(crate) fn take_screen_colors(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.screen_colors)
@@ -2348,41 +2315,15 @@ impl Screen {
     }
 
     /// The texts of selectable view `area` that take part in its selection,
-    /// in document order: each text view, its text and its content box in
-    /// `area`'s points. Hidden views and texts kept out
-    /// (`selectable={false}`) are left out.
-    pub(crate) fn area_texts(
-        &self,
-        area: NodeId,
-    ) -> Vec<(NodeId, Arc<nsh_core::AttributedText>, Bounds<Points>)> {
-        let mut out = Vec::new();
-        let Some(origin) = self.bounds_in_root(area).map(|b| b.origin) else {
-            return out;
-        };
-        let mut stack = vec![area];
-        while let Some(id) = stack.pop() {
-            let Some(view) = self.nodes.get(&id) else {
-                continue;
-            };
-            if view.hidden {
-                continue;
-            }
-            if let Some(text) = &view.attributed
-                && text.selectable != Some(false)
-                && let Some(bounds) = self.bounds_in_root(id)
-            {
-                let content = view.text_content;
-                out.push((
-                    id,
-                    Arc::clone(text),
-                    Bounds::new(bounds.origin - origin + content.origin, content.size),
-                ));
-            }
-            if let Some(children) = self.children.get(&id) {
-                stack.extend(children.iter().rev());
-            }
-        }
-        out
+    /// in document order, as the backends list them
+    /// (`selection::list_texts`): each text view, its text, its content box
+    /// in `area`'s points and the list marker beside it. Hidden views and
+    /// texts kept out (`selectable={false}`) are left out.
+    pub(crate) fn area_texts(&self, area: NodeId) -> Vec<AreaText> {
+        nsh_core::selection::list_texts(&AreaViews(self), &area)
+            .into_iter()
+            .map(|t| (t.view, t.text, t.frame, t.marker))
+            .collect()
     }
 
     /// Whether the view `selector` names is selected (its accessibility
@@ -3414,7 +3355,9 @@ impl Screen {
                 return false;
             };
             if let Some(input) = &v.input {
-                return input.config.editable && !self.disabled_from(id, None);
+                return input.config.editable
+                    && v.focusable != Some(false)
+                    && !self.disabled_from(id, None);
             }
             // A link in a text view is a stop after it, in text order
             // (`TextLink::focus_stop`).
@@ -3469,7 +3412,7 @@ impl Screen {
             return false;
         }
         if let Some(input) = &v.input {
-            return input.config.editable;
+            return input.config.editable && v.focusable != Some(false);
         }
         // A link in a text view is a stop after it, in text order
         // (`TextLink::focus_stop`).
@@ -3683,11 +3626,20 @@ impl Screen {
         };
         if *at > end {
             *at = end;
+            self.moved(id);
+        }
+    }
+
+    /// Scroll view `id` moved by what the core sent (a scroll, or its
+    /// content's new end): reported once after the batch, however many
+    /// items of it moved the view.
+    fn moved(&mut self, id: NodeId) {
+        if !self.scrolled.contains(&id) {
             self.scrolled.push(id);
         }
     }
 
-    /// The scroll views a command moved since the last call.
+    /// The scroll views the core's items moved since the last call.
     pub(crate) fn take_scrolled(&mut self) -> Vec<NodeId> {
         std::mem::take(&mut self.scrolled)
     }
@@ -3712,21 +3664,64 @@ pub(crate) fn protocol_accessibility(n: AccessibilityNode) -> nsh_dev::protocol:
     let mut out = nsh_dev::protocol::AccessibilityNode::default();
     out.role = n.role.map(|r| r.js_name().to_owned());
     out.label = n.label;
+    out.name = n.name;
     out.disabled = n.disabled;
     out.selected = n.selected;
-    out.checked = n.checked.map(|c| {
+    let name = |c: nsh_core::Checked| {
         match c {
             nsh_core::Checked::True => "true",
             nsh_core::Checked::False => "false",
             nsh_core::Checked::Mixed => "mixed",
         }
         .to_owned()
-    });
+    };
+    out.checked = n.checked.map(name);
     out.expanded = n.expanded;
+    out.pressed = n.pressed.map(name);
+    out.busy = n.busy;
+    out.value = n.value;
     out.level = n.level;
     out.description = n.description;
     out.children = n.children.into_iter().map(protocol_accessibility).collect();
     out
+}
+
+/// One text of a selectable area: its view, text, content box in the
+/// area's points and the list marker it carries, if any.
+pub(crate) type AreaText = (
+    NodeId,
+    Arc<nsh_core::AttributedText>,
+    Bounds<Points>,
+    Option<String>,
+);
+
+/// The screen's views as `selection::list_texts` walks them: frames from
+/// where each view is in the root, so scroll offsets are in them already.
+struct AreaViews<'a>(&'a Screen);
+
+impl nsh_core::selection::TextTree for AreaViews<'_> {
+    type View = NodeId;
+
+    fn hidden(&self, id: &NodeId) -> bool {
+        self.0.nodes.get(id).is_none_or(|v| v.hidden)
+    }
+
+    fn text(&self, id: &NodeId) -> Option<(Arc<nsh_core::AttributedText>, Bounds<Points>)> {
+        let view = self.0.nodes.get(id)?;
+        self.0.bounds_in_root(*id)?;
+        Some((Arc::clone(view.attributed.as_ref()?), view.text_content))
+    }
+
+    fn children(&self, id: &NodeId, out: &mut Vec<(NodeId, Bounds<Points>)>) {
+        let Some(origin) = self.0.bounds_in_root(*id).map(|b| b.origin) else {
+            return;
+        };
+        for &child in self.0.children.get(id).into_iter().flatten() {
+            if let Some(b) = self.0.bounds_in_root(child) {
+                out.push((child, Bounds::new(b.origin - origin, b.size)));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4044,7 +4039,8 @@ mod tests {
         ]));
         // Rows arrive above the one row: the core keeps it in place with a
         // scroll it sends before the new content size, and the view goes
-        // as far as that size lets it.
+        // as far as that size lets it. The scroll and the pull back move
+        // it once: one report.
         screen.apply(&batch(vec![by(1176.0), content(1232.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points(432.0));
         assert_eq!(screen.take_scrolled(), [2]);
@@ -4053,9 +4049,10 @@ mod tests {
         screen.apply(&batch(vec![content(56.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points::ZERO);
         assert_eq!(screen.take_scrolled(), [2]);
-        // So does a viewport growing past the content's end.
+        // So does a viewport growing past the content's end, from where the
+        // core's scroll put the view (reported, as any scroll of the core's).
         screen.apply(&batch(vec![by(432.0), content(1232.0)]));
-        assert!(screen.take_scrolled().is_empty());
+        assert_eq!(screen.take_scrolled(), [2]);
         screen.apply(&batch(vec![frame(2, 0.0, 0.0, 390.0, 1000.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points(232.0));
         assert_eq!(screen.take_scrolled(), [2]);

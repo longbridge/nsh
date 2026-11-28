@@ -84,6 +84,14 @@ test("a row's context menu has a checkable item that closes it", async () => {
   expect(app.texts()).not.toContain("Duplicate");
 });
 
+test("a hold on the star inside a row opens the star's menu alone", async () => {
+  await app.longPress("label:Star on Holiday.jpg");
+  await app.waitFor("Unstar");
+  expect(app.texts()).not.toContain("Duplicate");
+  await app.press("Unstar");
+  expect(app.count("label:Star on Holiday.jpg")).toBe(0);
+});
+
 test("a row's menu changes the list", async () => {
   await app.press("label:Actions for Notes.txt");
   await app.press("Duplicate");
@@ -122,22 +130,19 @@ test("a command that takes a while shows a toast that becomes its result", async
   await app.waitFor("Up to date");
 });
 
-test("on iOS the system's menu card leaves the segments to UIKit, not the gallery's drawn ones", async () => {
+test("the system's menu card picks its layout with the gallery's segments", async () => {
   await app.waitFor("The system's menu");
   await app.waitFor("id:system-menu");
   expect(app.shows("Sorted by Date")).toBe(true);
   expect(app.shows("List · sorted by Date")).toBe(true);
-  // The segments are a UISegmentedControl, which headless runs (no UIKit to
-  // size it) do not draw: none of the gallery's drawn segments stand in.
-  expect(app.shows("Grid")).toBe(false);
-  expect(app.shows("Columns")).toBe(false);
+  await app.press("Grid");
+  await app.waitFor("Grid · sorted by Date");
 });
 
-test("off iOS the system's menu card falls back to the gallery's drawn segments", async () => {
+test("off iOS the system's menu card keeps the same segments", async () => {
   const desk = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: {} });
   await desk.press("role:button[Menu]");
   await desk.waitFor("The system's menu");
-  expect(desk.shows("id:system-segments")).toBe(false);
   await desk.press("Grid");
   await desk.waitFor("Grid · sorted by Date");
 });

@@ -49,7 +49,38 @@ pub(crate) fn package(
     id: &str,
     built: &crate::build::Built,
 ) -> anyhow::Result<()> {
-    let runner = runtime::file(Platform::Windows, true)?;
+    let mut runner = runtime::file(Platform::Windows, true)?;
+    // A prebuilt runner with a link kit is linked again with only the
+    // parts the app imports; a failure leaves the prebuilt one, with all.
+    if crate::rust_app::current().is_none()
+        && let Some(uses) = built.native_use.as_ref()
+        && let Some(kit) = crate::windows_link::kit_for(&runner)
+    {
+        let gates =
+            crate::native_features::part_gates(Some(uses), &config.features, Default::default());
+        if let Err(e) = crate::windows_link::ensure_linker(&kit) {
+            ui::warn(format!("could not add the runner's linker: {e:#}"));
+        }
+        fs::create_dir_all(options.out)?;
+        let linked = options.out.join("nsh-windows-app.linked.exe");
+        let step = ui::Step::start("linking the runner with the parts the app imports");
+        match crate::windows_link::link(&kit, &gates, &linked) {
+            Ok(left_out) => {
+                step.done(format!(
+                    "linked the runner without {} parts",
+                    left_out.len()
+                ));
+                ui::debug(format!("left out: {}", left_out.join(", ")));
+                runner = linked;
+            }
+            Err(e) => {
+                step.done("kept the prebuilt runner");
+                ui::warn(format!(
+                    "the app's own runner did not link, so it has the prebuilt one, with every part: {e:#}"
+                ));
+            }
+        }
+    }
     // A runner built for another system would package fine and then not
     // start on Windows ("not a valid application").
     let mut magic = [0; 2];
@@ -67,6 +98,9 @@ pub(crate) fn package(
     fs::create_dir_all(&resources)?;
     let exe = dir.join(format!("{}.exe", file_stem(name)));
     fs::copy(&runner, &exe).with_context(|| format!("copy {}", runner.display()))?;
+    if runner.starts_with(options.out) {
+        let _ = fs::remove_file(&runner);
+    }
     // A Rust app has no bundle: the runner mounts its root.
     if !built.rust_root {
         fs::write(resources.join("bundle.nshc"), &built.bytecode)?;
@@ -74,7 +108,7 @@ pub(crate) fn package(
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let dest = resources.join("assets").join(&asset.path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -99,6 +133,26 @@ pub(crate) fn package(
         ui::path(&archive)
     ));
     installer(options.out, name, id, version, &dir, &exe)?;
+    if options.format == crate::android::Format::Msix {
+        let msix = options.out.join(format!("{name}.msix"));
+        let step = ui::Step::start(format!("packaging {}", ui::path(&msix)));
+        let executable = exe.file_name().unwrap().to_string_lossy().into_owned();
+        let identity =
+            crate::msix::Identity::new(config, name, id, executable, crate::msix::arch(&exe)?)?;
+        crate::msix::write(
+            &dir,
+            &identity,
+            config.icon(crate::package::PackageTarget::Windows),
+            &msix,
+            options.sign.map(Path::new),
+        )?;
+        step.done(format!(
+            "packaged {} ({} {})",
+            ui::path(&msix),
+            identity.name,
+            identity.version
+        ));
+    }
     if options.run {
         Command::new(&exe)
             .current_dir(&dir)
