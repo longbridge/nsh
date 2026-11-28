@@ -57,6 +57,7 @@ type TestModel = Arc<std::sync::Mutex<Option<Arc<nsh_testing::agent::Model>>>>;
 
 /// Forwards mount batches and errors from the engine thread to the main
 /// thread.
+#[derive(Clone)]
 struct MainThreadSink {
     mounter: SharedMounter,
     on_error: SharedErrorHandler,
@@ -1052,7 +1053,7 @@ impl RootView {
         let tokens = self.ivars().host_tokens.borrow().clone();
         let links = std::mem::take(&mut *self.ivars().url_schemes.borrow_mut());
         let fonts = self.ivars().fonts.borrow().clone();
-        let engine = match Engine::start_with(config, CoreTextEngine::default, sink, |control| {
+        let started = Engine::start_with(config, CoreTextEngine::default, sink.clone(), |control| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
@@ -1062,9 +1063,14 @@ impl RootView {
             for url in links {
                 send_url_scheme(control, url);
             }
-        }) {
+        });
+        let engine = match started {
             Ok(engine) => engine,
-            Err(err) => return log::error!("failed to start the engine: {err}"),
+            Err(err) => {
+                let message = format!("failed to start the engine: {err}");
+                log::error!("{message}");
+                return sink.report_error(&message);
+            }
         };
         // The test moves its clock through the engine.
         #[cfg(feature = "dev")]
