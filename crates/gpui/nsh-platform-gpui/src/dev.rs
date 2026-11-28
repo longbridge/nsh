@@ -52,43 +52,83 @@ const DONE_MS: u64 = 1200;
 
 struct DevLogger;
 
+/// Whether a log line goes to the dev server: the app's and the runtime's
+/// (targets `nsh*` and `js`), and warnings and errors of any target.
+fn forwarded(metadata: &log::Metadata<'_>) -> bool {
+    metadata.target().starts_with("nsh")
+        || metadata.target() == "js"
+        || metadata.level() <= log::Level::Warn
+}
+
 impl log::Log for DevLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.target().starts_with("nsh")
-            || metadata.target() == "js"
-            || metadata.level() <= log::Level::Warn
+        forwarded(metadata)
     }
 
     fn log(&self, record: &log::Record<'_>) {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let message = record.args().to_string();
-        let client = CLIENT.lock().ok().and_then(|c| c.upgrade());
-        match client {
-            Some(client) if CONNECTED.load(Ordering::Relaxed) => {
-                client.log(record.level().into(), record.target(), &message)
-            }
-            _ => {
-                let _ = writeln!(
-                    std::io::stderr().lock(),
-                    "{:>5} {} {message}",
-                    record.level(),
-                    record.target()
-                );
-            }
+        if !forward(record) {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "{:>5} {} {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
         }
     }
 
     fn flush(&self) {}
 }
 
+/// Forwards a log line of the NSH app or runtime (target `nsh*` or `js`),
+/// or a warning or error of any target, to the dev server, for an
+/// embedding app that installs its own `log` logger instead of
+/// [`init_logging`]: call it from that logger's `log`. Returns whether a
+/// connection took the line; it writes nothing itself otherwise.
+///
+/// - `true` only means the line was handed to the connection: it is still
+///   dropped when the connection's queue is full.
+/// - With several [`AppView`]s, lines go to the dev server of the one that
+///   connected last.
+/// - The logger must let `js` Info records through, in its `enabled` and
+///   in the max level (`log::set_max_level`): `console.log` and the like
+///   check `log_enabled!` before formatting a line.
+pub fn forward(record: &log::Record<'_>) -> bool {
+    if !forwarded(record.metadata()) {
+        return false;
+    }
+    let Some(client) = CLIENT.lock().ok().and_then(|c| c.upgrade()) else {
+        return false;
+    };
+    if !CONNECTED.load(Ordering::Relaxed) {
+        return false;
+    }
+    client.log(
+        record.level().into(),
+        record.target(),
+        &record.args().to_string(),
+    );
+    true
+}
+
 /// Installs a logger that prints to stderr and forwards every line to the
 /// dev server once connected. Call first thing in a development host.
+///
+/// An app that already installed a logger keeps it, and gets a warning
+/// through it: that logger must call [`forward`] for the app's logs to
+/// reach the developer's terminal.
 pub fn init_logging() {
     static LOGGER: DevLogger = DevLogger;
     if log::set_logger(&LOGGER).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
+    } else {
+        log::warn!(
+            "another logger is installed: NSH app logs will not reach the `nsh dev` \
+             terminal unless it calls `nsh_platform_gpui::dev::forward`"
+        );
     }
 }
 
@@ -870,6 +910,86 @@ mod tests {
         let mut up = key(0x52, command);
         up.down = false;
         assert!(!is_reload_key(&up));
+    }
+
+    #[test]
+    fn forward_sends_app_logs_to_the_dev_server() {
+        use std::{net::TcpListener, sync::mpsc, time::Duration};
+
+        use nsh_dev::protocol::{ClientMessage, LogLevel};
+
+        fn send(level: log::Level, target: &str, message: &str) -> bool {
+            forward(
+                &log::Record::builder()
+                    .level(level)
+                    .target(target)
+                    .args(format_args!("{message}"))
+                    .build(),
+            )
+        }
+
+        // No session yet.
+        assert!(!send(log::Level::Error, "embed", "nobody"));
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}/ws", listener.local_addr().unwrap());
+        let (lines, received) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            while let Ok(msg) = socket.read() {
+                let tungstenite::Message::Text(text) = msg else {
+                    continue;
+                };
+                if let Ok(ClientMessage::Log {
+                    level,
+                    target,
+                    message,
+                }) = serde_json::from_str(&text)
+                    && lines.send((level, target, message)).is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let host = HostInfo::new(HostPlatform::Gpui);
+        let (connected, on_connect) = mpsc::channel();
+        let client = Arc::new(
+            DevClient::start(url, host, move |event| {
+                if matches!(event, DevEvent::Connected) {
+                    let _ = connected.send(());
+                }
+            })
+            .unwrap(),
+        );
+        *CLIENT.lock().unwrap() = Arc::downgrade(&client);
+
+        // A client, not connected.
+        assert!(!send(log::Level::Error, "embed", "offline"));
+
+        // As `start` does: lines are only queued once the client connected,
+        // so its reconnect loop cannot take one of them.
+        on_connect.recv_timeout(Duration::from_secs(10)).unwrap();
+        CONNECTED.store(true, Ordering::Relaxed);
+        assert!(send(log::Level::Info, "js", "console"));
+        assert!(send(log::Level::Warn, "embed", "host warning"));
+        assert!(!send(log::Level::Info, "embed", "host info"));
+        assert!(send(log::Level::Info, "nsh_engine", "last"));
+
+        let next = || received.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(next(), (LogLevel::Info, "js".into(), "console".into()));
+        assert_eq!(
+            next(),
+            (LogLevel::Warn, "embed".into(), "host warning".into())
+        );
+        // The Info line of another target was not sent.
+        assert_eq!(next(), (LogLevel::Info, "nsh_engine".into(), "last".into()));
+
+        CONNECTED.store(false, Ordering::Relaxed);
+        *CLIENT.lock().unwrap() = std::sync::Weak::new();
+        drop(client);
+        drop(received);
+        server.join().unwrap();
     }
 
     #[test]

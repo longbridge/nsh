@@ -448,7 +448,9 @@ NSH draws (`src/layers.rs`).
   from the next load. A new kind of cache is one more `CachePolicy` field, never another option per platform.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
-  assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload
+  assets, logs forwarded to the developer's terminal (through the `DevLogger` of `dev::init_logging`, or, in an app
+  with a `log` logger of its own, through `dev::forward` called from that logger; `init_logging` warns when another
+  logger is installed), the status line and the error overlay over the view, the reload
   key. The embedding app's `on_error` keeps hearing the app's errors next to the overlay; connecting again replaces
   the session. `dev` keeps the optional parts the app's build chose ([features.md](features.md)), so an app
   importing a part its release leaves out fails here as it would there. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
