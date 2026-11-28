@@ -42,7 +42,8 @@ final class ImageBox extends View implements Node {
      * applies per draw op and the shadow fades with the content. */
     @Override
     public boolean hasOverlappingRendering() {
-        return !decor.hasOuterShadows();
+        if (decor.hasOuterShadows()) return false;
+        return previous != null || decor.hasAnyDecoration();
     }
 
     final int id;

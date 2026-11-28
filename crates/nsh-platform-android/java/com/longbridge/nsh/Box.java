@@ -39,7 +39,9 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
      * applies per draw op and the shadow fades with the content. */
     @Override
     public boolean hasOverlappingRendering() {
-        return !decor.hasOuterShadows();
+        if (decor.hasOuterShadows()) return false;
+        if (getChildCount() == 0 && !hasShader() && decor.hasSingleDecoration()) return false;
+        return true;
     }
 
     boolean clip;
@@ -612,7 +614,26 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     private void drawInCorners(Canvas canvas) {
         float left = edges[0], top = edges[1], right = edges[2], bottom = edges[3];
         float l = edges[4], t = edges[5], r = edges[6], b = edges[7];
-        if (l >= r || t >= b || layeredChild()) {
+        boolean split = l < r && t < b;
+        float[][] squares = {{left, top, l, t}, {r, top, right, t}, {r, b, right, bottom}, {left, b, l, bottom}};
+        int corners = 0;
+        if (split) {
+            for (int q = 0; q < 4; q++) {
+                float[] s = squares[q];
+                if (s[2] > s[0] && s[3] > s[1] && hasDrawingInRect(this, s[0], s[1], s[2], s[3])) {
+                    corners |= 1 << q;
+                }
+            }
+            if (corners == 0) {
+                canvas.save();
+                canvas.clipRect(left, top, right, bottom);
+                super.dispatchDraw(canvas);
+                canvas.restore();
+                return;
+            }
+        }
+        if (!split || layeredChild()) {
+            if (!hasDrawingInRect(this, left, top, right, bottom)) return;
             int layer = canvas.saveLayer(left, top, right, bottom, null);
             canvas.clipRect(left, top, right, bottom);
             super.dispatchDraw(canvas);
@@ -628,16 +649,55 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             super.dispatchDraw(canvas);
             canvas.restore();
         }
-        float[][] squares = {{left, top, l, t}, {r, top, right, t}, {r, b, right, bottom}, {left, b, l, bottom}};
         for (int q = 0; q < 4; q++) {
+            if ((corners & (1 << q)) == 0) continue;
             float[] s = squares[q];
-            if (s[2] <= s[0] || s[3] <= s[1]) continue;
             int layer = canvas.saveLayer(s[0], s[1], s[2], s[3], null);
             canvas.clipRect(s[0], s[1], s[2], s[3]);
             super.dispatchDraw(canvas);
             canvas.drawPath(outside[q], eraser);
             canvas.restoreToCount(layer);
         }
+    }
+
+    /**
+     * Whether any visible drawing descendant of {@code group} may intersect
+     * {@code [rx0, ry0, rx1, ry1]} in {@code group}'s local coordinates.
+     * Transformed, filtered, shadowed, outlined, or overflowing children are
+     * treated conservatively as intersecting.
+     */
+    private static boolean hasDrawingInRect(ViewGroup group, float rx0, float ry0, float rx1, float ry1) {
+        int sx = group.getScrollX(), sy = group.getScrollY();
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE || child.getAlpha() <= 0f) continue;
+            if (!child.getMatrix().isIdentity() || Effects.layered(child)) return true;
+            Decor d = Decor.of(child);
+            if (d != null && (d.hasOuterShadows() || d.outlineWidth > 0)) return true;
+            float cl = child.getLeft() - sx, ct = child.getTop() - sy;
+            float cr = child.getRight() - sx, cb = child.getBottom() - sy;
+            if (child instanceof Box) {
+                Box box = (Box) child;
+                if (box.hasShader() && box.shaderOverflow > 0) return true;
+                if (box.overflow != null
+                        && cl + box.overflow.right > rx0 && cl + box.overflow.left < rx1
+                        && ct + box.overflow.bottom > ry0 && ct + box.overflow.top < ry1) {
+                    return true;
+                }
+                if (cr <= rx0 || cl >= rx1 || cb <= ry0 || ct >= ry1) continue;
+                if (box.hasShader() || box.decor.hasAnyDecoration()) return true;
+                if (hasDrawingInRect(box, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) return true;
+            } else {
+                if (cr <= rx0 || cl >= rx1 || cb <= ry0 || ct >= ry1) continue;
+                if (child instanceof ViewGroup) {
+                    if (!child.willNotDraw() && child.getBackground() != null) return true;
+                    if (hasDrawingInRect((ViewGroup) child, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) return true;
+                } else {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Whether a child draws through a layer of its own. */
