@@ -84,10 +84,10 @@ pub(crate) struct UiAnimation {
     sticky: FxHashMap<u32, Vec<(u32, NodeId)>>,
     /// The shader views, whose animated slots are written here.
     pub(crate) shaders: crate::shader::Shaders,
-    /// Choreographer vsync timestamp (seconds) of the last `Graph::tick_frame` call,
-    /// cleared when animations or gestures mutate so high-rate or newly started work
-    /// ticks on the next frame.
-    last_tick: Option<f64>,
+    /// Target Choreographer vsync timestamp (seconds) for the next capped-rate
+    /// `Graph::tick_frame` call, carrying fractional phase across frames; cleared
+    /// when animations or gestures mutate so new work ticks on the next frame.
+    next_tick: Option<f64>,
 }
 
 impl UiAnimation {
@@ -105,7 +105,7 @@ impl UiAnimation {
     pub(crate) fn apply(&mut self, item: MountItem) {
         match item {
             MountItem::Animation(op) => {
-                self.last_tick = None;
+                self.next_tick = None;
                 self.graph.apply(op, &mut self.finished);
             }
             MountItem::AnimationBindings { id, bindings } => {
@@ -187,20 +187,37 @@ impl UiAnimation {
         let Some(hz) = self.graph.frame_rate() else {
             return true;
         };
-        match self.last_tick {
-            None => true,
-            // 2 ms vsync slack so 30 Hz locks cleanly to every 4th 120 Hz, 3rd 90 Hz, or 2nd 60 Hz frame.
-            // Also tick if the vsync clock ever moves backwards.
-            Some(prev) => vsync < prev || vsync - prev >= (1.0 / f64::from(hz)) - 0.002,
-        }
+        let Some(next) = self.next_tick else {
+            return true;
+        };
+        let period = 1.0 / f64::from(hz);
+        let slack = 0.002_f64.min(period * 0.25);
+        // Tick once the scheduled deadline arrives (within vsync slack), or if
+        // the vsync clock moves backwards past the previous period.
+        vsync >= next - slack || vsync < next - period * 2.0
     }
 
     /// A `Choreographer` frame, the only thing that ticks it
     /// ([`Graph::tick_frame`]). `now` is the host epoch time used by the graph;
     /// `vsync` is the Choreographer frame timestamp used for `frameRate` pacing.
     pub(crate) fn tick(&mut self, now: f64, vsync: f64) -> bool {
-        self.last_tick = Some(vsync);
-        self.graph.tick_frame(now, &mut self.finished)
+        let prev_rate = self.graph.frame_rate();
+        let changed = self.graph.tick_frame(now, &mut self.finished);
+        self.next_tick = self.graph.frame_rate().map(|hz| {
+            let period = 1.0 / f64::from(hz);
+            let slack = 0.002_f64.min(period * 0.25);
+            // Carry the fractional deadline across accepted vsyncs so rates that
+            // do not divide the display refresh rate (e.g. 24 Hz on 60 Hz, 60 Hz
+            // on 144 Hz) preserve their average cadence without burst catch-up.
+            let base = self
+                .next_tick
+                .filter(|&prev| {
+                    prev_rate == Some(hz) && prev <= vsync + slack && vsync - prev < period
+                })
+                .unwrap_or(vsync);
+            base + period
+        });
+        changed
     }
 
     pub(crate) fn animating(&self) -> bool {
@@ -220,7 +237,7 @@ impl UiAnimation {
         let Some(&(node, _)) = self.scrolls.get(&id) else {
             return false;
         };
-        self.last_tick = None;
+        self.next_tick = None;
         self.graph.settle(node)
     }
 
@@ -229,7 +246,7 @@ impl UiAnimation {
         let Some(&(node, horizontal)) = self.scrolls.get(&id) else {
             return false;
         };
-        self.last_tick = None;
+        self.next_tick = None;
         self.graph
             .set(node, if horizontal { x } else { y }, &mut self.finished);
         true
@@ -241,7 +258,7 @@ impl UiAnimation {
         let Some(&node) = self.pulls.get(&id) else {
             return false;
         };
-        self.last_tick = None;
+        self.next_tick = None;
         self.graph.set(node, distance.max(0.0), &mut self.finished);
         true
     }
@@ -268,7 +285,7 @@ impl UiAnimation {
             return;
         };
         let (x, y, start) = (g.values.pan_x, g.values.pan_y, g.start);
-        self.last_tick = None;
+        self.next_tick = None;
         if let Some(n) = x {
             self.graph.set(n, start[0] + tx, &mut self.finished);
         }
@@ -306,7 +323,7 @@ impl UiAnimation {
         let Some(g) = self.gestures.get(&id) else {
             return;
         };
-        self.last_tick = None;
+        self.next_tick = None;
         if rotation {
             if let Some(n) = g.values.rotation {
                 let v = g.start[3] + amount;
@@ -487,5 +504,45 @@ mod tests {
         assert!(anim.should_tick(1.0340));
         anim.tick(1.0340, 1.0340);
         assert!(anim.should_tick(1.0423));
+    }
+
+    #[test]
+    fn preserves_average_cadence_for_non_divisible_rates() {
+        for (display_hz, requested_hz, expected_min, expected_max) in [
+            (60u32, 24.0f32, 238u32, 242u32),
+            (144, 60.0, 598, 602),
+            (120, 30.0, 299, 301),
+            (60, 60.0, 599, 601),
+        ] {
+            let mut anim = UiAnimation::default();
+            anim.apply(MountItem::Animation(AnimationOp::CreateValue {
+                node: 1,
+                value: 0.0,
+            }));
+            anim.apply(MountItem::Animation(AnimationOp::Start {
+                node: 1,
+                driver: Driver::Timing {
+                    to: 1.0,
+                    duration_ms: 20_000.0,
+                    easing: Easing::Linear,
+                    delay_ms: 0.0,
+                    frame_rate: Some(requested_hz),
+                },
+                animation: 1,
+            }));
+            let mut ticks = 0u32;
+            let total_vsyncs = display_hz * 10;
+            for i in 0..total_vsyncs {
+                let vsync = 1.0 + f64::from(i) / f64::from(display_hz);
+                if anim.should_tick(vsync) {
+                    anim.tick(vsync, vsync);
+                    ticks += 1;
+                }
+            }
+            assert!(
+                (expected_min..=expected_max).contains(&ticks),
+                "display={display_hz} Hz requested={requested_hz} Hz produced {ticks} ticks in 10s"
+            );
+        }
     }
 }
