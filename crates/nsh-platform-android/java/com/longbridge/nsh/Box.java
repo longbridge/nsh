@@ -696,6 +696,19 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         canvas.restoreToCount(layer);
     }
 
+    private static boolean hasUnboundedDrawable(android.graphics.drawable.Drawable d) {
+        if (d instanceof android.graphics.drawable.RippleDrawable) {
+            return ((android.graphics.drawable.RippleDrawable) d).getNumberOfLayers() == 0;
+        }
+        if (d instanceof android.graphics.drawable.LayerDrawable) {
+            android.graphics.drawable.LayerDrawable layer = (android.graphics.drawable.LayerDrawable) d;
+            for (int i = 0; i < layer.getNumberOfLayers(); i++) {
+                if (hasUnboundedDrawable(layer.getDrawable(i))) return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Whether any visible drawing descendant of {@code group} may intersect
      * {@code [rx0, ry0, rx1, ry1]} in {@code group}'s local coordinates.
@@ -710,7 +723,9 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             if (!child.getMatrix().isIdentity()
                     || Effects.layered(child)
                     || child.getElevation() > 0f
-                    || child.getTranslationZ() > 0f) {
+                    || child.getTranslationZ() > 0f
+                    || hasUnboundedDrawable(child.getForeground())
+                    || hasUnboundedDrawable(child.getBackground())) {
                 return true;
             }
             Decor d = Decor.of(child);
