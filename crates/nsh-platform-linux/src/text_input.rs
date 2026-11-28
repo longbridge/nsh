@@ -1014,8 +1014,20 @@ fn new_editor(multiline: bool) -> Editor {
         scroller.set_child(Some(&view));
         Editor::Area { scroller, view }
     } else {
-        Editor::Line(gtk::Text::new())
+        // GTK gives a bare `GtkText` no role (its entries speak for it),
+        // so assistive technologies would skip it.
+        Editor::Line(
+            gtk::glib::Object::builder::<gtk::Text>()
+                .property("accessible-role", gtk::AccessibleRole::TextBox)
+                .build(),
+        )
     }
+}
+
+/// The widget assistive technologies know as the input's text box.
+pub(crate) fn editor(view: &NshView) -> Option<gtk::Widget> {
+    let input = view.state().input.clone()?;
+    Some(input.editor.borrow().widget())
 }
 
 /// `Input`.
@@ -1034,6 +1046,7 @@ pub(crate) fn config(_surface: &Rc<Surface>, view: &NshView, config: &InputConfi
             attach(cx, &editor, &input);
         }
         *input.editor.borrow_mut() = editor.clone();
+        crate::access::editor_replaced(view, &editor.widget());
         input.replace_text(&text);
         place(view, &input);
         if focused {
