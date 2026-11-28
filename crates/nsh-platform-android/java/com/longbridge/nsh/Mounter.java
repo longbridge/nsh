@@ -1708,6 +1708,7 @@ final class Mounter {
         v.setRotationX(d.rotateX);
         v.setRotationY(back * d.rotateY);
         setPerspective(v, d.perspective);
+        Box.invalidateCulledCorners(v);
         Decor backface = decor(v);
         if (backface != null) backface.applyBackface(v);
         Decor decor = decor(v);
@@ -2107,22 +2108,23 @@ final class Mounter {
     /** Sets animated property `prop` of view `id`. */
     private void animated(View v, int id, int prop, float value) {
         switch (prop) {
-            case 0: v.setAlpha(Math.max(0, Math.min(1, value))); break;
-            case 1: v.setTranslationX((mirror(v) == 2 ? -1 : 1) * value * density); break;
-            case 2: v.setTranslationY(value * density); break;
-            case 3: v.setScaleX(mirror(v) != 0 ? -value : value); v.setScaleY(value); break;
-            case 4: v.setScaleX(mirror(v) != 0 ? -value : value); break;
-            case 5: v.setScaleY(value); break;
-            case 6: v.setRotation((mirror(v) == 2 ? -1 : 1) * value); break;
+            case 0: v.setAlpha(Math.max(0, Math.min(1, value))); Box.invalidateCulledCorners(v); break;
+            case 1: v.setTranslationX((mirror(v) == 2 ? -1 : 1) * value * density); Box.invalidateCulledCorners(v); break;
+            case 2: v.setTranslationY(value * density); Box.invalidateCulledCorners(v); break;
+            case 3: v.setScaleX(mirror(v) != 0 ? -value : value); v.setScaleY(value); Box.invalidateCulledCorners(v); break;
+            case 4: v.setScaleX(mirror(v) != 0 ? -value : value); Box.invalidateCulledCorners(v); break;
+            case 5: v.setScaleY(value); Box.invalidateCulledCorners(v); break;
+            case 6: v.setRotation((mirror(v) == 2 ? -1 : 1) * value); Box.invalidateCulledCorners(v); break;
             case 8:
             case 9: {
                 if (prop == 8) v.setRotationX(value);
                 else v.setRotationY((mirror(v) == 2 ? -1 : 1) * value);
                 Decor decor = decor(v);
                 if (decor != null) decor.applyBackface(v);
+                Box.invalidateCulledCorners(v);
                 break;
             }
-            case 10: setPerspective(v, value); break;
+            case 10: setPerspective(v, value); Box.invalidateCulledCorners(v); break;
             case 7: {
                 Decor decor = decor(v);
                 int color = Float.floatToRawIntBits(value);

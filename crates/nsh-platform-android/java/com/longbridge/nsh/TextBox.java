@@ -582,6 +582,15 @@ final class TextBox extends android.view.ViewGroup implements Node {
         invalidate();
     }
 
+    /** Whether {@link #onDraw}'s text clip rect intersects {@code [rx0, ry0, rx1, ry1]} in local coords. */
+    boolean textIntersects(float rx0, float ry0, float rx1, float ry1) {
+        if (layout == null) return false;
+        float x0 = contentX, y0 = contentY;
+        float x1 = x0 + Math.max(contentWidth, layout.getWidth());
+        float y1 = y0 + contentHeight;
+        return x1 > rx0 && x0 < rx1 && y1 > ry0 && y0 < ry1;
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         if (layout == null) return;

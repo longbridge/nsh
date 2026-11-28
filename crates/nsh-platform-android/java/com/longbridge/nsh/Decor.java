@@ -153,6 +153,30 @@ final class Decor extends Drawable {
         return false;
     }
 
+    /** Whether this decoration draws anything of its own. */
+    boolean hasAnyDecoration() {
+        return Color.alpha(fill) > 0
+                || hasBorder()
+                || gradients.length > 0
+                || backdrop != null
+                || masks.length > 0
+                || boxShadows.length > 0
+                || outlineWidth > 0;
+    }
+
+    /**
+     * Whether this decoration draws at most one non-overlapping primitive (only a
+     * solid fill, or only a uniform border, with no gradients, shadows, outline,
+     * mask, or backdrop): alpha can apply directly without an offscreen layer.
+     */
+    boolean hasSingleDecoration() {
+        if (gradients.length > 0 || backdrop != null || masks.length > 0 || boxShadows.length > 0 || outlineWidth > 0) {
+            return false;
+        }
+        if (Color.alpha(fill) > 0 && hasBorder()) return false;
+        return !hasBorder() || uniformBorder();
+    }
+
     /** One circular radius: the outline is a plain round rect. */
     boolean uniformRadius() {
         return !continuous && radii[0] == radii[1] && radii[1] == radii[2] && radii[2] == radii[3];
