@@ -116,7 +116,7 @@ mod web;
 mod zoom;
 
 pub use nsh_engine::{Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Root};
-pub use picker::prepare_image;
+pub use nsh_platform_apple::picker::prepare_image;
 pub use presenting::{native_view, presenting_controller};
 
 /// The UI sets apps import ([`set_ui_sets`]; by default [`default_ui_sets`]).

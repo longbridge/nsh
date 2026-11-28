@@ -20,20 +20,16 @@ use std::{
 
 use block2::RcBlock;
 use nsh_core::{
-    EventKind, EventPayload, ImageData, file_dialog,
-    geometry::{DevicePixels, Size},
-    picker::{Encoding, FilePickRequest, PickFormat, PickRequest, PickedFile},
+    EventKind, EventPayload, file_dialog,
+    picker::{FilePickRequest, PickFormat, PickRequest, PickedFile},
 };
 use nsh_engine::EngineControl;
+use nsh_platform_apple::picker::prepare_image;
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject},
 };
-use objc2_core_foundation::{
-    CFData, CFDictionary, CFMutableData, CFNumber, CFString, CFType, CGFloat, kCFBooleanTrue,
-};
-use objc2_core_graphics::CGImage;
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol, NSString, NSURL};
 use objc2_ui_kit::{UIView, UIViewController};
 
@@ -456,83 +452,4 @@ fn read_results(
             msg_send![&provider, loadFileRepresentationForTypeIdentifier: &*image, completionHandler: &*handler]
         };
     }
-}
-
-/// `bytes`, an image file named `name`, prepared as `request` says: kept,
-/// or decoded with its orientation applied, scaled down and encoded again,
-/// as `Picker.pickImages` prepares the photos picked (modules preparing
-/// images of their own, a photo taken, call it too). `None` when it is no
-/// image ImageIO reads. Runs on any thread.
-pub fn prepare_image(bytes: Vec<u8>, name: &str, request: &PickRequest) -> Option<PickedFile> {
-    use objc2_image_io::{
-        CGImageDestination, CGImageSource, kCGImageDestinationLossyCompressionQuality,
-        kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
-        kCGImageSourceThumbnailMaxPixelSize,
-    };
-    let data = CFData::from_bytes(&bytes);
-    // SAFETY: ImageIO's documented API, with option dictionaries of the
-    // documented key and value types.
-    unsafe {
-        let source = CGImageSource::with_data(&data, None)?;
-        let uti = source.r#type().map(|t| t.to_string()).unwrap_or_default();
-        let mime = mime_for_uti(&uti)
-            .or_else(|| nsh_core::picker::sniff(&bytes))
-            .unwrap_or("application/octet-stream");
-        let size = crate::image::source_size(&source);
-        let size = Size::new(DevicePixels(size.0 as i32), DevicePixels(size.1 as i32));
-        let encoding = request.needs_encoding(mime, size);
-        if encoding == Encoding::Keep {
-            let mut file = PickedFile::new(name, mime, ImageData::new(bytes));
-            file.size = size;
-            return Some(file);
-        }
-        let target = request.scaled_size(size);
-        let longer = target.width.0.max(target.height.0).max(1);
-        let yes: &CFType = kCFBooleanTrue?;
-        let max = CFNumber::new_cgfloat(longer as CGFloat);
-        let keys: [&CFString; 3] = [
-            kCGImageSourceCreateThumbnailFromImageAlways,
-            kCGImageSourceCreateThumbnailWithTransform,
-            kCGImageSourceThumbnailMaxPixelSize,
-        ];
-        let values: [&CFType; 3] = [yes, yes, &max];
-        let options = CFDictionary::from_slices(&keys, &values);
-        let image = source.thumbnail_at_index(0, Some(options.as_opaque()))?;
-        let (uti, mime) = match encoding {
-            Encoding::Png => ("public.png", "image/png"),
-            _ => ("public.jpeg", "image/jpeg"),
-        };
-        let out = CFMutableData::new(None, 0)?;
-        let destination = CGImageDestination::with_data(&out, &CFString::from_str(uti), 1, None)?;
-        let quality = CFNumber::new_cgfloat(request.jpeg_quality().0 as CGFloat);
-        let keys: [&CFString; 1] = [kCGImageDestinationLossyCompressionQuality];
-        let values: [&CFType; 1] = [&quality];
-        let properties = CFDictionary::from_slices(&keys, &values);
-        destination.add_image(&image, Some(properties.as_opaque()));
-        if !destination.finalize() {
-            return None;
-        }
-        let mut file = PickedFile::new(name, mime, ImageData::new(out.to_vec()));
-        file.size = Size::new(
-            DevicePixels(CGImage::width(Some(&image)) as i32),
-            DevicePixels(CGImage::height(Some(&image)) as i32),
-        );
-        Some(file)
-    }
-}
-
-/// The media type of an image's uniform type identifier.
-fn mime_for_uti(uti: &str) -> Option<&'static str> {
-    Some(match uti {
-        "public.jpeg" => "image/jpeg",
-        "public.png" => "image/png",
-        "com.compuserve.gif" => "image/gif",
-        "org.webmproject.webp" => "image/webp",
-        "public.heic" => "image/heic",
-        "public.heif" | "public.heics" => "image/heif",
-        "public.avif" => "image/avif",
-        "public.tiff" => "image/tiff",
-        "com.microsoft.bmp" => "image/bmp",
-        _ => return None,
-    })
 }
