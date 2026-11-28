@@ -40,7 +40,14 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     @Override
     public boolean hasOverlappingRendering() {
         if (decor.hasOuterShadows()) return false;
-        if (getChildCount() == 0 && !hasShader() && decor.hasSingleDecoration()) return false;
+        if (getClass() == Box.class
+                && getChildCount() == 0
+                && !hasShader()
+                && getForeground() == null
+                && (getBackground() == null || getBackground() == decor)
+                && decor.hasSingleDecoration()) {
+            return false;
+        }
         return true;
     }
 
@@ -614,57 +621,65 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     private void drawInCorners(Canvas canvas) {
         float left = edges[0], top = edges[1], right = edges[2], bottom = edges[3];
         float l = edges[4], t = edges[5], r = edges[6], b = edges[7];
-        boolean split = l < r && t < b;
-        float[][] squares = {{left, top, l, t}, {r, top, right, t}, {r, b, right, bottom}, {left, b, l, bottom}};
-        int corners = 0;
-        if (split) {
-            for (int q = 0; q < 4; q++) {
-                float[] s = squares[q];
-                if (s[2] > s[0] && s[3] > s[1] && hasDrawingInRect(this, s[0], s[1], s[2], s[3])) {
-                    corners |= 1 << q;
-                }
-            }
-            if (corners == 0) {
-                canvas.save();
-                canvas.clipRect(left, top, right, bottom);
-                super.dispatchDraw(canvas);
-                canvas.restore();
-                return;
-            }
-        }
-        if (!split || layeredChild()) {
+        if (l >= r || t >= b) {
             if (!hasDrawingInRect(this, left, top, right, bottom)) return;
-            int layer = canvas.saveLayer(left, top, right, bottom, null);
-            canvas.clipRect(left, top, right, bottom);
-            super.dispatchDraw(canvas);
-            for (Path p : outside) canvas.drawPath(p, eraser);
-            canvas.restoreToCount(layer);
+            drawFullCornerLayer(canvas, left, top, right, bottom);
             return;
         }
-        float[][] bands = {{left, t, right, b}, {l, top, r, t}, {l, b, r, bottom}};
-        for (float[] band : bands) {
-            if (band[2] <= band[0] || band[3] <= band[1]) continue;
+        int corners = 0;
+        if (l > left && t > top && hasDrawingInRect(this, left, top, l, t)) corners |= 1;
+        if (right > r && t > top && hasDrawingInRect(this, r, top, right, t)) corners |= 2;
+        if (right > r && bottom > b && hasDrawingInRect(this, r, b, right, bottom)) corners |= 4;
+        if (l > left && bottom > b && hasDrawingInRect(this, left, b, l, bottom)) corners |= 8;
+        if (corners == 0) {
             canvas.save();
-            canvas.clipRect(band[0], band[1], band[2], band[3]);
+            canvas.clipRect(left, top, right, bottom);
             super.dispatchDraw(canvas);
             canvas.restore();
+            return;
         }
-        for (int q = 0; q < 4; q++) {
-            if ((corners & (1 << q)) == 0) continue;
-            float[] s = squares[q];
-            int layer = canvas.saveLayer(s[0], s[1], s[2], s[3], null);
-            canvas.clipRect(s[0], s[1], s[2], s[3]);
-            super.dispatchDraw(canvas);
-            canvas.drawPath(outside[q], eraser);
-            canvas.restoreToCount(layer);
+        if (layeredChild()) {
+            drawFullCornerLayer(canvas, left, top, right, bottom);
+            return;
         }
+        drawCornerBand(canvas, left, t, right, b);
+        drawCornerBand(canvas, l, top, r, t);
+        drawCornerBand(canvas, l, b, r, bottom);
+        if ((corners & 1) != 0) drawCornerSquare(canvas, 0, left, top, l, t);
+        if ((corners & 2) != 0) drawCornerSquare(canvas, 1, r, top, right, t);
+        if ((corners & 4) != 0) drawCornerSquare(canvas, 2, r, b, right, bottom);
+        if ((corners & 8) != 0) drawCornerSquare(canvas, 3, left, b, l, bottom);
+    }
+
+    private void drawFullCornerLayer(Canvas canvas, float left, float top, float right, float bottom) {
+        int layer = canvas.saveLayer(left, top, right, bottom, null);
+        canvas.clipRect(left, top, right, bottom);
+        super.dispatchDraw(canvas);
+        for (Path p : outside) canvas.drawPath(p, eraser);
+        canvas.restoreToCount(layer);
+    }
+
+    private void drawCornerBand(Canvas canvas, float x0, float y0, float x1, float y1) {
+        if (x1 <= x0 || y1 <= y0) return;
+        canvas.save();
+        canvas.clipRect(x0, y0, x1, y1);
+        super.dispatchDraw(canvas);
+        canvas.restore();
+    }
+
+    private void drawCornerSquare(Canvas canvas, int q, float x0, float y0, float x1, float y1) {
+        int layer = canvas.saveLayer(x0, y0, x1, y1, null);
+        canvas.clipRect(x0, y0, x1, y1);
+        super.dispatchDraw(canvas);
+        canvas.drawPath(outside[q], eraser);
+        canvas.restoreToCount(layer);
     }
 
     /**
      * Whether any visible drawing descendant of {@code group} may intersect
      * {@code [rx0, ry0, rx1, ry1]} in {@code group}'s local coordinates.
-     * Transformed, filtered, shadowed, outlined, or overflowing children are
-     * treated conservatively as intersecting.
+     * Transformed, filtered, shadowed, outlined, or unclipped descendants are
+     * treated conservatively.
      */
     private static boolean hasDrawingInRect(ViewGroup group, float rx0, float ry0, float rx1, float ry1) {
         int sx = group.getScrollX(), sy = group.getScrollY();
@@ -676,25 +691,40 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             if (d != null && (d.hasOuterShadows() || d.outlineWidth > 0)) return true;
             float cl = child.getLeft() - sx, ct = child.getTop() - sy;
             float cr = child.getRight() - sx, cb = child.getBottom() - sy;
-            if (child instanceof Box) {
+            boolean intersects = cr > rx0 && cl < rx1 && cb > ry0 && ct < ry1;
+            if (child.getClass() == Box.class) {
                 Box box = (Box) child;
                 if (box.hasShader() && box.shaderOverflow > 0) return true;
-                if (box.overflow != null
-                        && cl + box.overflow.right > rx0 && cl + box.overflow.left < rx1
-                        && ct + box.overflow.bottom > ry0 && ct + box.overflow.top < ry1) {
+                if (intersects) {
+                    if (box.hasShader()
+                            || box.decor.hasAnyDecoration()
+                            || box.getForeground() != null
+                            || (box.getBackground() != null && box.getBackground() != box.decor)) {
+                        return true;
+                    }
+                    if (hasDrawingInRect(box, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) return true;
+                } else if (!box.clip && hasDrawingInRect(box, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) {
                     return true;
                 }
-                if (cr <= rx0 || cl >= rx1 || cb <= ry0 || ct >= ry1) continue;
-                if (box.hasShader() || box.decor.hasAnyDecoration()) return true;
-                if (hasDrawingInRect(box, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) return true;
-            } else {
-                if (cr <= rx0 || cl >= rx1 || cb <= ry0 || ct >= ry1) continue;
-                if (child instanceof ViewGroup) {
-                    if (!child.willNotDraw() && child.getBackground() != null) return true;
-                    if (hasDrawingInRect((ViewGroup) child, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) return true;
-                } else {
+            } else if (child instanceof ViewGroup) {
+                ViewGroup childGroup = (ViewGroup) child;
+                if (intersects) {
+                    if (child.getClass() != Box.class && child instanceof Box) return true;
+                    if (child.getForeground() != null) return true;
+                    if (d != null) {
+                        if (d.hasAnyDecoration() || (child.getBackground() != null && child.getBackground() != d)) {
+                            return true;
+                        }
+                    } else if (child.getBackground() != null) {
+                        return true;
+                    }
+                    if (hasDrawingInRect(childGroup, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) return true;
+                } else if (!childGroup.getClipChildren()
+                        && hasDrawingInRect(childGroup, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) {
                     return true;
                 }
+            } else if (intersects) {
+                return true;
             }
         }
         return false;

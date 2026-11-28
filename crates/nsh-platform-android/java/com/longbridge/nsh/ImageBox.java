@@ -43,7 +43,10 @@ final class ImageBox extends View implements Node {
     @Override
     public boolean hasOverlappingRendering() {
         if (decor.hasOuterShadows()) return false;
-        return previous != null || decor.hasAnyDecoration();
+        return previous != null
+                || decor.hasAnyDecoration()
+                || getForeground() != null
+                || (getBackground() != null && getBackground() != decor);
     }
 
     final int id;
