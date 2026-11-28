@@ -1221,7 +1221,7 @@ impl ListState {
     fn rebuild_offsets(&mut self) {
         let gap = self.main_gap() as f64;
         let rows = (0..self.row_count()).map(|r| self.row_size(r) as f64 + gap);
-        self.rows = Fenwick::from_sizes(rows.collect::<Vec<_>>().into_iter());
+        self.rows = Fenwick::from_sizes(rows);
         self.dirty = true;
     }
 
@@ -4023,6 +4023,70 @@ mod perf {
     use std::time::Instant;
 
     use super::*;
+
+    /// `cargo test -p nsh-core --release bench_list_rebuild_offsets -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_list_rebuild_offsets() {
+        use std::{hint::black_box, time::Duration};
+
+        use crate::geometry::px;
+
+        for rows in [0u32, 1, 8, 1024, 65_536] {
+            for columns in [1, 3] {
+                let mut l = ListState::new();
+                l.estimated = 25.5;
+                l.columns = columns;
+                // Multi-column cases end with a partial row.
+                l.count = rows * columns - u32::from(rows > 0 && columns > 1);
+                l.sizes = (0..l.count)
+                    .map(|i| {
+                        if i % 11 == 0 {
+                            f32::NAN
+                        } else {
+                            (i % 113) as f32 * 0.25
+                        }
+                    })
+                    .collect();
+                l.content.row_gap = px(2.25);
+                l.content.column_gap = px(3.5);
+                l.horizontal = columns > 1;
+                let gap = if l.horizontal { 3.5 } else { 2.25 };
+                let mut expected = vec![0.0];
+                for items in l.sizes.chunks(columns as usize) {
+                    let mut height = 0.0f32;
+                    for &size in items {
+                        height = height.max(if size.is_nan() { 25.5 } else { size });
+                    }
+                    expected.push(expected.last().unwrap() + height as f64 + gap);
+                }
+                for _ in 0..32 {
+                    black_box(&mut l).rebuild_offsets();
+                }
+                let iterations = (1_000_000 / rows.max(1)).clamp(32, 100_000);
+                let mut samples = [Duration::ZERO; 7];
+                for sample in &mut samples {
+                    let start = Instant::now();
+                    for _ in 0..iterations {
+                        black_box(&mut l).rebuild_offsets();
+                        black_box(&l.rows);
+                    }
+                    *sample = start.elapsed() / iterations;
+                }
+                assert_eq!(l.rows.len(), rows as usize);
+                for (row, expected) in expected.iter().enumerate() {
+                    assert_eq!(l.rows.prefix(row), *expected, "row {row}");
+                }
+                assert!(l.dirty);
+                samples.sort_unstable();
+                eprintln!(
+                    "list offsets {rows} rows {columns} columns: min / median {} / {} ns per rebuild",
+                    samples[0].as_nanos(),
+                    samples[3].as_nanos(),
+                );
+            }
+        }
+    }
 
     /// `cargo test -p nsh-core --release perf -- --ignored --nocapture`
     #[test]
