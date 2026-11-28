@@ -1065,18 +1065,21 @@ fn data(hwnd: HWND) -> Option<&'static WindowData> {
         UI::WindowsAndMessaging::{GCLP_WNDPROC, GetClassLongPtrW, GetWindowThreadProcessId},
     };
     let mut process = 0;
-    // SAFETY: plain queries; an out value for the process id.
+    // SAFETY: plain queries; WindowData uses non-Sync thread-confined cells so it
+    // must only be dereferenced on the owning UI thread.
     let ours = unsafe {
-        GetWindowThreadProcessId(hwnd, Some(&mut process)) != 0
+        let thread = GetWindowThreadProcessId(hwnd, Some(&mut process));
+        thread != 0
+            && thread == GetCurrentThreadId()
             && process == GetCurrentProcessId()
             && GetClassLongPtrW(hwnd, GCLP_WNDPROC) == window_proc as *const () as usize
     };
     if !ours {
         return None;
     }
-    // SAFETY: a window of `CLASS` in this process: the pointer was stored by
-    // `WM_NCCREATE` and is freed only in `WM_NCDESTROY`, after which the
-    // slot is cleared.
+    // SAFETY: a window of `CLASS` on this UI thread in this process: the pointer
+    // was stored by `WM_NCCREATE` and is freed only in `WM_NCDESTROY`, after
+    // which the slot is cleared.
     unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WindowData).as_ref() }
 }
 

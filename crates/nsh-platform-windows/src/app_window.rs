@@ -226,6 +226,89 @@ pub(crate) fn activation_target(surface: &Surface, host: HWND) -> Option<HWND> {
     select_activation_target(candidates, foreground)
 }
 
+fn fullscreen_eligible(hwnd: HWND) -> bool {
+    // SAFETY: plain enabled-state query; disabled modal owners must never toggle fullscreen.
+    if !unsafe { IsWindowEnabled(hwnd).as_bool() } {
+        return false;
+    }
+    if crate::window::is_full_screen(hwnd) {
+        return true;
+    }
+    if !crate::window_state::top_level(hwnd) {
+        return false;
+    }
+    crate::window::shell(hwnd).is_none_or(|shell| {
+        let attrs = shell.attrs();
+        attrs.focusable && attrs.maximizable && attrs.resizable
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FullscreenCandidate {
+    pub(crate) hwnd: HWND,
+    pub(crate) visible: bool,
+    pub(crate) minimized: bool,
+    pub(crate) eligible: bool,
+    pub(crate) priority: u8,
+}
+
+pub(crate) fn select_fullscreen_target(
+    windows: impl IntoIterator<Item = FullscreenCandidate>,
+    host: Option<HWND>,
+) -> Option<HWND> {
+    windows
+        .into_iter()
+        .filter(|w| w.visible && !w.minimized && w.eligible)
+        .min_by_key(|w| w.priority)
+        .map(|w| w.hwnd)
+        .or(host)
+}
+
+/// The window F11 toggles full screen on: input HWND > foreground > cached focus >
+/// oldest visible eligible unminimized app window, or an eligible visible
+/// top-level embedding `host`.
+pub(crate) fn fullscreen_target(surface: &Surface, host: HWND) -> Option<HWND> {
+    let input_id = surface.input_root().id();
+    let input_hwnd = (input_id != ROOT_ID)
+        .then(|| hwnd_of(surface, input_id))
+        .flatten();
+    let foreground = crate::window::foreground();
+    let focused = focused_hwnd(surface);
+    let windows = surface.windows.borrow();
+    let candidates = windows.iter().map(|w| {
+        // SAFETY: plain queries; a missing window is not visible.
+        let (visible, minimized) = unsafe {
+            (
+                IsWindowVisible(w.hwnd).as_bool(),
+                IsIconic(w.hwnd).as_bool(),
+            )
+        };
+        let priority = if input_hwnd == Some(w.hwnd) {
+            0
+        } else if !foreground.is_invalid() && w.hwnd == foreground {
+            1
+        } else if focused == Some(w.hwnd) {
+            2
+        } else {
+            3
+        };
+        FullscreenCandidate {
+            hwnd: w.hwnd,
+            visible,
+            minimized,
+            eligible: fullscreen_eligible(w.hwnd),
+            priority,
+        }
+    });
+    // SAFETY: plain queries; a missing host is not visible.
+    let visible_host = (!host.is_invalid()
+        && crate::window_state::top_level(host)
+        && unsafe { IsWindowVisible(host).as_bool() && !IsIconic(host).as_bool() }
+        && fullscreen_eligible(host))
+    .then_some(host);
+    select_fullscreen_target(candidates, visible_host)
+}
+
 /// The root view of the window showing dialog root `id`: what its
 /// overlays and the dialogs presented in it are inserted into.
 pub(crate) fn root_view(surface: &Surface, id: NodeId) -> Option<NshView> {
@@ -1133,6 +1216,36 @@ fn destroy(surface: &Surface, window: &AppWindow) {
 }
 
 #[cfg(test)]
+impl AppWindow {
+    pub(crate) fn for_test(id: NodeId, hwnd: HWND, view: NshView) -> Self {
+        AppWindow {
+            id,
+            hwnd,
+            view,
+            owner: None,
+            modal: false,
+            composition: None,
+            web: RefCell::default(),
+            placed: RefCell::default(),
+            composed: RefCell::default(),
+            swap: RefCell::new(None),
+            target_scale: Cell::new(0.0),
+            pixels: Cell::new((0, 0)),
+            scale: Cell::new(1.0),
+            prepared_size: Cell::new(None),
+            invalid: Cell::new(false),
+            damage: Default::default(),
+            positioned: Cell::new(true),
+            reported: Cell::new(None),
+            opened: Cell::new(false),
+            closed: Cell::new(false),
+            hidden: Cell::new(false),
+            state: Cell::new(None),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use nsh_core::{
         ViewKind,
@@ -1612,5 +1725,113 @@ mod tests {
             let _ = DestroyWindow(hwnd);
         }
         let _ = std::fs::remove_file(path);
+    }
+
+    fn open_test_window(surface: &Rc<Surface>, id: NodeId, parent: Option<NodeId>) -> HWND {
+        use nsh_core::{
+            Command, MountItem,
+            desktop::{WindowKind, WindowOptions},
+        };
+        let mut opts = OpenWindow::default();
+        opts.options = WindowOptions::new(format!("window-{id}"));
+        opts.options.kind = if parent.is_some() {
+            WindowKind::Dialog
+        } else {
+            WindowKind::Normal
+        };
+        opts.options.attributes = WindowAttributes::for_kind(opts.options.kind);
+        opts.options.modal = parent.is_some();
+        opts.parent = parent;
+        let mut m = surface.mounter.borrow_mut();
+        for item in [
+            MountItem::Create {
+                id,
+                kind: ViewKind::Modal,
+            },
+            MountItem::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+            MountItem::Command {
+                id,
+                command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(opts)))),
+            },
+        ] {
+            m.apply(surface, &item);
+        }
+        m.end_batch(surface);
+        hwnd_of(surface, id).unwrap()
+    }
+
+    fn show_test_window(hwnd: HWND) {
+        // SAFETY: shows the test window on its UI thread without stealing focus.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            assert!(
+                IsWindowVisible(hwnd).as_bool(),
+                "test window must be visible in an interactive desktop session"
+            );
+        }
+    }
+
+    #[test]
+    fn fullscreen_target_prefers_input_window_over_earlier_foreground() {
+        std::thread::spawn(|| {
+            crate::window::run_in_background();
+            let app = crate::app::AppView::new(None, Default::default()).unwrap();
+            let surface = app.surface();
+            let a = open_test_window(surface, 7, None);
+            let b = open_test_window(surface, 8, None);
+            show_test_window(a);
+            show_test_window(b);
+            crate::window::set_foreground(a);
+            let mut cached = crate::window_state::state(a).expect("test window state");
+            cached.focused = true;
+            get(surface, 7).unwrap().state.set(Some(cached));
+            let selected = {
+                let _input = enter(surface, 8);
+                fullscreen_target(surface, app.hwnd())
+            };
+            close_all(surface);
+            // SAFETY: test app host window.
+            let _ = unsafe { DestroyWindow(app.hwnd()) };
+            assert_eq!(
+                selected,
+                Some(b),
+                "delivered F11 to second HWND; selected first = {}",
+                selected == Some(a)
+            );
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn fullscreen_target_skips_modally_disabled_parent() {
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let parent = open_test_window(surface, 7, None);
+        show_test_window(parent);
+        let modal = open_test_window(surface, 9, Some(7));
+        show_test_window(modal);
+        // SAFETY: plain enabled-state query on the test window.
+        assert!(!unsafe { IsWindowEnabled(parent) }.as_bool());
+        assert!(
+            !fullscreen_eligible(modal),
+            "stock dialog has no maximize capability"
+        );
+        let selected = {
+            let _input = enter(surface, 9).unwrap();
+            fullscreen_target(surface, app.hwnd())
+        };
+        close_all(surface);
+        // SAFETY: test app host window.
+        let _ = unsafe { DestroyWindow(app.hwnd()) };
+        assert_ne!(
+            selected,
+            Some(parent),
+            "F11 in the active dialog targeted its disabled parent"
+        );
     }
 }
