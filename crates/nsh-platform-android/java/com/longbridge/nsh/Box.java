@@ -709,7 +709,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             } else if (child instanceof ViewGroup) {
                 ViewGroup childGroup = (ViewGroup) child;
                 if (intersects) {
-                    if (child.getClass() != Box.class && child instanceof Box) return true;
+                    if (!child.willNotDraw() || (child instanceof Box)) return true;
                     if (child.getForeground() != null) return true;
                     if (d != null) {
                         if (d.hasAnyDecoration() || (child.getBackground() != null && child.getBackground() != d)) {
