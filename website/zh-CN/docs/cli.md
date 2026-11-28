@@ -329,6 +329,7 @@ nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--
 根据各平台 `nsh package` 产出的压缩包写出 `latest.json`（加 `--key` 时还有 `latest.json.sig`）；加 `--package` 时还写入应用代码的签名包（`nsh publish` 产出），写入前会按应用 id 和 `updater.packages.roots` 校验它，详见 [OTA 更新](/zh-CN/docs/ota-updates)。一个版本可以只有包。
 `--notes <TAG>=<FILE>` 加入另一种语言（BCP 47 标签）的更新说明，写在清单旁边的 `notes.<TAG>.md`；需要同时给不带标签的 `--notes`。
 `--previous <ARCHIVE>` 传入上一版本某平台的压缩包，在清单旁写出从它到新版本的补丁（`<压缩包>.from-<版本>.patch`）；运行那个版本的应用会下载补丁，而不是整个压缩包。
+`--base-url <URL>` 让压缩包、补丁和多语言说明的地址写成它下面的绝对地址，而不是清单旁的相对地址；在 GitHub 上传这个 Release 自己的 `https://github.com/<owner>/<repo>/releases/download/<tag>`，这样发布新版本后地址不会跟着移动（见[应用更新](/zh-CN/docs/app-updates#publish-a-release)）。
 
 ### nsh certify
 

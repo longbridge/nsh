@@ -382,6 +382,19 @@ fn notes(args: &[String]) -> anyhow::Result<Notes> {
     Ok((default, tagged))
 }
 
+/// Why a GitHub manifest without `--base-url` can break: its relative URLs
+/// resolve next to `releases/latest/download/`, which follows the newest
+/// release, so an update checked just before the next release is published
+/// is then looked for in that release. `None`: nothing drifts.
+fn drifting_urls(github: Option<&str>, base_url: Option<&str>) -> Option<String> {
+    let repo = github.filter(|_| base_url.is_none())?;
+    Some(format!(
+        "the archives' URLs are relative to releases/latest/download/, which moves to each new release: \
+         an update checked before the next release is published then fails to download. Pass \
+         --base-url https://github.com/{repo}/releases/download/<tag> with this release's tag"
+    ))
+}
+
 /// `nsh update-manifest`.
 pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
     let entry = crate::entry::resolve(&dunce::canonicalize(options.entry)?).with_context(|| {
@@ -394,6 +407,9 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
         bail!("nsh.json has no \"updater\"");
     };
     let version = version(&config);
+    if let Some(warning) = drifting_urls(runtime.github.as_deref(), options.base_url) {
+        ui::warn(warning);
+    }
     let mut platforms = std::collections::BTreeMap::new();
     for archive in options.archives {
         let file = archive
@@ -768,6 +784,16 @@ mod tests {
         fs::write(&path, bytes).unwrap();
         assert!(package_asset(&path, &runtime, None).is_err());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_github_manifest_without_a_base_url_warns() {
+        let warning = drifting_urls(Some("owner/repo"), None).unwrap();
+        assert!(
+            warning.contains("--base-url https://github.com/owner/repo/releases/download/<tag>")
+        );
+        assert!(drifting_urls(Some("owner/repo"), Some("https://x.dev/r")).is_none());
+        assert!(drifting_urls(None, None).is_none());
     }
 
     #[test]

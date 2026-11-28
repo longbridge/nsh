@@ -338,6 +338,9 @@ with `--package`, a signed package of the app's code (`nsh publish`'s), which it
 `notes.<TAG>.md`; it needs an untagged `--notes` too.
 `--previous <ARCHIVE>` takes the previous release's archive of a platform and writes a patch from it beside the
 manifest (`<archive>.from-<version>.patch`): apps running that version download it instead of the whole archive.
+`--base-url <URL>` writes the archives', patches' and notes' URLs under it instead of next to the manifest; on GitHub
+pass the release's own `https://github.com/<owner>/<repo>/releases/download/<tag>`, so that publishing a newer release
+does not move them (see [App Updates](/docs/app-updates#publish-a-release)).
 
 ### nsh certify
 
