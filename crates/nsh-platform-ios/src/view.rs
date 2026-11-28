@@ -334,7 +334,13 @@ impl Inner {
         let options = state.options.clone();
         let surface = match Surface::new(mtm, app, this.container.bounds(), options) {
             Ok(surface) => surface,
-            Err(err) => return log::error!("failed to start the engine: {err}"),
+            Err(err) => {
+                // The handler may configure or reload this same view.
+                drop(state);
+                let message = format!("failed to start the engine: {err}");
+                log::error!("{message}");
+                return Rc::clone(this).report_error(&message);
+            }
         };
         surface.view().setAutoresizingMask(
             UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
