@@ -351,7 +351,10 @@ pub(crate) fn command(
 /// Shows dialog root `view` in a new window.
 fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     let id = view.id();
-    if is_window(surface, id) {
+    // Do not create an HWND if the dialog root was already detached earlier
+    // in the batch (for example when `<Window open={...}>` opens and closes in
+    // the same commit).
+    if is_window(surface, id) || view.parent_view().is_none() {
         return;
     }
     let options = &open.options;
@@ -1612,5 +1615,141 @@ mod tests {
             let _ = DestroyWindow(hwnd);
         }
         let _ = std::fs::remove_file(path);
+    }
+
+    fn open_test_window(surface: &Rc<Surface>, id: NodeId, parent: Option<NodeId>) -> HWND {
+        use nsh_core::{
+            Command, MountItem,
+            desktop::{WindowKind, WindowOptions},
+        };
+        let mut opts = OpenWindow::default();
+        opts.options = WindowOptions::new(format!("window-{id}"));
+        opts.options.kind = if parent.is_some() {
+            WindowKind::Dialog
+        } else {
+            WindowKind::Normal
+        };
+        opts.options.attributes = WindowAttributes::for_kind(opts.options.kind);
+        opts.options.modal = parent.is_some();
+        opts.parent = parent;
+        let mut m = surface.mounter.borrow_mut();
+        for item in [
+            MountItem::Create {
+                id,
+                kind: ViewKind::Modal,
+            },
+            MountItem::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+            MountItem::Command {
+                id,
+                command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(opts)))),
+            },
+        ] {
+            m.apply(surface, &item);
+        }
+        m.end_batch(surface);
+        hwnd_of(surface, id).unwrap()
+    }
+
+    #[test]
+    fn removed_window_root_does_not_open_an_orphan_window() {
+        use nsh_core::{
+            Command, MountItem, ViewKind,
+            desktop::{DesktopCommand, OpenWindow, WindowAttributes, WindowKind, WindowOptions},
+        };
+
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let _main_hwnd = open_test_window(surface, 2, None);
+        let _editor_hwnd = open_test_window(surface, 3, None);
+
+        let make_open = || {
+            let mut open_cmd = OpenWindow::default();
+            open_cmd.options = WindowOptions::new("viewer");
+            open_cmd.options.attributes = WindowAttributes::for_kind(WindowKind::Normal);
+            open_cmd
+        };
+
+        // 1. Same-batch transient open + remove while unrelated windows remain live.
+        {
+            let mut mounter = surface.mounter.borrow_mut();
+            for item in [
+                MountItem::Create {
+                    id: 7,
+                    kind: ViewKind::Modal,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 7,
+                    before: None,
+                },
+                MountItem::Remove { id: 7 },
+                MountItem::Command {
+                    id: 7,
+                    command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(
+                        make_open(),
+                    )))),
+                },
+            ] {
+                mounter.apply(surface, &item);
+            }
+            mounter.end_batch(surface);
+        }
+        let after_transient = ids(surface);
+
+        // 2. Normal open followed by Remove in the next batch destroys the HWND
+        // cleanly while leaving the unrelated live windows intact.
+        {
+            let mut mounter = surface.mounter.borrow_mut();
+            for item in [
+                MountItem::Create {
+                    id: 8,
+                    kind: ViewKind::Modal,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 8,
+                    before: None,
+                },
+                MountItem::Command {
+                    id: 8,
+                    command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(
+                        make_open(),
+                    )))),
+                },
+            ] {
+                mounter.apply(surface, &item);
+            }
+            mounter.end_batch(surface);
+        }
+        let opened_hwnd = hwnd_of(surface, 8);
+        if let Some(hwnd) = opened_hwnd {
+            let mut mounter = surface.mounter.borrow_mut();
+            mounter.apply(surface, &MountItem::Remove { id: 8 });
+            mounter.end_batch(surface);
+            // SAFETY: query of the test window just destroyed.
+            let still_live = unsafe { IsWindow(Some(hwnd)).as_bool() };
+            assert!(!still_live, "Remove must destroy the opened HWND");
+        } else {
+            panic!("expected id 8 to open a window before Remove");
+        }
+        let after_close = ids(surface);
+
+        close_all(surface);
+        // SAFETY: the test app host window.
+        let _ = unsafe { DestroyWindow(app.hwnd()) };
+        assert_eq!(
+            after_transient,
+            vec![2, 3],
+            "removed dialog root must not open an orphan AppWindow"
+        );
+        assert_eq!(
+            after_close,
+            vec![2, 3],
+            "closing viewer must preserve the two unrelated live windows"
+        );
     }
 }
