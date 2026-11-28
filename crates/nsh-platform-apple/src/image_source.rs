@@ -91,11 +91,7 @@ pub fn still(source: &CGImageSource, longest: u32) -> usize {
 /// for a size (an animation's first frame, an icon's largest image, any
 /// other file's primary image).
 pub fn source_size(source: &CGImageSource) -> (u32, u32) {
-    let index = match is_animation(source) {
-        true => 0,
-        false => still(source, 0),
-    };
-    image_size(source, index)
+    image_size(source, shown(source, 0, 1).start)
 }
 
 /// The pixel size of image `index` of `source`, as displayed (EXIF

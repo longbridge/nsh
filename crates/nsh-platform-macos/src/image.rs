@@ -58,8 +58,7 @@ use nsh_core::{
         loader::{Context, Get, Priority, Ticket, Transport, loader},
     },
 };
-use nsh_platform_apple::image_source;
-pub(crate) use nsh_platform_apple::image_source::source_size;
+use nsh_platform_apple::image_source::{self, source_size};
 use objc2::{
     AnyThread, DefinedClass, define_class, msg_send,
     rc::{Retained, Weak},

@@ -20,8 +20,7 @@ use nsh_core::{
     geometry::{Points, Size},
     image::{CacheHeaders, DiskCache, Fetched, Lookup},
 };
-use nsh_platform_apple::image_source;
-pub(crate) use nsh_platform_apple::image_source::source_size;
+use nsh_platform_apple::image_source::{self, source_size};
 use objc2::{
     AnyThread, DefinedClass, Message, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
 };

@@ -22,6 +22,7 @@ pub mod image_source;
 #[doc(hidden)]
 pub mod network;
 pub mod notifications;
+pub mod picker;
 // Whether a view shows through the ancestors that clip it, for the backends'
 // view trees, no API of apps': hidden from the docs, so it stays out of what
 // NSH keeps compatible.
