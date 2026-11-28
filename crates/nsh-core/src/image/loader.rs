@@ -921,10 +921,10 @@ pub fn read_now(location: &Location, context: &Context) -> Result<ImageData, Str
     read(location, context, &AtomicBool::new(false), &mut |_, _| {})
 }
 
-/// Reads the file at `path`: for an app with `fs.read` roots, through the
+/// Reads up to [`MAX_BYTES`] from the file at `path`: for an app with `fs.read` roots, through the
 /// root that holds it, so a link made after the check is not followed out
 /// of it ([`crate::access::MediaFiles::open`]).
-fn read_file(
+pub fn read_file(
     path: &std::path::Path,
     files: &crate::access::MediaFiles,
 ) -> Result<ImageData, String> {
@@ -934,6 +934,11 @@ fn read_file(
         None => std::fs::File::open(path),
     }
     .map_err(|e| e.to_string())?;
+    // Avoid allocating up to the limit for a known oversized file. The
+    // bounded read still covers growing files and streams of unknown size.
+    if file.metadata().is_ok_and(|info| info.len() > MAX_BYTES) {
+        return Err(format!("larger than {MAX_BYTES} bytes"));
+    }
     let mut bytes = Vec::new();
     file.take(MAX_BYTES + 1)
         .read_to_end(&mut bytes)

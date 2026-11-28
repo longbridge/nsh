@@ -886,12 +886,13 @@ impl Mounter {
     pub(crate) fn new(
         mtm: MainThreadMarker,
         root: Retained<UIView>,
-        control: EngineControl,
+        engine: &nsh_engine::Engine,
         shared: SharedMounter,
         asset_base: Option<AssetBase>,
         access: std::sync::Arc<nsh_engine::Access>,
         components: crate::component::Components,
     ) -> Self {
+        let control = engine.control();
         let scrolls = crate::scroll_watch::SurfaceScrolls::default();
         let target = EventTarget::new(mtm, control.clone(), shared.clone(), scrolls.clone());
         let target_for_link = target.clone();
@@ -923,6 +924,8 @@ impl Mounter {
                     })
                 },
                 access.clone(),
+                engine.media_files(),
+                engine.image_cache(),
             ),
             offscreen: Default::default(),
             audio: Default::default(),
@@ -3784,17 +3787,12 @@ impl Mounter {
         }
     }
 
-    /// What the image loader reports.
-    /// The disk cache the images it loads go through.
     /// The scroll views the embedding app watches ([`crate::AppView::watch_scroll`]).
     pub(crate) fn watch_scrolls(&mut self, watchers: crate::ScrollWatchers) {
         self.scroll_watchers = watchers;
     }
 
-    pub(crate) fn set_image_cache(&mut self, cache: Option<nsh_core::image::DiskCache>) {
-        self.images.set_disk_cache(cache);
-    }
-
+    /// What the image loader reports.
     pub(crate) fn load_event(&mut self, event: crate::image::LoadEvent) {
         use crate::image::LoadEvent;
         match event {
