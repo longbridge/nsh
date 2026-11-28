@@ -725,10 +725,45 @@ pub(crate) fn controlled(view: &NshView) -> Option<Retained<AnyObject>> {
         .map(|v| Retained::into_super(Retained::into_super(Retained::into_super(v.ns().retain()))))
 }
 
-/// What a combo box's field answers ([`combobox_field`]).
-pub(crate) struct ComboboxField {
+/// What an input's editor answers as the element of the input
+/// ([`editor_field`]).
+pub(crate) struct EditorField {
     /// The input's label.
     pub(crate) label: Option<Arc<str>>,
+    /// The input's hint.
+    pub(crate) help: Option<String>,
+    /// The input is disabled.
+    pub(crate) disabled: bool,
+    /// The input's content is invalid.
+    pub(crate) invalid: bool,
+}
+
+/// An input with no role, or a text box or combo box role: its editor
+/// (the field or text view that keeps the keyboard focus) is the element
+/// VoiceOver is on, with the input's name and state, as a web page's
+/// `<input>` is; the input view is no element of its own ([`base_role`]).
+pub(crate) fn editor_field(view: &NshView) -> Option<EditorField> {
+    let s = view.try_state()?;
+    let a = &s.props.accessibility;
+    if s.kind != ViewKind::Input || !editor_is_element(a.role) {
+        return None;
+    }
+    Some(EditorField {
+        label: a.label.clone(),
+        help: a.help_text(None),
+        disabled: a.state.disabled,
+        invalid: a.state.invalid,
+    })
+}
+
+/// Whether an input with `role` is exposed through its editor
+/// ([`editor_field`]) rather than through the input view.
+fn editor_is_element(role: Role) -> bool {
+    matches!(role, Role::None | Role::Textbox | Role::Combobox)
+}
+
+/// What a combo box's field answers ([`combobox_field`]).
+pub(crate) struct ComboboxField {
     /// Its list is open.
     pub(crate) expanded: bool,
     /// Its active descendant.
@@ -739,19 +774,17 @@ pub(crate) struct ComboboxField {
 
 /// An input that is a combo box (`role="combobox"`): its field, which
 /// keeps the keyboard focus, is the combo box VoiceOver is on, as WebKit's
-/// editable combo box is, and the input view is no element of its own
-/// ([`base_role`]).
+/// editable combo box is ([`editor_field`]).
 pub(crate) fn combobox_field(view: &NshView) -> Option<ComboboxField> {
-    let (label, expanded) = {
+    let expanded = {
         let s = view.try_state()?;
         let a = &s.props.accessibility;
         if s.kind != ViewKind::Input || a.role != Role::Combobox {
             return None;
         }
-        (a.label.clone(), a.state.expanded == Some(true))
+        a.state.expanded == Some(true)
     };
     Some(ComboboxField {
-        label,
         expanded,
         active: active_descendant(view),
         controls: controlled(view),
@@ -865,7 +898,9 @@ pub(crate) fn focus(view: &NshView) {
     {
         window.makeFirstResponder(Some(view.ns()));
     }
-    let elements = NSArray::from_slice(&[AsRef::<AnyObject>::as_ref(view.ns())]);
+    // An input's element is its editor (`editor_field`).
+    let element = crate::text_input::accessibility_element(view);
+    let elements = NSArray::from_slice(&[AsRef::<AnyObject>::as_ref(&*element)]);
     // SAFETY: immutable AppKit constants; the user info holds the elements
     // VoiceOver moves to, as the notification documents.
     unsafe {
@@ -1330,6 +1365,8 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::None => match kind {
             ViewKind::Text => Ax::Text,
             ViewKind::Image if a.label.is_some() => Ax::Image,
+            // The input's editor is its element (`editor_field`).
+            ViewKind::Input => Ax::Generic,
             _ if a.accessible == Some(false) => Ax::Generic,
             // An input that hears presses (a combobox's) is still its
             // field, which is the text field VoiceOver reads, not a
@@ -1342,6 +1379,8 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::Button | Role::ImageButton | Role::KeyboardKey => Ax::Button,
         Role::Link => Ax::Link,
         Role::Search => Ax::Search,
+        // The input's editor is the text field (`editor_field`).
+        Role::Textbox if kind == ViewKind::Input => Ax::Generic,
         Role::Textbox => Ax::TextField,
         Role::Image => Ax::Image,
         Role::Text => Ax::Text,
@@ -1350,7 +1389,7 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::Summary => Ax::Status,
         Role::Alert => Ax::Alert,
         Role::Checkbox => Ax::CheckBox,
-        // An input's field is the combo box (`combobox_field`).
+        // An input's field is the combo box (`editor_field`).
         Role::Combobox if kind == ViewKind::Input => Ax::Generic,
         Role::Combobox => Ax::ComboBox,
         Role::Menu => Ax::Menu,
@@ -1573,6 +1612,27 @@ mod tests {
             ..Default::default()
         };
         assert!(spec_for(&invalid, ViewKind::View, false, None, false).invalid);
+        // A labelled input is its editor's element, not one of its own
+        // (`editor_field`), with no role or a text box's.
+        for role in [Role::None, Role::Textbox, Role::Combobox] {
+            let input = Accessibility {
+                role,
+                ..invalid.clone()
+            };
+            assert_eq!(
+                spec_for(&input, ViewKind::Input, false, None, false).role,
+                Ax::Generic,
+                "{role:?}"
+            );
+        }
+        let textbox = Accessibility {
+            role: Role::Textbox,
+            ..invalid.clone()
+        };
+        assert_eq!(
+            spec_for(&textbox, ViewKind::View, false, None, false).role,
+            Ax::TextField
+        );
 
         let value = AccessibilityValue {
             min: Some(0.0),

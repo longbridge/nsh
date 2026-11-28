@@ -39,7 +39,7 @@ mod macos {
             NSWindowStyleMask,
         },
         objc2_foundation::{
-            NSDate, NSNumber, NSPoint, NSRange, NSRect, NSRunLoop, NSSize, NSString,
+            NSArray, NSDate, NSNumber, NSPoint, NSRange, NSRect, NSRunLoop, NSSize, NSString,
         },
     };
 
@@ -385,6 +385,17 @@ mod macos {
             .child(field("plain-field"))
             .child(field("secure-field").masked(true))
             .child(
+                field("labelled-field")
+                    .label("Profile id")
+                    .hint("Six digits")
+                    .accessibility_state(AccessibilityState {
+                        invalid: true,
+                        ..Default::default()
+                    }),
+            )
+            .child(field("disabled-field").label("Locked").disabled(true))
+            .child(field("labelled-area").multiline(true).label("Notes"))
+            .child(
                 field("closed-combo")
                     .role(AccessibilityRole::Combobox)
                     .label("Closed choices")
@@ -467,7 +478,88 @@ mod macos {
                 }
             }
         }
+        check_labelled_inputs(root);
         println!("input accessibility: text fields and editable combobox relations ok");
+    }
+
+    /// A labelled input is one element, its editor, which has the input's
+    /// name and state; the input view is none of its own.
+    fn check_labelled_inputs(root: &NSView) {
+        /// The element of the input's editor: a field's cell (what AppKit
+        /// lists as the field), or the text view.
+        fn editor(view: &NSView) -> Option<Retained<AnyObject>> {
+            let class = view.class().name().to_string_lossy().into_owned();
+            if class == "NshTextField"
+                && let Ok(field) = view.retain().downcast::<NSTextField>()
+            {
+                return field.cell().map(|cell| Retained::into_super(cell).into());
+            }
+            if class == "NshTextView" {
+                return Some(Retained::into_super(Retained::into_super(
+                    Retained::into_super(view.retain()),
+                )));
+            }
+            view.subviews().iter().find_map(|child| editor(&child))
+        }
+        /// Whether `target` is reached from `view` through the accessibility
+        /// children, as VoiceOver walks them.
+        fn reached(view: &AnyObject, target: &AnyObject) -> bool {
+            if std::ptr::eq(view, target) {
+                return true;
+            }
+            // SAFETY: an NSAccessibility getter on the main thread.
+            let children: Option<Retained<NSArray>> =
+                unsafe { msg_send![view, accessibilityChildren] };
+            children.is_some_and(|c| c.iter().any(|child| reached(&child, target)))
+        }
+        fn text(element: &AnyObject, getter: &str) -> Option<String> {
+            // SAFETY: NSAccessibility getters of strings, on the main thread.
+            string(unsafe {
+                match getter {
+                    "role" => msg_send![element, accessibilityRole],
+                    "label" => msg_send![element, accessibilityLabel],
+                    _ => msg_send![element, accessibilityHelp],
+                }
+            })
+        }
+        fn attribute(element: &AnyObject, name: &str) -> Option<String> {
+            let name = NSString::from_str(name);
+            // SAFETY: the legacy NSAccessibility getter, which clients use.
+            string(unsafe { msg_send![element, accessibilityAttributeValue: &*name] })
+        }
+        for (id, label, role) in [
+            ("labelled-field", "Profile id", "AXTextField"),
+            ("disabled-field", "Locked", "AXTextField"),
+            ("labelled-area", "Notes", "AXTextArea"),
+        ] {
+            let input = view_with_id(root, id).unwrap();
+            assert!(
+                !input.isAccessibilityElement(),
+                "{id}: the input view is no element"
+            );
+            let editor = editor(&input).unwrap_or_else(|| panic!("{id}: no editor"));
+            assert!(reached(root, &editor), "{id}: VoiceOver reaches the editor");
+            assert_eq!(text(&editor, "role").as_deref(), Some(role), "{id}");
+            assert_eq!(
+                text(&editor, "label").as_deref(),
+                Some(label),
+                "{id}: the editor has the input's label"
+            );
+            // SAFETY: an NSAccessibility getter on the main thread.
+            let enabled: bool = unsafe { msg_send![&*editor, isAccessibilityEnabled] };
+            assert_eq!(enabled, id != "disabled-field", "{id}: enabled");
+            assert_eq!(
+                attribute(&editor, "AXInvalid").as_deref(),
+                Some(if id == "labelled-field" {
+                    "true"
+                } else {
+                    "false"
+                }),
+                "{id}: AXInvalid"
+            );
+        }
+        let field = editor(&view_with_id(root, "labelled-field").unwrap()).unwrap();
+        assert_eq!(text(&field, "help").as_deref(), Some("Six digits"));
     }
 
     /// Runs the main run loop until `done` holds, for at most 5 s.

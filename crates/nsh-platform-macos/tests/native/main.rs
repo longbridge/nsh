@@ -113,6 +113,8 @@ mod text_view_selection;
 #[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
+mod tray_access;
+#[cfg(target_os = "macos")]
 mod tray_owner;
 #[cfg(target_os = "macos")]
 mod unbound_animation;
@@ -191,6 +193,9 @@ fn main() {
             } else if std::env::var_os("NSH_TRAY_OWNER_CHECK_ONLY").is_some() {
                 window_press::run();
                 tray_owner::run();
+            } else if std::env::var_os("NSH_TRAY_ACCESS_CHECK_ONLY").is_some() {
+                window_press::run();
+                tray_access::run();
             } else if std::env::var_os("NSH_MULTI_VIEW_CHECK_ONLY").is_some() {
                 multi_view::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
@@ -308,6 +313,7 @@ fn main() {
                 file_panels::run();
                 web_file_input::run();
                 tray_owner::run();
+                tray_access::run();
                 window_frames::run();
                 window_layout::run();
                 window_mode_layout::run();

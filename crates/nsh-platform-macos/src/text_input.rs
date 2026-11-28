@@ -1148,9 +1148,11 @@ macro_rules! define_field {
                     }
                 }
 
+                // The input's name ([`crate::access::editor_field`]); its
+                // cell, the element clients read, answers it too.
                 #[unsafe(method_id(accessibilityLabel))]
                 fn accessibility_label(&self) -> Option<Retained<NSString>> {
-                    match self.combobox() {
+                    match self.editor_field() {
                         Some(field) => field.label.map(|l| NSString::from_str(&l)),
                         // SAFETY: NSTextField's own label.
                         None => unsafe { msg_send![super(self), accessibilityLabel] },
@@ -1350,17 +1352,48 @@ macro_rules! define_field {
     };
 }
 
-/// What a field of an input answers for its view.
+/// What an editor of an input answers for its view.
 trait FieldOf {
+    /// The input's name and state, when the editor is the input's element.
+    fn editor_field(&self) -> Option<crate::access::EditorField>;
     /// The input view's combo box, when the field is one.
     fn combobox(&self) -> Option<crate::access::ComboboxField>;
 }
 
 impl<T: objc2::DefinedClass<Ivars = OnceCell<Ctx>>> FieldOf for T {
+    fn editor_field(&self) -> Option<crate::access::EditorField> {
+        let (_, view, _) = self.ivars().get()?.get()?;
+        crate::access::editor_field(&view)
+    }
+
     fn combobox(&self) -> Option<crate::access::ComboboxField> {
         let (_, view, _) = self.ivars().get()?.get()?;
         crate::access::combobox_field(&view)
     }
+}
+
+/// Whether `attribute` is `AXInvalid` ([`crate::access::INVALID_ATTRIBUTE`]).
+fn is_invalid_attribute(attribute: &NSString) -> bool {
+    attribute.to_string() == crate::access::INVALID_ATTRIBUTE
+}
+
+/// `names` with `AXInvalid` beside them while the content is `invalid`:
+/// NSAccessibility has no property for it, so the editor answers it, as
+/// the view does for other elements.
+fn with_invalid(names: Retained<NSArray>, invalid: bool) -> Retained<NSArray> {
+    if invalid {
+        let name = NSString::from_str(crate::access::INVALID_ATTRIBUTE);
+        // SAFETY: an array of attribute names, which are strings.
+        unsafe { msg_send![&*names, arrayByAddingObject: &*name] }
+    } else {
+        names
+    }
+}
+
+/// The value of `AXInvalid`, as WebKit gives it.
+fn invalid_value(invalid: bool) -> Retained<AnyObject> {
+    let value = NSString::from_str(if invalid { "true" } else { "false" });
+    Retained::into_super(Retained::into_super(value))
 }
 
 define_field!(
@@ -1661,6 +1694,52 @@ define_text_view!(
             }
             // SAFETY: NSTextView's own method.
             unsafe { msg_send![super(self), validateUserInterfaceItem: item] }
+        }
+
+        // The input's name and state are its text view's
+        // ([`crate::access::editor_field`]).
+        #[unsafe(method_id(accessibilityLabel))]
+        fn accessibility_label(&self) -> Option<Retained<NSString>> {
+            match self.editor_field() {
+                Some(field) => field.label.map(|l| NSString::from_str(&l)),
+                // SAFETY: NSTextView's own label.
+                None => unsafe { msg_send![super(self), accessibilityLabel] },
+            }
+        }
+
+        #[unsafe(method_id(accessibilityHelp))]
+        fn accessibility_help(&self) -> Option<Retained<NSString>> {
+            match self.editor_field() {
+                Some(field) => field.help.map(|h| NSString::from_str(&h)),
+                // SAFETY: NSTextView's own help.
+                None => unsafe { msg_send![super(self), accessibilityHelp] },
+            }
+        }
+
+        #[unsafe(method(isAccessibilityEnabled))]
+        fn is_accessibility_enabled(&self) -> bool {
+            match self.editor_field() {
+                Some(field) => !field.disabled,
+                // SAFETY: NSTextView's own state.
+                None => unsafe { msg_send![super(self), isAccessibilityEnabled] },
+            }
+        }
+
+        #[unsafe(method_id(accessibilityAttributeNames))]
+        fn accessibility_attribute_names(&self) -> Retained<NSArray> {
+            // SAFETY: NSTextView's own attributes.
+            let names: Retained<NSArray> =
+                unsafe { msg_send![super(self), accessibilityAttributeNames] };
+            with_invalid(names, self.editor_field().is_some_and(|f| f.invalid))
+        }
+
+        #[unsafe(method_id(accessibilityAttributeValue:))]
+        fn accessibility_attribute_value(&self, attribute: &NSString) -> Option<Retained<AnyObject>> {
+            match self.editor_field() {
+                Some(field) if is_invalid_attribute(attribute) => Some(invalid_value(field.invalid)),
+                // SAFETY: NSTextView's own answer.
+                _ => unsafe { msg_send![super(self), accessibilityAttributeValue: attribute] },
+            }
         }
 
         #[unsafe(method(isAccessibilitySelectorAllowed:))]
@@ -2011,6 +2090,12 @@ fn cell_ctx(cell: &NSCell) -> Option<Ctx> {
     field_ctx_of(&view)
 }
 
+/// The input's name and state, for its field's `cell`.
+fn cell_editor_field(cell: &NSCell) -> Option<crate::access::EditorField> {
+    let (_, view, _) = cell_ctx(cell)?.get()?;
+    crate::access::editor_field(&view)
+}
+
 /// Whether `action` is AppKit's semantic `AXConfirm` action.
 fn is_confirm_action(action: &NSString) -> bool {
     // SAFETY: immutable AppKit accessibility action constant.
@@ -2079,6 +2164,58 @@ macro_rules! define_field_cell {
                         layout.setUsesFontLeading(false);
                     }
                     text
+                }
+
+                // The field's cell is the element accessibility clients
+                // read: it has the input's name and state
+                // ([`crate::access::editor_field`]).
+                #[unsafe(method_id(accessibilityLabel))]
+                fn accessibility_label(&self) -> Option<Retained<NSString>> {
+                    match cell_editor_field(self) {
+                        Some(field) => field.label.map(|l| NSString::from_str(&l)),
+                        // SAFETY: NSTextFieldCell's own label.
+                        None => unsafe { msg_send![super(self), accessibilityLabel] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityHelp))]
+                fn accessibility_help(&self) -> Option<Retained<NSString>> {
+                    match cell_editor_field(self) {
+                        Some(field) => field.help.map(|h| NSString::from_str(&h)),
+                        // SAFETY: NSTextFieldCell's own help.
+                        None => unsafe { msg_send![super(self), accessibilityHelp] },
+                    }
+                }
+
+                #[unsafe(method(isAccessibilityEnabled))]
+                fn is_accessibility_enabled(&self) -> bool {
+                    match cell_editor_field(self) {
+                        Some(field) => !field.disabled,
+                        // SAFETY: NSTextFieldCell's own state.
+                        None => unsafe { msg_send![super(self), isAccessibilityEnabled] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityAttributeNames))]
+                fn accessibility_attribute_names(&self) -> Retained<NSArray> {
+                    // SAFETY: NSTextFieldCell's own attributes.
+                    let names: Retained<NSArray> =
+                        unsafe { msg_send![super(self), accessibilityAttributeNames] };
+                    with_invalid(names, cell_editor_field(self).is_some_and(|f| f.invalid))
+                }
+
+                #[unsafe(method_id(accessibilityAttributeValue:))]
+                fn accessibility_attribute_value(
+                    &self,
+                    attribute: &NSString,
+                ) -> Option<Retained<AnyObject>> {
+                    match cell_editor_field(self) {
+                        Some(field) if is_invalid_attribute(attribute) => {
+                            Some(invalid_value(field.invalid))
+                        }
+                        // SAFETY: NSTextFieldCell's own answer.
+                        _ => unsafe { msg_send![super(self), accessibilityAttributeValue: attribute] },
+                    }
                 }
 
                 #[unsafe(method_id(accessibilityActionNames))]
