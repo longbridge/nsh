@@ -4,6 +4,22 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Queued computations run without an ancestor list (`reactive.rs`, 2026-11-28, Linux x86_64, Ryzen 9 7950X, release,
+against `25b304afe`): every computation run from the queue (`run_top`) allocated a list holding itself before looking
+for stale owners to run first, which it almost never finds. The list now holds only those owners and the computation
+runs after them, so it no longer allocates for each effect a write reruns. `bench_reactive_updates`
+(`reactive/tests.rs`), the median of ten alternating runs of each version pinned to one idle core, ns per write:
+
+| Effects reading the signal | Before | After |
+|---:|---:|---:|
+| 1 | 39 | 36 |
+| 32 | 979 | 888 |
+| 1,024 | 30,776 | 28,034 |
+
+`stale_owners_run_before_a_child_queued_first` keeps the order owners run in. The counter control (eight presses of
+`+1`, ten alternating debug runs) keeps 9 commits, 148 ops, 128 mount items and 30 nodes; its summed commit times stay
+within their run-to-run spread (median 2,055 / 2,143 µs).
+
 Resolved class styles cached and style records shared (`core/classes.rs`, `core/mod.rs`, `core/layout_tree.rs`,
 `core/components.rs`, `tailwind/mod.rs`, `tailwind/utilities.rs`, 2026-11-25, macOS arm64, Apple M5, release against
 `main` at `b729299a0`): every restyle unconditionally cloned `Style` (~900 B) for TUI resting fills, zero-initialized
