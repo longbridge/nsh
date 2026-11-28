@@ -570,7 +570,7 @@ final class SelectableView implements SelectionHandle.Owner {
         }
         // While a dragged handle has passed the other, each marks the other end.
         SelectionHandle forStart = swapped ? endHandle : startHandle, forEnd = swapped ? startHandle : endHandle;
-        Layout layout = start.layout();
+        Layout layout = start.geometry();
         if (layout == null || !start.isShown()) {
             forStart.dismiss();
         } else {
@@ -579,7 +579,7 @@ final class SelectableView implements SelectionHandle.Owner {
             forStart.place(at[0] + start.contentX() + layout.getPrimaryHorizontal(offset),
                     at[1] + start.contentY() + layout.getLineBottom(layout.getLineForOffset(offset)));
         }
-        layout = end.layout();
+        layout = end.geometry();
         if (layout == null || !end.isShown()) {
             forEnd.dismiss();
         } else {
@@ -821,7 +821,7 @@ final class SelectableView implements SelectionHandle.Owner {
                     for (int i = 0; ranges != null && i + 2 < ranges.length; i += 3) {
                         if (ranges[i] < 0 || ranges[i] >= texts.size()) continue;
                         TextBox t = texts.get(ranges[i]);
-                        Layout layout = t.layout();
+                        Layout layout = t.geometry();
                         if (layout == null || !t.isShown()) continue;
                         int length = layout.getText().length();
                         layout.getSelectionPath(Math.min(ranges[i + 1], length), Math.min(ranges[i + 2], length), path);

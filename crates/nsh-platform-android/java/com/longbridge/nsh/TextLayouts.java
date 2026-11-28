@@ -350,6 +350,10 @@ final class TextLayouts {
         /** Recent layouts by width: measuring and the final layout reuse them. */
         private final StaticLayout[] layouts = new StaticLayout[4];
         private int next;
+        /** The final layouts {@link #geometry} answered for, and its layout for each. */
+        private final Layout[] drawn = new Layout[4];
+        private final Layout[] geometries = new Layout[4];
+        private int nextGeometry;
 
         final TextDirectionHeuristic direction;
 
@@ -402,11 +406,22 @@ final class TextLayouts {
         StaticLayout layout(int widthPx) {
             widthPx = Math.max(0, widthPx);
             for (StaticLayout l : layouts) if (l != null && l.getWidth() == widthPx) return l;
+            StaticLayout l = build(text, widthPx);
+            layouts[next] = l;
+            next = (next + 1) % layouts.length;
+            return l;
+        }
+
+        /**
+         * The layout of {@code source} (the text, or its spans without the
+         * measurement) at {@code widthPx}, with this text's settings.
+         */
+        StaticLayout build(CharSequence source, int widthPx) {
             // Break strategy and hyphenation match the PrecomputedText params,
             // so the builder reuses its glyph measurements. LineBreaker's
             // constants are the setters' type (Android Lint) and equal
             // Layout's; javac inlines them, so API 26-28 never load the class.
-            StaticLayout.Builder b = StaticLayout.Builder.obtain(text, 0, text.length(), paint, widthPx)
+            StaticLayout.Builder b = StaticLayout.Builder.obtain(source, 0, source.length(), paint, widthPx)
                     .setAlignment(alignment)
                     .setTextDirection(direction)
                     .setIncludePad(false)
@@ -426,11 +441,68 @@ final class TextLayouts {
                 b.setMaxLines(maxLines);
                 if (ellipsize != null) b.setEllipsize(ellipsize);
             }
-            StaticLayout l = b.build();
-            layouts[next] = l;
-            next = (next + 1) % layouts.length;
-            return l;
+            return b.build();
         }
+
+        /**
+         * The layout to ask where characters are in a final layout {@code l}
+         * of this text (see {@link TextLayouts#geometry}): the same spans and
+         * width laid out without the {@code PrecomputedText}, once per final
+         * layout. Kept here, beside {@link #layouts}, so it goes when this
+         * text does; it reads the {@code l} given, which may have left the
+         * recent layouts while a view still shows it.
+         */
+        Layout geometry(Layout l) {
+            synchronized (geometries) {
+                for (int i = 0; i < geometries.length; i++) if (drawn[i] == l) return geometries[i];
+            }
+            Layout g = build(new SpannableString(l.getText()), l.getWidth());
+            // Same spans, same width: the same lines. Were they not, offsets
+            // would not mean the same places; the drawn layout answers then.
+            boolean same = g.getLineCount() == l.getLineCount();
+            for (int i = 0; same && i < l.getLineCount(); i++) same = g.getLineStart(i) == l.getLineStart(i);
+            if (!same) g = l;
+            synchronized (geometries) {
+                for (int i = 0; i < geometries.length; i++) if (drawn[i] == l) return geometries[i];
+                drawn[nextGeometry] = l;
+                geometries[nextGeometry] = g;
+                nextGeometry = (nextGeometry + 1) % geometries.length;
+            }
+            return g;
+        }
+    }
+
+    /**
+     * Kept in the spans of a prepared text, so that a final layout, which is
+     * all a view and a hit test have, reaches the {@link Prepared} it came
+     * from through its text. The text holds it, not a static map: nothing
+     * outside the layout, the text and the {@code Prepared} holds any of them.
+     */
+    private static final class Owner {
+        Prepared prepared;
+    }
+
+    /**
+     * The layout to ask where characters are in a final layout {@code l}: the
+     * same text, spans and width laid out without the {@code PrecomputedText},
+     * once, while {@code l} lives; {@code l} itself when it is not over one.
+     *
+     * <p>A layout over a {@code PrecomputedText} draws right and breaks its
+     * lines right, but asked for a position inside a styled run (every
+     * character of a text whose whole content is one run) Android 15 answers
+     * the run's far edge: {@code getPrimaryHorizontal} of the 5th character
+     * of a line is the line's end, {@code getOffsetForHorizontal} anywhere
+     * on it its start or end, and {@code getSelectionPath} of a word the
+     * whole line. A long press then selected from the word to the line's
+     * end, the highlight and the handles landed elsewhere, and a tap could
+     * miss its link. Positions at span boundaries (backgrounds, underlines)
+     * are right, so drawing keeps the measured layout.
+     */
+    static Layout geometry(Layout l) {
+        if (l == null || !(l.getText() instanceof PrecomputedText)) return l;
+        Spanned text = (Spanned) l.getText();
+        Owner[] owner = text.getSpans(0, text.length(), Owner.class);
+        return owner.length == 0 || owner[0].prepared == null ? l : owner[0].prepared.geometry(l);
     }
 
     static Object prepare(String text, int[] ints, float[] floats, String[] families, int align,
@@ -548,7 +620,13 @@ final class TextLayouts {
         // Android 8 has no PrecomputedText: each layout measures the spans
         // again, with the same breaks (the core caches layouts per width).
         CharSequence measured = s;
+        Owner owner = null;
         if (android.os.Build.VERSION.SDK_INT >= 28) {
+            // `geometry` reaches this text's `Prepared` through its spans.
+            if (s.length() > 0) {
+                owner = new Owner();
+                s.setSpan(owner, 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
             PrecomputedText.Params params = new PrecomputedText.Params.Builder(paint)
                     .setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
@@ -556,8 +634,10 @@ final class TextLayouts {
                     .build();
             measured = PrecomputedText.create(s, params);
         }
-        return new Prepared(measured, paint, alignment, align == ALIGN_JUSTIFY, endAligned, maxLines, truncate, density,
-                direction);
+        Prepared prepared = new Prepared(measured, paint, alignment, align == ALIGN_JUSTIFY, endAligned, maxLines,
+                truncate, density, direction);
+        if (owner != null) owner.prepared = prepared;
+        return prepared;
     }
 
     /**
@@ -719,7 +799,7 @@ final class TextLayouts {
      */
     static long hitTest(Object layout, float x, float y, float density) {
         if (!(layout instanceof Layout)) return 0;
-        Layout l = (Layout) layout;
+        Layout l = geometry((Layout) layout);
         int lines = l.getLineCount();
         if (lines == 0) return 0;
         x *= density;
@@ -754,7 +834,7 @@ final class TextLayouts {
      */
     static float[] caretRect(Object layout, int offset, boolean upstream, float density) {
         if (!(layout instanceof Layout)) return new float[0];
-        Layout l = (Layout) layout;
+        Layout l = geometry((Layout) layout);
         if (l.getLineCount() == 0) return new float[0];
         offset = Math.max(0, Math.min(offset, l.getText().length()));
         int line = l.getLineForOffset(offset);
@@ -778,7 +858,7 @@ final class TextLayouts {
      */
     static float[] rangeRects(Object layout, int start, int end, float density) {
         if (!(layout instanceof Layout)) return new float[0];
-        Layout l = (Layout) layout;
+        Layout l = geometry((Layout) layout);
         start = Math.max(0, start);
         end = Math.min(end, l.getText().length());
         int lines = l.getLineCount();
