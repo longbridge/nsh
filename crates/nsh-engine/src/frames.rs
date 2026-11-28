@@ -29,25 +29,53 @@ fn write(queue: &wgpu::Queue, writes: Writes) {
     }
 }
 
-/// A frame encoded on the main thread, to finish and submit, there or on
-/// the renderer's submitting thread ([`FrameTarget::submit_on`]).
-#[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
+/// A draw or texture transfer, to finish and submit in order.
 pub(crate) struct Submission {
     writes: Writes,
     encoder: wgpu::CommandEncoder,
-    /// Once submitted: marks the surface done when the GPU is.
-    #[cfg(target_vendor = "apple")]
-    submitted: crate::shader_surfaces::Submitted,
+    completion: Completion,
 }
 
-#[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
+enum Completion {
+    #[cfg(any(target_vendor = "apple", windows))]
+    Transfer,
+    Readback(wgpu::Buffer, Arc<AtomicU8>),
+    #[cfg(target_vendor = "apple")]
+    Surface(crate::shader_surfaces::Submitted),
+}
+
 impl Submission {
+    #[cfg(any(target_vendor = "apple", windows))]
+    pub(crate) fn transfer(encoder: wgpu::CommandEncoder) -> Self {
+        Self {
+            writes: Writes::new(),
+            encoder,
+            completion: Completion::Transfer,
+        }
+    }
+
     /// Writes its bytes, finishes and submits its commands.
     pub(crate) fn run(self, queue: &wgpu::Queue) {
         write(queue, self.writes);
         queue.submit([self.encoder.finish()]);
-        #[cfg(target_vendor = "apple")]
-        self.submitted.after_submit(queue);
+        match self.completion {
+            #[cfg(any(target_vendor = "apple", windows))]
+            Completion::Transfer => {}
+            Completion::Readback(buffer, flag) => {
+                buffer
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |result| {
+                        let state = if result.is_ok() {
+                            state::MAPPED
+                        } else {
+                            state::FAILED
+                        };
+                        flag.store(state, Ordering::Release);
+                    });
+            }
+            #[cfg(target_vendor = "apple")]
+            Completion::Surface(submitted) => submitted.after_submit(queue),
+        }
     }
 }
 
@@ -83,6 +111,45 @@ struct Target {
     view: wgpu::TextureView,
     texture: wgpu::Texture,
     readbacks: [Readback; 2],
+}
+
+impl Target {
+    fn newest_mapped(&self) -> Option<usize> {
+        let mut newest: Option<usize> = None;
+        for (i, r) in self.readbacks.iter().enumerate() {
+            match r.state.load(Ordering::Acquire) {
+                state::MAPPED if newest.is_none_or(|n| self.readbacks[n].serial < r.serial) => {
+                    newest = Some(i)
+                }
+                state::FAILED => r.state.store(state::IDLE, Ordering::Release),
+                _ => {}
+            }
+        }
+        newest
+    }
+
+    fn collect_mapped(&self, newest: usize, frame: &mut Frame) -> bool {
+        let selected = &self.readbacks[newest];
+        let chosen_serial = selected.serial;
+        let changed = chosen_serial > frame.serial;
+        if changed {
+            let data = selected.buffer.slice(..).get_mapped_range();
+            frame.pixels.clear();
+            frame.pixels.extend_from_slice(&data);
+            frame.width = self.width;
+            frame.height = self.height;
+            frame.stride = self.stride;
+            frame.serial = chosen_serial;
+        }
+        // A newer readback can finish while the chosen pixels are copied.
+        for r in &self.readbacks {
+            if r.serial <= chosen_serial && r.state.load(Ordering::Acquire) == state::MAPPED {
+                r.buffer.unmap();
+                r.state.store(state::IDLE, Ordering::Release);
+            }
+        }
+        changed
+    }
 }
 
 /// Where a frame is drawn ([`FrameTarget::destination`]).
@@ -237,12 +304,9 @@ impl FrameTarget {
         self.submit_on(queue, None, destination, encoder, Writes::new());
     }
 
-    /// As [`Self::submit`], after writing `writes`. Apple: a frame on a
-    /// surface is finished and submitted by `send` when there is one (on
-    /// the renderer's submitting thread),
-    /// which does what the GPU driver does there (most of a frame's cost on
-    /// the main thread: Metal's render pass is encoded as the commands
-    /// finish); the surface counts as rendering from now on.
+    /// As [`Self::submit`], after writing `writes`. When using `send`, the
+    /// destination is busy as soon as the frame is queued, before the
+    /// submitting thread finishes the encoder and sends it to the GPU.
     pub(crate) fn submit_on(
         &mut self,
         queue: &wgpu::Queue,
@@ -252,38 +316,25 @@ impl FrameTarget {
         writes: Writes,
     ) {
         self.serial += 1;
-        match destination {
+        let completion = match destination {
             #[cfg(target_vendor = "apple")]
-            Destination::Surface(i) => {
-                let submitted = self
-                    .surfaces
+            Destination::Surface(i) => Completion::Surface(
+                self.surfaces
                     .as_mut()
                     .expect("surfaces")
-                    .submitting(i, self.serial);
-                let submission = Submission {
-                    writes,
-                    encoder,
-                    submitted,
-                };
-                match send {
-                    Some(send) => send(submission),
-                    None => submission.run(queue),
-                }
-            }
+                    .submitting(i, self.serial),
+            ),
             #[cfg(windows)]
             Destination::Surface(i) => {
-                let _ = send;
                 write(queue, writes);
                 queue.submit([encoder.finish()]);
                 self.surfaces
                     .as_mut()
                     .expect("surfaces")
                     .submitted(i, self.serial, queue);
+                return;
             }
             Destination::Readback(i) => {
-                #[cfg(not(target_vendor = "apple"))]
-                let _ = send;
-                write(queue, writes);
                 let target = self.target.as_mut().expect("target");
                 let (width, height, stride) = (target.width, target.height, target.stride);
                 let readback = &mut target.readbacks[i];
@@ -308,22 +359,19 @@ impl FrameTarget {
                         depth_or_array_layers: 1,
                     },
                 );
-                queue.submit([encoder.finish()]);
                 readback.serial = self.serial;
                 readback.state.store(state::MAPPING, Ordering::Release);
-                let flag = readback.state.clone();
-                readback
-                    .buffer
-                    .slice(..)
-                    .map_async(wgpu::MapMode::Read, move |result| {
-                        let s = if result.is_ok() {
-                            state::MAPPED
-                        } else {
-                            state::FAILED
-                        };
-                        flag.store(s, Ordering::Release);
-                    });
+                Completion::Readback(readback.buffer.clone(), readback.state.clone())
             }
+        };
+        let submission = Submission {
+            writes,
+            encoder,
+            completion,
+        };
+        match send {
+            Some(send) => send(submission),
+            None => submission.run(queue),
         }
     }
 
@@ -417,42 +465,11 @@ impl FrameTarget {
             }
             return true;
         }
-        let Some(target) = &mut self.target else {
-            return false;
-        };
-        let mut newest: Option<usize> = None;
-        for (i, r) in target.readbacks.iter().enumerate() {
-            match r.state.load(Ordering::Acquire) {
-                state::MAPPED if newest.is_none_or(|n| target.readbacks[n].serial < r.serial) => {
-                    newest = Some(i)
-                }
-                state::FAILED => r.state.store(state::IDLE, Ordering::Release),
-                _ => {}
-            }
-        }
-        let Some(newest) = newest else {
-            return false;
-        };
-        let mut changed = false;
-        for (i, r) in target.readbacks.iter().enumerate() {
-            if r.state.load(Ordering::Acquire) != state::MAPPED {
-                continue;
-            }
-            if i == newest && r.serial > self.frame.serial {
-                let data = r.buffer.slice(..).get_mapped_range();
-                self.frame.pixels.clear();
-                self.frame.pixels.extend_from_slice(&data);
-                drop(data);
-                self.frame.width = target.width;
-                self.frame.height = target.height;
-                self.frame.stride = target.stride;
-                self.frame.serial = r.serial;
-                changed = true;
-            }
-            r.buffer.unmap();
-            r.state.store(state::IDLE, Ordering::Release);
-        }
-        changed
+        self.target.as_ref().is_some_and(|target| {
+            target
+                .newest_mapped()
+                .is_some_and(|newest| target.collect_mapped(newest, &mut self.frame))
+        })
     }
 
     /// Signals the surfaces' fence from the CPU, as the backend's device
@@ -498,5 +515,76 @@ fn target(device: &wgpu::Device, format: PixelFormat, width: u32, height: u32) -
         view: texture.create_view(&Default::default()),
         texture,
         readbacks: [readback(), readback()],
+    }
+}
+
+#[cfg(all(test, target_vendor = "apple"))]
+pub(crate) mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+    use crate::shader::Renderer;
+
+    pub(crate) fn clear(
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+        color: wgpu::Color,
+    ) -> wgpu::CommandEncoder {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        encoder
+    }
+
+    #[test]
+    fn a_readback_completed_after_selection_stays_pending() {
+        let Some((device, queue)) = Renderer::metal_device_for_test() else {
+            eprintln!("no Metal GPU: skipped");
+            return;
+        };
+        let mut frames = FrameTarget::default();
+        let mut draw = |color| {
+            let destination = frames
+                .destination(&device, PixelFormat::Bgra, 1, 1)
+                .unwrap();
+            let encoder = clear(&device, frames.view(destination), color);
+            let queued = Cell::new(None);
+            frames.submit_on(
+                &queue,
+                Some(&|submission| queued.set(Some(submission))),
+                destination,
+                encoder,
+                Writes::new(),
+            );
+            queued.into_inner().unwrap()
+        };
+        let first = draw(wgpu::Color::RED);
+        let second = draw(wgpu::Color::GREEN);
+        first.run(&queue);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let target = frames.target.as_ref().unwrap();
+        let chosen = target.newest_mapped().unwrap();
+
+        second.run(&queue);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(target.collect_mapped(chosen, &mut frames.frame));
+        assert_eq!(frames.frame().pixels[..4], [0, 0, 255, 255]);
+        assert!(
+            frames.pending(),
+            "newer readback must keep the view scheduled"
+        );
+        assert!(frames.collect());
+        assert_eq!(frames.frame().pixels[..4], [0, 255, 0, 255]);
+        assert!(!frames.pending());
     }
 }

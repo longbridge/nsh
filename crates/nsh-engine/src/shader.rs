@@ -131,10 +131,8 @@ pub struct Renderer {
     /// The worker thread's queue, started with the first pipeline asked for
     /// (the thread ends when the renderer is dropped).
     worker: OnceLock<Option<mpsc::Sender<Job>>>,
-    /// Apple: the thread that finishes and submits the frames encoded on
-    /// the main thread, and asks the GPU to tell when they are done
-    /// ([`Renderer::when_done`]), in order; started with the first frame
-    /// (it ends when the renderer is dropped).
+    /// Metal: finishes and submits draws and texture transfers in order, so
+    /// a later write cannot overtake a draw that samples the same texture.
     #[cfg(target_vendor = "apple")]
     submitter: OnceLock<Option<mpsc::Sender<Submit>>>,
 }
@@ -142,8 +140,10 @@ pub struct Renderer {
 /// Work for the submitting thread ([`Renderer::submitter`]).
 #[cfg(target_vendor = "apple")]
 enum Submit {
-    Frame(Submission),
-    /// Once the frames sent before are submitted.
+    Commands(Submission),
+    #[cfg(test)]
+    Pause(mpsc::Receiver<()>),
+    /// Once the commands sent before are submitted.
     WhenDone(Box<dyn FnOnce() + Send>),
 }
 
@@ -415,6 +415,13 @@ impl Renderer {
         self.format
     }
 
+    #[cfg(all(test, target_vendor = "apple"))]
+    pub(crate) fn metal_device_for_test() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let renderer = Self::new(PixelFormat::Bgra)?;
+        crate::shader_surfaces::is_metal(&renderer.queue)
+            .then_some((renderer.device, renderer.queue))
+    }
+
     /// Windows: the adapter of its device when that is Direct3D 12's.
     #[cfg(all(windows, test))]
     fn adapter_luid(&self) -> Option<windows_sys::Win32::Foundation::LUID> {
@@ -430,9 +437,6 @@ impl Renderer {
         // After the frames still on the submitting thread, which asks.
         #[cfg(target_vendor = "apple")]
         if let Some(thread) = self.submitter() {
-            if !crate::shader_surfaces::is_metal(&self.queue) {
-                return false;
-            }
             return match thread.send(Submit::WhenDone(Box::new(f))) {
                 Ok(()) => true,
                 Err(mpsc::SendError(Submit::WhenDone(f))) => {
@@ -486,13 +490,14 @@ impl Renderer {
         self.pipeline(layer, format)
     }
 
-    /// Apple: the submitting thread's queue, its thread started the first
-    /// time (`None` without one: frames are submitted where they are
-    /// encoded).
+    /// Metal's submitting thread, started with the first submission.
     #[cfg(target_vendor = "apple")]
     fn submitter(&self) -> Option<&mpsc::Sender<Submit>> {
         self.submitter
             .get_or_init(|| {
+                if !crate::shader_surfaces::is_metal(&self.queue) {
+                    return None;
+                }
                 let (tx, rx) = mpsc::channel::<Submit>();
                 let queue = self.queue.clone();
                 let spawned = std::thread::Builder::new()
@@ -501,7 +506,11 @@ impl Renderer {
                         // Ends once the renderer (the sender) is dropped.
                         while let Ok(work) = rx.recv() {
                             match work {
-                                Submit::Frame(frame) => frame.run(&queue),
+                                Submit::Commands(submission) => submission.run(&queue),
+                                #[cfg(test)]
+                                Submit::Pause(until) => {
+                                    let _ = until.recv();
+                                }
                                 Submit::WhenDone(f) => {
                                     crate::shader_surfaces::when_done(&queue, f);
                                 }
@@ -519,17 +528,99 @@ impl Renderer {
             .as_ref()
     }
 
-    /// Sends `frame` to the submitting thread, or submits it here without
+    /// Sends the commands to the submitting thread, or submits them here without
     /// one.
-    fn submit(&self, frame: Submission) {
+    fn submit(&self, submission: Submission) {
         #[cfg(target_vendor = "apple")]
         if let Some(thread) = self.submitter() {
-            if let Err(mpsc::SendError(Submit::Frame(frame))) = thread.send(Submit::Frame(frame)) {
-                frame.run(&self.queue);
+            if let Err(mpsc::SendError(Submit::Commands(submission))) =
+                thread.send(Submit::Commands(submission))
+            {
+                submission.run(&self.queue);
             }
             return;
         }
-        frame.run(&self.queue);
+        submission.run(&self.queue);
+    }
+
+    fn write_picture(&self, texture: &wgpu::Texture, pixels: &[u8], stride: u32) {
+        #[cfg(target_vendor = "apple")]
+        if self.submitter().is_some() {
+            self.stage_picture(texture, pixels, stride);
+            return;
+        }
+        self.queue.write_texture(
+            texture.as_image_copy(),
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(stride),
+                rows_per_image: Some(texture.height()),
+            },
+            texture.size(),
+        );
+    }
+
+    #[cfg(target_vendor = "apple")]
+    fn stage_picture(&self, texture: &wgpu::Texture, pixels: &[u8], stride: u32) {
+        let (width, height) = (texture.width(), texture.height());
+        let row_bytes = width * 4;
+        let pitch = row_bytes.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        // Fill GPU staging memory directly: no second CPU copy to move
+        // borrowed pixels to the submitter. A valid texture can be larger
+        // than a single device buffer.
+        let rows_per_buffer =
+            (self.device.limits().max_buffer_size / u64::from(pitch)).min(u64::from(height)) as u32;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        for y in (0..height).step_by(rows_per_buffer as usize) {
+            let rows = (height - y).min(rows_per_buffer);
+            let bytes = u64::from(rows - 1) * u64::from(pitch) + u64::from(row_bytes);
+            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("nsh shader picture upload"),
+                size: bytes,
+                usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: true,
+            });
+            {
+                let mut mapped = buffer.slice(..).get_mapped_range_mut();
+                let start = y as usize * stride as usize;
+                if stride == pitch {
+                    mapped.copy_from_slice(&pixels[start..start + bytes as usize]);
+                } else {
+                    let row_bytes = row_bytes as usize;
+                    for row in 0..rows as usize {
+                        let src = start + row * stride as usize;
+                        let dst = row * pitch as usize;
+                        mapped
+                            .slice(dst..dst + row_bytes)
+                            .copy_from_slice(&pixels[src..src + row_bytes]);
+                    }
+                }
+            }
+            buffer.unmap();
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(pitch),
+                        rows_per_image: Some(rows),
+                    },
+                },
+                wgpu::TexelCopyTextureInfo {
+                    origin: wgpu::Origin3d { x: 0, y, z: 0 },
+                    ..texture.as_image_copy()
+                },
+                wgpu::Extent3d {
+                    width,
+                    height: rows,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        self.submit(Submission::transfer(encoder));
     }
 
     /// The worker's queue, its thread started the first time.
@@ -836,25 +927,7 @@ impl ShaderView {
             self.pictures_changed = true;
         }
         let picture = slot.as_ref().expect("a picture");
-        renderer.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &picture.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            pixels,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+        renderer.write_picture(&picture.texture, pixels, stride);
         self.dirty = true;
     }
 
@@ -878,7 +951,7 @@ impl ShaderView {
                 picture.texture.as_image_copy(),
                 texture.size(),
             );
-            renderer.queue.submit([encoder.finish()]);
+            renderer.submit(Submission::transfer(encoder));
             self.dirty = true;
             return true;
         }
@@ -1413,46 +1486,158 @@ mod tests {
         paused.paused = true;
         view.set_layer(Some(Arc::new(paused)));
         frame(&mut view, &renderer);
-        // What was still on its way comes back; then nothing is due.
-        for _ in 0..10 {
+        // The last frame can still be queued on the Metal submitter.
+        let start = Instant::now();
+        while view.wants_frame() {
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "paused shader did not settle"
+            );
             let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
             view.render(&renderer, Instant::now());
+            std::thread::yield_now();
         }
-        assert!(!view.wants_frame());
     }
 
     /// Renders until a frame shows on a surface; its pixels as RGBA rows.
     #[cfg(target_vendor = "apple")]
     fn surface_frame(view: &mut ShaderView, renderer: &Renderer) -> Vec<Vec<[u8; 4]>> {
-        use objc2_io_surface::IOSurfaceLockOptions;
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
             if view.render(renderer, Instant::now()) {
-                let surface = view.surface().expect("a surface");
-                assert_eq!(view.frame().width, 0, "nothing is read back");
-                // SAFETY: the surface is locked while its rows are read.
-                unsafe {
-                    surface.lock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut());
-                    let base = surface.base_address().as_ptr().cast::<u8>();
-                    let stride = surface.bytes_per_row();
-                    let rows = (0..surface.height())
-                        .map(|y| {
-                            (0..surface.width())
-                                .map(|x| {
-                                    let p = base.add(y * stride + x * 4);
-                                    // 'BGRA' in memory.
-                                    [*p.add(2), *p.add(1), *p, *p.add(3)]
-                                })
-                                .collect()
-                        })
-                        .collect();
-                    surface.unlock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut());
-                    return rows;
-                }
+                return surface_pixels(view);
             }
             let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
         }
         panic!("no frame");
+    }
+
+    #[cfg(target_vendor = "apple")]
+    fn surface_pixels(view: &ShaderView) -> Vec<Vec<[u8; 4]>> {
+        use objc2_io_surface::IOSurfaceLockOptions;
+
+        let surface = view.surface().expect("a surface");
+        assert_eq!(view.frame().width, 0, "nothing is read back");
+        // SAFETY: the surface is locked while its rows are read.
+        unsafe {
+            surface.lock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut());
+            let base = surface.base_address().as_ptr().cast::<u8>();
+            let stride = surface.bytes_per_row();
+            let rows = (0..surface.height())
+                .map(|y| {
+                    (0..surface.width())
+                        .map(|x| {
+                            let p = base.add(y * stride + x * 4);
+                            // 'BGRA' in memory.
+                            [*p.add(2), *p.add(1), *p, *p.add(3)]
+                        })
+                        .collect()
+                })
+                .collect();
+            surface.unlock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut());
+            rows
+        }
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn a_queued_metal_frame_samples_the_input_it_was_rendered_with() {
+        let Some(renderer) = Renderer::new(PixelFormat::Bgra)
+            .filter(|renderer| crate::shader_surfaces::is_metal(&renderer.queue))
+        else {
+            eprintln!("no Metal GPU: skipped");
+            return;
+        };
+        let effect = layer(
+            "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }",
+            &[],
+        );
+        let _ = renderer.pipeline(&effect, wgpu::TextureFormat::Bgra8Unorm);
+        assert!(renderer.wait_for_pipelines(Duration::from_secs(5)));
+        // Two one-pixel rows with padding between them, but not after the last.
+        let red = [0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 255, 255];
+        let green = [0, 255, 0, 255, 0, 0, 0, 0, 0, 255, 0, 255];
+        for on_surfaces in [true, false] {
+            let mut view = ShaderView::default();
+            view.show_on_surfaces(on_surfaces);
+            view.set_size(size(px(1.0), px(2.0)), 1.0);
+            view.set_layer(Some(effect.clone()));
+            view.set_input(&renderer, ShaderInput::Content, Some((&red, 1, 2, 8)));
+            let pause = pause_submitter(&renderer);
+            let collected = view.render(&renderer, Instant::now());
+            view.set_input(&renderer, ShaderInput::Content, Some((&green, 1, 2, 8)));
+            drop(pause);
+            collect_submitted_frame(&mut view, &renderer, collected);
+            if on_surfaces {
+                assert_eq!(surface_pixels(&view), [[[255, 0, 0, 255]]; 2]);
+            } else {
+                for y in 0..2 {
+                    assert_eq!(pixel(view.frame(), 0, y), [0, 0, 255, 255]);
+                }
+            }
+        }
+    }
+
+    // Keep a draw encoded but not submitted while the next input is set.
+    #[cfg(target_vendor = "apple")]
+    fn pause_submitter(renderer: &Renderer) -> mpsc::Sender<()> {
+        let (resume, until) = mpsc::channel();
+        assert!(
+            renderer
+                .submitter()
+                .unwrap()
+                .send(Submit::Pause(until))
+                .is_ok()
+        );
+        resume
+    }
+
+    #[cfg(target_vendor = "apple")]
+    fn collect_submitted_frame(view: &mut ShaderView, renderer: &Renderer, collected: bool) {
+        if !collected {
+            let start = Instant::now();
+            while !view.collect_frame(renderer) {
+                assert!(start.elapsed() < Duration::from_secs(5), "no frame");
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn copying_the_shown_surface_does_not_overtake_a_queued_draw() {
+        let Some(renderer) = Renderer::new(PixelFormat::Bgra)
+            .filter(|renderer| crate::shader_surfaces::is_metal(&renderer.queue))
+        else {
+            eprintln!("no Metal GPU: skipped");
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.show_on_surfaces(true);
+        view.set_size(size(px(1.0), px(1.0)), 1.0);
+        view.set_layer(Some(layer(
+            "fn shade(uv: vec2f) -> vec4f { return vec4f(0.0, 1.0, 0.0, 1.0); }",
+            &[],
+        )));
+        assert_eq!(surface_frame(&mut view, &renderer)[0][0], [0, 255, 0, 255]);
+
+        view.set_layer(Some(layer(
+            "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }",
+            &[],
+        )));
+        prepare(&mut view, &renderer);
+        view.set_input(
+            &renderer,
+            ShaderInput::Content,
+            Some((&[0, 0, 255, 255], 1, 1, 4)),
+        );
+        let pause = pause_submitter(&renderer);
+        let collected = view.render(&renderer, Instant::now());
+        assert!(view.set_input_from_frame(&renderer, ShaderInput::Content));
+        drop(pause);
+        collect_submitted_frame(&mut view, &renderer, collected);
+        assert_eq!(surface_pixels(&view)[0][0], [255, 0, 0, 255]);
+        assert_eq!(surface_frame(&mut view, &renderer)[0][0], [0, 255, 0, 255]);
     }
 
     /// The main thread's cost of rendering an animated shader on surfaces,

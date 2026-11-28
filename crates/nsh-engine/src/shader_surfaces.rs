@@ -128,23 +128,32 @@ impl Surfaces {
     /// when [`Self::shown`] changed. Older frames done go back to the pool
     /// unseen, and so does the one replaced.
     pub(crate) fn collect(&mut self) -> bool {
-        let shown_serial = self.shown.map_or(0, |i| self.slots[i].serial);
-        let newest = self
-            .slots
+        self.newest_done()
+            .is_some_and(|newest| self.show_done(newest))
+    }
+
+    fn newest_done(&self) -> Option<usize> {
+        self.slots
             .iter()
             .enumerate()
             .filter(|(_, s)| s.state.load(Ordering::Acquire) == state::DONE)
             .max_by_key(|(_, s)| s.serial)
-            .map(|(i, _)| i);
-        let Some(newest) = newest else {
-            return false;
-        };
+            .map(|(i, _)| i)
+    }
+
+    fn show_done(&mut self, newest: usize) -> bool {
+        let shown_serial = self.shown.map_or(0, |i| self.slots[i].serial);
+        let chosen_serial = self.slots[newest].serial;
+        // Leave frames that completed after selection for the next collect.
         for (i, s) in self.slots.iter().enumerate() {
-            if i != newest && s.state.load(Ordering::Acquire) == state::DONE {
+            if i != newest
+                && s.serial <= chosen_serial
+                && s.state.load(Ordering::Acquire) == state::DONE
+            {
                 s.state.store(state::IDLE, Ordering::Release);
             }
         }
-        if self.slots[newest].serial <= shown_serial {
+        if chosen_serial <= shown_serial {
             self.slots[newest]
                 .state
                 .store(state::IDLE, Ordering::Release);
@@ -329,4 +338,43 @@ fn surface(width: u32, height: u32) -> Option<CFRetained<IOSurfaceRef>> {
     // SAFETY: a colour space name is a valid `IOSurfaceColorSpace`.
     unsafe { surface.set_value(kIOSurfaceColorSpace, srgb.as_ref()) };
     Some(surface)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{frames::tests::clear, shader::Renderer};
+
+    #[test]
+    fn a_surface_completed_after_selection_stays_pending() {
+        let Some((device, queue)) = Renderer::metal_device_for_test() else {
+            eprintln!("no Metal GPU: skipped");
+            return;
+        };
+        let mut surfaces = Surfaces::new(1, 1);
+        let first = surfaces.free(&device).unwrap().unwrap();
+        let first_id = surfaces.slots[first].surface.id();
+        let first_ready = surfaces.submitting(first, 1);
+        let second = surfaces.free(&device).unwrap().unwrap();
+        let second_id = surfaces.slots[second].surface.id();
+        let second_ready = surfaces.submitting(second, 2);
+
+        queue.submit([clear(&device, surfaces.view(first), wgpu::Color::RED).finish()]);
+        first_ready.after_submit(&queue);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let chosen = surfaces.newest_done().unwrap();
+
+        queue.submit([clear(&device, surfaces.view(second), wgpu::Color::GREEN).finish()]);
+        second_ready.after_submit(&queue);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(surfaces.show_done(chosen));
+        assert_eq!(surfaces.shown().unwrap().id(), first_id);
+        assert!(
+            surfaces.pending(),
+            "newer surface must keep the view scheduled"
+        );
+        assert!(surfaces.collect());
+        assert_eq!(surfaces.shown().unwrap().id(), second_id);
+        assert!(!surfaces.pending());
+    }
 }
