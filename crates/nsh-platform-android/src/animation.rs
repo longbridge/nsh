@@ -84,8 +84,9 @@ pub(crate) struct UiAnimation {
     sticky: FxHashMap<u32, Vec<(u32, NodeId)>>,
     /// The shader views, whose animated slots are written here.
     pub(crate) shaders: crate::shader::Shaders,
-    /// Timestamp of the last `Graph::tick_frame` call, cleared when animations or
-    /// gestures mutate so high-rate or newly started work ticks on the next frame.
+    /// Choreographer vsync timestamp (seconds) of the last `Graph::tick_frame` call,
+    /// cleared when animations or gestures mutate so high-rate or newly started work
+    /// ticks on the next frame.
     last_tick: Option<f64>,
 }
 
@@ -174,11 +175,12 @@ impl UiAnimation {
         }
     }
 
-    /// Whether `Choreographer` frame `now` should advance the animation graph.
-    /// When every running animation asks for a capped `frameRate` (and no shader
-    /// view wants a frame), intermediate vsyncs are skipped so Java does not
-    /// touch view properties or trigger a Skia frame.
-    pub(crate) fn should_tick(&self, now: f64) -> bool {
+    /// Whether the `Choreographer` frame at vsync timestamp `vsync` (seconds)
+    /// should advance the animation graph. When every running animation asks
+    /// for a capped `frameRate` (and no shader view wants a frame),
+    /// intermediate vsyncs are skipped so Java does not touch view properties
+    /// or trigger a Skia frame.
+    pub(crate) fn should_tick(&self, vsync: f64) -> bool {
         if self.shaders.wants_frame() {
             return true;
         }
@@ -188,14 +190,16 @@ impl UiAnimation {
         match self.last_tick {
             None => true,
             // 2 ms vsync slack so 30 Hz locks cleanly to every 4th 120 Hz, 3rd 90 Hz, or 2nd 60 Hz frame.
-            Some(prev) => now - prev >= (1.0 / f64::from(hz)) - 0.002,
+            // Also tick if the vsync clock ever moves backwards.
+            Some(prev) => vsync < prev || vsync - prev >= (1.0 / f64::from(hz)) - 0.002,
         }
     }
 
     /// A `Choreographer` frame, the only thing that ticks it
-    /// ([`Graph::tick_frame`]).
-    pub(crate) fn tick(&mut self, now: f64) -> bool {
-        self.last_tick = Some(now);
+    /// ([`Graph::tick_frame`]). `now` is the host epoch time used by the graph;
+    /// `vsync` is the Choreographer frame timestamp used for `frameRate` pacing.
+    pub(crate) fn tick(&mut self, now: f64, vsync: f64) -> bool {
+        self.last_tick = Some(vsync);
         self.graph.tick_frame(now, &mut self.finished)
     }
 
@@ -465,19 +469,23 @@ mod tests {
 
         // First frame always ticks immediately.
         assert!(anim.should_tick(1.000));
-        anim.tick(1.000);
+        anim.tick(1.000, 1.000);
 
         // Intermediate 120 Hz vsyncs (8.33 ms apart) are skipped until ~33.3 ms.
         assert!(!anim.should_tick(1.0083));
         assert!(!anim.should_tick(1.0167));
         assert!(!anim.should_tick(1.0250));
         assert!(anim.should_tick(1.0333));
-        anim.tick(1.0333);
+        // Even if the callback is dispatched 3 ms late (now = 1.0363), pacing
+        // records the vsync timestamp (1.0333) so the next on-time vsync at
+        // 1.0667 is not skipped.
+        anim.tick(1.0363, 1.0333);
+        assert!(anim.should_tick(1.0667));
 
         // Starting an uncapped animation immediately restores full-rate ticking.
         anim.apply(timing(2, None));
         assert!(anim.should_tick(1.0340));
-        anim.tick(1.0340);
+        anim.tick(1.0340, 1.0340);
         assert!(anim.should_tick(1.0423));
     }
 }

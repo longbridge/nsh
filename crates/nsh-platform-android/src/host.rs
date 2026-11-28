@@ -2266,7 +2266,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_tick(
     mut env: JNIEnv<'_>,
     _: JClass<'_>,
     handle: jlong,
-    _frame_nanos: jlong,
+    frame_nanos: jlong,
 ) -> jfloatArray {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -2274,10 +2274,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_tick(
     let out = {
         let mut ui = host.ui.lock().expect("ui");
         let now = host.epoch.elapsed().as_secs_f64();
-        if !ui.should_tick(now) {
+        let vsync = if frame_nanos > 0 {
+            frame_nanos as f64 * 1e-9
+        } else {
+            now
+        };
+        if !ui.should_tick(vsync) {
             vec![if ui.animating() { 1.0 } else { 0.0 }]
         } else {
-            let changed = ui.tick(now);
+            let changed = ui.tick(now, vsync);
             finish(host, &mut ui);
             // A frame only shader views asked for: no bound value moved.
             let mut out = if changed || ui.animating() {
