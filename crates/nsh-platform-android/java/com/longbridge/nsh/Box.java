@@ -760,9 +760,15 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
                         return true;
                     }
                     if (hasDrawingInRect(childGroup, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) return true;
-                } else if (!childGroup.getClipChildren()
-                        && hasDrawingInRect(childGroup, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) {
-                    return true;
+                } else {
+                    if (child instanceof TextBox
+                            && ((TextBox) child).textIntersects(rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) {
+                        return true;
+                    }
+                    if (!childGroup.getClipChildren()
+                            && hasDrawingInRect(childGroup, rx0 - cl, ry0 - ct, rx1 - cl, ry1 - ct)) {
+                        return true;
+                    }
                 }
             } else if (intersects) {
                 return true;
