@@ -22,7 +22,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
     RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorPastedFiles, RichEditorProps,
-    RichEditorSelection,
+    RichEditorSelection, RichEditorUnreadFile,
     geometry::{DOC, Geometry, Hit, slot_id},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
@@ -1885,7 +1885,8 @@ impl Rv {
     /// A paste: files go to the app (`onPasteFiles`), text and HTML into
     /// the document.
     pub(crate) fn paste_event(&self, p: &nsh_core::PasteEvent) {
-        if self.editable() && (!p.files.is_empty() || !p.uris.is_empty()) {
+        if self.editable() && (!p.files.is_empty() || !p.too_large.is_empty() || !p.uris.is_empty())
+        {
             let files = p
                 .files
                 .iter()
@@ -1898,6 +1899,15 @@ impl Rv {
             self.cx
                 .emit(RichEditorEvent::PasteFiles(RichEditorPastedFiles {
                     files,
+                    too_large: p
+                        .too_large
+                        .iter()
+                        .map(|file| RichEditorUnreadFile {
+                            name: file.name.clone(),
+                            mime: file.mime.clone(),
+                            size: file.len,
+                        })
+                        .collect(),
                     uris: p.uris.clone(),
                 }));
             return;

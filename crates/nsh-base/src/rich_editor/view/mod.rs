@@ -67,6 +67,11 @@ pub struct RichEditorProps {
     /// read-only too. A read-only editor still selects and copies.
     #[prop(default = true)]
     pub editable: Prop<bool>,
+    /// The largest pasted file read, in bytes. Larger files reach
+    /// `onPasteFiles` in `tooLarge` with only their name, MIME type and size.
+    /// By default files of any size are read, as for an `Input`.
+    #[prop(default = u64::MAX)]
+    pub paste_max_size: Prop<u64>,
     /// Shown in an empty textblock while the document has no content
     /// (Tiptap's placeholder extension): the one the selection is in, at
     /// the document's top level, while the document can be edited (`showOnlyCurrent`, `includeChildren`,
@@ -157,6 +162,18 @@ pub struct RichEditorFile {
     pub data: Vec<u8>,
 }
 
+/// A pasted file whose bytes exceed the editor's `pasteMaxSize`.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct RichEditorUnreadFile {
+    /// Its name.
+    pub name: String,
+    /// Its MIME type.
+    pub mime: String,
+    /// Its size in bytes.
+    pub size: u64,
+}
+
 /// Files pasted into a `RichEditor`, which the app inserts as it likes (an
 /// image node, a link to a saved copy): the editor inserts nothing for them,
 /// as Tiptap's file handler leaves them to its `onPaste`.
@@ -165,6 +182,8 @@ pub struct RichEditorFile {
 pub struct RichEditorPastedFiles {
     /// Files with their bytes, in the platform's order.
     pub files: Vec<RichEditorFile>,
+    /// Files over the paste size limit, without their bytes.
+    pub too_large: Vec<RichEditorUnreadFile>,
     /// `file:` URLs of local files copied in a file manager.
     pub uris: Vec<String>,
 }

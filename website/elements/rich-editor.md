@@ -201,8 +201,10 @@ is copied with `transform_copied`.
 
 Files reach the app, which decides what they become (an image node, an attachment, a link to an uploaded copy); the
 editor inserts nothing for them and keeps its selection, where the app inserts what it makes of them. A paste of
-images or of files copied in a file manager calls `onPasteFiles` with `{ paste: { files, uris } }`: `files` the images with
-their bytes (`{ name, mime, data }`), `uris` the copied files' `file:` URLs. On the desktops, files dragged from another application onto
+images or of files copied in a file manager calls `onPasteFiles` with `{ paste: { files, tooLarge, uris } }`: `files` the images with
+their bytes (`{ name, mime, data }`), `uris` the copied files' `file:` URLs. Set `pasteMaxSize` in bytes to limit which
+files the editor reads. Larger ones appear in `tooLarge` as `{ name, mime, size }`, including when every file is over the limit.
+On the desktops, files dragged from another application onto
 the editor call its `onFileDrop` with `{ uris, mimeTypes }`, as a [view's file drops](./view.md#desktop-file-drops)
 do, and `onFileDragEnter` / `onFileDragLeave` follow the drag, for a hint such as "Release to attach". Without
 `onFileDrop` the editor leaves dropped files to the view around it that listens.

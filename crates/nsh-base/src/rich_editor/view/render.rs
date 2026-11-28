@@ -2134,6 +2134,7 @@ fn sink(rv: Rv) -> impl IntoElement {
         .auto_correct(false)
         .auto_capitalize(AutoCapitalize::None)
         .paste_behavior(PasteBehavior::Report)
+        .paste_max_size(props.paste_max_size)
         .value(move || value.get())
         .label(move || props.accessibility_label.get().unwrap_or_default())
         // The keyboard is the sink's, so the editor's accessory is too;
