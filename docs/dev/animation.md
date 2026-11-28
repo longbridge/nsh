@@ -183,7 +183,8 @@
   highest rate; `None` as soon as one runs uncapped; a composite asks for the highest of its steps while it runs),
   `transition::Live::frame_rate` a view's keyframes while they run alone. Platforms that can lower their frame rate
   honor it while nothing else wants frames (macOS: `macos.md` "Frames"; iOS: the graph's display link and Core
-  Animation's keyframes); the others run at the screen's rate.
+  Animation's keyframes; Android: `Native.tick` skips intermediate `Choreographer` frames without touching views);
+  the others run at the screen's rate.
 
 ## Pointer-driven motion follows the pointer
 

@@ -957,7 +957,7 @@ opacity.timing_with(1.0, Timing::new(600.0, Easing::Linear).frame_rate(30.0));
 glow.keyframes([Keyframe::new(0.4), Keyframe::new(1.0), Keyframe::new(0.4)], KeyframeTiming::new(1600.0).infinite().frame_rate(24.0));
 ```
 
-The screen runs at the highest rate anything on it needs: an animation without `frameRate`, a transition, a scroll, a gesture or a `requestAnimationFrame` loop brings it back to the full rate while it runs, and a composite runs at the highest rate of its steps. The animation's timing is the same at any rate: it ends when it would at the full rate. macOS and iOS lower the screen's rate for these requests; the other platforms run every animation at the screen's rate.
+The screen runs at the highest rate anything on it needs: an animation without `frameRate`, a transition, a scroll, a gesture or a `requestAnimationFrame` loop brings it back to the full rate while it runs, and a composite runs at the highest rate of its steps. The animation's timing is the same at any rate: it ends when it would at the full rate. macOS and iOS lower the screen's rate for these requests, and Android skips intermediate animation frames so views only redraw at the requested rate; the other platforms run every animation at the screen's rate.
 
 ## Reduced motion
 

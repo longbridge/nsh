@@ -957,7 +957,7 @@ opacity.timing_with(1.0, Timing::new(600.0, Easing::Linear).frame_rate(30.0));
 glow.keyframes([Keyframe::new(0.4), Keyframe::new(1.0), Keyframe::new(0.4)], KeyframeTiming::new(1600.0).infinite().frame_rate(24.0));
 ```
 
-屏幕以其上所有内容所需的最高帧率运行：没有 `frameRate` 的动画、过渡、滚动、手势或 `requestAnimationFrame` 循环运行时，屏幕回到最高帧率；组合动画以其步骤中最高的帧率运行。动画的时间与帧率无关：它在全帧率下结束的时刻结束。macOS 和 iOS 会按这些声明降低屏幕帧率；其他平台以屏幕的帧率运行所有动画。
+屏幕以其上所有内容所需的最高帧率运行：没有 `frameRate` 的动画、过渡、滚动、手势或 `requestAnimationFrame` 循环运行时，屏幕回到最高帧率；组合动画以其步骤中最高的帧率运行。动画的时间与帧率无关：它在全帧率下结束的时刻结束。macOS 和 iOS 会按这些声明降低屏幕帧率，Android 会跳过中间动画帧使视图仅按请求的帧率重绘；其他平台以屏幕的帧率运行所有动画。
 
 ## 减少动态效果
 
