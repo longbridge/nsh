@@ -32413,6 +32413,76 @@ mod rust_windows {
         }
     }
 
+    /// nsh.json's `"window"` belongs to the host that reads it, not to the
+    /// app's capabilities: an app that declares capabilities without
+    /// `application` still gets its launch window attributes. Its own sets
+    /// of the main window still need `application`.
+    #[test]
+    fn launch_window_defaults_apply_without_the_application_capability() {
+        use crate::desktop::{MainWindowOptions, WindowAttributes};
+        let mut c = core();
+        let access = |application: bool| {
+            std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&serde_json::json!({
+                    "application": application,
+                }))
+                .unwrap(),
+                granted: None,
+            })
+        };
+        c.set_access(access(false));
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_main_window(&MainWindowOptions {
+            attributes: WindowAttributes {
+                title: Some("Notes".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let sent = |c: &mut Core<FakeEngine>| -> Vec<WindowAttributes> {
+            c.commit()
+                .map(|batch| batch.items)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|item| match item {
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::Desktop(command),
+                    } => match *command {
+                        DesktopCommand::SetAttributes(attributes) => Some(*attributes),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect()
+        };
+        let launch = sent(&mut c);
+        assert_eq!(launch.len(), 1, "{launch:?}");
+        assert_eq!(launch[0].title.as_deref(), Some("Notes"));
+        // The app's own set of the main window is what `application` grants.
+        let set = |c: &mut Core<FakeEngine>| {
+            let _ = c.apply_op(Op::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(Box::new(DesktopCommand::SetAttributes(Box::new(
+                    WindowAttributes {
+                        title: Some("Inbox".into()),
+                        ..Default::default()
+                    },
+                )))),
+            });
+        };
+        set(&mut c);
+        assert!(sent(&mut c).is_empty(), "without `application`");
+        c.set_access(access(true));
+        set(&mut c);
+        let granted = sent(&mut c);
+        assert_eq!(granted.len(), 1, "{granted:?}");
+        assert_eq!(granted[0].title.as_deref(), Some("Inbox"));
+    }
+
     /// Every window request the app root's ref takes, and an attribute it
     /// sets and an attention request it asks for.
     #[component]
