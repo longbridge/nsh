@@ -836,7 +836,8 @@ fn content_size(hwnd: HWND) -> Option<Size<nsh_core::Points>> {
 /// Windows' own apps (Alt+F4, which closes the window, is the system's).
 fn install_shortcuts(view: &AppView) {
     const VK_F11: u16 = 0x7A;
-    let hwnd = view.hwnd();
+    let surface = std::rc::Rc::downgrade(view.surface());
+    let host = view.hwnd();
     view.surface()
         .shortcuts
         .borrow_mut()
@@ -845,6 +846,12 @@ fn install_shortcuts(view: &AppView) {
             if event.vk != VK_F11 || m.ctrl || m.alt || m.shift || m.meta {
                 return false;
             }
+            let Some(hwnd) = surface
+                .upgrade()
+                .and_then(|surface| crate::app_window::fullscreen_target(&surface, host))
+            else {
+                return false;
+            };
             // A key held down toggles once.
             if !event.repeat {
                 crate::window::toggle_full_screen(hwnd);
@@ -1098,5 +1105,133 @@ mod tests {
         assert!(crate::window::shell(view.hwnd()).unwrap().attrs().taskbar);
         // SAFETY: the test's own window.
         let _ = unsafe { DestroyWindow(view.hwnd()) };
+    }
+
+    #[test]
+    fn f11_toggles_full_screen_on_the_focused_app_window() {
+        use nsh_core::{
+            NodeId, ViewKind,
+            desktop::{WindowAttributes, WindowKind},
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, ShowWindow,
+        };
+
+        let hwnd = |id: isize| HWND(id as *mut _);
+        let cand = |id: isize, priority: u8| crate::app_window::FullscreenCandidate {
+            hwnd: hwnd(id),
+            visible: true,
+            minimized: false,
+            eligible: true,
+            priority,
+        };
+        assert_eq!(
+            crate::app_window::select_fullscreen_target([cand(1, 1), cand(2, 0)], Some(hwnd(99))),
+            Some(hwnd(2)),
+            "input-handling window must beat an earlier foreground window"
+        );
+        assert_eq!(
+            crate::app_window::select_fullscreen_target(
+                [
+                    crate::app_window::FullscreenCandidate {
+                        eligible: false,
+                        ..cand(1, 0)
+                    },
+                    crate::app_window::FullscreenCandidate {
+                        minimized: true,
+                        ..cand(2, 0)
+                    },
+                    cand(3, 3),
+                ],
+                Some(hwnd(99)),
+            ),
+            Some(hwnd(3)),
+            "ineligible panels and minimized windows must be skipped"
+        );
+        assert_eq!(
+            crate::app_window::select_fullscreen_target([], Some(hwnd(99))),
+            Some(hwnd(99)),
+            "visible top-level host fallback works when no app window exists"
+        );
+        assert_eq!(
+            crate::app_window::select_fullscreen_target([], None),
+            None,
+            "hidden standalone host must not toggle"
+        );
+
+        let app = AppView::new(None, AppOptions::default()).unwrap();
+        install_shortcuts(&app);
+        let surface = app.surface();
+        let make = |id: NodeId| {
+            let view = crate::view::NshView::new(id, ViewKind::Modal);
+            let hwnd = crate::window::create_app_window(
+                surface,
+                id,
+                WindowKind::Normal,
+                &WindowAttributes::default(),
+                None,
+                false,
+            )
+            .unwrap();
+            surface.windows.borrow_mut().push(std::rc::Rc::new(
+                crate::app_window::AppWindow::for_test(id, hwnd, view),
+            ));
+            // SAFETY: test window position & show on UI thread.
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    100 + (id as i32) * 20,
+                    100,
+                    400,
+                    300,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            }
+            hwnd
+        };
+        let main_hwnd = make(7);
+        let editor_hwnd = make(8);
+
+        let f11 = crate::input::KeyEvent {
+            vk: 0x7A,
+            down: true,
+            repeat: false,
+            modifiers: crate::input::Modifiers::default(),
+            scan: 0,
+            extended: false,
+            sys: false,
+            translated: false,
+        };
+        {
+            let _root = crate::app_window::enter(surface, 8);
+            assert!(crate::input::key(surface, f11));
+            assert!(
+                crate::window::is_full_screen(editor_hwnd),
+                "F11 must put the focused AppWindow in fullscreen"
+            );
+            assert!(
+                !crate::window::is_full_screen(main_hwnd),
+                "F11 must leave the unfocused live sibling window un-fullscreened"
+            );
+            assert!(
+                !crate::window::is_full_screen(app.hwnd()),
+                "F11 must not toggle the hidden host window"
+            );
+            assert!(crate::input::key(surface, f11));
+            assert!(
+                !crate::window::is_full_screen(editor_hwnd),
+                "second F11 must restore the AppWindow from fullscreen"
+            );
+            assert!(
+                !crate::window::is_full_screen(main_hwnd),
+                "sibling window stays un-fullscreened after restore"
+            );
+        }
+
+        crate::app_window::close_all(surface);
+        // SAFETY: test app host window.
+        let _ = unsafe { DestroyWindow(app.hwnd()) };
     }
 }
