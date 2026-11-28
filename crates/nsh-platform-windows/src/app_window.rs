@@ -320,14 +320,14 @@ pub(crate) fn command(
             WindowRequest::Hide => {
                 // Asked before its first show: it opens hidden.
                 window.hidden.set(true);
-                release_owner(&window);
+                release_owner(surface, &window);
                 // SAFETY: a plain call on the window, alive while listed.
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
             }
             WindowRequest::Show | WindowRequest::Focus => {
                 window.closed.set(false);
                 window.hidden.set(false);
-                hold_owner(&window);
+                hold_owner(surface, &window);
                 crate::shell::request(hwnd, request);
             }
             request => {
@@ -433,7 +433,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     crate::shell::sync(surface, hwnd, None, resolved);
     place(&window, open);
     window.positioned.set(true);
-    hold_owner(&window);
+    hold_owner(surface, &window);
     resized(surface, &window);
     // Shown once the engine has laid out and drawn what it shows: after
     // the batches of the size just reported ([`first_show`]), or after a
@@ -491,13 +491,25 @@ fn place(window: &AppWindow, open: &OpenWindow) {
     crate::window_state::open_at(hwnd, content, origin, center_on, options.display);
 }
 
-/// A modal window takes the input from its owner while it shows.
-fn hold_owner(window: &AppWindow) {
+/// A modal window takes the input from its owner while it shows, leaving
+/// an owner disabled independently outside NSH untouched on release.
+fn hold_owner(surface: &Surface, window: &AppWindow) {
     let (Some(owner), true) = (window.owner, window.modal) else {
         return;
     };
+    let already_held = surface.windows.borrow().iter().any(|other| {
+        other.hwnd != window.hwnd
+            && !other.closed.get()
+            && !other.hidden.get()
+            && crate::window::shell(other.hwnd)
+                .is_some_and(|s| s.disabled_owner.get() == Some(owner))
+    });
+    // SAFETY: plain enabled-state query on a live owner window.
+    let was_enabled = unsafe { IsWindowEnabled(owner).as_bool() };
     if let Some(shell) = crate::window::shell(window.hwnd)
+        && (already_held || was_enabled)
         && shell.disabled_owner.replace(Some(owner)).is_none()
+        && !already_held
     {
         // SAFETY: a plain call on a live window.
         let _ = unsafe { EnableWindow(owner, false) };
@@ -505,11 +517,23 @@ fn hold_owner(window: &AppWindow) {
 }
 
 /// A modal window gives its owner the input back (before it hides, so
-/// that the system activates the owner).
-fn release_owner(window: &AppWindow) {
-    if let Some(shell) = crate::window::shell(window.hwnd)
-        && let Some(owner) = shell.disabled_owner.take()
-    {
+/// that the system activates the owner), unless another live modal still
+/// holds that owner.
+fn release_owner(surface: &Surface, window: &AppWindow) {
+    let Some(shell) = crate::window::shell(window.hwnd) else {
+        return;
+    };
+    let Some(owner) = shell.disabled_owner.take() else {
+        return;
+    };
+    let still_held = surface.windows.borrow().iter().any(|other| {
+        other.hwnd != window.hwnd
+            && !other.closed.get()
+            && !other.hidden.get()
+            && crate::window::shell(other.hwnd)
+                .is_some_and(|s| s.disabled_owner.get() == Some(owner))
+    });
+    if !still_held {
         // SAFETY: a plain call; a window gone meanwhile ignores it.
         let _ = unsafe { EnableWindow(owner, true) };
     }
@@ -769,7 +793,7 @@ pub(crate) fn closed(surface: &Surface, id: NodeId, cause: WindowCloseCause) {
         return;
     }
     release_children(surface, window.hwnd, true);
-    release_owner(&window);
+    release_owner(surface, &window);
     // SAFETY: a plain call on the window, alive while listed.
     let _ = unsafe { ShowWindow(window.hwnd, SW_HIDE) };
     report(surface, id, WindowEvent::Closed { cause });
@@ -1109,6 +1133,13 @@ pub(crate) fn close_all(surface: &Surface) {
 }
 
 fn destroy(surface: &Surface, window: &AppWindow) {
+    window.closed.set(true);
+    release_owner(surface, window);
+    // SAFETY: cancelling any pending timers on the window being destroyed.
+    unsafe {
+        let _ = KillTimer(Some(window.hwnd), SHOW_TIMER);
+        let _ = KillTimer(Some(window.hwnd), STATE_TIMER);
+    }
     // The dialogs it showed go with it, answered as dismissed.
     crate::system::window_closing(surface, window.id);
     // Its views keep their trees, but the window that showed them is gone:
@@ -1612,5 +1643,132 @@ mod tests {
             let _ = DestroyWindow(hwnd);
         }
         let _ = std::fs::remove_file(path);
+    }
+
+    fn open_test_window(surface: &Rc<Surface>, id: NodeId, parent: Option<NodeId>) -> HWND {
+        use nsh_core::{
+            Command, MountItem,
+            desktop::{WindowKind, WindowOptions},
+        };
+        let mut opts = OpenWindow::default();
+        opts.options = WindowOptions::new(format!("window-{id}"));
+        opts.options.kind = if parent.is_some() {
+            WindowKind::Dialog
+        } else {
+            WindowKind::Normal
+        };
+        opts.options.attributes = WindowAttributes::for_kind(opts.options.kind);
+        opts.options.modal = parent.is_some();
+        opts.parent = parent;
+        let mut m = surface.mounter.borrow_mut();
+        for item in [
+            MountItem::Create {
+                id,
+                kind: ViewKind::Modal,
+            },
+            MountItem::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+            MountItem::Command {
+                id,
+                command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(opts)))),
+            },
+        ] {
+            m.apply(surface, &item);
+        }
+        m.end_batch(surface);
+        hwnd_of(surface, id).unwrap()
+    }
+
+    #[test]
+    fn removing_a_modal_window_reenables_its_parent() {
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let parent = open_test_window(surface, 7, None);
+        let sibling = open_test_window(surface, 8, None);
+        open_test_window(surface, 9, Some(7));
+        // SAFETY: plain enabled-state queries on test windows.
+        assert!(!unsafe { IsWindowEnabled(parent) }.as_bool());
+        // SAFETY: plain enabled-state query.
+        assert!(unsafe { IsWindowEnabled(sibling) }.as_bool());
+        {
+            let mut m = surface.mounter.borrow_mut();
+            m.apply(surface, &nsh_core::MountItem::Remove { id: 9 });
+            m.end_batch(surface);
+        }
+        // SAFETY: plain enabled-state query.
+        let enabled = unsafe { IsWindowEnabled(parent) }.as_bool();
+        close_all(surface);
+        // SAFETY: test app host window.
+        let _ = unsafe { DestroyWindow(app.hwnd()) };
+        assert!(enabled, "parent still disabled after modal root removed");
+    }
+
+    #[test]
+    fn multiple_modals_keep_parent_disabled_until_the_last_one_closes() {
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let parent = open_test_window(surface, 7, None);
+        open_test_window(surface, 9, Some(7));
+        open_test_window(surface, 10, Some(7));
+        // SAFETY: plain enabled-state query on a test window.
+        assert!(!unsafe { IsWindowEnabled(parent) }.as_bool());
+        {
+            let mut m = surface.mounter.borrow_mut();
+            m.apply(surface, &nsh_core::MountItem::Remove { id: 9 });
+            m.end_batch(surface);
+        }
+        // SAFETY: plain enabled-state query on a test window.
+        let after_first = unsafe { IsWindowEnabled(parent) }.as_bool();
+        assert!(
+            !after_first,
+            "parent must stay disabled while second modal remains open"
+        );
+        {
+            let mut m = surface.mounter.borrow_mut();
+            m.apply(surface, &nsh_core::MountItem::Remove { id: 10 });
+            m.end_batch(surface);
+        }
+        // SAFETY: plain enabled-state query on a test window.
+        let after_last = unsafe { IsWindowEnabled(parent) }.as_bool();
+        close_all(surface);
+        // SAFETY: test app host window.
+        let _ = unsafe { DestroyWindow(app.hwnd()) };
+        assert!(
+            after_last,
+            "parent must be re-enabled once the last modal closes"
+        );
+    }
+
+    #[test]
+    fn removing_a_modal_preserves_preexisting_owner_disablement() {
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let parent = open_test_window(surface, 7, None);
+        let other = open_test_window(surface, 8, None);
+        // Simulate an external modal dialog or component hold already disabling `parent`.
+        // SAFETY: plain enable call on the test window.
+        let _ = unsafe { EnableWindow(parent, false) };
+        // SAFETY: plain enabled-state query on a test window.
+        assert!(!unsafe { IsWindowEnabled(parent) }.as_bool());
+        open_test_window(surface, 9, Some(7));
+        {
+            let mut mounter = surface.mounter.borrow_mut();
+            mounter.apply(surface, &nsh_core::MountItem::Remove { id: 9 });
+            mounter.end_batch(surface);
+        }
+        // SAFETY: plain enabled-state queries on test windows.
+        let enabled = unsafe { IsWindowEnabled(parent) }.as_bool();
+        // SAFETY: plain enabled-state query on a test window.
+        assert!(unsafe { IsWindowEnabled(other) }.as_bool());
+        close_all(surface);
+        // SAFETY: test app host window.
+        let _ = unsafe { DestroyWindow(app.hwnd()) };
+        assert!(
+            !enabled,
+            "removing NSH modal re-enabled its already-disabled owner"
+        );
     }
 }
