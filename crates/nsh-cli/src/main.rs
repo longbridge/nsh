@@ -480,6 +480,8 @@ enum Command {
         #[arg(long)]
         previous: Vec<PathBuf>,
         /// Prefix of the archives' URLs (default: next to the manifest).
+        /// On GitHub, the release's own `releases/download/<tag>`, so a
+        /// newer release cannot move them.
         #[arg(long)]
         base_url: Option<String>,
         /// The directory the manifest is written to.

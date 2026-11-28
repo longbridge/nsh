@@ -983,21 +983,8 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         from: u64,
         sink: nsh_core::runtime::UpdaterSink<'_>,
     ) -> Result<(), String> {
-        self.get_with_redirects(url, from, sink).map(|_| ())
-    }
-
-    fn get_with_redirects(
-        &self,
-        url: &str,
-        from: u64,
-        sink: nsh_core::runtime::UpdaterSink<'_>,
-    ) -> Result<Vec<String>, String> {
-        let mut redirects = Vec::new();
-        if let Some(get) = nsh_core::runtime::updater_transport_with_redirects() {
-            return get(url, from, sink);
-        }
         if let Some(get) = nsh_core::runtime::updater_transport() {
-            return get(url, from, sink).map(|_| Vec::new());
+            return get(url, from, sink);
         }
         const MAX_REDIRECTS: usize = 20;
         let mut current = url.to_owned();
@@ -1118,11 +1105,10 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
             task.cancel();
             outcome?;
             if let Some(next) = redirect_to {
-                redirects.push(next.clone());
                 current = next;
                 continue;
             }
-            return Ok(redirects);
+            return Ok(());
         }
         Err("too many redirects".to_owned())
     }
@@ -5475,23 +5461,6 @@ mod updater_range_tests {
             );
             assert_eq!(updater_header(&req.headers, "range"), Some("bytes=4-"));
         }
-        net.seen.lock().unwrap().clear();
-
-        // The redirect-reporting contract sees the CDN target but leaves the
-        // trust decision about using it as a relative base to the caller.
-        let mut body = Vec::new();
-        let redirects = host
-            .get_with_redirects(
-                "https://github.com/o/r/releases/latest/download/a.tar.gz",
-                0,
-                &mut |_, bytes, _| {
-                    body.extend_from_slice(bytes);
-                    Ok(())
-                },
-            )
-            .unwrap();
-        assert_eq!(redirects, ["https://cdn.example.com/assets/a.tar.gz"]);
-        assert_eq!(body, b"0123456789");
 
         // `from == 0` omits `Range` and sends `Accept-Encoding: identity`.
         net.seen.lock().unwrap().clear();
@@ -5632,19 +5601,6 @@ mod updater_range_tests {
             running: None,
         };
         let url = format!("http://127.0.0.1:{redirect_port}/latest/app.tar.gz");
-
-        let mut whole = Vec::new();
-        let redirects = host
-            .get_with_redirects(&url, 0, &mut |_, bytes, _| {
-                whole.extend_from_slice(bytes);
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(
-            redirects,
-            [format!("http://127.0.0.1:{asset_port}/app.tar.gz")]
-        );
-        assert_eq!(whole, payload);
 
         let (events, body) = collect(&host, &url, 10).unwrap();
         assert_eq!(events, [format!("partial:Some({})", payload.len())]);

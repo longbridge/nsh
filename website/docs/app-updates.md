@@ -98,6 +98,11 @@ nsh update-manifest *.tar.gz *.zip \
 Upload the archives, `latest.json` and `latest.json.sig` (with `--key`) as assets of the GitHub Release, or to your host
 next to each other. A release marked as a draft or prerelease on GitHub is not offered.
 
+On GitHub, also pass `--base-url https://github.com/<owner>/<repo>/releases/download/<tag>` with the release's tag. Apps
+find the manifest at `releases/latest/download/latest.json`, which follows the newest release; with relative URLs an
+update checked just before the next release is published is then looked for in that release, and fails to download.
+`nsh update-manifest` warns when `updater.github` is set without it.
+
 For notes in more than one language, add `--notes <tag>=<file>` for each, a BCP 47 tag such as
 `--notes zh-TW=CHANGES.zh-TW.md`. Each is written as `notes.<tag>.md` beside `latest.json`, which records its SHA-256;
 upload them with it. Check with `checkForUpdate({ locale })` and `update.notes` is the one in that language, downloaded

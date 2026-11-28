@@ -336,18 +336,8 @@ impl Config {
 
     /// The signature's URL, next to the manifest; `None`: nothing to check.
     pub fn signature_url(&self) -> Option<String> {
-        self.signature_url_with_base(&self.manifest_url())
-    }
-
-    /// [`Config::signature_url`] against `base`, the URL the manifest was
-    /// actually fetched from after trusted same-origin redirects. A versioned
-    /// release URL keeps the signature and the manifest together even when a
-    /// drifting `latest` URL meanwhile names a newer release. Hidden:
-    /// `nsh-core`'s redirect plumbing, not a separate app-facing API.
-    #[doc(hidden)]
-    pub fn signature_url_with_base(&self, base: &str) -> Option<String> {
         self.public_key.as_ref()?;
-        Some(resolve(base, SIGNATURE))
+        Some(resolve(&self.manifest_url(), SIGNATURE))
     }
 
     /// What the manifest offers this machine (`platform`: [`platform`]), if
@@ -358,22 +348,6 @@ impl Config {
         manifest: &[u8],
         signature: Option<&[u8]>,
         platform: &str,
-    ) -> Result<Option<Available>, Error> {
-        self.check_with_base(manifest, signature, platform, &self.manifest_url())
-    }
-
-    /// [`Config::check`] resolving the manifest's relative URLs against
-    /// `base`, the URL the manifest was actually fetched from after trusted
-    /// same-origin redirects. Asset URLs that are already absolute pass
-    /// through unchanged. Hidden: `nsh-core`'s redirect plumbing, not a
-    /// separate app-facing API.
-    #[doc(hidden)]
-    pub fn check_with_base(
-        &self,
-        manifest: &[u8],
-        signature: Option<&[u8]>,
-        platform: &str,
-        base: &str,
     ) -> Result<Option<Available>, Error> {
         self.need_source()?;
         let parsed = self.open(manifest, signature)?;
@@ -387,9 +361,9 @@ impl Config {
         let Some(asset) = parsed.platforms.get(platform) else {
             return Ok(None);
         };
-        let url = resolve(base, &asset.url);
+        let url = resolve(&self.manifest_url(), &asset.url);
         check_url(&url).map_err(Error::Manifest)?;
-        let localized_notes = self.localized_notes(parsed.localized_notes, base, check_url)?;
+        let localized_notes = self.localized_notes(parsed.localized_notes, check_url)?;
         Ok(Some(Available {
             version: parsed.version,
             notes: parsed.notes,
@@ -397,7 +371,7 @@ impl Config {
             url,
             sha256: asset.sha256.clone(),
             size: asset.size,
-            delta: self.delta(&asset.deltas, base)?,
+            delta: self.delta(&asset.deltas)?,
         }))
     }
 
@@ -414,27 +388,6 @@ impl Config {
         running_build: u64,
         runtime: &str,
     ) -> Result<Option<AvailablePackage>, Error> {
-        self.check_package_with_base(
-            manifest,
-            signature,
-            running_build,
-            runtime,
-            &self.manifest_url(),
-        )
-    }
-
-    /// [`Config::check_package`] resolving the manifest's relative URLs
-    /// against `base`, as [`Config::check_with_base`] does. Hidden:
-    /// `nsh-core`'s redirect plumbing, not a separate app-facing API.
-    #[doc(hidden)]
-    pub fn check_package_with_base(
-        &self,
-        manifest: &[u8],
-        signature: Option<&[u8]>,
-        running_build: u64,
-        runtime: &str,
-        base: &str,
-    ) -> Result<Option<AvailablePackage>, Error> {
         if self.package_roots().is_empty() {
             return Ok(None);
         }
@@ -449,11 +402,10 @@ impl Config {
         if package.sha256.is_empty() {
             return Err(Error::Manifest("the package has no sha256".into()));
         }
-        let url = resolve(base, &package.url);
+        let url = resolve(&self.manifest_url(), &package.url);
         self.check_package_url(&url).map_err(Error::Manifest)?;
-        let localized_notes = self.localized_notes(parsed.localized_notes, base, |url| {
-            self.check_package_url(url)
-        })?;
+        let localized_notes =
+            self.localized_notes(parsed.localized_notes, |url| self.check_package_url(url))?;
         Ok(Some(AvailablePackage {
             version: package.version,
             build: package.build,
@@ -467,12 +419,12 @@ impl Config {
 
     /// The manifest's notes files, their URLs absolute and HTTPS.
     /// The patch of `deltas` from the running version, its URL absolute.
-    fn delta(&self, deltas: &[Delta], base: &str) -> Result<Option<Delta>, Error> {
+    fn delta(&self, deltas: &[Delta]) -> Result<Option<Delta>, Error> {
         let Some(delta) = deltas.iter().find(|delta| delta.from == self.version) else {
             return Ok(None);
         };
         let mut delta = delta.clone();
-        delta.url = resolve(base, &delta.url);
+        delta.url = resolve(&self.manifest_url(), &delta.url);
         check_url(&delta.url).map_err(Error::Manifest)?;
         Ok(Some(delta))
     }
@@ -480,11 +432,10 @@ impl Config {
     fn localized_notes(
         &self,
         mut notes: BTreeMap<String, NotesFile>,
-        base: &str,
         check: impl Fn(&str) -> Result<(), String>,
     ) -> Result<BTreeMap<String, NotesFile>, Error> {
         for file in notes.values_mut() {
-            file.url = resolve(base, &file.url);
+            file.url = resolve(&self.manifest_url(), &file.url);
             check(&file.url).map_err(Error::Manifest)?;
         }
         Ok(notes)
@@ -983,47 +934,6 @@ mod tests {
         assert_eq!(
             config().manifest_url(),
             "https://github.com/owner/repo/releases/latest/download/latest.json"
-        );
-    }
-
-    #[test]
-    fn check_with_base_resolves_only_relative_names_against_it() {
-        let versioned = "https://github.com/owner/repo/releases/download/v1.2.0/latest.json";
-        let bytes = manifest("2.0.0", "a.tar.gz");
-        let available = config()
-            .check_with_base(&bytes, None, "linux-x86_64", versioned)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            available.url,
-            "https://github.com/owner/repo/releases/download/v1.2.0/a.tar.gz"
-        );
-        let signed = Config {
-            public_key: Some(public()),
-            ..config()
-        };
-        assert_eq!(
-            signed.signature_url_with_base(versioned).as_deref(),
-            Some("https://github.com/owner/repo/releases/download/v1.2.0/latest.json.sig")
-        );
-
-        // An already absolute asset URL (as `nsh update-manifest --base-url`
-        // writes) is byte-for-byte the manifest's URL, never rebased.
-        let absolute = "https://cdn.example.com/releases/a.tar.gz";
-        let bytes = manifest("2.0.0", absolute);
-        let available = config()
-            .check_with_base(&bytes, None, "linux-x86_64", versioned)
-            .unwrap()
-            .unwrap();
-        assert_eq!(available.url, absolute);
-
-        let package = takes_packages()
-            .check_package_with_base(&package_manifest(5, "0.5.0"), None, 3, "0.5.0", versioned)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            package.url,
-            "https://github.com/owner/repo/releases/download/v1.2.0/com.example.app-5.nshpkg"
         );
     }
 

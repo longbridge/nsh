@@ -84,6 +84,8 @@ nsh update-manifest *.tar.gz *.zip \
 
 把压缩包、`latest.json` 和 `latest.json.sig`（使用 `--key` 时）上传为 GitHub Release 的附件，或放到自己服务器的同一目录。GitHub 上标记为 draft 或 prerelease 的版本不会被推送。
 
+在 GitHub 上发布时，还要传 `--base-url https://github.com/<owner>/<repo>/releases/download/<tag>`，`<tag>` 是这个 Release 的 tag。应用从 `releases/latest/download/latest.json` 读取清单，这个地址总是指向最新的 Release；压缩包用相对地址时，如果检查到更新后、下载前正好发布了下一个版本，就会去新版本里找旧的压缩包，导致下载失败。设置了 `updater.github` 却没传 `--base-url` 时，`nsh update-manifest` 会给出警告。
+
 更新说明有多种语言时，每种语言加一个 `--notes <标签>=<文件>`，标签用 BCP 47，例如 `--notes zh-TW=CHANGES.zh-TW.md`。每种语言写成 `latest.json` 旁边的 `notes.<标签>.md`，清单里记录它的 SHA-256；和清单一起上传。用 `checkForUpdate({ locale })` 检查时，`update.notes` 就是该语言的说明，只下载这一个文件；没有该语言时用不带标签的说明。旧版运行时的应用照旧显示不带标签的说明。
 
 ### 更小的下载

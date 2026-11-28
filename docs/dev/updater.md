@@ -95,10 +95,11 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shel
   same place. A custom host therefore needs `publicKey`; GitHub may have one. The signature has its own context, so a
   signature over a manifest is not valid as anything else signed by a `nsh keygen` key, or the other way around.
 - **`releases/latest/download/`, not the GitHub API.** No 60 requests per hour limit, and it skips drafts and
-  prereleases. GitHub first redirects that drifting URL to the release's versioned `releases/download/<tag>/` URL and
-  then to its signed asset CDN. The updater resolves the manifest's relative URLs at the furthest same-origin target
-  (normally the versioned release URL), never at the cross-origin CDN object: a newer release published between check
-  and download cannot move those names to assets the new release does not have. Absolute asset URLs are untouched.
+  prereleases. The archives' relative URLs resolve next to it, so they follow the newest release too: one published
+  between a check and its download moves them to a release without those files. GitHub releases therefore write
+  absolute URLs under the release's own `releases/download/<tag>/` (`nsh update-manifest --base-url`, which warns
+  without it). The runtime does not chase redirects to find that base itself: it would need the host to report them,
+  a second transport contract next to `UpdaterHost::get` and `set_updater_transport`.
 - **Swapping.** Linux and macOS rename the whole directory or `.app`, which keeps a user's own name for it. Windows
   cannot rename a directory holding the running executable, but can rename the executable: `swap_entries` swaps entry
   by entry, undoes on failure, and the next check removes what was still in use.
